@@ -24,6 +24,7 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 | W3 K1 character polish | ✅ merged | silhouette distance 0.033 → 0.122; 24/24 kits in budget; `9d8b11f` |
 | W3 lead M1 Ear Glide · M2 buff bits | ✅ | prediction parity 0 cm while gliding; Zoomies+ corrections 1182 → ≤ 2 |
 | Deploy prep (not deployed) | ✅ | docs/ops/DEPLOY.md; bundled server runs on an --omit=dev install |
+| W5 B2 bots drive + fly (B2a karts, B2b RC plane) | ✅ merged + wired | 18 tests (12 + 6 through the brain hook); TDM: kart rides every match (both teams), ram hits every match, kart stuck ≤ 0.5 s; kart beats walking 60 m 5/5; ch3 getaway driven bot-only (12.7 s); plane flown 4/4 TDM seeds, 5/5 take-offs no crash; ch6 bot-only 214.9 s with glide/plane/flyover met for real; 28-char tick p95 2.33 ms; soak PASS (stuck max 1.5 s, p95 ≤ 1.40 ms) |
 | W5 N1 bots climb (nav links) | ✅ merged | 12 tests; perch from base 21–25 s (4 seeds, < 60); 14/15 links valid × 6 profiles, every leg replayed in a real Sim; misses → retry → other route → ground (stuck ≤ 1.5 s); 28-char tick p95 1.43 ms; soak PASS 5 modes (stuck max 1 s, p95 ≤ 1.26 ms) |
 | Q2 Wave 4 verification | ✅ | docs/qa/W4_VERIFICATION.md at `a5177fd`: 76/100 (R 82 · I 70 · F 74), gate PASS; P1-1 fixed `ad28d0f`; P2-2 … P2-9 fixed (lead); P2-1 is a design question for a human |
 | W4 A2 adventure chapters 3–6 | ✅ merged + wired | 24 new tests; bot-only squads, 6 seeds, all complete inside par, deterministic: ch3 42–63 s / 120, ch4 87–97 s / 180, ch5 74–79 s / 160, ch6 165–186 s / 360; runner ≤ 0.027 ms/tick; artifacts/a2-*.png |
@@ -215,9 +216,10 @@ Newest first. Every task appends: what changed, proof (command + result + screen
   45–100 ms once per movement profile, on first need (a start-of-match hitch, not in p95).
 - Ability entities: shotgun damage to drones/barriers is estimated from the first pellet (C2).
 - Adventure (A1/A2):
-  - bots shoot adventure props and breach with Dig Charges. They climb when a goal sets a roof height (N1), but the
-    ch4/ch6 roof steps still waive `minY` for bot-only squads until the tactics snippet in `docs/handoff/N1.md` §4.1
-    lands. They don't drive or fly yet (B2). Humans get a 120 s grace;
+  - bots shoot adventure props and breach with Dig Charges. They climb when a goal sets a roof height (N1; the roof-zone
+    tactics of `docs/handoff/N1.md` §4.1 landed with B2), but the runner still waives `minY` for bot-only squads.
+    Bot-only squads drive ch3's getaway and fly/glide ch6 for real: `vehicle`/`airborne` are strict for them too,
+    with the same 120 s grace as humans (B2). Pups don't take karts for plain travel;
   - ch6 step 1 needs a Skyraider. Joining a listed adventure room now takes the chapter's kit (`096be58`); a joiner
     who types the room name by hand keeps their kit and waits out the grace.
   - ch5's difficulty for humans is unknown. Bot squads do wipe on its last wave: 3 of 12 seeds on the first try
@@ -226,13 +228,19 @@ Newest first. Every task appends: what changed, proof (command + result + screen
     (intended readability).
 - Sniper elite (E1): perches are hard-coded West Yard spots (tests catch lost sightlines, not looks); L3 bots don't
   dodge the dot; a human must confirm the 2–4 minute duel target.
+- Bots drive karts (B2a): rides every match, but ram kills are rare. Targets back off from karts, so rams close at
+  ~12 m/s for 51–63 damage. The kart grid costs 60–100 ms once per world (first need), 12 ms per destructible change.
+- Sim outcomes depend on what ran before in the same process: a TDM Room before a bot-only ch6 changes its step
+  times, with or without B2. Identical back-to-back runs agree. Some per-world cache holds per-sim state (found by
+  B2, not fixed yet).
 - Destructibles (X1): outside adventure destroy steps bots ignore props; a match reset relabels nav regions once
   (~5–9 ms).
 - RC plane (R1):
   - the cockpit strip `ui/plane-hud.ts` shows hull, throttle, airspeed, height, boost, gun heat and STALL!; engines
     are voiced by S2;
   - planes are interpolated, not predicted (mouse-aim hides most of the latency);
-  - bots don't fly;
+  - one Overwatch/Skyraider room bot per team flies strafing sorties in TDM / core-rush / yard-skirmish (B2b); its gun
+    hits are few (0–3 a sortie);
   - an empty plane after a bail-out is a guided bomb (intended; watch it in balance).
 - Fixed since first logged:
   - upgrade-core buffs now ride in snapshots as `EFlag` buff bits, so late joiners see them and Zoomies+ no longer

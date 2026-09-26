@@ -195,7 +195,9 @@ describe('vehicles on the West Yard', () => {
     const p = pet(sim, Team.Corgis, term.pos.x - fx * 1.8, term.pos.z - fz * 1.8);
     sim.step(); sim.drainEvents();
     vehicleMs = 0;
-    const kart = useTerminal(sim, term, p)!;
+    // B2a: room bots vend from the Kart-O-Matic too; when one already has its kart out, this driver takes one of its own
+    const t = term.terminal!;
+    const kart = useTerminal(sim, term, p) ?? spawnKart(sim, 'mower_kart', Team.Corgis, t.padX, t.padY, t.padZ, t.padYaw);
     expect(kart).not.toBeNull();
     sim.step();
     mountKart(sim, kart, p);

@@ -11,6 +11,8 @@ export { ARCHETYPES, archetypeForClass, type Archetype, type ArchetypeId } from 
 export { navGridFor, buildNavGrid, findPath, lineWalkable, isWalkable, nearestWalkable, cellX, cellZ, type NavGrid } from './nav';
 export { holdPerch, type PerchGoal } from './brain';
 export { canReach, navLevelAt, navLinksFor, type NavLinkSet } from './nav-links';
+export { vehicleThink, humanWants, ramPays, DRIVE_MIN, type RideState } from './tactics';
+export { driveKart, flyPlane, kartNavFor, findDrivePath, createDriver, createFlight, type DriveGoal, type FlightGoal } from './drive';
 
 /** Per-tick AI cost, readable by soaks/debug tools. */
 export interface AiPerf { ms: number; bots: number; searches: number; navBuildMs: number }

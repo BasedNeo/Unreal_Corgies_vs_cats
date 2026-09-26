@@ -16,7 +16,7 @@ import type { GameEvent, MatchState } from '../../src/shared/protocol';
 import type { WorldData, ConcealZone } from '../../src/shared/world/world-data';
 import { TICK_HZ } from '../../src/shared/constants';
 import {
-  ADVENTURE_CHAIN_INDEX, ADVENTURE_ITEM_SEED, ADVENTURE_PHASES, CHAPTER_POINTS, KIOSK_PROMPT, STEP_POINTS,
+  ADVENTURE_CHAIN_INDEX, ADVENTURE_ITEM_SEED, ADVENTURE_PHASES, CHAPTER_POINTS, KIOSK_PROMPT, STEP_POINTS, STRICT_GRACE_SECONDS,
   type ChapterDef, type ChapterStep,
 } from '../../src/shared/content/chapters';
 
@@ -129,7 +129,7 @@ describe('adventure: trigger types', () => {
     expect(evs.some((e) => e.e === 'bark')).toBe(false); // no barks on these steps
   });
 
-  it('reach (vehicle / airborne): a human must be in a vehicle / in the air; a bot-only squad waives it', async () => {
+  it('reach (vehicle / airborne): a human must be in a vehicle / in the air; a bot-only squad too, until the grace waives it', async () => {
     const def = chapter([
       { id: 'air', text: 'Glide in', trigger: { type: 'reach', params: { x: 20, z: 0, radius: 4, airborne: true } } },
       { id: 'car', text: 'Drive in', trigger: { type: 'reach', params: { x: -20, z: 0, radius: 4, vehicle: true } } },
@@ -157,7 +157,12 @@ describe('adventure: trigger types', () => {
     live(sim2);
     teleport(sim2, b, -20, 0);
     run(sim2, 2 / TICK_HZ);
-    expect(st(sim2).phase).toBe('complete'); // no human: bots don't drive, so the vehicle rule is waived
+    // B2: bots drive, fly and glide now, so a bot-only squad has to meet vehicle / airborne too (on foot is not enough)...
+    expect(st(sim2).phase).toBe('live');
+    run(sim2, STRICT_GRACE_SECONDS);
+    teleport(sim2, b, -20, 0);
+    run(sim2, 2 / TICK_HZ);
+    expect(st(sim2).phase).toBe('complete'); // ...until the grace waives it (fail forward), as for humans
   });
 
   it('interact: E inside the radius; with a human in the squad only a human counts; the kiosk variant takes a kit swap too', async () => {

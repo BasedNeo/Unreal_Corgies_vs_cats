@@ -47,6 +47,7 @@ import { surfaceAt } from '../../shared/world/queries';
 import type { Destructible } from '../../shared/world/world-types';
 import {
   abilityIntent, buddyInTrouble, createTactics, objectiveInteract, pushBand, raiderAir, skipGoal, updateObjectiveGoal, type TacticsState,
+  vehicleThink,
 } from './tactics';
 
 export type AiMode = 'patrol' | 'alert' | 'engage' | 'cover' | 'regroup';
@@ -667,6 +668,8 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   if (target && ai.visible && ai.mode !== 'cover') setMode(sim, ai, 'engage');
   if (target && ai.visible) { ai.reaction -= dt; ai.trackTime += dt; } else ai.trackTime = Math.max(0, ai.trackTime - dt * 2);
   ai.coverCooldown = Math.max(0, ai.coverCooldown - dt);
+  // B2a: a seated bot drives, a bot on its way to a kart boards it (tactics.ts vehicleThink); the on-foot FSM sleeps
+  if (vehicleThink(sim, e, ai, ctx, inp, dt)) return;
 
   let buttons = 0;
   let lookYaw = ai.yaw, lookPitch = 0, aiming = false;

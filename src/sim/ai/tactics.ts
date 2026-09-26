@@ -28,11 +28,34 @@
 // that takes blasts) becomes the bot's prop target (`prop`): with nobody to fight, the brain stops in a standoff band
 // (propMin..propMax: explosives keep 6.5 m off their own splash) and shoots it (brain.ts propShot). Props that only
 // take a Dig Charge (the breach wall) are still walked up to and mined.
+// Vehicles (B2a, vehicleThink — the brain hands a tick over to it right after perception):
+//   board   a room bot (not a wave cat) on foot in patrol/alert/regroup whose trip (objective goal, patrol goal, noise)
+//           is ≥ 45 m away takes the best own-team option: an empty Mower Kart (≥ 40 % armor) or a ready Kart-O-Matic
+//           (walk up, E vends, E boards), when walking to it + driving beats walking by ≥ 0.5 s (drive.ts can reach the
+//           trip from it). Never a kart or kiosk a human teammate is heading for (within 5 m of one, walking at it
+//           from 25 m, or looking at it from 14 m), never one another bot has claimed. An adventure `vehicle` reach
+//           step (the Garage Job's getaway) is driven for real by a bot-only squad (≥ 15 m, no time test); with a human
+//           in the squad the kart is the human's.
+//   drive   drive.ts steers to the trip (an objective that moves on is followed); a visible enemy in reach is rammed
+//           when the ram pays off (same level, a clear line, a run-up to ≥ 8.5 m/s closing, damage ≥ 35 % of its max
+//           or its hp; 3 runs per target, 5 s each); an enemy within 14 m that can't be rammed → hop out and fight.
+//           A vehicle step drives calm (no rams, no hopping out to fight) and stays seated in the zone.
+//   hop out near the trip's end (braking below 5 m/s first), at < 30 % armor (at any speed), a rider under fire below
+//           55 % health, when the driver gives up
+//           (stuck three times) or has no route, after 45 s; no new boarding for 8 s after.
 import type { Sim } from '../sim';
 import type { SimEntity } from '../entity';
-import { Btn } from '../../shared/input';
+import { Btn, type InputCmd } from '../../shared/input';
 import { EFlag, EntityKind, Team, type EntityId } from '../../shared/types';
 import { angleDelta } from '../../shared/math';
+import { TICK_HZ } from '../../shared/constants';
+import { TERMINALS, VEHICLES } from '../../shared/content/vehicles';
+import { surfaceAt, yawToward } from '../../shared/world/queries';
+import { kartForwardSpeed } from '../vehicles/kart';
+import {
+  controlsToInput, createDriver, createFlight, driveKart, driveLineClear, driveStats, flyPlane, kartNavFor, nearestDrivable,
+  resetDriver, type DriveGoal, type DriverState, type FlightGoal, type FlightState, type KartControls,
+} from './drive';
 import { abilityDef } from '../../shared/content/abilities';
 import { pickupLayoutFor } from '../../shared/content/pickups';
 import { worldLineClear } from '../combat/geometry';
@@ -49,7 +72,8 @@ import {
   SENTRY_DWELL, adventureChapter, adventureItems, adventureState, adventureStep, adventureTargets, isAdventureMode, squadHasHuman,
 } from '../adventure/state';
 import type { Archetype } from './archetypes';
-import { type NavGrid, cellX, cellZ, isWalkable, nearestWalkable, randomCell } from './nav';
+import { type NavGrid, cellX, cellZ, findPath, isWalkable, lineWalkable, nearestWalkable, randomCell } from './nav';
+import { canReach } from './nav-links';
 
 export interface TacticsState {
   /** No ability press before this tick (after a press, refused or not). */
@@ -99,13 +123,84 @@ export interface TacticsState {
   propLined: boolean;
   /** Walk to the goal instead of running (sentries pacing their posts). */
   walk: boolean;
+  /** B2a: the goal is an adventure `reach` step that wants a vehicle (drive there for real, stay seated). */
+  vehicle: boolean;
+  /** B2b: the goal is the Rooftop Hangar (vend the RC plane and fly it); an airborne step's launch spot (glide off). */
+  plane: boolean;
+  glide: boolean;
+  /** B2a: boarding and driving vehicles (vehicleThink). */
+  ride: RideState;
+}
+
+/** B2a: a bot's trip by vehicle (see vehicleThink). Plain data. */
+export interface RideState {
+  /**
+   * idle (on foot, deciding every 0.5 s) · board (walking to a kart / plane / kiosk, pressing E) · drive (seated in a
+   * kart or the plane) · leap (B2b: off a roof into an Ear Glide).
+   */
+  phase: 'idle' | 'board' | 'drive' | 'leap';
+  /** The kart being boarded or driven, and the Kart-O-Matic to vend one from first (-1 = none). */
+  kart: EntityId;
+  term: EntityId;
+  /** Where the trip goes, the radius that counts as there, stay seated there (a vehicle step), ignore fights. */
+  destX: number; destZ: number; destR: number;
+  stay: boolean;
+  calm: boolean;
+  /** Tick the phase began; last tick vehicleThink ran (a gap = the bot was dead); next boarding evaluation. */
+  since: number;
+  seen: number;
+  evalAt: number;
+  /** Boarding: closest approach so far and when (no progress for 2.5 s → give up). */
+  bestD: number;
+  bestTick: number;
+  /** Boarding on foot: a nav route to the kart / kiosk. */
+  walk: number[];
+  walkIdx: number;
+  walkGX: number; walkGZ: number;
+  walkAt: number;
+  /** Ram run: the target, until when, runs on this target, no new run before ramCool. */
+  ram: EntityId;
+  ramUntil: number;
+  ramFor: EntityId;
+  ramTries: number;
+  ramCool: number;
+  ramHitTick: number;
+  /** Tick the current run (or its follow-up after a hit) began. */
+  ramSince: number;
+  /** Joust: after a run, head for (extendX, extendZ) until extendUntil (making room for the next one). */
+  extendUntil: number;
+  extendX: number; extendZ: number;
+  drv: DriverState;
+  /** B2b: the flight (strafing runs), the strike target (-1 none) and when it was picked, the leap's stage. */
+  flight: FlightState;
+  /** The last route check up to the hangar (canReach) and when to redo it. */
+  reachOk: boolean;
+  reachAt: number;
+  strike: EntityId;
+  strikeAt: number;
+  leap: number;
+  /** Telemetry: trips started (seated), hop-outs, ram hits; the driver's last status and why the bot wants out. */
+  boards: number;
+  hops: number;
+  ramHits: number;
+  status: string;
+  out: string;
+}
+
+export function createRide(): RideState {
+  return {
+    phase: 'idle', kart: -1, term: -1, destX: 0, destZ: 0, destR: 0, stay: false, calm: false, since: 0, seen: -9999, evalAt: 0,
+    bestD: Infinity, bestTick: 0, walk: [], walkIdx: 0, walkGX: 0, walkGZ: 0, walkAt: 0,
+    ram: -1, ramUntil: 0, ramFor: -1, ramTries: 0, ramCool: 0, ramHitTick: -1, ramSince: 0, extendUntil: 0, extendX: 0, extendZ: 0, drv: createDriver(),
+    flight: createFlight(), reachOk: false, reachAt: 0, strike: -1, strikeAt: 0, leap: 0, boards: 0, hops: 0, ramHits: 0, status: '', out: '',
+  };
 }
 
 export function createTactics(): TacticsState {
   return {
     lock: 0, pushUntil: 0, pushRolled: -1, pushRollAt: 0, rolledFor: -1, wallFrom: -1, wallUntil: 0, holdUntil: 0, chokeAt: 0, hopAt: 0,
     goal: '', gx: 0, gz: 0, gy: 0, gr: 0, cx: 0, cz: 0, interact: false, hold: false, kiosk: false, destroy: false, goalId: -1, goalAt: 0, goalSince: 0, drone: -1, droneLined: false, skip: [],
-    prop: -1, px: 0, py: 0, pz: 0, propMin: 0, propMax: 0, propSeen: false, propLined: false, walk: false,
+    prop: -1, px: 0, py: 0, pz: 0, propMin: 0, propMax: 0, propSeen: false, propLined: false, walk: false, vehicle: false, plane: false, glide: false, ride: createRide(),
   };
 }
 
@@ -388,11 +483,12 @@ export function updateObjectiveGoal(sim: Sim, e: SimEntity, t: TacticsState, g: 
   t.goalAt = sim.tick + 30;
   const prev = t.goal, prevId = t.goalId;
   t.goal = '';
-  t.kiosk = false; t.destroy = false; t.walk = false; t.prop = -1;
+  t.kiosk = false; t.destroy = false; t.walk = false; t.prop = -1; t.vehicle = false; t.plane = false; t.glide = false;
   if (isAdventureMode(sim)) { adventureGoal(sim, e, t, g, chars, prev, prevId); return; }
   if (e.combat?.pve || e.kind !== EntityKind.Bot) return;
   const hpFrac = e.health ? e.health.hp / e.health.max : 1;
   const buddy = buddyInTrouble(sim, e, chars) !== null;
+  if (!buddy && planeGoal(sim, e, t, chars, prev, prevId)) return; // B2b: the team's pilot heads for the Rooftop Hangar
   // core-rush pads
   if (roomModeOf(sim) === 'core-rush') {
     const pads = coreRushPads(sim);
@@ -588,6 +684,15 @@ function adventureGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, char
     case 'reach':
     case 'hold':
       zoneGoal(sim, t, g, tr.params.x, tr.params.z, tr.params.radius, zid - 2, prev, prevId, tr.type === 'hold');
+      // N1: a zone up on a deck (minY: the garage roof): stand on it, the brain climbs there through the nav links
+      {
+        const minY = (tr.params as { minY?: number }).minY;
+        if (minY !== undefined && minY - sim.worldData.height(tr.params.x, tr.params.z) > 1.5 && Number.isFinite(canReach(sim, e, tr.params.x, minY, tr.params.z))) {
+          t.gx = tr.params.x; t.gz = tr.params.z; t.gy = minY;
+        }
+      }
+      t.vehicle = tr.type === 'reach' && !!tr.params.vehicle; // B2a: drive there for real (vehicleThink)
+      if (tr.type === 'reach' && tr.params.airborne && !human) glideGoal(sim, e, t, chars, def); // B2b: glide there for real
       return;
     case 'interact': {
       const p = tr.params;
@@ -630,4 +735,776 @@ function adventureGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, char
       return;
   }
   zoneGoal(sim, t, g, st.anchorX, st.anchorZ, 5, zid - 1, prev, prevId);
+}
+
+// ---------------------------------------------------------------- vehicles (B2a)
+
+/** Trips at least this far (m) are worth a kart. */
+export const DRIVE_MIN = 45;
+/** Seconds between boarding evaluations of an idle bot; seconds before boarding again after a hop-out. */
+const EVAL_EVERY = 0.5;
+const HOP_COOLDOWN = 8;
+/** Walk at most this far (m) to a kart or kiosk (a vehicle step: farther). */
+const BOARD_REACH = 35;
+const BOARD_REACH_STEP = 70;
+/** Seconds of boarding before giving up; seconds without getting closer. */
+const BOARD_TIMEOUT = 15;
+const BOARD_STALL = 2.5;
+/**
+ * Time model (s, m, m/s; measured on the West Yard): mount / vend overheads, route detours, a kart cruising at 15 m/s
+ * after a spin-up that costs 0.7 s over cruising all the way, and its stop; a bot walking sprints until the last 18 m
+ * (TAIL_WALK s more than sprinting it all).
+ */
+const MOUNT_COST = 0.3, VEND_COST = 1.2;
+const WALK_DETOUR = 1.1, DRIVE_DETOUR = 1.15;
+const KART_SPINUP = 0.7, KART_CRUISE = 15, KART_STOP = 0.5, TAIL_WALK = 0.9;
+/** Drive only when it saves this much time (s). */
+const SAVE_MIN = 0.5;
+/** A human teammate this close to a kart/kiosk has dibs; so has one walking at it from HUMAN_HEADING m, or looking at it from HUMAN_LOOK m. */
+const HUMAN_NEAR = 5, HUMAN_HEADING = 25, HUMAN_LOOK = 14;
+/** A rider under fire below this health fraction gets out (riders sit exposed above the hood). */
+const RIDER_BAIL = 0.55;
+/** Board only karts with at least this armor fraction. */
+const KART_MIN_HP = 0.4;
+/** Hop out below this armor fraction (at any speed); brake below HOP_SPEED (m/s) before a planned hop-out. */
+const BAIL_HP = 0.3;
+const HOP_SPEED = 5;
+/** Seconds a trip may last before the bot gets out and walks. */
+const MAX_RIDE = 45;
+/** Enemy this close (m) that can't be rammed: get out and fight. */
+const FIGHT_RANGE = 14;
+/** Ram runs: range (m), seconds per run, runs per target, pause between runs (s). */
+const RAM_MIN = 3, RAM_MAX = 45, RAM_RUN = 5, RAM_TRIES = 3, RAM_PAUSE = 1.2;
+/** A fighting bot hops into an empty kart this close (m) to ram its target; seconds before it may after a hop-out. */
+const BOARD_TO_RAM = 10, FIGHT_COOLDOWN = 3;
+/** Seconds a run stays on a pet it just hit (it lands ahead of the kart: the follow-up). */
+const RAM_FOLLOW = 3;
+/** Seconds a joust carries on straight after a run before swinging round. */
+const EXTEND = 1.6;
+
+/** The slice of the brain's state (brain.ts AiState) the vehicle tactics read and write. */
+export interface VehicleBrain {
+  mode: 'patrol' | 'alert' | 'engage' | 'cover' | 'regroup';
+  target: EntityId;
+  visible: boolean;
+  hasGoal: boolean;
+  goalX: number; goalZ: number;
+  alertX: number; alertZ: number;
+  yaw: number; pitch: number;
+  lastX: number; lastZ: number;
+  odo: number;
+  stuck: number;
+  path: number[];
+  tac: TacticsState;
+  /** N1: the perch the bot climbs to / holds (it doesn't drive then), and the link runner (-1 = not on a climb). */
+  perch?: { pauseUntil: number } | null;
+  nav?: { link: number; elev: boolean };
+}
+
+/** The slice of the brain's per-tick context (brain.ts AiContext) the vehicle tactics use. */
+export interface VehicleCtx {
+  grid: NavGrid | null;
+  chars: SimEntity[];
+  pathBudget: number;
+}
+
+interface Trip { x: number; z: number; r: number; stay: boolean; calm: boolean }
+const trip: Trip = { x: 0, z: 0, r: 0, stay: false, calm: false };
+const ctrl: KartControls = { throttle: 0, steer: 0, boost: false, handbrake: false };
+const goalTmp: DriveGoal = { x: 0, z: 0, r: 0, stop: true, ram: false };
+
+/** The objective the brain would walk to in patrol, as a trip (null = none; also for a goal up on a deck: N1 climbs). */
+function objectiveTrip(sim: Sim, t: TacticsState): Trip | null {
+  if ((t.goal === 'step' || t.goal === 'core') && t.gy - sim.worldData.height(t.gx, t.gz) > 1.5) return null;
+  if (t.goal === 'step') {
+    trip.x = t.gx; trip.z = t.gz;
+    trip.r = t.vehicle ? Math.max(1.5, t.gr * 0.4) : t.hold ? Math.max(2.5, t.gr * 0.6) : 5;
+    trip.stay = t.vehicle; trip.calm = t.vehicle;
+    return trip;
+  }
+  if (t.goal === 'core') { trip.x = t.gx; trip.z = t.gz; trip.r = 6; trip.stay = false; trip.calm = false; return trip; }
+  return null;
+}
+
+/** Where the bot is going on foot right now (objective, patrol goal, a noise), as a trip; null = nowhere far. */
+function tripOf(sim: Sim, ai: VehicleBrain): Trip | null {
+  if (ai.mode === 'patrol') {
+    if (ai.tac.goal) return objectiveTrip(sim, ai.tac);
+    if (ai.perch && sim.tick >= ai.perch.pauseUntil) return null; // N1: climbing to / holding a perch
+    if (ai.hasGoal) { trip.x = ai.goalX; trip.z = ai.goalZ; trip.r = 8; trip.stay = false; trip.calm = false; return trip; }
+    return null;
+  }
+  if (ai.mode === 'alert') { trip.x = ai.alertX; trip.z = ai.alertZ; trip.r = 12; trip.stay = false; trip.calm = false; return trip; }
+  if (ai.mode === 'regroup' && ai.hasGoal) { trip.x = ai.goalX; trip.z = ai.goalZ; trip.r = 6; trip.stay = false; trip.calm = false; return trip; }
+  return null;
+}
+
+function setTrip(r: RideState, tr: Trip): void {
+  r.destX = tr.x; r.destZ = tr.z; r.destR = tr.r; r.stay = tr.stay; r.calm = tr.calm;
+}
+
+/** Another bot of the team has this kart or kiosk in its trip. */
+function claimed(chars: SimEntity[], e: SimEntity, id: EntityId): boolean {
+  for (const c of chars) {
+    if (c === e || c.team !== e.team) continue;
+    const r = c.ai?.tac.ride;
+    if (r && r.phase !== 'idle' && (r.kart === id || r.term === id)) return true;
+  }
+  return false;
+}
+
+/**
+ * A human teammate is heading for this kart or kiosk: within HUMAN_NEAR m, or walking at it from HUMAN_HEADING m, or
+ * looking at it from HUMAN_LOOK m. Bots never take it then.
+ */
+export function humanWants(chars: SimEntity[], team: number, x: number, z: number): boolean {
+  for (const c of chars) {
+    if (c.team !== team || c.kind !== EntityKind.Player || c.dead || c.seat) continue;
+    const dx = x - c.pos.x, dz = z - c.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < HUMAN_NEAR) return true;
+    if (d < HUMAN_HEADING) {
+      const sp = Math.hypot(c.vel.x, c.vel.z);
+      if (sp > 1.5 && (c.vel.x * dx + c.vel.z * dz) / (sp * d) > 0.8) return true;
+    }
+    if (d < HUMAN_LOOK && Math.abs(angleDelta(c.yaw, yawToward(c.pos.x, c.pos.z, x, z))) < 0.35) return true;
+  }
+  return false;
+}
+
+/** Seconds a kart takes over d m (spin-up, cruise, stop). */
+function driveTime(d: number): number {
+  return KART_SPINUP + d / KART_CRUISE + KART_STOP;
+}
+
+function kartUsable(e: SimEntity, v: SimEntity): boolean {
+  const k = v.kart;
+  if (!k || v.removed || k.rider >= 0 || !v.health || v.health.hp < v.health.max * KART_MIN_HP || v.team !== e.team) return false;
+  if (Math.hypot(v.vel.x, v.vel.z) > VEHICLES[k.id].mountMaxSpeed || Math.abs(v.pos.y - e.pos.y) > 1.5) return false;
+  return true;
+}
+
+/** A ready vehicle terminal of this kind the bot may use (own team, or a neutral one: the Rooftop Hangar). */
+function kioskUsable(e: SimEntity, v: SimEntity, id: 'kart_terminal' | 'plane_hangar' = 'kart_terminal'): boolean {
+  const t = v.terminal;
+  if (!t || t.id !== id || (v.team !== e.team && !TERMINALS[t.id].neutral)) return false;
+  return t.kart < 0 && t.cooldown <= 0 && Math.abs(v.pos.y - e.pos.y) < 1.8;
+}
+
+/** A kart or plane the bot may board now. */
+function vehicleUsable(e: SimEntity, v: SimEntity): boolean {
+  return v.kart ? kartUsable(e, v) : v.plane ? planeUsable(e, v) : false;
+}
+
+/** Idle bot: is a kart worth it for the current trip? Starts boarding the best option. */
+function considerBoarding(sim: Sim, e: SimEntity, ai: VehicleBrain, g: NavGrid, chars: SimEntity[]): void {
+  const r = ai.tac.ride;
+  r.evalAt = sim.tick + Math.round(EVAL_EVERY * TICK_HZ);
+  if (!e.char || !e.char.grounded) return;
+  if (ai.nav && (ai.nav.link >= 0 || ai.nav.elev)) return; // N1: mid-climb, or up on a deck
+  const step = ai.tac.goal === 'step' && ai.tac.vehicle && ai.mode === 'patrol';
+  // adventure: pups drive only for a step that asks for it, and never with a human in the squad (the kart is theirs)
+  if (isAdventureMode(sim) && (!step || squadHasHuman(sim))) return;
+  if (ai.mode === 'engage') { boardToRam(sim, e, ai, g, chars); return; }
+  const tr = tripOf(sim, ai);
+  if (!tr) return;
+  const D = Math.hypot(tr.x - e.pos.x, tr.z - e.pos.z);
+  if (D < (step ? 15 : DRIVE_MIN)) return;
+  const nav = kartNavFor(g, sim.worldData);
+  const run = e.char.move.sprintSpeed * 0.95;
+  const walkT = (D * WALK_DETOUR) / run + TAIL_WALK;
+  let best: SimEntity | null = null, bestT = Infinity;
+  for (const v of sim.entities.values()) {
+    let px: number, pz: number, cost: number;
+    if (v.kart) { if (!kartUsable(e, v)) continue; px = v.pos.x; pz = v.pos.z; cost = MOUNT_COST; }
+    else if (v.terminal) { if (!kioskUsable(e, v)) continue; px = v.terminal.padX; pz = v.terminal.padZ; cost = VEND_COST; }
+    else continue;
+    const dWalk = Math.hypot(v.pos.x - e.pos.x, v.pos.z - e.pos.z);
+    if (dWalk > (step ? BOARD_REACH_STEP : BOARD_REACH)) continue;
+    if (claimed(chars, e, v.id) || humanWants(chars, e.team, v.pos.x, v.pos.z)) continue;
+    // where a kart from here can take the bot: the drivable cell nearest the trip's end, in the kart's region
+    const kc = nearestDrivable(g, nav, px, pz, 3);
+    if (kc < 0) continue;
+    const dc = nearestDrivable(g, nav, tr.x, tr.z, 10, nav.region[kc]);
+    if (dc < 0) continue;
+    const ex = cellX(g, dc), ez = cellZ(g, dc);
+    const tail = Math.hypot(tr.x - ex, tr.z - ez);
+    if (step && tail > tr.r + 4) continue;
+    const t = (dWalk * WALK_DETOUR) / run + cost + driveTime(Math.hypot(ex - px, ez - pz) * DRIVE_DETOUR) + tail / run;
+    if (t < bestT) { bestT = t; best = v; }
+  }
+  if (!best || (!step && bestT > walkT - SAVE_MIN)) return;
+  r.phase = 'board';
+  r.kart = best.kart ? best.id : -1;
+  r.term = best.terminal ? best.id : -1;
+  r.since = sim.tick;
+  r.bestD = Infinity; r.bestTick = sim.tick;
+  r.walk.length = 0;
+  setTrip(r, tr);
+}
+
+/**
+ * In a fight, a few steps from an empty own-team kart (≤ BOARD_TO_RAM m), with the target in sight where a ram from that
+ * kart pays off: hop in to ram it (the trip ends where the bot stands).
+ */
+function boardToRam(sim: Sim, e: SimEntity, ai: VehicleBrain, g: NavGrid, chars: SimEntity[]): void {
+  const r = ai.tac.ride;
+  const t = ai.target >= 0 && ai.visible ? sim.entities.get(ai.target) : undefined;
+  if (!t || t.dead || !t.char || t.team === e.team || (ai.tac.goal === 'step' && ai.tac.vehicle)) return;
+  for (const v of sim.entities.values()) {
+    if (!v.kart || !kartUsable(e, v) || Math.hypot(v.pos.x - e.pos.x, v.pos.z - e.pos.z) > BOARD_TO_RAM) continue;
+    if (claimed(chars, e, v.id) || humanWants(chars, e.team, v.pos.x, v.pos.z)) continue;
+    const dmg = ramDamage(sim, v, t, g);
+    const def = VEHICLES[v.kart!.id];
+    if (dmg <= 0 || def.ramDamageBase + (dmg - def.ramDamageBase) * RAM_GLANCE < t.health!.hp * 0.7) continue; // worth leaving the fight for
+    r.phase = 'board'; r.kart = v.id; r.term = -1; r.since = sim.tick;
+    r.bestD = Infinity; r.bestTick = sim.tick; r.walk.length = 0;
+    trip.x = e.pos.x; trip.z = e.pos.z; trip.r = 6; trip.stay = false; trip.calm = false;
+    setTrip(r, trip);
+    return;
+  }
+}
+
+/** Leave the ride state (hopped out, thrown out, died, gave up boarding); no new boarding for `cooldown` s. */
+function endRide(sim: Sim, e: SimEntity, ai: VehicleBrain, cooldown: number): void {
+  const r = ai.tac.ride;
+  if (r.phase === 'drive') r.hops++;
+  r.phase = 'idle'; r.kart = -1; r.term = -1; r.ram = -1;
+  r.walk.length = 0;
+  r.evalAt = sim.tick + Math.round(cooldown * TICK_HZ);
+  // the brain's odometer and route are stale after a ride
+  ai.lastX = e.pos.x; ai.lastZ = e.pos.z; ai.odo = 0; ai.stuck = 0;
+  ai.path.length = 0;
+}
+
+/** Walk toward (gx, gz) (nav route unless the line is open, straight in over the last 3.5 m); writes inp. */
+function walkToward(sim: Sim, e: SimEntity, ai: VehicleBrain, ctx: VehicleCtx, gx: number, gz: number, inp: InputCmd, dt: number): number {
+  const g = ctx.grid!;
+  const r = ai.tac.ride;
+  const d = Math.hypot(gx - e.pos.x, gz - e.pos.z);
+  let tx = gx, tz = gz;
+  const up = e.pos.y - sim.worldData.height(e.pos.x, e.pos.z) > 1.5; // on a roof: the ground grid doesn't cover it
+  if (d > 3.5 && !up && !lineWalkable(g, e.pos.x, e.pos.z, gx, gz, true)) {
+    const stale = !r.walk.length || Math.hypot(gx - r.walkGX, gz - r.walkGZ) > 1.5 || sim.tick >= r.walkAt;
+    if (stale && ctx.pathBudget > 0) {
+      ctx.pathBudget--;
+      findPath(g, e.pos.x, e.pos.z, gx, gz, r.walk);
+      r.walkIdx = 0; r.walkGX = gx; r.walkGZ = gz; r.walkAt = sim.tick + 120;
+    }
+    const n = r.walk.length >> 1;
+    if (n) {
+      while (r.walkIdx < n - 1 && Math.hypot(r.walk[r.walkIdx * 2] - e.pos.x, r.walk[r.walkIdx * 2 + 1] - e.pos.z) < 0.8) r.walkIdx++;
+      const k = r.walkIdx + 1;
+      if (k < n && lineWalkable(g, e.pos.x, e.pos.z, r.walk[k * 2], r.walk[k * 2 + 1], true)) r.walkIdx = k;
+      tx = r.walk[r.walkIdx * 2]; tz = r.walk[r.walkIdx * 2 + 1];
+    }
+  }
+  let mx = tx - e.pos.x, mz = tz - e.pos.z;
+  const l = Math.hypot(mx, mz);
+  if (l > 1e-3) { mx /= l; mz /= l; } else { mx = 0; mz = 0; }
+  if (mx || mz) {
+    const want = Math.atan2(-mx, -mz);
+    const step = 10 * dt;
+    ai.yaw += clampAbs(angleDelta(ai.yaw, want), step);
+  }
+  const sy = Math.sin(ai.yaw), cy = Math.cos(ai.yaw);
+  inp.mz = mx * -sy + mz * -cy;
+  inp.mx = mx * cy + mz * -sy;
+  inp.yaw = ai.yaw; inp.pitch = ai.pitch = 0;
+  inp.buttons = d > 6 && inp.mz > 0.5 ? Btn.Sprint : 0;
+  return d;
+}
+
+const clampAbs = (v: number, m: number) => (v > m ? m : v < -m ? -m : v);
+
+/** Stand still this tick and press E (edge: a released tick between presses). */
+function pressE(e: SimEntity, inp: InputCmd): void {
+  inp.mx = 0; inp.mz = 0;
+  inp.buttons = e.prevButtons & Btn.Interact ? 0 : Btn.Interact;
+}
+
+/** Boarding: walk to the kiosk (E vends) and then the kart (E boards). False = gave up (the brain runs this tick). */
+function boardTick(sim: Sim, e: SimEntity, ai: VehicleBrain, ctx: VehicleCtx, inp: InputCmd, dt: number): boolean {
+  const r = ai.tac.ride;
+  const now = sim.tick;
+  // a fight nearby comes first; so does a stalled or overlong walk
+  const foe = ai.target >= 0 ? sim.entities.get(ai.target) : undefined;
+  const kartNear = r.kart >= 0 && r.term < 0 && (() => { const k = sim.entities.get(r.kart); return !!k && Math.hypot(k.pos.x - e.pos.x, k.pos.z - e.pos.z) < BOARD_TO_RAM + 1; })();
+  const fight = !kartNear && (ai.mode === 'engage' || ai.mode === 'cover') && foe && !foe.dead && Math.hypot(foe.pos.x - e.pos.x, foe.pos.z - e.pos.z) < 30;
+  if (fight || now - r.since > BOARD_TIMEOUT * TICK_HZ || now - r.bestTick > BOARD_STALL * TICK_HZ) {
+    endRide(sim, e, ai, fight ? 3 : 10);
+    return false;
+  }
+  if (r.term >= 0) {
+    const term = sim.entities.get(r.term);
+    const t = term?.terminal;
+    if (!term || !t) { endRide(sim, e, ai, 3); return false; }
+    if (t.kart >= 0) {
+      // vended (by this bot's E, or someone else's): board it when it is free
+      const k = sim.entities.get(t.kart);
+      if (!k || !vehicleUsable(e, k) || claimed(ctx.chars, e, k.id)) { endRide(sim, e, ai, 5); return false; }
+      r.kart = k.id; r.term = -1;
+      r.bestD = Infinity; r.bestTick = now;
+    } else {
+      if (!kioskUsable(e, term, t.id) || humanWants(ctx.chars, e.team, term.pos.x, term.pos.z)) { endRide(sim, e, ai, 5); return false; }
+      const d = walkToward(sim, e, ai, ctx, term.pos.x, term.pos.z, inp, dt);
+      if (d < r.bestD - 0.3) { r.bestD = d; r.bestTick = now; }
+      if (d <= TERMINALS[t.id].useRange - 0.6) { pressE(e, inp); r.bestTick = now; }
+      return true;
+    }
+  }
+  const kart = r.kart >= 0 ? sim.entities.get(r.kart) : undefined;
+  if (!kart || !vehicleUsable(e, kart) || humanWants(ctx.chars, e.team, kart.pos.x, kart.pos.z)) { endRide(sim, e, ai, 5); return false; }
+  const d = walkToward(sim, e, ai, ctx, kart.pos.x, kart.pos.z, inp, dt);
+  if (d < r.bestD - 0.3) { r.bestD = d; r.bestTick = now; }
+  if (d <= VEHICLES[kart.kart ? kart.kart.id : kart.plane!.id].mountRange - 0.6) { pressE(e, inp); r.bestTick = now; }
+  return true;
+}
+
+/**
+ * Does ramming `t` pay off from this kart? Same level, 3–45 m, a clear drivable line, a run-up to a closing speed
+ * ≥ ramMinSpeed + 2.5 (after the target's own speed away), and the hit worth ≥ 35 % of its max hp (or all it has).
+ */
+export function ramPays(sim: Sim, kart: SimEntity, t: SimEntity, g: NavGrid): boolean {
+  return ramDamage(sim, kart, t, g) > 0;
+}
+
+/** The damage a ram on `t` from this kart is expected to deal when it pays off (see ramPays), else 0. */
+export function ramDamage(sim: Sim, kart: SimEntity, t: SimEntity, g: NavGrid): number {
+  const k = kart.kart;
+  if (!k || !t.char || !t.health || t.dead || t.seat || t.kind === EntityKind.Boss) return 0;
+  if (!kart.health || kart.health.hp < kart.health.max * 0.4) return 0;
+  const dy = t.pos.y - kart.pos.y;
+  if (dy > 0.6 || dy < -0.9) return 0;
+  const dx = t.pos.x - kart.pos.x, dz = t.pos.z - kart.pos.z;
+  const d = Math.hypot(dx, dz);
+  if (d < RAM_MIN || d > RAM_MAX) return 0;
+  const def = VEHICLES[k.id];
+  const v = Math.max(0, kartForwardSpeed(kart));
+  const err = Math.abs(angleDelta(kart.yaw, yawToward(kart.pos.x, kart.pos.z, t.pos.x, t.pos.z)));
+  const runUp = Math.max(0, d - (err > 1 ? 6 : err > 0.5 ? 3 : 0) - 1);
+  const vHit = Math.min(k.boost > 0.2 ? def.boostSpeed : def.topSpeed, Math.sqrt(v * v + 2 * 10 * runUp));
+  const away = Math.max(0, (t.vel.x * dx + t.vel.z * dz) / d);
+  const closing = vHit - away;
+  if (closing < def.ramMinSpeed + 2.5) return 0;
+  if (!driveLineClear(g, kartNavFor(g, sim.worldData), kart.pos.x, kart.pos.z, t.pos.x, t.pos.z)) return 0;
+  const dmg = def.ramDamageBase + (closing - def.ramMinSpeed) * def.ramDamagePerMs;
+  return dmg >= Math.min(t.health.hp, t.health.max * 0.35) ? dmg : 0;
+}
+
+/**
+ * The best enemy to ram from this kart right now (null = none pays): enemies on foot the rider can see (the brain's
+ * target, or anyone in a clear line from the seat), in front or far enough to swing round, where ramPays(); slow,
+ * hurt, close and centred targets first. A target already run at RAM_TRIES times is skipped.
+ */
+function ramPick(sim: Sim, e: SimEntity, kart: SimEntity, chars: SimEntity[], g: NavGrid, r: RideState): SimEntity | null {
+  const ai = e.ai;
+  const ey = kart.pos.y + 1.3;
+  let best: SimEntity | null = null, bs = Infinity;
+  for (const c of chars) {
+    if (c.team === e.team || c.dead || c.seat || !c.health) continue;
+    // a pet one more hit would finish gets a couple of extra runs
+    if (c.id === r.ramFor && r.ramTries >= RAM_TRIES + (c.health.hp < 45 ? 2 : 0)) continue;
+    const dx = c.pos.x - kart.pos.x, dz = c.pos.z - kart.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < RAM_MIN || d > RAM_MAX) continue;
+    const err = Math.abs(angleDelta(kart.yaw, yawToward(kart.pos.x, kart.pos.z, c.pos.x, c.pos.z)));
+    if (err > 1.3 && d < 10) continue; // too close behind to swing round onto
+    // the pet it just rammed is remembered (it flew off behind the kart): come round on it without a sight line
+    const seen = (ai && ai.target === c.id && ai.visible) || (c.id === r.ramFor && sim.tick - r.ramHitTick < RAM_MEMORY * TICK_HZ);
+    if (!seen && (isStealthed(sim, c) || concealLevel(c) > 0.5 || !worldLineClear(sim, kart.pos.x, ey, kart.pos.z, c.pos.x, c.pos.y + 1, c.pos.z))) continue;
+    const dmg = ramDamage(sim, kart, c, g);
+    if (dmg <= 0) continue;
+    // a ram that finishes it first, then the closest, most centred, slowest, most hurt
+    const away = Math.max(0, (c.vel.x * dx + c.vel.z * dz) / d); // a pet running off soaks up the hit's speed
+    // most hits on a dodging pet land off-centre (measured: ~45–60 % of the head-on damage): a pet even that would
+    // finish comes first
+    const def = VEHICLES[kart.kart!.id];
+    const glancing = def.ramDamageBase + Math.max(0, dmg - def.ramDamageBase) * RAM_GLANCE;
+    // a pet facing the kart backs off from it as it comes (bots keep their range): one busy elsewhere takes the full hit
+    const watching = Math.abs(angleDelta(c.yaw, yawToward(c.pos.x, c.pos.z, kart.pos.x, kart.pos.z))) < 0.6 ? 10 : 0;
+    const score = d * (0.55 + 0.45 * (c.health.hp / c.health.max)) + err * 8 + Math.hypot(c.vel.x, c.vel.z) * 0.8 + away * 2 + watching
+      - (glancing >= c.health.hp ? 40 : dmg >= c.health.hp ? 15 : 0);
+    if (score < bs) { bs = score; best = c; }
+  }
+  return best;
+}
+const RAM_SCAN = 12;
+/** Seconds a kart remembers the pet it last hit (for the next run). */
+const RAM_MEMORY = 4;
+/** Share of a head-on ram's extra damage an off-centre hit keeps (target choice only). */
+const RAM_GLANCE = 0.4;
+
+/** Closing speed (m/s) of the kart on a pet right now (the kart's velocity toward it minus the pet's away). */
+function closingOn(kart: SimEntity, t: SimEntity): number {
+  const dx = t.pos.x - kart.pos.x, dz = t.pos.z - kart.pos.z;
+  const d = Math.hypot(dx, dz) || 1e-3;
+  return ((kart.vel.x - t.vel.x) * dx + (kart.vel.z - t.vel.z) * dz) / d;
+}
+
+/** After a ram run: head on along the kart's heading (a drivable point up to 22 m ahead) for EXTEND s. */
+function extendFrom(g: NavGrid, sim: Sim, kart: SimEntity, r: RideState, now: number): void {
+  const nav = kartNavFor(g, sim.worldData);
+  const fx = -Math.sin(kart.yaw), fz = -Math.cos(kart.yaw);
+  for (const d of [22, 15, 9]) {
+    const x = kart.pos.x + fx * d, z = kart.pos.z + fz * d;
+    if (!driveLineClear(g, nav, kart.pos.x, kart.pos.z, x, z)) continue;
+    r.extendX = x; r.extendZ = z; r.extendUntil = now + Math.round(EXTEND * TICK_HZ);
+    return;
+  }
+}
+
+/** Seated bot: drive the trip, ram, or get out. Writes the rider's input. */
+function driveTick(sim: Sim, e: SimEntity, ai: VehicleBrain, ctx: VehicleCtx, kart: SimEntity, inp: InputCmd): void {
+  const g = ctx.grid!;
+  const r = ai.tac.ride;
+  const now = sim.tick;
+  const k = kart.kart!;
+  if (r.phase !== 'drive' || r.kart !== kart.id) {
+    // just seated (this bot's E, or placed by a test / chapter): keep the trip it boarded for, else take the current one
+    const boarding = r.phase === 'board';
+    r.phase = 'drive'; r.kart = kart.id; r.term = -1; r.since = now;
+    r.ram = -1; r.ramFor = -1; r.ramTries = 0; r.ramCool = 0;
+    resetDriver(r.drv, sim, kart);
+    r.boards++;
+    if (!boarding) {
+      const tr = tripOf(sim, ai);
+      if (tr) setTrip(r, tr); else { r.destX = kart.pos.x; r.destZ = kart.pos.z; r.destR = 4; r.stay = false; r.calm = false; }
+    }
+  }
+  // objectives keep moving on while the bot drives (an adventure step, a core-rush pad)
+  updateObjectiveGoal(sim, e, ai.tac, g, ctx.chars);
+  const obj = objectiveTrip(sim, ai.tac);
+  if (obj && (Math.hypot(obj.x - r.destX, obj.z - r.destZ) > 2 || obj.stay !== r.stay)) setTrip(r, obj);
+
+  // why the bot wants out ('' = it doesn't)
+  let out = '';
+  const hp = kart.health!;
+  const riderHp = e.health!;
+  if (hp.hp < hp.max * BAIL_HP) out = 'wrecked';
+  else if (now - r.since > MAX_RIDE * TICK_HZ) out = 'timeout';
+  else if (!r.calm && riderHp.hp < riderHp.max * RIDER_BAIL && now - riderHp.lastDamageTick < TICK_HZ) out = 'hurt'; // the rider is the one being shot
+
+  // a ram run, or out to fight
+  const goal = goalTmp;
+  goal.x = r.destX; goal.z = r.destZ; goal.r = r.destR; goal.stop = true; goal.ram = false;
+  if (!r.calm) {
+    const t = ai.target >= 0 ? sim.entities.get(ai.target) : undefined;
+    const foe = t && t.char && !t.dead && t.team !== e.team && ai.visible ? t : null;
+    if (r.ram >= 0) {
+      const rt = sim.entities.get(r.ram);
+      // a new hit: the kart's per-target ram cooldown was (re)armed this tick
+      const hit = !!rt && (k.ramUntil[rt.id] ?? -1) === now - 1 + Math.round(VEHICLES[k.id].ramCooldown * TICK_HZ);
+      if (hit) r.ramHits++;
+      // a miss: the target slipped by (close and behind) — drive on, gain room, come round again after the pause
+      const missed = rt && Math.hypot(rt.pos.x - kart.pos.x, rt.pos.z - kart.pos.z) < 7
+        && Math.abs(angleDelta(kart.yaw, yawToward(kart.pos.x, kart.pos.z, rt.pos.x, rt.pos.z))) > 1.0;
+      // a pet on its feet that outruns the closing speed (the hit would be a nudge): give it up after a second of trying
+      if (rt && rt.char?.grounded && now - r.ramSince > TICK_HZ && closingOn(kart, rt) < VEHICLES[k.id].ramMinSpeed + 1) r.ramUntil = now;
+      if (hit && rt && !rt.dead) {
+        // a hit throws the pet ahead of the kart: stay on it for the follow-up while it comes down (not a new try)
+        if (r.ramHitTick !== now) { r.ramUntil = now + Math.round(RAM_FOLLOW * TICK_HZ); r.ramSince = now; }
+        r.ramHitTick = now;
+      } else if (!rt || rt.dead || hit || missed || now >= r.ramUntil) {
+        r.ram = -1; r.ramCool = now + Math.round(RAM_PAUSE * TICK_HZ);
+        // joust: carry on straight for a moment to make room, then swing round for another run
+        if (rt && !rt.dead) extendFrom(g, sim, kart, r, now);
+      }
+    }
+    if (r.ram < 0 && now >= r.ramCool && (foe || (now + e.id) % RAM_SCAN === 0)) {
+      const best = ramPick(sim, e, kart, ctx.chars, g, r);
+      if (best) {
+        if (r.ramFor !== best.id) { r.ramFor = best.id; r.ramTries = 0; }
+        r.ram = best.id; r.ramUntil = now + Math.round(RAM_RUN * TICK_HZ); r.ramSince = now; r.ramTries++;
+      } else if (foe && !out && now >= r.extendUntil && Math.hypot(foe.pos.x - kart.pos.x, foe.pos.z - kart.pos.z) < FIGHT_RANGE) {
+        // close and no ram lined up: a sound kart with a healthy rider makes room and comes round (joust); a hurt rider
+        // or a weak kart gets out, guns out
+        if (riderHp.hp < riderHp.max * 0.6 || hp.hp < hp.max * 0.45 || r.ramTries >= RAM_TRIES) out = 'fight';
+        else extendFrom(g, sim, kart, r, now);
+      }
+    }
+    const rt = r.ram >= 0 ? sim.entities.get(r.ram) : undefined;
+    if (rt) {
+      // intercept: where the pet will be when the kart gets there (time to contact from the closing speed)
+      const dx = rt.pos.x - kart.pos.x, dz = rt.pos.z - kart.pos.z;
+      const d = Math.hypot(dx, dz) || 1e-3;
+      const away = (rt.vel.x * dx + rt.vel.z * dz) / d;
+      const tc = Math.min(1.5, d / Math.max(4, Math.max(12, kartForwardSpeed(kart)) - away));
+      goal.x = rt.pos.x + rt.vel.x * tc; goal.z = rt.pos.z + rt.vel.z * tc;
+      goal.r = 0; goal.stop = false; goal.ram = true;
+    } else if (now < r.extendUntil) {
+      goal.x = r.extendX; goal.z = r.extendZ; goal.r = 3; goal.stop = false;
+    }
+  }
+
+  const st = driveKart(sim, kart, r.drv, goal, g, ctx, ctrl);
+  r.status = st;
+  if (!out && goal.ram && st !== 'driving') { r.ram = -1; r.ramCool = now + Math.round(RAM_PAUSE * TICK_HZ); } // no way to it
+  else if (!out && now < r.extendUntil && !goal.ram && st !== 'driving') r.extendUntil = 0; // made room (or can't)
+  else if (!out && (st === 'giveup' || st === 'noroute')) out = st;
+  else if (!out && st === 'arrived' && !r.stay) out = 'arrived';
+  r.out = out;
+  controlsToInput(ctrl, inp);
+  if (out) {
+    const v = kartForwardSpeed(kart);
+    if (out !== 'wrecked' && Math.abs(v) > HOP_SPEED) { inp.mz = v > 0 ? -1 : 1; inp.mx = 0; inp.buttons = 0; }
+    else { inp.mz = 0; inp.mx = 0; inp.buttons = e.prevButtons & Btn.Interact ? 0 : Btn.Interact; }
+  }
+  // eyes on the road (perception looks where the kart goes)
+  ai.yaw = kart.yaw; ai.pitch = 0;
+  inp.yaw = ai.yaw; inp.pitch = 0;
+}
+
+/**
+ * B2a brain hook: called by brain.ts think() right after perception. A seated bot drives (drive.ts) and a bot on its
+ * way to a kart boards it; both write the whole InputCmd and return true (the on-foot FSM skips the tick). Idle bots
+ * are checked every 0.5 s for a trip worth a kart; false = the brain runs as usual. `sim.state.aiConfig = { vehicles:
+ * false }` keeps bots out of vehicles (tests, labs, benches).
+ */
+export function vehicleThink(sim: Sim, e: SimEntity, ai: VehicleBrain, ctx: VehicleCtx, inp: InputCmd, dt: number): boolean {
+  driveStats.hookCalls++;
+  const r = ai.tac.ride;
+  const gap = sim.tick - r.seen > 3;
+  r.seen = sim.tick;
+  if (!ctx.grid || e.kind !== EntityKind.Bot || e.combat?.pve) return false;
+  if ((sim.state.aiConfig as { vehicles?: boolean } | undefined)?.vehicles === false && !e.seat) return false; // tests/labs: bots stay on foot
+  const v = e.seat ? sim.entities.get(e.seat.vehicle) : undefined;
+  if (v) {
+    if (v.kart) driveTick(sim, e, ai, ctx, v, inp);
+    else if (v.plane) planeTick(sim, e, ai, ctx, v, inp);
+    else return false;
+    return true;
+  }
+  if (r.phase === 'drive') endRide(sim, e, ai, r.out === 'fight' ? FIGHT_COOLDOWN : HOP_COOLDOWN);
+  else if (gap && (r.phase === 'board' || r.phase === 'leap')) endRide(sim, e, ai, 1);
+  const t = ai.tac;
+  if (r.phase === 'idle' && t.glide && e.char?.grounded && Math.abs(e.pos.y - t.gy) < 0.8 && Math.hypot(t.gx - e.pos.x, t.gz - e.pos.z) < 1.5) {
+    r.phase = 'leap'; r.leap = 0; r.since = sim.tick; // B2b: at the launch spot: off the edge into a glide
+  }
+  if (r.phase === 'leap') return leapTick(sim, e, ai, inp);
+  if (r.phase === 'idle' && sim.tick >= r.evalAt && !hangarBoard(sim, e, ai, ctx.chars)) considerBoarding(sim, e, ai, ctx.grid, ctx.chars);
+  if (r.phase === 'board') return boardTick(sim, e, ai, ctx, inp, dt);
+  return false;
+}
+
+// ---------------------------------------------------------------- the RC plane and the Ear Glide (B2b)
+//   pilot   in team-deathmatch, core-rush and yard-skirmish each team sends one pilot to the neutral Rooftop Hangar:
+//           its lowest-id Overwatch or Skyraider room bot (≥ 60 % health, no teammate flying, no human heading for the
+//           hangar, a route up N1's climb links). The goal sits on the roof (t.gy), so the brain climbs there; E vends,
+//           E boards (a plane parked empty up there is boarded as is).
+//   sortie  strafing runs (drive.ts flyPlane) on the best enemy on foot in the open: close to the plane, hurt, near
+//           the pilot's teammates (the contested ground), re-picked every 1.5 s; nobody to hit → a circuit over the
+//           middle of the yard. Bails out (E in the air) below 35 % hull, or under fire below 45 % health.
+//   adventure  a `vehicle` step up by the hangar (ch6's pad) is met by vending and sitting in the plane on the pad; a
+//           `vehicle` flyover step is flown to (over its zone, 5 m above its floor); after the flying steps the pilot
+//           lands by the squad and gets out. An `airborne` step (ch6's glide) sends the squad's first Skyraider pup up
+//           to the chapter's roof start, off the edge (jump, double jump) into an Ear Glide steered at the zone.
+
+/** Room bots that fly: the marksman (it perches on the Rooftops by the hangar) and the flier (it flies best). */
+const PILOT_CLASSES: readonly string[] = ['overwatch', 'skyraider'];
+const PLANE_MODES = new Set(['team-deathmatch', 'core-rush', 'yard-skirmish']);
+/** Bail out below these fractions (hull; pilot health while being shot). */
+const PLANE_BAIL_HP = 0.35, PILOT_BAIL_HP = 0.45;
+/** A pilot stands this far (m) from the hangar kiosk, toward the pad; the hangar is boarded from within HANGAR_NEAR m. */
+const HANGAR_SPOT = 1.6, HANGAR_NEAR = 6;
+/** Strike targets are re-picked every STRIKE_EVERY s; the patrol circuit height (m). */
+const STRIKE_EVERY = 1.5, PATROL_AGL = 16;
+const flightGoal: FlightGoal = { x: 0, y: 0, z: 0, mode: 'flyover', target: null };
+
+/** The Rooftop Hangar of this sim (null when the world has none). */
+function hangarOf(sim: Sim): SimEntity | null {
+  for (const v of sim.entities.values()) if (v.terminal?.id === 'plane_hangar') return v;
+  return null;
+}
+
+/** The hangar's plane parked empty on its roof, fit to fly (null when there is none). */
+function parkedPlane(sim: Sim, h: SimEntity): SimEntity | null {
+  const t = h.terminal!;
+  const pl = t.kart >= 0 ? sim.entities.get(t.kart) : undefined;
+  if (!pl?.plane || pl.removed || pl.plane.rider >= 0 || !pl.plane.grounded || Math.abs(pl.pos.y - h.pos.y) > 1) return null;
+  return pl.health && pl.health.hp >= pl.health.max * 0.5 ? pl : null;
+}
+
+function isPilotClass(e: SimEntity): boolean {
+  return PILOT_CLASSES.includes(e.cls ?? '') && !!e.health && e.health.hp >= e.health.max * 0.6;
+}
+
+/** PvP: is `e` its team's pilot right now? Sets the hangar goal (on the roof: the brain climbs) and returns true. */
+function planeGoal(sim: Sim, e: SimEntity, t: TacticsState, chars: SimEntity[], prev: string, prevId: EntityId): boolean {
+  if (!isPilotClass(e) || !PLANE_MODES.has(roomModeOf(sim))) return false;
+  if ((sim.state.aiConfig as { vehicles?: boolean } | undefined)?.vehicles === false) return false;
+  const h = hangarOf(sim);
+  if (!h?.terminal) return false;
+  const ht = h.terminal;
+  if (ht.kart >= 0 ? !parkedPlane(sim, h) : ht.cooldown > 0) return false;
+  for (const c of chars) {
+    if (c.team !== e.team || c === e) continue;
+    const v = c.seat ? sim.entities.get(c.seat.vehicle) : undefined;
+    if (v?.plane) return false;                                                        // a teammate is up already
+    if (c.kind === EntityKind.Bot && !c.combat?.pve && c.id < e.id && isPilotClass(c)) return false; // not our pilot
+  }
+  if (humanWants(chars, e.team, h.pos.x, h.pos.z)) return false;
+  const dx = ht.padX - h.pos.x, dz = ht.padZ - h.pos.z, dl = Math.hypot(dx, dz) || 1;
+  const sx = h.pos.x + (dx / dl) * HANGAR_SPOT, sz = h.pos.z + (dz / dl) * HANGAR_SPOT;
+  // a route up (N1's cross-grid planner; re-checked every 3 s, it isn't cheap)
+  const r = t.ride;
+  if (sim.tick >= r.reachAt) { r.reachAt = sim.tick + 3 * TICK_HZ; r.reachOk = Number.isFinite(canReach(sim, e, sx, h.pos.y, sz)); }
+  if (!r.reachOk) return false;
+  t.goal = 'step'; t.interact = false; t.hold = false; t.plane = true;
+  t.gx = sx; t.gz = sz; t.gy = h.pos.y; t.gr = 1.5; t.cx = h.pos.x; t.cz = h.pos.z;
+  if (prev !== 'step' || prevId !== h.id) t.goalSince = sim.tick;
+  t.goalId = h.id;
+  return true;
+}
+
+/**
+ * Adventure `airborne` reach step, bot-only squad: its first living Skyraider pup goes up to the chapter's roof start
+ * (ChapterDef.start with y) to leap off into an Ear Glide (vehicleThink 'leap'); the zone stays the leap's aim (cx, cz).
+ */
+function glideGoal(sim: Sim, e: SimEntity, t: TacticsState, chars: SimEntity[], def: { start: { x: number; z: number; y?: number } }): void {
+  const glider = (c: SimEntity) => c.kind === EntityKind.Bot && c.team === e.team && !c.dead && !c.combat?.pve && !!c.abil && abilityDef(c.abil.id)?.kind === 'glide';
+  if (!glider(e) || def.start.y === undefined) return;
+  for (const c of chars) if (c !== e && glider(c) && c.id < e.id) return;
+  if (!Number.isFinite(canReach(sim, e, def.start.x, def.start.y, def.start.z))) return;
+  t.gx = def.start.x; t.gz = def.start.z; t.gy = def.start.y; t.glide = true;
+}
+
+/** On foot by the hangar with a plane goal (or an adventure vehicle step up there): start boarding (vend, board). */
+function hangarBoard(sim: Sim, e: SimEntity, ai: VehicleBrain, chars: SimEntity[]): boolean {
+  const t = ai.tac, r = t.ride;
+  if (!t.plane && !(t.vehicle && t.goal === 'step' && isAdventureMode(sim) && !squadHasHuman(sim))) return false;
+  const h = hangarOf(sim);
+  if (!h?.terminal || Math.hypot(h.pos.x - e.pos.x, h.pos.z - e.pos.z) > HANGAR_NEAR || Math.abs(e.pos.y - h.pos.y) > 1.5) return false;
+  const pl = parkedPlane(sim, h);
+  if (pl ? claimed(chars, e, pl.id) : !kioskUsable(e, h, 'plane_hangar') || claimed(chars, e, h.id)) return false;
+  r.phase = 'board';
+  r.kart = pl ? pl.id : -1;
+  r.term = pl ? -1 : h.id;
+  r.since = sim.tick; r.bestD = Infinity; r.bestTick = sim.tick; r.walk.length = 0;
+  trip.x = t.cx; trip.z = t.cz; trip.r = 4; trip.stay = t.vehicle; trip.calm = t.vehicle;
+  setTrip(r, trip);
+  return true;
+}
+
+function planeUsable(e: SimEntity, v: SimEntity): boolean {
+  const p = v.plane;
+  if (!p || v.removed || p.rider >= 0 || !v.health || v.health.hp < v.health.max * 0.5) return false;
+  return Math.hypot(v.vel.x, v.vel.y, v.vel.z) <= VEHICLES[p.id].mountMaxSpeed && Math.abs(v.pos.y - e.pos.y) <= 1.5;
+}
+
+/**
+ * The enemy to strafe: on foot, alive, in the open from above (a clear line from 15 m over it), not too high up;
+ * close to the plane, hurt and near the pilot's teammates (the contested ground) first. Null = nobody worth a pass.
+ */
+function strikePick(sim: Sim, e: SimEntity, plane: SimEntity, chars: SimEntity[]): SimEntity | null {
+  let best: SimEntity | null = null, bs = Infinity;
+  for (const c of chars) {
+    if (c.team === e.team || c.dead || !c.health || c.seat || c.kind === EntityKind.Boss || isStealthed(sim, c)) continue;
+    const d = Math.hypot(c.pos.x - plane.pos.x, c.pos.z - plane.pos.z);
+    if (d > 140 || c.pos.y - sim.worldData.height(c.pos.x, c.pos.z) > 3) continue;
+    if (!worldLineClear(sim, c.pos.x, c.pos.y + 15, c.pos.z, c.pos.x, c.pos.y + 1, c.pos.z)) continue; // under a roof
+    let friends = 0;
+    for (const f of chars) if (f.team === e.team && f !== e && Math.hypot(f.pos.x - c.pos.x, f.pos.z - c.pos.z) < 25) friends++;
+    const score = d * 0.4 + (c.health.hp / c.health.max) * 25 - Math.min(3, friends) * 8;
+    if (score < bs) { bs = score; best = c; }
+  }
+  return best;
+}
+
+/** Seated in the plane: the sortie (or an adventure flight), bail-outs, landings. Writes the pilot's input. */
+function planeTick(sim: Sim, e: SimEntity, ai: VehicleBrain, ctx: VehicleCtx, plane: SimEntity, inp: InputCmd): void {
+  const g = ctx.grid!;
+  const r = ai.tac.ride, t = ai.tac;
+  const now = sim.tick;
+  const p = plane.plane!;
+  if (r.phase !== 'drive' || r.kart !== plane.id) {
+    r.phase = 'drive'; r.kart = plane.id; r.term = -1; r.since = now;
+    const f = r.flight; f.phase = 'cruise'; f.until = 0;
+    r.strike = -1; r.strikeAt = 0;
+    r.boards++;
+  }
+  updateObjectiveGoal(sim, e, t, g, ctx.chars);
+  let out = '';
+  const hp = plane.health!, rh = e.health!;
+  if (hp.hp < hp.max * PLANE_BAIL_HP) out = 'wrecked';
+  else if (rh.hp < rh.max * PILOT_BAIL_HP && now - rh.lastDamageTick < TICK_HZ) out = 'hurt';
+  const goal = flightGoal;
+  goal.target = null; goal.landYaw = undefined; goal.r = 10;
+  let park = false;
+  if (isAdventureMode(sim)) {
+    const st = adventureState(sim);
+    if (t.goal === 'step' && t.vehicle) {
+      if (p.grounded && Math.hypot(plane.pos.x - t.cx, plane.pos.z - t.cz) <= t.gr) park = true; // a pad step: sit in it
+      else {
+        const floor = t.gy - sim.worldData.height(t.cx, t.cz) > 1.5 ? t.gy : sim.worldData.height(t.cx, t.cz);
+        goal.mode = 'flyover'; goal.x = t.cx; goal.z = t.cz; goal.y = Math.max(floor + 5, sim.worldData.height(t.cx, t.cz) + 12); goal.r = t.gr * 0.5;
+      }
+    } else if (st) {
+      // the flying is done: land by the squad and walk on
+      goal.mode = 'land'; goal.x = st.anchorX; goal.z = st.anchorZ; goal.y = sim.worldData.height(st.anchorX, st.anchorZ);
+    }
+  } else {
+    if (now >= r.strikeAt) {
+      r.strikeAt = now + Math.round(STRIKE_EVERY * TICK_HZ);
+      r.strike = strikePick(sim, e, plane, ctx.chars)?.id ?? -1;
+    }
+    const tgt = r.strike >= 0 ? sim.entities.get(r.strike) : undefined;
+    if (tgt && !tgt.dead) { goal.mode = 'strafe'; goal.target = tgt; goal.x = tgt.pos.x; goal.y = tgt.pos.y; goal.z = tgt.pos.z; }
+    else {
+      // nobody to hit: a circuit over the middle of the yard (between the team spawns)
+      const mid = midfield(sim);
+      const a = (now / TICK_HZ) * 0.25 + e.id;
+      goal.mode = 'flyover'; goal.x = mid.x + Math.cos(a) * 25; goal.z = mid.z + Math.sin(a) * 25;
+      goal.y = sim.worldData.height(goal.x, goal.z) + PATROL_AGL;
+    }
+  }
+  if (park) { inp.mz = -1; inp.mx = 0; inp.yaw = plane.yaw; inp.pitch = 0; inp.buttons = 0; }
+  else {
+    const fs = flyPlane(sim, plane, r.flight, goal, inp);
+    r.status = fs;
+    if (fs === 'landed' && !out) out = 'landed';
+  }
+  r.out = out;
+  if (out) inp.buttons = e.prevButtons & Btn.Interact ? 0 : Btn.Interact; // in the air: a bail-out
+  ai.yaw = inp.yaw; ai.pitch = inp.pitch;
+}
+
+const mids = new WeakMap<Sim, { x: number; z: number }>();
+/** The middle of the yard between the two teams' spawn centroids. */
+function midfield(sim: Sim): { x: number; z: number } {
+  let m = mids.get(sim);
+  if (!m) {
+    let x = 0, z = 0, n = 0;
+    for (const s of sim.worldData.spawns) if (s.team === Team.Corgis || s.team === Team.Cats) { x += s.x; z += s.z; n++; }
+    m = n ? { x: x / n, z: z / n } : { x: 0, z: 0 };
+    mids.set(sim, m);
+  }
+  return m;
+}
+
+/**
+ * The glide leap (an adventure `airborne` step): from the launch spot on the roof, run at the zone, jump at the edge
+ * (a parapet or a drop ahead), double-jump near the apex, spread the ears at the second apex and steer the glide at
+ * the zone. Ends on landing (or after 8 s).
+ */
+function leapTick(sim: Sim, e: SimEntity, ai: VehicleBrain, inp: InputCmd): boolean {
+  const r = ai.tac.ride, t = ai.tac, c = e.char!;
+  const now = sim.tick;
+  if (now - r.since > 8 * TICK_HZ || (r.leap > 0 && c.grounded && now - r.since > 30) || !t.glide) {
+    endRide(sim, e, ai, 4);
+    return false;
+  }
+  const want = yawToward(e.pos.x, e.pos.z, t.cx, t.cz);
+  let b = Btn.Sprint;
+  if (r.leap === 0) {
+    // the edge: a parapet or a drop 0.9 m ahead
+    const ax = e.pos.x - Math.sin(want) * 0.9, az = e.pos.z - Math.cos(want) * 0.9;
+    const ahead = surfaceAt(sim.worldData, ax, az, e.pos.y + 1).y;
+    if (Math.abs(ahead - e.pos.y) > 0.2) { b |= Btn.Jump; if (!c.grounded) r.leap = 1; }
+  } else if (r.leap === 1) { if (e.vel.y > 1) b |= Btn.Jump; else r.leap = 2; }
+  else if (r.leap === 2) { if (!(e.prevButtons & Btn.Jump)) b |= Btn.Jump; if (c.jumpsUsed >= 2) r.leap = 3; }
+  else if (r.leap === 3) { if (e.vel.y > 0.3) b |= Btn.Jump; else { if (!(e.prevButtons & Btn.Ability)) b |= Btn.Ability; r.leap = 4; } }
+  ai.yaw = want; ai.pitch = 0;
+  inp.mx = 0; inp.mz = 1; inp.yaw = want; inp.pitch = 0; inp.buttons = b;
+  return true;
 }

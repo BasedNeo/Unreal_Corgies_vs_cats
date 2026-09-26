@@ -425,9 +425,10 @@ design question for a human and P2-5 (triangles in a live high-tier TDM) is open
 
 ### Wave 5 — Bots use the whole yard (`docs/sprints/WAVE5_PLAN.md`)
 - **N1 nav** ✅ — nav links on the Rooftops climb routes; bots climb to perches and roof steps.
-- **B2 ai-vehicles** — bots drive karts (B2a: board, a deterministic driver, rams, hop out near the goal), then fly
+- **B2 ai-vehicles** ✅ — bots drive karts (B2a: board, a deterministic driver, rams, hop out near the goal) and fly
   the RC plane (B2b: strafing runs, bail out when hurt, chapter 6 with a bot pilot).
-- **INT5 lead** — the brain hook for seated bots, soak in all five modes, verify every commit.
+- **INT5 lead** ✅ — the brain hook for seated bots; `vehicle`/`airborne` steps strict for bot-only squads (with the
+  grace); soak in all five modes; verify every commit.
 
 ### Quality loop (runs forever after the slice)
 Capture bookmarks → diagnose with `game-worlds-iteration-coach` → change one thing → gate → before/after →

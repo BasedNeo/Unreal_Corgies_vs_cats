@@ -49,7 +49,11 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
   destruct/                        X1 breakable props (EntityKind.Destructible), order 505: breaching fuse, hitscan
                                    damage, blasts via explode()'s blast listeners; break/restore toggles colliders and
                                    nav blockers (ai/nav.ts per-sim dynamic blockers); mirrorDestructibles (prediction)
-  ai/tactics.ts                    ability use, objective play (mission, cores, pads), helping humans
+  ai/tactics.ts                    ability use, objective play (mission, cores, pads), helping humans, vehicles (B2)
+  ai/drive.ts                      B2 bots drive and fly: kart nav (kart-sized drivable grid + A*), deterministic kart
+                                   driver (pursuit, corner braking, boost, reverse-out), plane strafing dives on R1's
+                                   planeAutopilot; ai/tactics.ts vehicleThink boards / rams / hops out / pilots (the
+                                   brain hands a seated or boarding bot's tick to it)
   world/build.ts                   also terrainFastMove(): analytic grounded capsule moves over open terrain
 src/host/                          Room (players, bots, input buffers, snapshots), wire (delta encoding),
                                    quantize (snapshot-precision parity), guard (validation), worker-host (offline)
