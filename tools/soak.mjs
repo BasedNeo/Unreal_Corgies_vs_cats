@@ -7,7 +7,7 @@
 //
 //   npx tsx tools/soak.mjs                      # 60 s per mode, soak match config (a full match fits in 60 s)
 //   npx tsx tools/soak.mjs --seconds 300 --full # shipping match config, longer
-//   options: --modes yard-skirmish,team-deathmatch,core-rush  --seed 1  --no-netbot  --repeat 3  --json artifacts/soak.json
+//   options: --modes yard-skirmish,team-deathmatch,core-rush (+ boss-rush,adventure: completion not required)  --seed 1  --no-netbot  --repeat 3  --json artifacts/soak.json
 //
 // Exit 1 on: any runtime error / non-finite state, a bot stuck (wants to move, doesn't) > 5 s,
 // tick p95 > 3 ms, or (soak config) a mode that never completes a match.
@@ -59,6 +59,7 @@ const LINEUP = {
   'core-rush': [[Team.Corgis, 'skyraider'], [Team.Corgis, 'breacher'], [Team.Corgis, 'warden'],
     [Team.Cats, 'assault'], [Team.Cats, 'skyraider'], [Team.Cats, 'breacher'], [Team.Cats, 'warden']],
 };
+const OPEN_ENDED = new Set(['boss-rush', 'adventure']);
 const L3_SYSTEMS = new Set(['ai', 'weapons', 'abilities', 'projectiles', 'combat-status', 'respawn-regen', 'lag-record', 'match']);
 
 const pct = (arr, q) => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(q * (s.length - 1)))]; };
@@ -270,7 +271,9 @@ for (const s of sessions) {
   if (s.errors > LIMITS.maxErrors) fails.push(`${s.mode}: ${s.errors} errors (${s.errorSamples.join(' | ').slice(0, 300)})`);
   if (s.stuckMaxSec > LIMITS.maxStuckSec) fails.push(`${s.mode}: bot stuck ${s.stuckMaxSec}s (${s.stuckBots.join(', ')})`);
   if (s.tickMs.p95 > LIMITS.maxTickP95Ms) fails.push(`${s.mode}: tick p95 ${s.tickMs.p95} ms > ${LIMITS.maxTickP95Ms}`);
-  if (!FULL && !s.completed) fails.push(`${s.mode}: no match completed in ${s.durationSec}s`);
+  // Boss-rush (one long boss fight) and adventure (a chapter the net-bot, an AFK "human", must complete by design) can't
+  // finish inside a short soak: for them completion is reported, not required.
+  if (!FULL && !s.completed && !OPEN_ENDED.has(s.mode)) fails.push(`${s.mode}: no match completed in ${s.durationSec}s`);
 }
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), seed: SEED, seconds: SECONDS, full: FULL, netbot: NETBOT, machine: { cores, load: [r2(load0), r2(load1)] }, sessions }, null, 2));
