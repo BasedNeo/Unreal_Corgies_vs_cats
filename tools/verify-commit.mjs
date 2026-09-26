@@ -15,7 +15,7 @@ const dir = mkdtempSync(path.join(tmpdir(), `cvc-verify-${sha}-`));
 execSync(`git archive ${rev} | tar -x -C ${dir}`);
 symlinkSync(path.resolve('node_modules'), path.join(dir, 'node_modules'), 'dir');
 const steps = [['typecheck', 'npx', ['tsc', '--noEmit']], ['boundaries', 'node', ['tools/check-boundaries.mjs']], ['unit', 'npx', ['vitest', 'run']], ['build', 'npx', ['vite', 'build', '--logLevel', 'error']]];
-if (e2e) steps.push(['e2e', 'npx', ['playwright', 'test', 'tests/e2e/smoke.spec.ts']]);
+if (e2e) steps.push(['e2e', 'npx', ['playwright', 'test', 'tests/e2e/smoke.spec.ts', 'tests/e2e/modes.spec.ts']]);
 let ok = true; const out = [];
 for (const [name, cmd, args] of steps) {
   const r = spawnSync(cmd, args, { cwd: dir, stdio: 'inherit', env: { ...process.env, CI: '' } });
