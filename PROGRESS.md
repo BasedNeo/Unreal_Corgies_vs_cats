@@ -257,11 +257,12 @@ Newest first. Every task appends: what changed, proof (command + result + screen
     shared grid, decks and kart flat mask come from the static world only, and each room closes its own kiosk cells
     (`setNavFixture`). `tools/qa-determinism.mjs` checks any pair; `determinism-cross-sim.test.ts` guards it. The
     shared grid builds in ~100 ms cold / ~26 ms warm (was ~200 / ~115);
-  - client views that leave the scene release their render objects (`engine/release.ts`): shared geometry and
-    materials kept every dropped drone, avatar, kart and core alive with its uniform buffers (+188 WebGL buffers in
-    5 min of TDM). A 10-minute headless TDM now shows no buffer or render-object growth (`tools/qa-memory.mjs`,
-    heap +0.19 MB/min, mostly JIT code); the authority's heap grows ≤ 0.14 MB/min with no collection growing
-    (`soak.mjs --heap`);
+  - client memory: views that leave the scene release their render objects (`engine/release.ts`). Shared geometry
+    and materials had kept every dropped drone, avatar, kart and core alive with its uniform buffers (+188 WebGL
+    buffers in 5 min of TDM). Separately, the ability views kept a list of every ink line they ever made, pinning
+    ~78 dead meshes per 5 min. Now 0 meshes, render objects or buffers are retained (heap snapshot diff and
+    retainer paths; `tools/qa-memory.mjs` for the 10-minute run). The authority's heap grows ≤ 0.14 MB/min with no
+    collection growing (`soak.mjs --heap`);
   - Q2's Wave 4 polish (lead; `docs/qa/W4_VERIFICATION.md` §P2):
     - adaptive resolution steps before the frame renders, so a resize can't present a blank frame (P2-9);
     - the objective line puts its "(n/N)" first; the scoreboard header drops "0:00" when untimed and says STEP in an

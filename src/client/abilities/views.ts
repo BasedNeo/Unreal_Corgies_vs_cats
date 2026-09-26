@@ -213,13 +213,12 @@ export function createAbilityViews(scene: THREE.Scene, opts: AbilityViewsOptions
   group.name = 'ability-views';
   scene.add(group);
   const inkMat = new THREE.Line2NodeMaterial({ color: PALETTE.ink, linewidth: STYLE.crease.widthPx, worldUnits: false });
-  const inkLines: LineSegments2[] = [];
+  // (no registry of the ink lines: a list of them pinned every view ever made, ~15 drones a minute in TDM)
   const ink = (lines: LineSegmentsGeometry | null, parent: THREE.Object3D) => {
     if (!lines) return;
     const l = new LineSegments2(lines, inkMat);
     l.userData.styleInk = true;
     parent.add(l);
-    inkLines.push(l);
   };
   const assets = new Map<TeamId, TeamAssets>();
   const assetsFor = (team: TeamId): TeamAssets => {
@@ -320,7 +319,6 @@ export function createAbilityViews(scene: THREE.Scene, opts: AbilityViewsOptions
       inkMat.dispose();
       views.clear();
       leaving.length = 0;
-      inkLines.length = 0;
     },
     stats() {
       let drones = 0, charges = 0, barriers = 0;
