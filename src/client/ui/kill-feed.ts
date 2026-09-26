@@ -1,4 +1,18 @@
 // OWNER: L5 (juice). Kill feed model: newest first, capped, entries expire. Pure (tested in ui-killfeed.test.ts).
+import type { EntityState } from '../../shared/protocol';
+import { EFlag, EntityKind } from '../../shared/types';
+import { planeByIndex } from '../../shared/content/vehicles';
+
+/**
+ * The glyph for a kill made from a vehicle seat: 'plane' (its ram or its gun) or 'kart' (a ram), else null. The killer's
+ * last hand-held weapon would be stale: a seated pet doesn't fire it.
+ */
+export function seatedGlyph(states: ReadonlyMap<number, EntityState>, killer: number): 'plane' | 'kart' | null {
+  const k = states.get(killer);
+  if (!k || !(k.flags & EFlag.Mounted)) return null;
+  for (const v of states.values()) if (v.kind === EntityKind.Vehicle && v.weapon === killer) return planeByIndex(v.cls) ? 'plane' : 'kart';
+  return null;
+}
 
 export interface FeedParty { /** Entity id (lets the view re-resolve names once the roster arrives). */ id: number; name: string; team: number; local: boolean; bot: boolean }
 

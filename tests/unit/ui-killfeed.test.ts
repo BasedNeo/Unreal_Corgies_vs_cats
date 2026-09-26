@@ -1,10 +1,30 @@
 // L5: kill feed ordering/limits/expiry + scoreboard model.
 import { describe, expect, it } from 'vitest';
-import { KillFeed, type FeedParty } from '../../src/client/ui/kill-feed';
+import { KillFeed, seatedGlyph, type FeedParty } from '../../src/client/ui/kill-feed';
+import { WEAPON_GLYPHS } from '../../src/client/ui/icons';
+import { EFlag, EntityKind } from '../../src/shared/types';
+import { vehicleIndex } from '../../src/shared/content/vehicles';
+import type { EntityState } from '../../src/shared/protocol';
 import { buildScoreboard, kdText } from '../../src/client/ui/scoreboard';
 import type { RosterEntry } from '../../src/shared/protocol';
 
 const P = (id: number, team = 0, local = false): FeedParty => ({ id, name: `p${id}`, team, local, bot: false });
+
+describe('vehicle kill glyphs', () => {
+  const st = (o: Partial<EntityState>): EntityState => ({ id: 0, kind: EntityKind.Player, team: 0, species: 0, cls: 0, seed: 0, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, vx: 0, vy: 0, vz: 0, hp: 100, maxHp: 100, anim: 0, flags: 0, weapon: 0, ammo: 0, ...o } as EntityState);
+  it('a seated killer shows its vehicle (plane or kart); on foot, nothing (the weapon glyph applies)', () => {
+    const states = new Map<number, EntityState>([
+      [1, st({ id: 1, flags: EFlag.Mounted })], [2, st({ id: 2, flags: EFlag.Mounted })], [3, st({ id: 3 })],
+      [10, st({ id: 10, kind: EntityKind.Vehicle, cls: vehicleIndex('rc_plane'), weapon: 1 })],
+      [11, st({ id: 11, kind: EntityKind.Vehicle, cls: -1, weapon: 2 })],
+    ]);
+    expect(seatedGlyph(states, 1)).toBe('plane');
+    expect(seatedGlyph(states, 2)).toBe('kart');
+    expect(seatedGlyph(states, 3)).toBeNull();
+    expect(seatedGlyph(states, 99)).toBeNull();
+    expect(WEAPON_GLYPHS.plane && WEAPON_GLYPHS.kart).toBeTruthy(); // the glyphs exist
+  });
+});
 
 describe('KillFeed', () => {
   it('keeps newest first and caps the list', () => {

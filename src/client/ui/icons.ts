@@ -31,6 +31,9 @@ export const WEAPON_GLYPHS: Record<string, string> = {
   boom: svg(`<path fill="#ff9b3d" d="M16 2l2.6 7.4 7-3.4-3 7.3L30 16l-7.4 2.6 3.4 7-7.3-3L16 30l-2.6-7.4-7 3.4 3-7.3L2 16l7.4-2.6-3.4-7 7.3 3z"/><circle cx="16" cy="16" r="4" fill="#ffd04a"/>`, 'glyph'),
   fall: svg(`<path fill="#f6e7cf" d="M16 29l-8-9h5V4h6v16h5z"/>`, 'glyph'),
   star: svg(`<path fill="#ffd04a" d="M16 3l3.6 8 8.4.8-6.4 5.6 1.9 8.3L16 21.4l-7.5 4.3 1.9-8.3L4 11.8l8.4-.8z"/>`, 'glyph'),
+  // vehicle kills (a kart ram; a plane ram or its gun): the killer was seated
+  kart: svg(`<path fill="#e8453c" d="M4 19l3-7h11l3 4h6l1 3z"/><circle cx="9" cy="22" r="3.6" fill="#2b2b2b" stroke="#f6e7cf" stroke-width="1.6"/><circle cx="23.5" cy="22" r="3.6" fill="#2b2b2b" stroke="#f6e7cf" stroke-width="1.6"/><path d="M13 12l1.5-5h3" stroke="#f6e7cf" stroke-width="2"/>`, 'glyph'),
+  plane: svg(`<path fill="#ffd04a" d="M4 16.5l17-2.5 6 1.5v3l-6 1.5-17-2z"/><path fill="#6ff7ff" d="M12 15l3-8h3l-1 8zM12 18.5l3 7h3l-1-7z"/><path d="M27 12v10" stroke="#f6e7cf" stroke-width="2"/><path fill="#ffd04a" d="M4 13l2 3.5-2 3.5z"/>`, 'glyph'),
 };
 
 export function classIcon(cls: ClassId): string { return CLASS_ICONS[cls] ?? CLASS_ICONS.assault; }

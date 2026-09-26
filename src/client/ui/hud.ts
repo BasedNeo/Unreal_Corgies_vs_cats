@@ -16,7 +16,7 @@ import { WEAPON_FX, WeaponTable } from '../fx/weapon-fx';
 import { ensureFonts } from './fonts';
 import { injectHudStyle } from './hud-style';
 import { classIcon, weaponGlyph, WEAPON_GLYPHS } from './icons';
-import { KillFeed, type FeedParty } from './kill-feed';
+import { KillFeed, seatedGlyph, type FeedParty } from './kill-feed';
 import { createMenu, createSettingsPanel, firstPad, PadNav, type Menu, type MenuDeps, type PlayOptions, type UiSoundKind } from './menu';
 import { buildScoreboard, renderScoreboardHtml } from './scoreboard';
 import { objectiveForTeam } from './objective';
@@ -668,7 +668,8 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
           const lh = lastHitOn.get(ev.id);
           const exploded = !self && (lastExplodeBy.get(by) ?? -9) > now - 0.5;
           const wpn = lastWpnBy.get(by);
-          const glyph = self ? 'fall' : exploded ? 'boom' : wpn !== undefined ? WEAPON_FX[weapons.id(wpn)].glyph : 'paw';
+          const ride = !self && !exploded ? seatedGlyph(states, by) : null; // a kill from a seat: the vehicle, not a stale gun
+          const glyph = self ? 'fall' : exploded ? 'boom' : ride ?? (wpn !== undefined ? WEAPON_FX[weapons.id(wpn)].glyph : 'paw');
           feed.push({ killer: self ? null : party(by), victim: party(ev.id), glyph, crit: !!lh && lh.src === by && lh.crit && now - lh.t < 0.5 }, now);
           if (by === localId && ev.id !== localId) hud.hitMarker(true);
           deathBy.set(ev.id, { by: self ? -1 : by, t: now });
