@@ -72,7 +72,11 @@ next encounter / queue another match?"*
 
 ## §3 Art direction & theme tokens
 
-- **Look:** hand-inked comic/cartoon. Chunky shapes, warm-black ink outlines, 3-band toon light, warm sun key +
+> **Revised 2026-09-26 (owner):** battle-hardened warriors. `docs/design/HARDENED.md` (art & feel bible v2)
+> overrides the look below where they differ: veteran armored pets, stylized-real comic with thin ink, dusk/storm
+> battle lighting, weathered materials, team signal colours kept for readability.
+
+- **Look (v1, superseded in part):** hand-inked comic/cartoon. Chunky shapes, warm-black ink outlines, 3-band toon light, warm sun key +
   cool sky rim, saturated backyard greens, corgi oranges, cat greys/blacks. Team colors: Corgis royal blue + gold,
   Cats crimson + black. Only emissives bloom (laser pointers, tennis-ball tracers, glowing cores).
 - **Pet scale:** characters ≈ 1.2 m tall; the world is a backyard scaled ~×4 (fence ≈ 8 m, garden hose ≈ 0.4 m

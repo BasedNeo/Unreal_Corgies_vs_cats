@@ -1,0 +1,82 @@
+{
+  "sprint": "Wave 7 — HARDENED: battle-hardened warriors, a contested battlefield, weapons that hit hard, one gritty image (docs/design/HARDENED.md)",
+  "sprintHours": 8,
+  "agents": [
+    { "id": "look-2", "lanes": ["look"] },
+    { "id": "char-2", "lanes": ["characters"] },
+    { "id": "arms-1", "lanes": ["weapons-fx"] },
+    { "id": "env-4", "lanes": ["environment"] },
+    { "id": "lead", "lanes": ["integration"] }
+  ],
+  "tasks": [
+    {
+      "id": "S4",
+      "title": "Hardened look (Block 4 core): style factory v2 (weathered material: grime/wear/edge damage/roughness via TSL masks, wet sheen, thinner ink), gritty grade + grain + controlled bloom, dusk/storm light rig with sodium practicals, rain streaks and wet-ground reflections from the weather system, quality tiers kept",
+      "lane": "look",
+      "deps": [],
+      "estimate": 3,
+      "priority": 1,
+      "paths": ["src/client/style/**", "src/client/engine/renderer.ts", "src/client/world/sky.ts", "src/client/world/weather-view.ts", "STYLE_GUIDE.md", "tests/unit/style*", "labs/look*"],
+      "acceptance": [
+        "every material still comes from the style factory; the style audit and the existing style tests are green",
+        "bookmark screenshots (overview, center, deck, cats, garden) before/after at the high and low tiers, looked at: dusk/storm reads gritty, teams and silhouettes still read",
+        "high-tier live TDM stays ≤ 1.5 M triangles / ≤ 400 draws; the low tier costs no more than before"
+      ]
+    },
+    {
+      "id": "K2",
+      "title": "Hardened characters (Block 1): armored veteran corgis and cats (plates, vests, straps, pouches, dog tags, scars, wet/muddy fur), heavier grounded proportions, grizzled faces that still emote, an elite/veteran variant per side; class silhouettes (K1) and team signal colours kept; C3's coat/neckwear looks still apply",
+      "lane": "characters",
+      "deps": [],
+      "estimate": 3,
+      "priority": 1,
+      "paths": ["src/client/procgen/characters/body.ts", "src/client/procgen/characters/colors.ts", "src/client/procgen/characters/gear.ts", "src/client/procgen/characters/index.ts", "src/client/procgen/characters/mesh-builder.ts", "src/client/procgen/characters/silhouette.ts", "src/client/procgen/characters/skeleton.ts", "src/client/procgen/characters/species.ts", "src/client/procgen/cosmetics/**", "src/client/procgen/boss/**", "src/client/anim/**", "tests/unit/char*", "labs/characters*"],
+      "acceptance": [
+        "24/24 kits (6 classes × 2 species × 2 teams) within the kit triangle budget, style audit green, K1 silhouette distance not lower than before",
+        "lab turntable and in-game screenshots (both species, both teams, elite variants) looked at: they read as veterans at 5 m and as their class at 35 m",
+        "animation still clean: no floating gear, no skin tearing in idle/run/fire/emote"
+      ]
+    },
+    {
+      "id": "X3",
+      "title": "Weapons + combat feedback (Block 3): weighty weapon models sized for pets, muzzle flash with light pulse, tracers, casings, surface-aware impacts (dirt, sparks, splinters, water), pooled bullet-hole/scorch decals, comic fur-tuft hit splats, hitmarker + hit thud + camera punch/recoil kick, sound-to-visual sync",
+      "lane": "weapons-fx",
+      "deps": [],
+      "estimate": 3,
+      "priority": 2,
+      "paths": ["src/client/procgen/characters/weapons.ts", "src/client/fx/**", "src/client/camera/**", "src/client/audio/**", "src/client/ui/hit-feedback.ts", "tests/unit/fx*", "tests/unit/weapon-view*", "tests/unit/audio*", "labs/weapons*"],
+      "acceptance": [
+        "every weapon has a model within budget and a distinct fire/impact read in screenshots and a slow-motion capture, looked at",
+        "effects are pooled: 0 allocations per shot after warm-up, decals capped, FX frame cost ≤ 0.5 ms in a firefight (unit perf test)",
+        "no sim/gameplay change without a note in the handoff (recoil kick is visual; spread/fire rate stay unless justified)"
+      ]
+    },
+    {
+      "id": "E4",
+      "title": "Contested battlefield (Block 2): West Yard becomes the Yard War front: forward bases for both teams (kibble-sack sandbag walls, picket barricades, bird-feeder watchtowers, tennis-ball ammo crates, terminals dressed as base gear, torn team banners), trenches/cover along the lanes, craters and scorch, weathered ground, floodlight pools; adventure steps, spawns and nav stay valid",
+      "lane": "environment",
+      "deps": [],
+      "estimate": 3,
+      "priority": 1,
+      "paths": ["src/shared/world/west-yard.ts", "src/shared/world/kit.ts", "src/shared/world/fortifications.ts", "src/client/world/prim-mesh.ts", "src/client/world/materials.ts", "src/client/world/terrain-view.ts", "src/client/world/fence-view.ts", "src/client/world/lamps-view.ts", "src/client/world/world-palette.ts", "src/client/world/battle-dressing.ts", "tests/unit/world*"],
+      "acceptance": [
+        "every new solid prop has a collider matching its visual (≤ 1 cm, like L2's test), nav/links rebuild, bots are never stuck > 5 s in a soak, all adventure/world/destruct tests stay green",
+        "both team bases read as forward operating bases from the overview and spawn bookmarks (screenshots looked at)",
+        "prop density up without breaking budgets: merged/instanced, ≤ +40 draw calls, triangle total within budget"
+      ]
+    },
+    {
+      "id": "INT7",
+      "title": "Integrate wave 7 + Q3 fixes: land lanes one at a time with verify --e2e, soak all modes, before/after gallery, PROGRESS/ARCHITECTURE/MASTER_PLAN, second-loop list",
+      "lane": "integration",
+      "deps": ["S4", "K2", "X3", "E4"],
+      "estimate": 2,
+      "priority": 2,
+      "paths": ["src/client/main.ts", "src/sim/ai/tactics.ts", "PROGRESS.md", "ARCHITECTURE.md", "MASTER_PLAN.md", "docs/qa/W7_GALLERY.md"],
+      "acceptance": [
+        "verify --e2e green on every integration commit; soak PASS in all five modes; budgets re-measured",
+        "Q3 P1-1 fixed with a test that asserts who breaches the ch3 wall"
+      ]
+    }
+  ]
+}
