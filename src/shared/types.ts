@@ -39,6 +39,10 @@ export const EFlag = {
   Mounted: 1 << 10,
   /** Vehicle/terminal/pickup is in use or unavailable (cooldown). */
   Busy: 1 << 11,
+  /** Revealed to the other team (Spotter Drone): drawn through walls for them while set. */
+  Spotted: 1 << 12,
+  /** Gliding (Ear Glide): fall speed capped, air control kept. */
+  Gliding: 1 << 13,
 } as const;
 
 export interface Vec3 { x: number; y: number; z: number }

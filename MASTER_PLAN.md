@@ -375,9 +375,24 @@ Maine Coon boss set piece; weather state machine; performance pass; bots polish;
 3-step objective chain, 20 collectibles, day/night + 2 weather states, adaptive music, full HUD/menus, playable
 offline and online with 2+ humans; 60 fps on the reference machine; 0 console errors; bots complete 3/3 soaks.
 
-### Wave 3+ — Breadth (only after the slice passes the human queue test)
+**Wave 2 as built ✅** — V1 kart + Kart-O-Matic, S1 Ordnance kiosk + Upgrade Cores + 20 Golden Kibble + Squeaker
+mission, G1 Garden + concealment + deterministic weather/day-night, B1 Vac-Tank boss (a vacuum mech, not the Maine
+Coon mech first sketched), Q1 independent verification (55/100 → P0/P1 fixes). Slice DoD still open: 60 fps on a
+real GPU (headless is SwiftShader), 2+ humans online, and the human queue test itself.
+
+### Wave 3+ — Breadth
 Remaining districts/classes (Overwatch, Breacher, Warden, Skyraider), `core-rush` mode, RC plane, hosting
 (`infra-stack-advisor`), matchmaking-lite (room list), then the continuous quality loop.
+The owner directed continuous autonomous building (2026-09-26), so Wave 3 starts before the human queue test; the
+test stays the first item in PROGRESS "Human verdicts" and its findings pre-empt any lane.
+
+**Wave 3 lanes** (`docs/sprints/WAVE3_PLAN.md`, validated: no path collisions):
+- **C2 combat-2** — Spotter Drone, Dig Charge, Squeak Barrier as authoritative ability entities + views; then bots
+  use abilities and play objectives (cores, mission, kiosk).
+- **P1/P2 perf** — full-room sim tick p95 ≤ 3 ms (KCC vs terrain); a low quality tier that is really cheaper.
+- **D3 districts** — Rooftops (Overwatch perches) and the Garage (Breacher close quarters) in the West Yard.
+- **U1 ux** — chat, room browser, first-match tips, quality-change notice.
+- **Lead** — M1 Ear Glide in the shared movement (predicted), M2 buff bits in snapshots, integration.
 
 ### Quality loop (runs forever after the slice)
 Capture bookmarks → diagnose with `game-worlds-iteration-coach` → change one thing → gate → before/after →

@@ -1,0 +1,40 @@
+{
+  "sprint": "Wave 3 — depth: every class plays its fantasy, bots play the game, full rooms stay in budget",
+  "sprintHours": 8,
+  "agents": [
+    { "id": "combat-2", "lanes": ["combat"] },
+    { "id": "perf-1", "lanes": ["perf"] },
+    { "id": "world-3", "lanes": ["districts"] },
+    { "id": "ux-1", "lanes": ["ux"] },
+    { "id": "lead", "lanes": ["integration", "movement"] }
+  ],
+  "tasks": [
+    { "id": "C2a", "title": "Spotter Drone, Dig Charge, Squeak Barrier: authoritative ability entities + views", "lane": "combat", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/sim/combat/abilities.ts", "src/sim/combat/ability-*.ts", "src/client/abilities/**", "tests/unit/abilities*"],
+      "acceptance": ["drone marks enemies it sees for allies (flag) and can be shot down", "charge arms, detonates on proximity or timer, never damages through walls", "barrier blocks movement and bullets for its duration, both teams collide"] },
+    { "id": "C2b", "title": "Bots use their class ability and play objectives (cores, mission hold, kiosk)", "lane": "combat", "deps": ["C2a"], "estimate": 3, "priority": 1,
+      "paths": ["src/sim/ai/**", "tests/unit/ai*"],
+      "acceptance": ["every class bot uses its ability at least once per 90 s of combat in a soak", "corgi bots advance the Squeaker mission with no human", "bots stay beatable: qa-difficulty first death >= 40 s"] },
+    { "id": "P1", "title": "Sim tick budget: 28 characters p95 <= 3 ms (KCC vs terrain cost, collider build)", "lane": "perf", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/sim/world/build.ts", "src/sim/rapier.ts", "tools/perf-*.mjs", "tests/unit/perf*"],
+      "acceptance": ["tools/perf-systems full-room tick p95 <= 3 ms", "no movement or prediction test changes behavior", "collider stays within 1 cm of the visual ground"] },
+    { "id": "P2", "title": "Client low quality tier that is actually cheaper (>= 30 % fewer tris/draws than high)", "lane": "perf", "deps": ["P1"], "estimate": 2, "priority": 2,
+      "paths": ["src/client/engine/**", "tests/unit/quality*"],
+      "acceptance": ["low tier: >= 30 % fewer triangles and draw calls than high in the same view", "quality change applies without a reload or says clearly that it needs one"] },
+    { "id": "D3", "title": "Rooftops (Overwatch perches) and the Garage (Breacher close quarters) in the West Yard", "lane": "districts", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/shared/world/**", "src/sim/world/env.ts", "src/sim/world/systems.ts", "src/client/world/**", "tests/unit/world*"],
+      "acceptance": ["a corgi can reach every rooftop perch by a readable route", "garage interior has 2+ entrances and cover", "S1 kibble/core placements stay reachable (interact-yard tests green)"] },
+    { "id": "U1", "title": "Chat, room browser, FTUE tips, quality-change notice", "lane": "ux", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/client/ui/**", "server/**", "tests/unit/ui-*", "tests/unit/ux-*"],
+      "acceptance": ["Enter opens chat, messages show with team color, server rate limit respected", "menu lists live rooms (players, mode) from the server and joins one", "first match shows 3 contextual tips once, never again after"] },
+    { "id": "M1", "title": "Ear Glide (Skyraider): hold jump while falling to glide; predicted exactly", "lane": "movement", "deps": [], "estimate": 2, "priority": 1,
+      "paths": ["src/sim/systems/movement.ts", "src/sim/entity.ts", "tests/unit/sim-movement*"],
+      "acceptance": ["glide caps fall speed and keeps air control, ends on landing or release", "prediction error stays 0 cm while gliding", "only classes with the ability can glide"] },
+    { "id": "M2", "title": "Buff state in snapshots (EFlag bits) so HUD and prediction know Upgrade Cores", "lane": "movement", "deps": ["M1"], "estimate": 2, "priority": 2,
+      "paths": ["src/shared/types.ts", "src/shared/protocol.ts", "src/client/net/**"],
+      "acceptance": ["late joiner sees running buffs", "Zoomies+ causes 0 prediction corrections"] },
+    { "id": "INT3", "title": "Integrate wave 3, verify every commit, screenshots, PROGRESS", "lane": "integration", "deps": ["C2b", "P2", "D3", "U1", "M2"], "estimate": 2, "priority": 1,
+      "paths": ["src/client/main.ts", "PROGRESS.md", "ARCHITECTURE.md"],
+      "acceptance": ["npm run verify PASS on every integration commit", "gate e2e PASS", "0 console errors in a 5 min skirmish probe"] }
+  ]
+}
