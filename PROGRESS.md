@@ -273,6 +273,12 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 ## Human verdicts
 _(none yet — first human session after Wave 1 integration)_
 
+Open questions for the first human session:
+- **Featured kits (Q2 P2-1).** Bot squads finish chapters 2, 4, 5 and 6 as fast with four Assaults as with the
+  featured kit; only chapter 3's breach wall needs it (a Breacher's Dig Charge). For humans the kit gates only
+  chapter 6 step 1, and only for the 120 s grace. Should a chapter's kit be required, only rewarded (par, medal), or
+  stay a recommendation? Play chapter 4 (range in the duel) and chapter 2 (cloak in the grass) with and without it.
+
 ## Ideas (not in scope yet)
 - Corgi "zoomies" leaves a dust trail that briefly slows pursuing cats.
 - Sprinkler weather event that knocks cats off the lawn.
