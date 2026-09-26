@@ -15,17 +15,37 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 | W2 B1 Vac-Tank boss | ✅ merged + wired | 23 tests; bots beat it in 217 s; boss bar, telegraphs, ?boss=1 |
 | W2 G1 Garden + weather | ✅ merged + wired | concealment, deterministic weather + day/night; `de82d72` |
 | W2 S1 Ordnance kiosk/cores/kibble/mission | ✅ merged + wired | 27 interact tests; 20/20 kibble + 4/4 cores hop-validated; 0.022 ms/tick; artifacts/s1-*.png |
-| W3 C2 abilities + bot play | ⏳ running | — |
-| W3 P1/P2 perf | ⏳ running | — |
-| W3 D3 Rooftops + Garage | ⏳ running | — |
+| W3 C2 abilities + bot play | ✅ merged + wired | 29 new tests; bots use every ability 2–11×/90 s; bot-only Squeaker run done ~285 s; `8c4e174` |
+| W3 P1/P2 perf | ✅ merged + wired | 28-char tick p95 4.47 → 2.75 ms; low tier −42 % draws / −43 % tris; `f3789bf` |
+| W3 D3 Rooftops + Garage | ✅ merged | 14 district tests (hop search, cover, nav, collider=visual); +0 prop draws; `ac9eb63` |
+| Lead: core-rush mode | ✅ | 4 match tests; bots play pads; soak PASS incl. core-rush; `4ca8b2a` |
+| Lead: netcode stalls | ✅ | TCP head-of-line emulation; 150 ms/2 %: max err 4.2 m → 0.78 m, teleports 1 → 0; `808f246` |
 | W3 U1 chat/rooms/tips | ✅ merged + wired | 39 new tests; `d110c7a` VERIFY PASS incl. e2e; artifacts/u1-*.png |
-| W3 K1 character polish | ⏳ running | — |
+| W3 K1 character polish | ✅ merged | silhouette distance 0.033 → 0.122; 24/24 kits in budget; `9d8b11f` |
 | W3 lead M1 Ear Glide · M2 buff bits | ✅ | prediction parity 0 cm while gliding; Zoomies+ corrections 1182 → ≤ 2 |
 | Deploy prep (not deployed) | ✅ | docs/ops/DEPLOY.md; bundled server runs on an --omit=dev install |
 | **Wave 1 integration** | ⚠️ corrected | first claim was false (did not boot); fixed + verified in `3d2de26` — see log |
 | Q1 verification | ✅ | docs/qa/W1_VERIFICATION.md — 55/100, P0/P1 fixes landed |
 
 ## Log
+### 2026-09-26 — Wave 3 complete (lead)
+- **All lanes merged**; every integration commit verified in isolation including e2e (`npm run verify -- --e2e`).
+  Soak PASS across skirmish, TDM and core-rush (0 errors, tick p95 ≤ 1.4 ms).
+- **C2**: Spotter Drone / Dig Charge / Squeak Barrier (authoritative, deterministic); bots use every class ability,
+  hunt spotted enemies, run the Squeaker mission with no human, take cores, play core-rush pads. Lead: ability
+  entities got their own `EntityKind.Ability` (as Props they could read as S1's beacon), `Sim.peekEvents()`, the
+  predictor mirrors barriers, a SPOTTED cue.
+- **P1/P2**: analytic terrain fast path for grounded capsule moves (tick p95 within the 3 ms budget); low tier
+  finally cheaper, mostly live-switchable. **Integration catch:** the fast path also took the ball-shaped Vac-Tank
+  (read as a capsule): the boss sank and bots never beat it (0/4 seeds). Capsule-only now, with a regression test;
+  both lanes had blamed that failing test on each other's work in progress.
+- **D3**: the Garage (Breacher CQB, 3 entrances) and the Rooftops (3 perches, 2 climb routes, one-way hatch); two
+  Golden Kibble added up there (22); district name toasts.
+- **K1**: class silhouettes readable at 35 m, attitude faces (glare, snarl, grit, smug kill grin), smoother faces.
+- **Lead**: core-rush mode + MATCH selector in the menu; netcode freeze + catch-up for late inputs (TCP stall
+  emulation exposed the authority improvising on held inputs); per-frame allocation cleanup; deploy prep.
+- Open for a human: the queue test (`docs/qa/PLAYTEST_SCRIPT.md`), TDM balance with bots helping the player side
+  (corgis won 4/4 bot-stand-in runs), the Overwatch beacon as a long-range tell.
 ### 2026-09-26 — Wave 3 in flight (lead)
 - Plan: `docs/sprints/WAVE3_PLAN.md` (validated, no path collisions). Lanes C2, P, D3, U1 dispatched; K1 after U1.
 - **M1 Ear Glide** (Skyraider): Q in the air caps the fall at 2.5 m/s for 4 s (6 s cooldown); Q again, crouch or
@@ -110,7 +130,10 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 - Upgrade-core buffs are not in snapshots: the HUD rebuilds them from events (late joiners miss running buffs) and
   Zoomies+ causes small prediction corrections (~3 cm/snapshot) (S1).
 - `EntityState.cls` carries content indexes through `CLASS_IDS`: 6 entries per content table at most (S1, B1).
-- Bots ignore kiosks, cores, kibble and the mission (S1).
+- Bots don't climb to the Rooftops perches (they fight in the Garage fine) (D3/C2).
+- With shadows off (low tier) characters have no ground shadow; a blob shadow would fix it (P2).
+- Ability entities: shotgun damage to drones/barriers is estimated from the first pellet; your own barrier and drone
+  block your team's shots (C2).
 
 ## Human verdicts
 _(none yet — first human session after Wave 1 integration)_

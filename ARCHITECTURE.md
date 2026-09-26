@@ -29,6 +29,10 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
   vehicles/  boss/                 Wave 2 lanes (Mower Kart + terminals; Vac-Tank boss)
   interact/                        order 150: Ordnance kiosk kit swaps, Upgrade Cores + buffs, Golden Kibble,
                                    Squeaker mission chain (folded into MatchState by match/)
+  combat/ability-*.ts              Spotter Drone / Dig Charge / Squeak Barrier entities (EntityKind.Ability)
+  match/core-rush.ts               core-rush: fair Core Pad placement, capture, hold scoring (EntityKind.Zone)
+  ai/tactics.ts                    ability use, objective play (mission, cores, pads), helping humans
+  world/build.ts                   also terrainFastMove(): analytic grounded capsule moves over open terrain
 src/host/                          Room (players, bots, input buffers, snapshots), wire (delta encoding),
                                    quantize (snapshot-precision parity), guard (validation), worker-host (offline)
 src/client/
@@ -40,11 +44,16 @@ src/client/
   net/                             transports (+ emulation), NetClient (interpolation, prediction, reconnect),
                                    prediction.ts, server-url.ts, loopback (tests)
   views/                           Avatar contract, entity-views (entity → avatar), nameplates
-  procgen/characters/  anim/       procedural corgi/cat bodies, skeleton, gear, weapons · animator, face, springs
-  world/                           world view: terrain, fences, prims, foliage, water, sky/day-night
-  ui/  audio/  fx/                 comic HUD + menus + settings · procedural audio + music · pooled FX + words
+  procgen/characters/  anim/       procedural corgi/cat bodies, skeleton (47 bones), class silhouette gear, weapons ·
+                                   animator (glide pose, kill grin), face, springs; silhouette.ts = range-readability check
+  world/                           world view: terrain, fences, prims, foliage, water, sky/day-night, lamps
+                                   (Garden, Garage + Rooftops districts; quality tiers apply live where possible)
+  ui/  audio/  fx/                 comic HUD + menus (MATCH selector, room browser) + chat + tips + settings ·
+                                   procedural audio + music · pooled FX + words
   vehicles/                        kart + terminal views (Wave 2)
   interact/                        kiosk/core/kibble/beacon views · E prompt, kit picker, buff chips, mission card
+  abilities/                       drone, charge, barrier views + spotted markers
+  modes/core-rush-view.ts          Core Pads, A·B·C markers and strip
   debug/debug-hook.ts              window.__cvc for tests
 tools/                             gate, boundaries, probe, soak, net-bots, char-audit, world-* benches/shots
 labs/                              lane labs: characters, world, juice (HUD/FX), vehicles, boss, interact
