@@ -30,7 +30,7 @@ describe('cosmetics content', () => {
     expect(cosmeticsFor(Species.Cat, 'coat').map((c) => c.id)).toEqual(['cat_tabby', 'cat_tuxedo', 'cat_calico', 'cat_siamese']);
     for (const sp of SPECIES) {
       expect(cosmeticsFor(sp, 'neck').map((c) => c.id).sort()).toEqual(['neck_bandana', 'neck_bowtie', 'neck_nametag', 'neck_none', 'neck_spiked']);
-      expect(cosmeticsFor(sp, 'taunt')).toHaveLength(4);
+      expect(cosmeticsFor(sp, 'taunt')).toHaveLength(5); // 4 per species + Base Assault's shared 'Fetch This!' (W9)
       for (const slot of ['coat', 'neck', 'taunt'] as const) {
         const defaults = cosmeticsFor(sp, slot).filter((c) => c.unlock.kind === 'default');
         expect(defaults.map((d) => d.id)).toEqual([defaultLook(sp)[slot]]);

@@ -38,6 +38,8 @@ const MAX_HISTORY = TICK_HZ * 4;
 const TICK_MS = 1000 / TICK_HZ;
 /** Flags owned by movement (predicted); every other flag comes from the authority. */
 export const MOVE_FLAGS = EFlag.Grounded | EFlag.Sprinting | EFlag.Aiming | EFlag.Crouching | EFlag.Gliding;
+/** Authority-owned flags that change how stepCharacter moves: taken from every snapshot (buffs, the ball carrier). */
+const SYNCED_FLAGS = BUFF_FLAGS | EFlag.Carrier;
 
 interface Hist {
   seq: number;
@@ -234,12 +236,14 @@ export class LocalPredictor {
     mirrorDestructibles(this.sim, list, this.destructibles);
   }
 
-  /** Take the authority's buff bits; returns true when Zoomies+ turned on/off (movement speeds changed). */
+  /** Take the authority's buff bits and the ball-carrier bit (W9 G4a: movement.ts slows a carrier); returns true when
+   *  Zoomies+ or Carrier turned on/off (movement speeds changed). */
   private syncBuffs(flags: number): boolean {
     const e = this.e!, m = e.char!.move;
     const was = (e.flags & EFlag.BuffZoomies) !== 0, now = (flags & EFlag.BuffZoomies) !== 0;
-    e.flags = (e.flags & ~BUFF_FLAGS) | (flags & BUFF_FLAGS);
-    if (was === now) return false;
+    const carrierMoved = ((e.flags ^ flags) & EFlag.Carrier) !== 0;
+    e.flags = (e.flags & ~SYNCED_FLAGS) | (flags & SYNCED_FLAGS);
+    if (was === now) return carrierMoved;
     const k = PICKUPS.zoomies_plus.buff.moveSpeed ?? 1;
     const b = this.baseMove;
     // same arithmetic as the authority (base × k on apply, base restored on expiry) → bit-identical speeds

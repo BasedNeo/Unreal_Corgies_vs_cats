@@ -11,6 +11,7 @@ import { Anim, EFlag } from '../../shared/types';
 import { ABILITIES } from '../../shared/content/abilities';
 import { CLASSES } from '../../shared/content/classes';
 import { PICKUPS } from '../../shared/content/pickups';
+import { BASE_ASSAULT } from '../../shared/content/modes';
 import { CHARACTER_MOVE_FILTER } from '../rapier';
 import { terrainFastMove } from '../world/build';
 import type { GameEvent } from '../../shared/protocol';
@@ -36,6 +37,9 @@ const GLIDE_BRAKE = 45;
 const GLIDE_ACCEL = 1.4;
 /** Squeaky Clean (Upgrade Core) drains ability cooldowns faster; read from the snapshot flag so prediction agrees. */
 const SQUEAKY_RATE = 1 / (PICKUPS.squeaky_clean.buff.abilityCooldown ?? 1);
+/** W9 G4a: the Base Assault ball carrier (EFlag.Carrier, a snapshot flag, so prediction agrees) moves at this share of
+ *  every speed: run, walk, sprint and the slide's entry boost, like a buff scales them. It can't Ear Glide either. */
+const CARRIER_SPEED = BASE_ASSAULT.carrierSpeed;
 
 /** Reused result object for KCC collision queries (no per-tick allocation). */
 let collisionScratch: CharacterCollision | undefined;
@@ -70,12 +74,14 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
   c.sprinting = wantsSprint && wlen > 0.1 && c.slideTime <= 0;
   c.slideCooldown = Math.max(0, c.slideCooldown - dt);
   c.glideCooldown = Math.max(0, c.glideCooldown - dt * (e.flags & EFlag.BuffSqueaky ? SQUEAKY_RATE : 1));
+  const carrier = (e.flags & EFlag.Carrier) !== 0;
+  const k = carrier ? CARRIER_SPEED : 1;
 
   // --- slide: crouch while running fast on the ground; keeps momentum, steers a little ---
   const hsNow = Math.hypot(e.vel.x, e.vel.z);
-  if (pressed(e, Btn.Crouch) && c.grounded && c.slideTime <= 0 && c.slideCooldown <= 0 && hsNow > m.runSpeed * 0.9) {
+  if (pressed(e, Btn.Crouch) && c.grounded && c.slideTime <= 0 && c.slideCooldown <= 0 && hsNow > m.runSpeed * k * 0.9) {
     c.slideTime = SLIDE_TIME;
-    const boost = Math.max(hsNow, m.sprintSpeed * SLIDE_BOOST) / Math.max(0.001, hsNow);
+    const boost = Math.max(hsNow, m.sprintSpeed * k * SLIDE_BOOST) / Math.max(0.001, hsNow);
     e.vel.x *= boost; e.vel.z *= boost;
     ctx.emit?.({ e: 'ability', id: e.id, ability: 'slide', x: e.pos.x, y: e.pos.y, z: e.pos.z });
   }
@@ -94,7 +100,7 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
     if (c.slideTime <= 0 || !c.grounded || Math.hypot(e.vel.x, e.vel.z) < m.walkSpeed) { c.slideTime = 0; c.slideCooldown = SLIDE_COOLDOWN; }
   } else if (!c.pounding) {
     const gliding = c.glideTime > 0;
-    const speed = gliding ? m.sprintSpeed : aiming ? m.walkSpeed : c.sprinting ? m.sprintSpeed : m.runSpeed;
+    const speed = (gliding ? m.sprintSpeed : aiming ? m.walkSpeed : c.sprinting ? m.sprintSpeed : m.runSpeed) * k;
     const tx = wx * speed, tz = wz * speed;
     // a glide with no stick input keeps its drift instead of braking in the air
     const accel = c.grounded ? (wlen > 0.05 ? m.groundAccel : m.groundDecel) : gliding ? (wlen > 0.05 ? m.airAccel * GLIDE_ACCEL : 0) : m.airAccel;
@@ -116,10 +122,10 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
   }
 
   // --- Ear Glide: Q in the air spreads the ears; Q again, crouch (pound) or landing ends it ---
-  if (c.pounding) c.glideTime = 0;
+  if (c.pounding || carrier) c.glideTime = 0;
   else if (c.glideTime > 0) {
     c.glideTime = pressed(e, Btn.Ability) ? 0 : Math.max(0, c.glideTime - dt);
-  } else if (pressed(e, Btn.Ability) && !c.grounded && c.glideCooldown <= 0 && e.cls && CLASSES[e.cls]?.ability === GLIDE.id) {
+  } else if (pressed(e, Btn.Ability) && !c.grounded && c.glideCooldown <= 0 && !carrier && e.cls && CLASSES[e.cls]?.ability === GLIDE.id) {
     c.glideTime = GLIDE.duration;
     c.glideCooldown = GLIDE.cooldown;
     ctx.emit?.({ e: 'ability', id: e.id, ability: GLIDE.id, x: e.pos.x, y: e.pos.y, z: e.pos.z });

@@ -601,8 +601,9 @@ export const vehicleInteractSystem: SimSystem = {
         else if (v?.plane) dismountPlane(sim, v, c);
         continue;
       }
-      const kart = nearestKart(sim, c);
-      const plane = nearestPlane(sim, c);
+      const ride = !(c.flags & EFlag.Carrier); // W9 G4a: the Base Assault ball carrier can't ride (kiosks still vend)
+      const kart = ride ? nearestKart(sim, c) : null;
+      const plane = ride ? nearestPlane(sim, c) : null;
       const kd = kart ? Math.hypot(c.pos.x - kart.pos.x, c.pos.z - kart.pos.z) : Infinity;
       const pd = plane ? Math.hypot(c.pos.x - plane.pos.x, c.pos.z - plane.pos.z) : Infinity;
       if (kart && kd <= pd) { mountKart(sim, kart, c); continue; }

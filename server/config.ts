@@ -145,7 +145,7 @@ export function loadConfig(env: Env = process.env, defaults: Partial<ServerConfi
 
 /** Default bot fill per mode: PvP modes fill both teams; skirmish/boss-rush a corgi squad; adventure a squad of four. */
 export function botsForMode(mode: string, fallback: [number, number] = [3, 0]): [number, number] {
-  if (mode === 'team-deathmatch' || mode === 'core-rush') return [4, 4];
+  if (mode === 'team-deathmatch' || mode === 'core-rush' || mode === 'base-assault') return [4, 4];
   if (mode === 'adventure') return [4, 0];
   return fallback;
 }

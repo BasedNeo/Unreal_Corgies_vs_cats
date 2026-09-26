@@ -9,6 +9,8 @@
 //                    with reset scores.
 //   core-rush        PvP domination over three Core Pads (core-rush.ts): hold pads for points, first to
 //                    scoreLimit or the leader at the horn.
+//   base-assault     W9 G4a: steal the enemy's squeaky ball and run it home (base-assault.ts): first to
+//                    captureLimit captures, or the most captures at the horn (equal = draw).
 import type { Sim, SimSystem } from '../sim';
 import type { SimEntity } from '../entity';
 import type { MatchState } from '../../shared/protocol';
@@ -22,13 +24,15 @@ import { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type MatchConfigOve
 import { spawnBoss, bossWaveStatus, bossRushConfig } from '../boss'; // B1 hook: boss waves (E1: which boss)
 import { objectiveState, takeObjectiveScore, foldObjectiveText } from '../interact'; // S1: mission chain
 import { coreRushConfig, setupCorePads, stepCorePads } from './core-rush';
-import { CORE_PAD_LABELS } from '../../shared/content/modes';
+import { BA_REASON, CORE_PAD_LABELS } from '../../shared/content/modes';
+import { baseAssaultConfig, resetBaseAssault, setupBaseAssault, stepBaseAssault } from './base-assault';
 import { clearVehicles } from '../vehicles';
 
 export { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type WaveDef, type MatchConfigOverrides } from './config';
 
-export const MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush'] as const;
+export const MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault'] as const;
 export { coreRushPads, corePadSpots, type CorePadInfo } from './core-rush';
+export { baseAssaultBalls, baseAssaultSpots, baseAssaultState, checkBallInvariants, type BallInfo, type BaseSpot } from './base-assault';
 
 /** Match runtime bookkeeping (plain data in sim.state.matchRt). */
 interface MatchRuntime {
@@ -48,6 +52,8 @@ interface MatchRuntime {
   /** core-rush: pads placed for this match; fractional hold points not yet in the score. */
   padsReady: boolean;
   holdAcc: [number, number];
+  /** base-assault: balls, stands and rings placed for this match. */
+  ballsReady: boolean;
 }
 
 function roomMode(sim: Sim): string | undefined {
@@ -75,13 +81,14 @@ function rulesOf(sim: Sim): MatchRules {
 }
 
 function init(sim: Sim, mode: string): MatchRuntime {
-  const rt: MatchRuntime = { mode, clock: 0, intermission: false, queue: [], spawnTimer: 0, spawned: 0, wipes: 0, squadAlive: false, banner: '', bannerTime: 0, boss: 0, padsReady: false, holdAcc: [0, 0] };
+  const rt: MatchRuntime = { mode, clock: 0, intermission: false, queue: [], spawnTimer: 0, spawned: 0, wipes: 0, squadAlive: false, banner: '', bannerTime: 0, boss: 0, padsReady: false, holdAcc: [0, 0], ballsReady: false };
   sim.state.matchRt = rt;
   const ms: MatchState = { mode, phase: 'warmup', timeLeft: 0, score: [0, 0], objective: '', wave: 0, winner: -1 };
   sim.state.match = ms;
   const rules: MatchRules = { combatLive: false, respawn: [true, mode !== 'yard-skirmish', true] };
   sim.state.rules = rules;
-  rt.clock = mode === 'team-deathmatch' ? tdmConfig(sim).warmup : mode === 'core-rush' ? coreRushConfig(sim).warmup : skirmishConfig(sim).warmup;
+  rt.clock = mode === 'team-deathmatch' ? tdmConfig(sim).warmup : mode === 'core-rush' ? coreRushConfig(sim).warmup
+    : mode === 'base-assault' ? baseAssaultConfig(sim).warmup : skirmishConfig(sim).warmup;
   ms.timeLeft = rt.clock;
   return rt;
 }
@@ -105,6 +112,7 @@ function restart(sim: Sim, rt: MatchRuntime): void {
   for (const e of sim.entities.values()) if (e.char && e.combat?.pve) remove.push(e.id);
   for (const id of remove) sim.removeEntity(id);
   clearVehicles(sim); // Q3 P2-2: no pilotless plane from the last match crashing into this one
+  resetBaseAssault(sim); // G4a: every ball home, no carrier keeps EFlag.Carrier into the new match (no-op in other modes)
   for (const e of characters(sim)) respawnNow(sim, e, undefined, true);
   const ms = stateOf(sim);
   ms.score[0] = 0; ms.score[1] = 0;
@@ -198,6 +206,44 @@ function updateCoreRush(sim: Sim, rt: MatchRuntime, dt: number): void {
     rt.padsReady = true;
     return;
   }
+  ms.timeLeft = Math.max(0, rt.clock);
+}
+
+// ------------------------------------------------------------------ base assault (G4a)
+
+function updateBaseAssault(sim: Sim, rt: MatchRuntime, dt: number): void {
+  const cfg = baseAssaultConfig(sim);
+  const ms = stateOf(sim);
+  const rules = rulesOf(sim);
+  if (!rt.ballsReady) { setupBaseAssault(sim); rt.ballsReady = true; } // a restart re-inits rt: balls go home
+  rt.clock -= dt;
+  if (ms.phase === 'warmup') {
+    rules.combatLive = false;
+    stepBaseAssault(sim, false, cfg);
+    ms.objective = `Base Assault — steal their ball in ${Math.max(1, Math.ceil(rt.clock))}`;
+    if (rt.clock <= 0) {
+      ms.phase = 'live';
+      rt.clock = cfg.timeLimit;
+      rules.combatLive = true;
+    }
+  } else if (ms.phase === 'live') {
+    const r = stepBaseAssault(sim, true, cfg);
+    for (const t of r.captures) addScore(sim, t, 1, BA_REASON.captured);
+    const relief = (sim.state.baseAssault as { relief?: boolean } | undefined)?.relief;
+    ms.objective = relief ? 'STALEMATE — any carrier can capture!' : `Base Assault — steal their ball · first to ${cfg.captureLimit}`;
+    const [c, k] = ms.score;
+    if (c >= cfg.captureLimit || k >= cfg.captureLimit || rt.clock <= 0) {
+      const winner: TeamId | -1 = c > k ? Team.Corgis : k > c ? Team.Cats : -1;
+      const text = winner === Team.Corgis ? `Corgis take the war ${c}–${k}!` : winner === Team.Cats ? `Cats take the war ${k}–${c}!` : `Draw ${c}–${k}!`;
+      endMatch(sim, rt, winner, text, cfg.endedHold);
+      stepBaseAssault(sim, false, cfg); // the horn: every ball goes home, no carrier runs slowed through the result
+    }
+  } else if (rt.clock <= 0) {
+    restart(sim, rt);
+    setupBaseAssault(sim); // balls home on the restart tick itself (idempotent: the same entities, reset)
+    rt.ballsReady = true;
+    return;
+  } else stepBaseAssault(sim, false, cfg);
   ms.timeLeft = Math.max(0, rt.clock);
 }
 
@@ -369,12 +415,13 @@ export const matchSystem: SimSystem = {
       (sim.state.room as { mode: string }).mode = mode = 'yard-skirmish';
     }
     const kills = combatBus(sim).kills;
-    if (mode !== 'yard-skirmish' && mode !== 'team-deathmatch' && mode !== 'core-rush') return;
+    if (mode !== 'yard-skirmish' && mode !== 'team-deathmatch' && mode !== 'core-rush' && mode !== 'base-assault') return;
     let rt = sim.state.matchRt as MatchRuntime | undefined;
     if (!rt || rt.mode !== mode) rt = init(sim, mode);
     const batch = kills.splice(0);
     if (mode === 'team-deathmatch') updateTdm(sim, rt, dt, batch);
     else if (mode === 'core-rush') updateCoreRush(sim, rt, dt);
+    else if (mode === 'base-assault') updateBaseAssault(sim, rt, dt);
     else updateSkirmish(sim, rt, dt, batch);
     // S1 mission chain: its points join the team score; its current step rides the objective line
     // ("Wave 2/5 — 6 cats left · ▶ Hold the trampoline 12/20s (2/3)"). The fold is idempotent.

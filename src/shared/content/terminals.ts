@@ -91,7 +91,7 @@ export const TERMINALS: Record<TerminalId, TerminalDef> & { ordnance_terminal: O
   kart_terminal: {
     id: 'kart_terminal', kind: 'vehicle', name: 'Kart-O-Matic', catName: 'Kart-O-Matic', verb: 'vend a kart',
     vehicle: 'mower_kart', useRange: 2.5, cooldown: 20, rearm: 3, cost: 0,
-    hx: 0.6, hy: 1.1, hz: 0.45, padOffset: 3.1, modes: ['yard-skirmish', 'team-deathmatch', 'core-rush'],
+    hx: 0.6, hy: 1.1, hz: 0.45, padOffset: 3.1, modes: ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault'],
   },
   // R1: the Rooftop Hangar. One per map, NEUTRAL and contested: The Rooftops sit near the line of equal distance
   // between the bases, so the plane is a power position both teams fight over (and gives Overwatch's perches a
@@ -107,13 +107,13 @@ export const TERMINALS: Record<TerminalId, TerminalDef> & { ordnance_terminal: O
       padX: GARAGE.x + 8.3, padY: GARAGE_ROOF, padZ: GARAGE.z - 8.2, padYaw: Math.PI,
       runway: 18.7,
     },
-    modes: ['yard-skirmish', 'team-deathmatch', 'core-rush', 'adventure'],
+    modes: ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault', 'adventure'],
   },
   ordnance_terminal: {
     id: 'ordnance_terminal', kind: 'ordnance', name: 'Ordnance Kiosk', catName: 'Ordnance Kiosk',
     useRange: 2.6, swapCooldown: 1, kits: CLASS_IDS, maxDy: 2,
     hx: 0.8, hy: 1.25, hz: 0.55, siteRadius: 7, keepOut: 3.5,
-    modes: ['yard-skirmish', 'team-deathmatch', 'boss-rush', 'core-rush'],
+    modes: ['yard-skirmish', 'team-deathmatch', 'boss-rush', 'core-rush', 'base-assault'],
   },
 };
 

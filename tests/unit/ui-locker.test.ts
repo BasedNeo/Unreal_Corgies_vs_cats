@@ -24,7 +24,9 @@ describe('locker model', () => {
 
   it('per species and slot: cats see cat coats and cat taunts, both see every neckwear', () => {
     expect(lockerModel(freshProfile(), 'cat', 'coat').items.map((i) => i.id)).toEqual(['cat_tabby', 'cat_tuxedo', 'cat_calico', 'cat_siamese']);
-    expect(lockerModel(freshProfile(), 'cat', 'taunt').items.every((i) => i.id.startsWith('taunt_cat_'))).toBe(true);
+    const catTaunts = lockerModel(freshProfile(), 'cat', 'taunt').items.map((i) => i.id);
+    expect(catTaunts.every((id) => id.startsWith('taunt_cat_') || id === 'taunt_fetch')).toBe(true); // + Base Assault's shared pack (W9)
+    expect(catTaunts).toContain('taunt_fetch');
     const necks = COSMETICS.filter((c) => c.slot === 'neck').map((c) => c.id);
     expect(lockerModel(freshProfile(), 'corgi', 'neck').items.map((i) => i.id)).toEqual(necks);
     expect(lockerModel(freshProfile(), 'cat', 'neck').items.map((i) => i.id)).toEqual(necks);

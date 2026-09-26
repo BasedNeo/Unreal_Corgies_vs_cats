@@ -33,10 +33,10 @@ beforeAll(async () => {
 describe('The Lot: registry', () => {
   it('is registered for the PvP modes; adventure and boss-rush fall back to the West Yard', () => {
     expect(MAPS.the_lot).toMatchObject({ id: 'the_lot', title: 'The Lot' });
-    expect([...MAPS.the_lot.modes].sort()).toEqual(['core-rush', 'team-deathmatch', 'yard-skirmish']);
+    expect([...MAPS.the_lot.modes].sort()).toEqual(['base-assault', 'core-rush', 'team-deathmatch', 'yard-skirmish']);
     expect(data.name).toBe('The Lot');
     expect(data.map).toBe('the_lot');
-    for (const m of ['team-deathmatch', 'core-rush', 'yard-skirmish']) {
+    for (const m of ['team-deathmatch', 'core-rush', 'base-assault', 'yard-skirmish']) {
       expect(mapForMode('the_lot', m)).toBe('the_lot');
       expect(mapsForMode(m)).toEqual(['west_yard', 'the_lot']);
     }

@@ -98,6 +98,7 @@ export const MODE_LABELS: Record<string, string> = {
   'team-deathmatch': 'Team Deathmatch',
   'boss-rush': 'Boss Rush',
   'core-rush': 'Core Rush',
+  'base-assault': 'Base Assault',
   adventure: 'Adventure',
 };
 /** A listed boss id → its name ("madame_pointille" → "Madame Pointillé"); an unknown id is title-cased. */

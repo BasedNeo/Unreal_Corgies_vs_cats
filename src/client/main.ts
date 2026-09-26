@@ -36,6 +36,8 @@ import { createAdventureHud, createAdventureViews } from './adventure'; // A1
 import { chapterById } from '../shared/content/chapters';
 import { createInteractViews, createInteractPrompts } from './interact';
 import { createCoreRushView } from './modes/core-rush-view';
+import { createBaseAssaultView } from './modes/base-assault-view'; // W9 G4a: balls, stands, capture rings
+import { createBaseAssaultHud } from './ui/base-assault-hud'; // W9 G4a: ball strip, banners, markers, carrier cue
 import { createAbilityViews } from './abilities';
 import { loadSettings, type Settings } from './ui/settings';
 import { bus } from './core/events';
@@ -74,7 +76,7 @@ async function main(): Promise<void> {
   const serverUrl = serverUrlForPage(); // ?server / ?online / ?room / page served by server/prod.ts
   let mode = params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish';
   // Skirmish: a corgi squad of bots with you; cat waves come from the match rules. TDM / core-rush: bot-filled teams.
-  const botsFor = (m: string) => (params.get('bots') ?? (m === 'team-deathmatch' || m === 'core-rush' ? '4,4' : m === 'adventure' ? '4,0' : '3,0')).split(',').map(Number) as [number, number];
+  const botsFor = (m: string) => (params.get('bots') ?? (m === 'team-deathmatch' || m === 'core-rush' || m === 'base-assault' ? '4,4' : m === 'adventure' ? '4,0' : '3,0')).split(',').map(Number) as [number, number];
   // Adventure chapter (?chapter=, or the menu's chapter picker); the authority validates it.
   let chapter = /^[a-z0-9_]{1,32}$/.test(params.get('chapter') ?? '') ? params.get('chapter')! : undefined;
   // ?boss=<id> (boss-rush showcase; '1' = the Vac-Tank): E1's Madame Pointillé is ?boss=madame_pointille.
@@ -114,6 +116,7 @@ async function main(): Promise<void> {
   // S1: Ordnance kiosks, Upgrade Cores, Golden Kibble, the mission beacon (3D) + E prompt, kit picker, buffs, mission card
   const interact = createInteractViews(ctx.scene, { world: worldData, camera: ctx.camera });
   const rush = createCoreRushView(ctx.scene, ui); // core-rush pads + A·B·C strip (idle in other modes)
+  const assault = createBaseAssaultView(ctx.scene, { heightAt: (x, z) => worldData.height(x, z), heightOf: (id) => views.get(id)?.avatar.height, camera: ctx.camera }); // G4a (idle in other modes)
   const abilityViews = createAbilityViews(ctx.scene, { camera: ctx.camera }); // C2: drones, charges, barriers, spotted markers
   const advViews = createAdventureViews(ctx.scene); // A1: sentry cones (stealth steps), catnip bags
   // Concealment cue: the sim sets EFlag.Stealthed while the local corgi is hidden in tall grass.
@@ -194,6 +197,7 @@ async function main(): Promise<void> {
   hud.setUiSound((k) => audio.ui(k));
   const prompts = createInteractPrompts(ui, { send: (msg) => net?.transport.send(msg), sound: (k) => audio.ui(k) });
   const planeHud = createPlaneHud(ui);
+  const assaultHud = createBaseAssaultHud(ui, { audio }); // G4a (idle in other modes)
   // A1: intro/outro captions, step barks, the squad-down beat, the chapter-complete card (+ device progress)
   const adventureUrl = (id: string) => {
     const p = new URLSearchParams(location.search);
@@ -256,6 +260,8 @@ async function main(): Promise<void> {
     if (ev.e === 'bark') views.trigger(ev.id, 'emote'); // taunts and mission lines: the avatar acts it out
     bossFx.onGameEvent(ev);
     interact.onGameEvent(ev);
+    assault.onGameEvent(ev); // G4a
+    assaultHud.onGameEvent(ev, net?.localEntity ?? -1); // G4a
     abilityViews.onGameEvent(ev);
     worldView.destruct.onGameEvent(ev); // X1: breaks (rubble + debris at once)
     adventure.onGameEvent(ev); // A1
@@ -302,6 +308,7 @@ async function main(): Promise<void> {
     interact.sync(states, pdt);
     prompts.update(states, localId, dt);
     rush.sync(states, states.get(localId)?.team ?? 0, ctx.camera, dt);
+    assault.sync(states, localId, pdt); // G4a
     abilityViews.sync(states, (states.get(localId)?.team ?? -1) as TeamId | -1, pdt);
     worldView.destruct.sync(states); // X1: broken/standing from snapshots (late joins, resets)
     worldView.destruct.update(pdt); // X1: debris
@@ -345,7 +352,7 @@ async function main(): Promise<void> {
       for (const s of states.values()) if (s.kind === EntityKind.Boss && sniperPainting(s, local.x, local.y, local.z)) { painted = true; break; }
     }
     dotCue.style.display = painted ? 'block' : 'none';
-    const cueUp = hiddenCue.style.display === 'block' || spottedCue.style.display === 'block' || painted || planeHud.shown;
+    const cueUp = hiddenCue.style.display === 'block' || spottedCue.style.display === 'block' || painted || planeHud.shown || assaultHud.cueUp;
     if (local && !(local.flags & EFlag.Dead)) {
       const d = districtAt(worldData, local.x, local.z, local.y)?.name ?? '';
       if (d !== districtCur) { districtCur = d; districtSince = now; }
@@ -381,6 +388,7 @@ async function main(): Promise<void> {
     if ((local || !net) && debug.frames > 2) hideLoading();
     hud.update({ cueUp, local, match: net?.match ?? null, roster: net?.roster ?? [], fps: debug.fps, rttMs: net?.stats.rttMs ?? 0, locked: input.locked || params.has('autoplay') || !net, backend: ctx.backend, transport: transport?.kind ?? 'none', states });
     hitFx.update();
+    assaultHud.update({ states, localId, roster: net?.roster ?? [], match: net?.match ?? null, camera: ctx.camera, ballAt: (t) => assault.ballPosition(t) }, dt); // G4a
   });
 }
 

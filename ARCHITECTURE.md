@@ -44,6 +44,9 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
                                    Squeaker mission chain (folded into MatchState by match/)
   combat/ability-*.ts              Spotter Drone / Dig Charge / Squeak Barrier entities (EntityKind.Ability)
   match/core-rush.ts               core-rush: fair Core Pad placement, capture, hold scoring (EntityKind.Zone)
+  match/base-assault.ts            W9 G4a base-assault: a ball, stand and capture ring per team (props in the snapshot),
+                                   steal / carry (EFlag.Carrier: 0.75× speed, no glide, no rides) / drop / return /
+                                   capture, stalemate relief; bases from WorldData.bases → battleOf flags → spawns
   adventure/                       A1 mode adventure: setup 95 + runner 790 (chapter steps and triggers, spawns and
                                    sentries, stealth alarm, checkpoints with fail forward, MatchState/beacon fold);
                                    A2 props.ts: pup kits per chapter, parked karts, barricades (lasting barrier walls)
@@ -106,6 +109,7 @@ src/client/
   interact/                        kiosk/core/kibble/beacon views · E prompt, kit picker, buff chips, mission card
   abilities/                       drone, charge, barrier views + spotted markers
   modes/core-rush-view.ts          Core Pads, A·B·C markers and strip
+  modes/base-assault-view.ts       W9 G4a balls, stands, rings, beacons · ui/base-assault-hud.ts ball strip, banners
   adventure/                       A1: intro/outro captions, step barks, chapter card (medals), sentry cones, catnip
                                    bags, `cvc.adventure` progress; content in shared/content/chapters.ts
   debug/debug-hook.ts              window.__cvc for tests

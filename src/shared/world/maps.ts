@@ -18,11 +18,11 @@ export interface MapDef {
   build(seed: number): WorldData;
 }
 
-const PVP = ['yard-skirmish', 'team-deathmatch', 'core-rush'] as const;
+const PVP = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault'] as const;
 
 export const MAPS: Record<MapId, MapDef> = {
   west_yard: { id: 'west_yard', title: 'West Yard', modes: [...PVP, 'boss-rush', 'adventure'], build: buildWestYard },
-  the_lot: { id: 'the_lot', title: 'The Lot', modes: ['yard-skirmish', 'team-deathmatch', 'core-rush'], build: buildTheLot },
+  the_lot: { id: 'the_lot', title: 'The Lot', modes: [...PVP], build: buildTheLot },
 };
 
 export const isMapId = (id: unknown): id is MapId => typeof id === 'string' && (MAP_IDS as readonly string[]).includes(id);

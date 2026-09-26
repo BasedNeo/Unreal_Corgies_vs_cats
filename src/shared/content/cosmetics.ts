@@ -14,7 +14,7 @@ import { TAUNTS } from './taunts';
 export type CosmeticSlot = 'coat' | 'neck' | 'taunt';
 export type CosmeticSpecies = 'corgi' | 'cat' | 'both';
 /** The modes that have a first-win unlock (the room modes). */
-export const FIRST_WIN_MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'boss-rush', 'adventure'] as const;
+export const FIRST_WIN_MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault', 'boss-rush', 'adventure'] as const;
 export type FirstWinMode = (typeof FIRST_WIN_MODES)[number];
 
 export type CosmeticUnlock =
@@ -71,6 +71,7 @@ export const COSMETICS: readonly CosmeticDef[] = [
   { id: 'taunt_cat_royal', slot: 'taunt', species: 'cat', name: 'Royal Highness', unlock: win('team-deathmatch') },
   { id: 'taunt_cat_hunter', slot: 'taunt', species: 'cat', name: 'Apex Hunter', unlock: gold('porch_siege') },
   { id: 'taunt_cat_midnight', slot: 'taunt', species: 'cat', name: '3 AM Zoomies', unlock: win('adventure') },
+  { id: 'taunt_fetch', slot: 'taunt', species: 'both', name: 'Fetch This!', unlock: win('base-assault') }, // W9 G4a
 ];
 
 /**
@@ -86,6 +87,7 @@ export const TAUNT_PACKS: Readonly<Record<string, readonly string[]>> = {
   taunt_cat_royal: ['You may kiss the paw.', 'Peasant.', 'I own this yard. And you.', 'Bow before the floof.', 'Your defeat bores me.'],
   taunt_cat_hunter: ['Pounce. Pounce. Win.', 'You squeak like a toy.', 'Stalk. Wiggle. Gotcha.', 'Caught one!', 'Red dot? Red YOU.'],
   taunt_cat_midnight: ['3 AM. My hour.', 'Mrrrp? MRRRP!', 'Chaos is a lifestyle.', 'Knocked you off the shelf.', 'Blep.', 'Zoom. Zoom. Gone.'],
+  taunt_fetch: ['Tag, you lost it!', 'Squeak squeak. Mine.', 'Finders keepers!', 'Go fetch, slowpoke.', 'Ball? What ball?'],
 };
 
 const BY_ID: ReadonlyMap<string, CosmeticDef> = new Map(COSMETICS.map((c) => [c.id, c]));
@@ -175,6 +177,7 @@ const MODE_WIN_HINT: Record<FirstWinMode, string> = {
   'yard-skirmish': 'Win a Yard Skirmish',
   'team-deathmatch': 'Win a Team Deathmatch',
   'core-rush': 'Win a Core Rush',
+  'base-assault': 'Win a Base Assault',
   'boss-rush': 'Beat a boss in Boss Rush',
   adventure: 'Finish an Adventure chapter',
 };

@@ -134,7 +134,7 @@ export const ADVENTURE_STRINGS = {
 // ---- P2/U2 (profile + ux): the LOCKER view and the reward card ----
 /** Mode names for first-win lines and hints (MatchState.mode / C3 FIRST_WIN_MODES ids). */
 export const MODE_NAMES: Record<string, string> = {
-  'yard-skirmish': 'Skirmish', 'team-deathmatch': 'Deathmatch', 'core-rush': 'Core Rush', 'boss-rush': 'Boss Rush', adventure: 'Adventure',
+  'yard-skirmish': 'Skirmish', 'team-deathmatch': 'Deathmatch', 'core-rush': 'Core Rush', 'base-assault': 'Base Assault', 'boss-rush': 'Boss Rush', adventure: 'Adventure',
 };
 
 export const LOCKER_STRINGS = {
