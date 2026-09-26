@@ -461,3 +461,235 @@ export const pop: Recipe = (v) => {
   glide(o.frequency, t, 380, 980, 0.05);
   return 0.12;
 };
+
+// ---- S2: vehicle, destructible and adventure voices ----
+
+/** mount / dismount: a plastic seat clunk with a latch click and a little seat-spring squeak. k 0 = hop on (the
+ *  spring rises), 1 = hop off (lighter, the spring falls). */
+export const seatClunk: Recipe = (v, k) => {
+  const t = v.t, off = k >= 1, p = vary(v, 0.05);
+  const out = gain(v, 1);
+  const th = gain(v, 0.0001, out);
+  ad(th.gain, t, 0.002, off ? 0.5 : 0.65, 0.09);
+  const o = osc(v, 'sine', (off ? 150 : 185) * p, th, 0.12);
+  glide(o.frequency, t, (off ? 150 : 185) * p, 70, 0.08);
+  const lt = t + (off ? 0 : 0.045);
+  const c = gain(v, 0.0001, out);
+  ad(c.gain, lt, 0.001, 0.32, 0.035);
+  noiseSrc(v, filter(v, 'bandpass', 1500 * p, 3, c), 0.05, 'white', lt);
+  osc(v, 'square', 620 * p, filter(v, 'lowpass', 1800, 1, gain(v, 0.25, c)), 0.05, lt);
+  const s = gain(v, 0.0001, out);
+  ad(s.gain, t + 0.02, 0.004, 0.12, 0.16);
+  const sp = osc(v, 'triangle', (off ? 900 : 600) * p, s, 0.2, t + 0.02);
+  glide(sp.frequency, t + 0.02, (off ? 900 : 600) * p, (off ? 520 : 1050) * p, 0.12);
+  return 0.24;
+};
+
+/** bail: out of the plane in mid-air — a rising whoosh with a cartoon cork "pop" at its top. */
+export const bailPop: Recipe = (v) => {
+  const t = v.t, p = vary(v, 0.05);
+  const out = gain(v, 1);
+  const w = gain(v, 0.0001, out);
+  ahr(w.gain, t, 0.03, 0.5, 0.08, 0.28);
+  const bp = filter(v, 'bandpass', 380, 2.4, w);
+  bp.frequency.setValueAtTime(380, t);
+  bp.frequency.exponentialRampToValueAtTime(3000, t + 0.2);
+  bp.frequency.exponentialRampToValueAtTime(900, t + 0.4);
+  noiseSrc(v, bp, 0.42, 'pink');
+  const tp = t + 0.12;
+  const pg = gain(v, 0.0001, out);
+  ad(pg.gain, tp, 0.001, 0.6, 0.08);
+  const o = osc(v, 'sine', 420 * p, pg, 0.1, tp);
+  glide(o.frequency, tp, 420 * p, 1100 * p, 0.04);
+  const ck = gain(v, 0.0001, out);
+  ad(ck.gain, tp, 0.001, 0.3, 0.02);
+  noiseSrc(v, filter(v, 'highpass', 2500, 0.7, ck), 0.03, 'white', tp);
+  return 0.45;
+};
+
+/** boost: a rocket-can "FWOOSH" — ignition whump, a rising band of rushing air, a low roar and a sizzle. */
+export const rocketFwoosh: Recipe = (v) => {
+  const t = v.t, p = vary(v, 0.06);
+  const out = gain(v, 1);
+  const wh = gain(v, 0.0001, out);
+  ad(wh.gain, t, 0.004, 0.5, 0.18);
+  const o = osc(v, 'sine', 110 * p, wh, 0.22);
+  glide(o.frequency, t, 110 * p, 45, 0.16);
+  const fw = gain(v, 0.0001, out);
+  ahr(fw.gain, t, 0.02, 0.5, 0.12, 0.45);
+  const bp = filter(v, 'bandpass', 350, 1.3, fw);
+  glide(bp.frequency, t, 350 * p, 2200 * p, 0.25);
+  bp.frequency.exponentialRampToValueAtTime(1200, t + 0.6);
+  noiseSrc(v, bp, 0.62, 'pink');
+  const r = gain(v, 0.0001, out);
+  ahr(r.gain, t + 0.01, 0.03, 0.4, 0.15, 0.4);
+  noiseSrc(v, filter(v, 'lowpass', 600, 0.8, r), 0.62, 'brown', t + 0.01);
+  const cr = gain(v, 0.0001, out);
+  ahr(cr.gain, t + 0.04, 0.02, 0.12, 0.2, 0.25);
+  noiseSrc(v, filter(v, 'highpass', 3500, 0.8, cr), 0.52, 'white', t + 0.04, 0.3);
+  return 0.66;
+};
+
+/** horn (kart, Fire/Ability while seated): a toy "beep-beep" — two square-wave major-third dyads through a tiny
+ *  speaker band. */
+export const honk: Recipe = (v) => {
+  const t = v.t, p = vary(v, 0.02);
+  const out = gain(v, 1);
+  const spk = filter(v, 'bandpass', 1300, 1.1, out);
+  for (const dt of [0, 0.16]) {
+    const g = gain(v, 0.0001, spk);
+    ahr(g.gain, t + dt, 0.006, 0.3, 0.08, 0.04);
+    osc(v, 'square', 587.3 * p, g, 0.14, t + dt);
+    osc(v, 'square', 740 * p, g, 0.14, t + dt);
+  }
+  return 0.34;
+};
+
+/** destruct:wall_boards — the Garage wall gives: a heavy thump, sharp splinter cracks, tumbling planks knocking,
+ *  and a dusty rubble tail. */
+export const woodCrash: Recipe = (v) => {
+  const t = v.t;
+  const out = gain(v, 1);
+  const th = gain(v, 0.0001, out);
+  ad(th.gain, t, 0.003, 0.65, 0.22);
+  const o = osc(v, 'sine', 120, th, 0.28);
+  glide(o.frequency, t, 120, 45, 0.2);
+  const cracks = [0, 0.025, 0.06, 0.11, 0.19, 0.3];
+  for (let i = 0; i < cracks.length; i++) {
+    const dt = cracks[i] + v.rand() * 0.015;
+    const g = gain(v, 0.0001, out);
+    ad(g.gain, t + dt, 0.001, 0.42 - i * 0.05, 0.04 + 0.03 * v.rand());
+    noiseSrc(v, filter(v, 'bandpass', 1800 + 1600 * v.rand(), 3.5, g), 0.1, 'white', t + dt);
+  }
+  const knocks: Array<[number, number]> = [[0.05, 240], [0.16, 310], [0.28, 200], [0.42, 270]];
+  for (const [dt, f0] of knocks) {
+    const f = f0 * vary(v, 0.08);
+    const g = gain(v, 0.0001, out);
+    ad(g.gain, t + dt, 0.002, 0.28, 0.09);
+    const k = osc(v, 'triangle', f, g, 0.12, t + dt);
+    glide(k.frequency, t + dt, f, f * 0.82, 0.06);
+  }
+  const d = gain(v, 0.0001, out);
+  ahr(d.gain, t + 0.03, 0.03, 0.2, 0.15, 0.45);
+  noiseSrc(v, filter(v, 'lowpass', 1400, 0.7, d), 0.7, 'pink', t + 0.03);
+  return 0.75;
+};
+
+/** destruct:tuna_stack — tin cans everywhere: a bright crash, then cans pinging (two inharmonic partials each) as
+ *  they bounce, denser at first and quieter as they settle, over a rolling rattle. */
+export const canClatter: Recipe = (v) => {
+  const t = v.t;
+  const out = gain(v, 1);
+  const h = gain(v, 0.0001, out);
+  ad(h.gain, t, 0.001, 0.4, 0.12);
+  noiseSrc(v, filter(v, 'highpass', 2500, 0.8, h), 0.15);
+  let dt = 0;
+  for (let i = 0; i < 8; i++) {
+    dt += 0.03 + 0.06 * v.rand() + i * 0.012;
+    const f = 1150 + 1500 * v.rand();
+    const g = gain(v, 0.0001, out);
+    ad(g.gain, t + dt, 0.001, 0.26 * (1 - i / 10), 0.07 + 0.08 * v.rand());
+    osc(v, 'triangle', f, g, 0.18, t + dt);
+    osc(v, 'sine', f * 2.76, gain(v, 0.5, g), 0.18, t + dt);
+  }
+  const r = gain(v, 0.0001, out);
+  ahr(r.gain, t + 0.1, 0.05, 0.08, 0.3, 0.3);
+  noiseSrc(v, filter(v, 'bandpass', 3200, 2, r), 0.8, 'white', t + 0.1, 0.5);
+  return Math.max(dt + 0.22, 0.8);
+};
+
+/** destruct:crate_stack — a crate stack caves in: a dull heavy thump, a grainy "krrk" crunch (noise chopped by a
+ *  fast square), a few board snaps and hollow box knocks. Lower and duller than the wall's splinters. */
+export const crateCrunch: Recipe = (v) => {
+  const t = v.t;
+  const out = gain(v, 1);
+  const th = gain(v, 0.0001, out);
+  ad(th.gain, t, 0.003, 0.7, 0.25);
+  const o = osc(v, 'sine', 95, th, 0.3);
+  glide(o.frequency, t, 95, 38, 0.22);
+  const cr = gain(v, 0.0001, out);
+  ahr(cr.gain, t, 0.004, 0.5, 0.08, 0.22);
+  const bp = filter(v, 'bandpass', 1100, 0.9, cr);
+  glide(bp.frequency, t, 1100, 380, 0.3);
+  const am = gain(v, 0.6, bp);
+  noiseSrc(v, am, 0.4, 'pink');
+  const lfo = v.ctx.createOscillator(); lfo.type = 'square'; lfo.frequency.value = 38;
+  const lg = v.ctx.createGain(); lg.gain.value = 0.4;
+  lfo.connect(lg); lg.connect(am.gain); lfo.start(t); lfo.stop(t + 0.45);
+  for (const dt of [0.02, 0.09, 0.2]) {
+    const g = gain(v, 0.0001, out);
+    ad(g.gain, t + dt, 0.001, 0.26, 0.05);
+    noiseSrc(v, filter(v, 'bandpass', 1100 + 500 * v.rand(), 2.5, g), 0.08, 'white', t + dt);
+  }
+  const knocks: Array<[number, number]> = [[0.12, 160], [0.3, 130], [0.46, 180]];
+  for (const [dt, f] of knocks) {
+    const g = gain(v, 0.0001, out);
+    ad(g.gain, t + dt, 0.002, 0.3, 0.1);
+    const k = osc(v, 'sine', f, g, 0.13, t + dt);
+    glide(k.frequency, t + dt, f, f * 0.75, 0.08);
+  }
+  return 0.62;
+};
+
+/** Adventure step complete (score reason 'step'): a quick rising marimba "ta-da" in the music's key (A5 C6 F6) with
+ *  a glassy ding on the last note. Short, so it never talks over the next step's barks. */
+export const stepJingle: Recipe = (v) => {
+  const t = v.t;
+  const out = gain(v, 1);
+  const notes: Array<[number, number, number]> = [[880, 0, 0.14], [1046.5, 0.075, 0.14], [1396.9, 0.15, 0.42]];
+  for (const [f, dt, d] of notes) {
+    const g = gain(v, 0.0001, out);
+    ad(g.gain, t + dt, 0.003, 0.24, d);
+    osc(v, 'sine', f, g, d + 0.05, t + dt);
+    const h = gain(v, 0.0001, out);
+    ad(h.gain, t + dt, 0.002, 0.07, 0.06);
+    osc(v, 'sine', f * 4, h, 0.1, t + dt);
+  }
+  const b = gain(v, 0.0001, out);
+  ad(b.gain, t + 0.15, 0.002, 0.09, 0.5);
+  osc(v, 'triangle', 2793.8, b, 0.55, t + 0.15);
+  return 0.7;
+};
+
+/** Adventure chapter complete (score reason 'chapter'): a toy-brass fanfare in F — a triplet pickup, a held F, a
+ *  climb, then a full F-major chord with delayed vibrato over timpani thumps, a cymbal swell and a glockenspiel
+ *  sparkle. ~2.4 s. */
+export const chapterFanfare: Recipe = (v) => {
+  const t = v.t;
+  const out = gain(v, 1);
+  const brass = (f: number, at: number, d: number, peak: number): OscillatorNode => {
+    const g = gain(v, 0.0001, out);
+    ahr(g.gain, t + at, 0.015, peak, d * 0.6, d * 0.4 + 0.05);
+    const lp = filter(v, 'lowpass', 700, 1.2, g, t + at);
+    lp.frequency.exponentialRampToValueAtTime(2600, t + at + 0.05);
+    lp.frequency.exponentialRampToValueAtTime(1300, t + at + d);
+    return osc(v, 'sawtooth', f, lp, d + 0.1, t + at);
+  };
+  // melody: C C C | F — | A C | (chord)
+  brass(523.25, 0, 0.08, 0.16); brass(523.25, 0.11, 0.08, 0.16); brass(523.25, 0.22, 0.08, 0.16);
+  brass(698.46, 0.33, 0.42, 0.2);
+  brass(880, 0.8, 0.16, 0.18); brass(1046.5, 1.0, 0.16, 0.18);
+  // final chord (F4 F5 A5 C6) with vibrato that swells in after 0.3 s
+  const vib = v.ctx.createOscillator(); vib.frequency.value = 5.5;
+  const vd = v.ctx.createGain(); vd.gain.setValueAtTime(0, t + 1.22); vd.gain.linearRampToValueAtTime(14, t + 1.6);
+  vib.connect(vd); vib.start(t + 1.22); vib.stop(t + 2.45);
+  for (const f of [349.23, 698.46, 880, 1046.5]) vd.connect(brass(f, 1.22, 1.0, 0.085).detune);
+  // timpani on the held F and the chord
+  for (const at of [0.33, 1.22]) {
+    const g = gain(v, 0.0001, out);
+    ad(g.gain, t + at, 0.004, 0.4, 0.35);
+    const o = osc(v, 'sine', 98, g, 0.4, t + at);
+    glide(o.frequency, t + at, 98, 70, 0.3);
+  }
+  // cymbal swell under the chord
+  const cy = gain(v, 0.0001, out);
+  ahr(cy.gain, t + 1.1, 0.12, 0.07, 0.3, 0.8);
+  noiseSrc(v, filter(v, 'highpass', 5500, 0.7, cy), 1.3, 'white', t + 1.1);
+  // glockenspiel sparkle (F6 A6 C7)
+  [1396.9, 1760, 2093].forEach((f, i) => {
+    const g = gain(v, 0.0001, out);
+    ad(g.gain, t + 1.22 + i * 0.07, 0.002, 0.08, 0.5);
+    osc(v, 'sine', f, g, 0.55, t + 1.22 + i * 0.07);
+  });
+  return 2.45;
+};

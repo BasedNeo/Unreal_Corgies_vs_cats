@@ -123,7 +123,11 @@ export class AudioEngine {
     }
   }
 
-  distanceTo(x: number, y: number, z: number): number { return Math.hypot(x - this.lx, y - this.ly, z - this.lz); }
+  /** Per-frame hot path (footsteps, engine loops): sqrt of a sum — V8's Math.hypot allocates on every call. */
+  distanceTo(x: number, y: number, z: number): number {
+    const dx = x - this.lx, dy = y - this.ly, dz = z - this.lz;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
 
   private rand = () => { let s = this.seed; s ^= s << 13; s ^= s >>> 17; s ^= s << 5; this.seed = s >>> 0; return this.seed / 4294967296; };
 

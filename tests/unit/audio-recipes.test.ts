@@ -54,6 +54,8 @@ describe('SFX recipes', () => {
   it('are all exported and include the Wave 3 ability voices', () => {
     const names = recipes.map(([n]) => n);
     for (const n of ['droneWhir', 'chargeArm', 'squeakWall', 'whoosh', 'poof', 'whoomp', 'dotPing', 'glintTink', 'dotLost', 'clonk', 'pop']) expect(names).toContain(n);
+    // S2: vehicle events, destructible breaks, adventure stingers
+    for (const n of ['seatClunk', 'bailPop', 'rocketFwoosh', 'honk', 'woodCrash', 'canClatter', 'crateCrunch', 'stepJingle', 'chapterFanfare']) expect(names).toContain(n);
   });
 
   it('schedule without Web Audio errors and report a finite duration, for every strength/variant', () => {

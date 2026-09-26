@@ -1,5 +1,6 @@
 // OWNER: L5 (juice). Audio director: maps GameEvents and entity motion to procedural sounds and drives the
-// adaptive music from combat intensity.
+// adaptive music from combat intensity. S2 added vehicle engine loops (vehicle-loops.ts), vehicle/destructible
+// event voices (abilitySfx) and the adventure step/chapter stingers.
 //
 //   const audio = createAudio();                                   // attaches first-gesture unlock
 //   bus.on('game', (ev) => audio.onGameEvent(ev));
@@ -14,6 +15,8 @@ import { CombatIntensity, intensityFor, type IntensityContext } from './intensit
 import { Music } from './music';
 import { speak } from './gibberish';
 import * as S from './presets';
+import { VehicleLoops } from './vehicle-loops';
+import { WeaponTable, type WeaponFxId } from '../fx/weapon-fx';
 
 /** Class ability → recipe (bark blast also barks; see the 'ability' case). */
 const ABILITY_SFX: Record<string, S.Recipe> = {
@@ -21,7 +24,60 @@ const ABILITY_SFX: Record<string, S.Recipe> = {
   // E1 sniper: the dot's life (paint → glint → shot, or lost / spoiled), her leaps and phase 2
   dot_paint: S.dotPing, dot_glint: S.glintTink, dot_lost: S.dotLost, shot_spoiled: S.clonk, sniper_leap: S.whoosh, beret_off: S.pop,
 };
-import { WeaponTable, type WeaponFxId } from '../fx/weapon-fx';
+
+/** How one `ability` event sounds: recipe + variant, limiter category/priority, spatial reach. */
+export interface AbilitySfx {
+  recipe: S.Recipe;
+  k: number;
+  category: string;
+  priority: number;
+  /** Panner reference distance (m) and cull distance (m). */
+  refDist: number;
+  maxDist: number;
+  gain: number;
+  /** Vehicle events: played centered when they're the local rider's own. */
+  vehicle: boolean;
+}
+
+const sfx = (recipe: S.Recipe, category: string, priority: number, refDist: number, maxDist: number, o: Partial<AbilitySfx> = {}): AbilitySfx =>
+  ({ recipe, k: 0, category, priority, refDist, maxDist, gain: 1, vehicle: false, ...o });
+
+/** S2: vehicle events (V1 kart, R1 plane; `id` = the vehicle). */
+const VEHICLE_SFX: Record<string, AbilitySfx> = {
+  // gains from the S2 offline renders (K-weighted 100 ms max; a local Squeaker shot ≈ −26): clunks level with a shot,
+  // boost / bail / horn 2–3 dB over it, all well under a snap-pistol crack (≈ −18) — docs/handoff/S2.md §3
+  mount: sfx(S.seatClunk, 'fx', 1, 4, 35, { k: 0, gain: 0.55, vehicle: true }),
+  dismount: sfx(S.seatClunk, 'fx', 1, 4, 35, { k: 1, gain: 0.55, vehicle: true }),
+  bail: sfx(S.bailPop, 'impact', 2, 5, 55, { gain: 0.75, vehicle: true }),
+  boost: sfx(S.rocketFwoosh, 'fx', 1, 5, 55, { gain: 0.55, vehicle: true }),
+  horn: sfx(S.honk, 'fx', 1, 6, 50, { gain: 0.35, vehicle: true }),
+};
+
+/** S2: X1 destructible breaks, `destruct:<kind>` (an unknown future kind gets the generic crate crunch). */
+const DESTRUCT_PREFIX = 'destruct:';
+const DESTRUCT_SFX: Record<string, AbilitySfx> = {
+  wall_boards: sfx(S.woodCrash, 'impact', 2, 7, 90, { gain: 0.9 }),
+  tuna_stack: sfx(S.canClatter, 'impact', 2, 5, 70, { gain: 0.9 }),
+  crate_stack: sfx(S.crateCrunch, 'impact', 2, 6, 80, { gain: 0.8 }),
+};
+
+const classSfx = new Map<string, AbilitySfx>();
+const WHOOMP = sfx(S.whoomp, 'impact', 2, 5, 55);
+
+/** The sound for an `ability` event name (class abilities, boss cues, vehicle events, destructible breaks). */
+export function abilitySfx(name: string): AbilitySfx {
+  const v = VEHICLE_SFX[name];
+  if (v) return v;
+  if (name.startsWith(DESTRUCT_PREFIX)) return DESTRUCT_SFX[name.slice(DESTRUCT_PREFIX.length)] ?? DESTRUCT_SFX.crate_stack;
+  const r = ABILITY_SFX[name];
+  if (!r) return WHOOMP;
+  let c = classSfx.get(name);
+  if (!c) { c = sfx(r, 'impact', 2, 5, 55); classSfx.set(name, c); }
+  return c;
+}
+
+/** Score reasons with their own UI stinger (A1 adventure); everything else gets the team sting. */
+export const SCORE_STINGERS = { step: S.stepJingle, chapter: S.chapterFanfare } as const;
 
 export type { Volumes } from './engine';
 export type UiSound = 'click' | 'hover' | 'back' | 'open';
@@ -59,8 +115,14 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
   const barkNext = new Map<number, number>();
   const stepPhase = new Map<number, number>();
   let clock = 0;
+  let loops: VehicleLoops | null = null;
+  // Adventure stingers: the last step of a chapter lands on the same tick as 'chapter' (+ 'win'), so the step
+  // jingle waits one frame (it is dropped if the fanfare comes), and the fanfare mutes the team sting while it plays.
+  let pendingStep = false;
+  let fanfareUntil = -1;
 
   engine.whenReady((ctx) => {
+    loops = new VehicleLoops(engine, ctx, engine.buses!.sfx);
     if (opts.music === false) return;
     music = new Music(ctx, engine.buses!.music);
     if (ctx.state === 'running') music.start();
@@ -77,14 +139,22 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
     return { x: s.x, y: s.y + 0.8, z: s.z, ...extra };
   };
   const speciesOf = (id: number) => states.get(id)?.species ?? Species.Corgi;
+  /** A vehicle event of the local rider's own vehicle (interpolated states lag ~0.1 s, so near the local pet counts). */
+  const isLocalVehicleEvent = (vid: number, x: number, z: number): boolean => {
+    const v = states.get(vid);
+    if (v && v.kind === EntityKind.Vehicle && v.weapon === localId) return true;
+    const me = states.get(localId);
+    return !!me && Math.hypot(me.x - x, me.z - z) < 3;
+  };
 
   // Footsteps: per-entity phase accumulators; cadence rises with speed (corgi legs are short → quicker patter).
   let frameDt = 0;
   const stepCb = (s: EntityState, id: number) => {
     if (s.kind !== EntityKind.Player && s.kind !== EntityKind.Bot) return;
     const f = s.flags;
-    if ((f & EFlag.Grounded) === 0 || (f & EFlag.Dead) !== 0) { stepPhase.set(id, 0.6); return; }
-    const sp = Math.hypot(s.vx, s.vz);
+    // Riders are Grounded with their vehicle's velocity: no footsteps while seated (S2).
+    if ((f & EFlag.Grounded) === 0 || (f & (EFlag.Dead | EFlag.Mounted)) !== 0) { stepPhase.set(id, 0.6); return; }
+    const sp = Math.sqrt(s.vx * s.vx + s.vz * s.vz); // not Math.hypot: it allocates per call
     if (sp < 0.8) { stepPhase.set(id, 0.6); return; }
     if (id !== localId && engine.distanceTo(s.x, s.y, s.z) > 28) return;
     const cat = s.species === Species.Cat;
@@ -115,7 +185,14 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
       // Camera looks down its local −Z; up is local +Y.
       engine.setListener(e[12], e[13], e[14], -e[8], -e[9], -e[10], e[4], e[5], e[6]);
       frameDt = dt;
-      if (engine.unlocked) st.forEach(stepCb);
+      if (engine.unlocked) {
+        st.forEach(stepCb);
+        loops?.update(st, lid, dt, intensity.level);
+        if (pendingStep) {
+          pendingStep = false;
+          engine.play(SCORE_STINGERS.step, { bus: 'ui', gain: 0.85, priority: 2, category: 'ui' });
+        }
+      }
       intensity.update(dt);
       if (music && clock - musicSetAt > 0.25) { music.setIntensity(intensity.level); musicSetAt = clock; }
       if (stepPhase.size > 96) stepPhase.forEach((_, id) => { if (!st.has(id)) stepPhase.delete(id); });
@@ -173,6 +250,14 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
           break;
         }
         case 'score': {
+          if (ev.reason === 'step') { pendingStep = true; break; }
+          if (ev.reason === 'chapter') {
+            pendingStep = false;
+            fanfareUntil = clock + 2.4;
+            engine.play(SCORE_STINGERS.chapter, { bus: 'ui', gain: 0.85, priority: 3, category: 'ui' });
+            break;
+          }
+          if (clock < fanfareUntil) break; // the chapter's 'win' lands with the fanfare: it already says so
           const mine = me ? ev.team === me.team : ev.team === 0;
           engine.play(S.sting, { bus: 'ui', k: mine ? 1 : 2, gain: 0.7, priority: 2, category: 'ui' });
           break;
@@ -180,12 +265,15 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
         case 'reload':
           engine.play(S.reloadClicks, at(ev.id, { gain: ev.id === localId ? 0.7 : 0.5, priority: ev.id === localId ? 2 : 0, category: 'fx', maxDist: 20 }));
           break;
-        case 'ability':
-          // movement abilities swish (air), the rest land with a whoomp
-          // each class ability has its own voice (readability: you can hear what was used and where)
-          engine.play(ABILITY_SFX[ev.ability] ?? S.whoomp, { x: ev.x, y: ev.y, z: ev.z, priority: 2, category: 'impact', refDist: 5 });
+        case 'ability': {
+          // each class ability has its own voice (readability: you can hear what was used and where); vehicles
+          // and destructibles too (S2); anything unmapped lands with a whoomp
+          const a = abilitySfx(ev.ability);
+          if (a.vehicle && isLocalVehicleEvent(ev.id, ev.x, ev.z)) engine.play(a.recipe, { k: a.k, gain: a.gain * 0.8, priority: a.priority + 1, category: a.category });
+          else engine.play(a.recipe, { x: ev.x, y: ev.y, z: ev.z, k: a.k, gain: a.gain, priority: a.priority, category: a.category, refDist: a.refDist, maxDist: a.maxDist });
           if (ev.ability === 'bark_blast') engine.play(S.bark, { x: ev.x, y: ev.y + 1, z: ev.z, k: 0.8, gain: 1, priority: 2, category: 'voice', refDist: 6 });
           break;
+        }
         default:
           break;
       }
@@ -198,7 +286,7 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
     },
     setWeaponIds(ids) { weapons.set(ids); },
     setQuality(q) { engine.panningModel = q === 'low' ? 'equalpower' : 'HRTF'; },
-    dispose() { music?.stop(); engine.dispose(); },
+    dispose() { music?.stop(); loops?.dispose(); loops = null; engine.dispose(); },
   };
   return audio;
 }
