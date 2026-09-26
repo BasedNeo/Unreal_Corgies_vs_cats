@@ -420,7 +420,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
         toggle(timer, 'low', M.phase === 'live' && !untimed && M.timeLeft <= 30);
         setText(obj, objectiveForTeam(M.objective, M.mode, L ? L.team : 0));
         const showWave = M.wave > 0 && /skirmish|wave|pve/i.test(M.mode);
-        show(wave, showWave);
+        show(wave, showWave && !untimed); // an untimed live phase already reads WAVE n in the timer
         if (showWave) setText(wave, `WAVE ${M.wave}`);
         if (M.phase !== lastPhase) {
           if (lastPhase === 'warmup' && M.phase === 'live') banner('FUR WILL FLY!', null, 1.6);
