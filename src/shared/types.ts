@@ -52,6 +52,10 @@ export const EFlag = {
   BuffSqueaky: 1 << 17,
   /** Stunned (thrown out of a crashing RC plane, R1): no movement or buttons until it clears; predicted too. */
   Stunned: 1 << 18,
+  /** W9 X4: carrying a throwable (Ordnance Terminal); cleared when thrown or on death. */
+  Ordnance: 1 << 19,
+  /** W9 G4: carrying the enemy's squeaky tennis ball (Base Assault); slowed, drawn with the ball on the back. */
+  Carrier: 1 << 20,
 } as const;
 export const BUFF_FLAGS = EFlag.BuffOverclock | EFlag.BuffThickFur | EFlag.BuffZoomies | EFlag.BuffSqueaky;
 

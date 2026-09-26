@@ -14,9 +14,11 @@ export const Btn = {
   NextWeapon: 1 << 9,
   /** Taunt (cosmetic): a voiced line + emote animation (src/sim/systems/emote.ts). */
   Emote: 1 << 10,
+  /** W9 X4: throw the carried ordnance (squeaker grenade / hairball bomb). Keyboard G, gamepad d-pad down. */
+  Throw: 1 << 11,
 } as const;
 /** Every defined button bit (sanitizeInput masks to these). */
-export const BTN_MASK = 0x7ff;
+export const BTN_MASK = 0xfff;
 
 export interface InputCmd {
   /** Monotonic per-client sequence number; the authority acks the last one it applied. */

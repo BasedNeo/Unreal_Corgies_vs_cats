@@ -54,6 +54,8 @@ export interface WaterZone {
   bottomY: number;
   /** Per-tick horizontal velocity keep factor at 60 Hz (0.6 = strong drag). */
   drag: number;
+  /** W9: shallow-water colour as a palette key (e.g. 'mud' for The Lot's ditch); the view's default otherwise. */
+  tint?: string;
 }
 
 /** Camera bookmark for screenshots / spectator. */
@@ -236,6 +238,12 @@ export interface WorldData {
   /** Terrain below this height (m) reads as a wet pond bed in the view (default −0.12, the West Yard pond). Maps with dry
    *  pits set it lower; their water zones cover their own beds. */
   bedLevel?: number;
+  /** W9: floodlight towers (lamp head → aim point) for the S4 rig; views give the nearest real lights by tier. */
+  floodlights?: { pos: [number, number, number]; target: [number, number, number] }[];
+  /** W9: hand-authored climb routes (standing points, feet) the N1 link builder adds to its generated links. */
+  climbRoutes?: { name: string; pts: [number, number, number][] }[];
+  /** W9 G4: each team's base for Base Assault: where its flag stands (score here) and where its ball rests. */
+  bases?: { team: 0 | 1; flag: [number, number, number]; ballStand: [number, number, number] }[];
   /** Terrain height at world XZ (meters). Must be deterministic and identical on every machine. */
   height(x: number, z: number): number;
   /** Half-size of the playable square, centered on the origin. */
