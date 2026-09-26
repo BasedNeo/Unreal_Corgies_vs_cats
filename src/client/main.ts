@@ -409,7 +409,7 @@ async function main(): Promise<void> {
     debug.localEntity = localId;
     debug.entities = states.size;
     debug.localLook = views.get(localId)?.lookKey ?? '';
-    debug.local = local ? { x: local.x, y: local.y, z: local.z, hp: local.hp } : null;
+    debug.local = local ? { x: local.x, y: local.y, z: local.z, hp: local.hp, flags: local.flags } : null;
     debug.ready = !!local && debug.frames > 5;
     if ((local || !net) && debug.frames > 2) hideLoading();
     hud.update({ cueUp, local, match: net?.match ?? null, roster: net?.roster ?? [], fps: debug.fps, rttMs: net?.stats.rttMs ?? 0, locked: input.locked || params.has('autoplay') || !net, backend: ctx.backend, transport: transport?.kind ?? 'none', states });

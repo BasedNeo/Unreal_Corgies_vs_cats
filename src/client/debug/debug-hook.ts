@@ -7,7 +7,7 @@ export interface DebugState {
   backend: string;
   transport: string;
   localEntity: number;
-  local: { x: number; y: number; z: number; hp: number } | null;
+  local: { x: number; y: number; z: number; hp: number; flags?: number } | null;
   entities: number;
   /** N2: the look the local avatar wears, `coat|neck` ('' = classic / none yet). */
   localLook: string;

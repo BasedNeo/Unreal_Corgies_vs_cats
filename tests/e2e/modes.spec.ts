@@ -21,6 +21,26 @@ test('MATCH: CORE RUSH from the menu starts a core-rush match with three Core Pa
   expect(errors).toEqual([]);
 });
 
+// W9: BASE ASSAULT from the menu runs the mode on the authority (the six ball / stand / capture-ring props, EntityKind.Prop 5,
+// ride the snapshot) and X4's throwables are live in it: the local pet spawns carrying one (EFlag.Ordnance, bit 19).
+test('MATCH: BASE ASSAULT from the menu places both balls and the pet carries a throwable', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto('/?webgl&quality=low');
+  const pick = page.locator('[data-match="base-assault"]');
+  await pick.waitFor({ timeout: 90_000 });
+  await pick.click();
+  await expect(pick).toHaveAttribute('aria-checked', 'true');
+  await page.locator('[data-play]').click();
+  await page.waitForFunction(() => (globalThis as any).__cvc?.ready === true, null, { timeout: 90_000 });
+  await page.waitForFunction(
+    () => (((globalThis as any).__cvc.net?.entities ?? []) as number[][]).filter((e) => e[1] === 5).length >= 6,
+    null, { timeout: 90_000 },
+  );
+  await page.waitForFunction(() => (((globalThis as any).__cvc.local?.flags ?? 0) & (1 << 19)) !== 0, null, { timeout: 90_000 });
+  expect(errors).toEqual([]);
+});
+
 // A1: ADVENTURE → a picked chapter from the menu runs that chapter (menu → PlayOptions.match/chapter → worker Room →
 // adventure runner → MatchState): the top bar counts STEPs and shows its first objective, the intro panel names it.
 // Chapter 2, not the default first one, so the pick itself is proven to reach the authority.
