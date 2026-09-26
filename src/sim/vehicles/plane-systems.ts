@@ -17,6 +17,7 @@ import { hash2 } from '../../shared/rng';
 import { COMBAT_RULES, weaponByIndex, weaponIndex } from '../../shared/content/weapons';
 import { TERMINALS, VEHICLES, packPlaneAux, vehicleIndex, type PlaneDef, type PlaneId } from '../../shared/content/vehicles';
 import { applyDamage, explode, combatLive, capsuleOf, rayCapsule, knockback } from '../combat';
+import { pointCapsuleDistance } from '../combat/geometry';
 import { falloff } from '../combat/weapon-system';
 import { TargetSet, rewindTick, currentStateTick } from '../combat/lagcomp';
 import { reportNoiseAt } from '../combat/state';
@@ -497,6 +498,46 @@ function updateGun(sim: Sim, plane: SimEntity, rider: SimEntity | undefined, dt:
 // ---------------------------------------------------------------------------------------------
 
 const stepRes = newPlaneStepResult();
+/** Per plane: the tick until which each character can't be rammed again. */
+const ramUntil = new WeakMap<SimEntity, Map<EntityId, number>>();
+
+/**
+ * Plane vs pets (lead): flying into a character fast enough rams it — damage to enemies, a launch for everyone (half
+ * for teammates), like a kart ram. The plane slows and takes a knock; pets never block it (a toy plane that stops dead
+ * on a cat would fall out of the sky).
+ */
+function planeRams(sim: Sim, plane: SimEntity, rider: SimEntity | undefined, d: PlaneDef): void {
+  const p = plane.plane!, r = d.ram;
+  const speed = Math.hypot(plane.vel.x, plane.vel.y, plane.vel.z);
+  if (speed < r.minSpeed) return;
+  const cx = plane.pos.x, cy = plane.pos.y + d.gearHeight, cz = plane.pos.z;
+  const team = vehicleTeam(sim, plane);
+  for (const c of sim.entities.values()) {
+    if (!c.char || c.dead || c.seat || c === rider) continue;
+    const cap = capsuleOf(c);
+    if (pointCapsuleDistance(cx, cy, cz, c.pos.x, c.pos.y + cap.r, c.pos.z, cap.len, cap.r) > d.radius + 0.25) continue;
+    let nx = c.pos.x - cx, ny = c.pos.y + cap.height * 0.5 - cy, nz = c.pos.z - cz;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l; ny /= l; nz /= l;
+    const closing = (plane.vel.x - c.vel.x) * nx + (plane.vel.y - c.vel.y) * ny + (plane.vel.z - c.vel.z) * nz;
+    if (closing < r.minSpeed) continue;
+    let map = ramUntil.get(plane);
+    if (!map) { map = new Map(); ramUntil.set(plane, map); }
+    if ((map.get(c.id) ?? -1) >= sim.tick) continue;
+    map.set(c.id, sim.tick + ticks(r.cooldown));
+    const enemy = COMBAT_RULES.friendlyFire || c.team !== team;
+    if (enemy) applyDamage(sim, c, r.damageBase + (closing - r.minSpeed) * r.damagePerMs, { id: rider?.id ?? plane.id, team, weapon: -1 }, c.pos.x, c.pos.y + cap.height * 0.5, c.pos.z, false);
+    if (c.kind !== EntityKind.Boss) {
+      const k = closing * r.knockback * (enemy ? 1 : 0.5);
+      knockback(c, (plane.vel.x / speed) * k, r.lift * (enemy ? 1 : 0.5), (plane.vel.z / speed) * k);
+    }
+    p.speed *= 1 - r.slow;
+    plane.vel.x *= 1 - r.slow; plane.vel.y *= 1 - r.slow; plane.vel.z *= 1 - r.slow;
+    damagePlane(sim, plane, r.selfDamage, { id: c.id, team: c.team }, cx, cy, cz);
+    if (plane.removed) return;
+  }
+}
+
 const pin: PlaneInput = { throttle: 0, steer: 0, aimYaw: 0, aimPitch: 0, boost: false, pilot: { speed: 1, handling: 1, boostCooldown: 1 } };
 
 export const planeStepSystem: SimSystem = {
@@ -524,6 +565,8 @@ export const planeStepSystem: SimSystem = {
         continue;
       }
       if (res.bumpDamage > 0) damagePlane(sim, plane, res.bumpDamage, { id: plane.id, team: plane.team }, plane.pos.x, plane.pos.y + d.gearHeight, plane.pos.z);
+      if (plane.removed) continue;
+      planeRams(sim, plane, rider ?? undefined, d);
       if (plane.removed) continue;
 
       if (rider && !rider.dead && rider.seat) seatPilot(sim, plane, rider);

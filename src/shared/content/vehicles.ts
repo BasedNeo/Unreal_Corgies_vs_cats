@@ -215,6 +215,12 @@ export interface PlaneDef {
   wingspan: number;
   /** Shots and blasts count within this distance of the fuselage center (a readable, shootable target). */
   hitRadius: number;
+  /**
+   * Flying into a pet (lead): closing speed above ramMinSpeed (m/s) rams it: ramDamageBase + ramDamagePerMs per m/s
+   * above that (enemies only), a launch (ramKnockback × closing, ramLift up), once per target per ramCooldown s. The
+   * plane loses ramSlow of its speed and takes ramSelfDamage. Pets never block a plane.
+   */
+  ram: { minSpeed: number; damageBase: number; damagePerMs: number; knockback: number; lift: number; cooldown: number; slow: number; selfDamage: number };
   /** Rider feet in plane space (x right, y up from the ground point, z toward the back). Like the kart's seat this is
    *  the Drive pose's feet: the pet straddles the fuselage with its rump on the saddle ~0.3 m higher. */
   seat: { x: number; y: number; z: number };
@@ -366,6 +372,8 @@ export const VEHICLES: { mower_kart: VehicleDef; rc_plane: PlaneDef } = {
   rc_plane: {
     id: 'rc_plane', kind: 'plane', name: 'Fetch Flyer', catName: 'Pounce Plane',
     radius: 0.42, gearHeight: 0.42, wingspan: 1.6, hitRadius: 1.0,
+    // a cruise-speed (20 m/s) buzz does 48; a boosted dive (30 m/s) 73 — a full-hp Assault survives one
+    ram: { minSpeed: 8, damageBase: 18, damagePerMs: 2.5, knockback: 0.45, lift: 6, cooldown: 0.8, slow: 0.3, selfDamage: 12 },
     seat: { x: 0, y: 0.38, z: 0.12 }, pivotY: 0.5,
     maxHp: 140,
     throttleRate: 2.5,

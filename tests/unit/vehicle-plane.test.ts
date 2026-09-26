@@ -519,6 +519,41 @@ describe('RC plane: pilots, the gun and damage', () => {
 // ---------------------------------------------------------------------------------------------
 
 describe('RC plane: snapshots', () => {
+  it('rams pets it flies into: an enemy takes damage and a launch, a teammate only a nudge; slow planes just pass', async () => {
+    const sim = await makeSim(yard(), WITH_COMBAT());
+    sim.state.match = { mode: 'test', phase: 'live', timeLeft: 99, score: [0, 0], objective: '', wave: 0, winner: -1 };
+    const cat = pet(sim, Team.Cats, 0, -14);
+    const pal = pet(sim, Team.Corgis, 6, -14);
+    const { plane, pilot } = await airborne(sim, 0, 0.55, 0, 0, PLANE.topSpeed);
+    sim.drainEvents();
+    const hp0 = plane.health!.hp, catHp = cat.health!.hp;
+    const ev: GameEvent[] = [];
+    let launched = 0, speedBefore = 0;
+    fly(sim, pilot, { mz: 1, yaw: 0, pitch: 0.04 }, 45, ev, () => {
+      if (!speedBefore && Math.abs(plane.pos.z - cat.pos.z) < 3) speedBefore = Math.hypot(plane.vel.x, plane.vel.z);
+      launched = Math.max(launched, cat.vel.y);
+    });
+    const ram = ev.find((e) => e.e === 'hit' && e.dst === cat.id);
+    expect(ram && ram.e === 'hit' && ram.src).toBe(pilot.id);
+    expect(cat.health!.hp).toBeLessThan(catHp - PLANE.ram.damageBase + 1);
+    expect(launched).toBeGreaterThan(3);
+    expect(plane.removed || plane.health!.hp <= hp0 - PLANE.ram.selfDamage).toBe(true);
+    // a teammate in the path: no damage, just a nudge
+    const { plane: p2, pilot: pilot2 } = await airborne(sim, 6, 0.55, 0, 0, PLANE.topSpeed);
+    const palHp = pal.health!.hp;
+    let palUp = 0;
+    fly(sim, pilot2, { mz: 1, yaw: 0, pitch: 0.04 }, 45, undefined, () => { palUp = Math.max(palUp, pal.vel.y); });
+    expect(pal.health!.hp).toBe(palHp);
+    expect(palUp).toBeGreaterThan(0.5);
+    // a plane rolling slower than the ram speed passes without a ram
+    const slowCat = pet(sim, Team.Cats, -10, -6);
+    const { pilot: pilot3 } = await airborne(sim, -10, 0.55, 0, 0, PLANE.ram.minSpeed - 3);
+    const ev3: GameEvent[] = [];
+    fly(sim, pilot3, { mz: 0, yaw: 0, pitch: 0.04 }, 90, ev3);
+    expect(ev3.some((e) => e.e === 'hit' && e.dst === slowCat.id)).toBe(false);
+    void p2;
+  });
+
   it('sends its content index, bank and throttle for smooth remote planes', async () => {
     const sim = await makeSim(yard());
     const { plane, pilot } = await airborne(sim, 0, 20, 0, 0);

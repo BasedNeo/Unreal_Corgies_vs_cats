@@ -176,7 +176,6 @@ Newest first. Every task appends: what changed, proof (command + result + screen
   - there is no engine sound yet (the cockpit strip `ui/plane-hud.ts` shows hull, throttle, airspeed, height, boost,
     gun heat and STALL!);
   - planes are interpolated, not predicted (mouse-aim hides most of the latency);
-  - planes pass through characters;
   - bots don't fly;
   - an empty plane after a bail-out is a guided bomb (intended; watch it in balance).
 - Fixed since first logged:
@@ -188,6 +187,8 @@ Newest first. Every task appends: what changed, proof (command + result + screen
     stop the other team's shots (lead).
   - a kart rammed hard into a tuna or crate stack flattens it (the breach wall stays explosions-only) (lead);
   - direct frisbee hits now damage enemy karts, planes and destructible stacks (lead);
+  - an RC plane flying into a pet rams it (enemies take 48 at cruise, 73 in a boosted dive; teammates get a nudge),
+    and the plane slows and takes a knock (lead);
   - spawn facing: the client holds inputs until its entity is in a snapshot, so a fresh spawn keeps the sim's facing
     in every mode (lead; found by A1).
 
