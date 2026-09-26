@@ -1,3 +1,4 @@
+import { randomLook, tauntLines } from '../../src/shared/content/cosmetics';
 import { describe, it, expect } from 'vitest';
 import { Sim } from '../../src/sim/sim';
 import { Btn, sanitizeInput } from '../../src/shared/input';
@@ -39,13 +40,13 @@ describe('emote / taunt', () => {
         combatBus(sim).kills.length = 0;
         for (const ev of sim.drainEvents()) if (ev.e === 'bark') lines.push(ev.line);
       }
-      return { lines, rngNext: sim.rng() };
+      return { lines, rngNext: sim.rng(), pack: tauntLines(randomLook(cat.seed, Species.Cat), Species.Cat) };
     };
     const a = await run(true), b = await run(true), off = await run(false);
     expect(a.lines).toEqual(b.lines);
     expect(a.lines.length).toBeGreaterThan(4);   // ~30 % of 40
     expect(a.lines.length).toBeLessThan(25);
-    for (const l of a.lines) expect(TAUNTS[Species.Cat]).toContain(l);
+    for (const l of a.lines) expect(a.pack).toContain(l); // N2: the bot's seeded look picks its taunt pack
     expect(a.rngNext).toBe(off.rngNext); // taunts never draw from sim.rng: outcomes can't shift
   });
 });
