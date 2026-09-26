@@ -70,6 +70,15 @@ Newest first. Every task appends: what changed, proof (command + result + screen
   - adventure rooms list their chapter in the room browser (`0859476`);
   - an e2e for the menu's MATCH selector (`74c2fb2`);
   - the README and playtest script were rewritten.
+- INT4 lead loop after the lanes landed, each commit verified in isolation:
+  - soak of all five modes on the integrated HEAD: 0 errors, 0 stuck, tick p95 0.94–1.79 ms. The ~90 ms tick max is
+    identical before Wave 4 (A/B against `62a41ba`: 90/87 vs 92/88 ms), so it is a startup artifact, not a regression.
+    Boss-rush and adventure now report completion instead of failing on it (`9e7d144`).
+  - spawn facing held until the first snapshot (`3117ad1`);
+  - karts ram destructible stacks (`7891c87`); frisbees hit karts, planes and stacks directly (`4dd5190`); the plane
+    rams pets (`64d2684`);
+  - an e2e for ADVENTURE → chapter 2 from the menu (`90e7f93`); the controls list and menu footer (`626fde5`);
+  - a plane lift-off whoosh (`9fb5410`); no duplicate WAVE chip (`4bdfcb7`); kart/plane kill-feed glyphs (`2abe2c5`).
 ### 2026-09-26 — Wave 3 complete (lead)
 - **All lanes merged**; every integration commit verified in isolation including e2e (`npm run verify -- --e2e`).
   Soak PASS across skirmish, TDM and core-rush (0 errors, tick p95 ≤ 1.4 ms).
