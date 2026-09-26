@@ -186,10 +186,12 @@ describe('vehicles on the West Yard', () => {
       sim.spawnCharacter({ kind: EntityKind.Bot, team, species: team === Team.Cats ? Species.Cat : Species.Corgi, cls: 'assault', name: `bot${i}` });
     }
     sim.step();
-    const term = [...sim.entities.values()].find((e) => e.kind === EntityKind.Terminal && e.team === Team.Corgis)!;
+    const term = [...sim.entities.values()].find((e) => e.kind === EntityKind.Terminal && e.team === Team.Corgis && e.terminal)!; // the Kart-O-Matic (Ordnance kiosks are terminals too)
     const fx = Math.sin(term.yaw), fz = Math.cos(term.yaw);
-    const p = pet(sim, Team.Corgis, term.pos.x - fx * 1.8, term.pos.z - fz * 1.8);
     for (let i = 0; i < 400; i++) { sim.step(); sim.drainEvents(); } // warmup ends, bots spread out
+    // Spawn the driver after the warmup so live bots can't knock it out before it reaches the kiosk.
+    const p = pet(sim, Team.Corgis, term.pos.x - fx * 1.8, term.pos.z - fz * 1.8);
+    sim.step(); sim.drainEvents();
     vehicleMs = 0;
     const kart = useTerminal(sim, term, p)!;
     expect(kart).not.toBeNull();
@@ -210,7 +212,7 @@ describe('vehicles on the West Yard', () => {
     console.log(`[vehicles] full sim, 16 bots + 1 kart: vehicle systems ${perTick.toFixed(3)} ms/tick; hits on/by kart: ${evs.filter((e) => e.e === 'hit' && (e.dst === kart.id || e.src === p.id)).length}; kart hp ${kart.health!.hp}${kart.removed ? ' (destroyed)' : ''}`);
     // Budget check is informative on shared/loaded machines; hard-fail only on a gross regression.
     expect(perTick).toBeLessThan(process.env.CI ? 0.6 : 2.5);
-    expect([...sim.entities.values()].filter((e) => e.kind === EntityKind.Terminal)).toHaveLength(2);
+    expect([...sim.entities.values()].filter((e) => e.kind === EntityKind.Terminal && e.terminal)).toHaveLength(2); // Kart-O-Matics only
   });
 });
 

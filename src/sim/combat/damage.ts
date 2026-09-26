@@ -1,7 +1,7 @@
 // Health, damage, death and respawn — the only code that changes hp or the dead state.
 import type { Sim } from '../sim';
 import type { SimEntity } from '../entity';
-import { Anim, EFlag, type EntityId, type TeamId } from '../../shared/types';
+import { Anim, EFlag, EntityKind, type EntityId, type TeamId } from '../../shared/types';
 import { COMBAT_RULES, WEAPONS } from '../../shared/content/weapons';
 import { combatBus, combatLive, ensureCombat, isInvulnerable, ticksOf } from './state';
 
@@ -25,6 +25,13 @@ export function applyDamage(sim: Sim, dst: SimEntity, amount: number, src: Damag
   const self = src.id === dst.id;
   if (!self && !COMBAT_RULES.friendlyFire && src.team === dst.team) return 0;
   if (isInvulnerable(sim, dst)) return 0;
+  if (!self && dst.kind === EntityKind.Player) {
+    const attacker = sim.entities.get(src.id);
+    if (attacker && (attacker.kind === EntityKind.Bot || attacker.kind === EntityKind.Boss)) {
+      const mode = (sim.state.room as { mode?: string } | undefined)?.mode ?? '';
+      amount *= COMBAT_RULES.botToPlayerDamage[mode] ?? 1;
+    }
+  }
   const dmg = Math.min(h.hp, Math.max(1, Math.round(amount)));
   h.hp -= dmg;
   h.lastDamageTick = sim.tick;

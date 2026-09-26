@@ -341,10 +341,12 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
           }
           toggle(mbTeams[t], 'mine', !!L && L.team === t);
         }
-        const tt = M.phase === 'warmup' ? `WARMUP ${fmtTime(M.timeLeft)}` : M.phase === 'ended' ? 'FINAL' : fmtTime(M.timeLeft);
+        // Untimed live phases (skirmish waves) show the wave instead of a red 0:00.
+        const untimed = M.phase === 'live' && M.timeLeft <= 0;
+        const tt = M.phase === 'warmup' ? `WARMUP ${fmtTime(M.timeLeft)}` : M.phase === 'ended' ? 'FINAL' : untimed ? (M.wave > 0 ? `WAVE ${M.wave}` : 'LIVE') : fmtTime(M.timeLeft);
         setText(timer, tt);
         toggle(timer, 'warm', M.phase === 'warmup');
-        toggle(timer, 'low', M.phase === 'live' && M.timeLeft <= 30);
+        toggle(timer, 'low', M.phase === 'live' && !untimed && M.timeLeft <= 30);
         setText(obj, M.objective);
         const showWave = M.wave > 0 && /skirmish|wave|pve/i.test(M.mode);
         show(wave, showWave);
@@ -588,7 +590,8 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
           if (ev.id === localId) reloadAt = now;
           break;
         case 'ability':
-          if (ev.id === localId) { abilityAt = now; abilityId = ev.ability; }
+          // Only class abilities start the Q ring (slide, ground pound, vehicle and boss events also use 'ability').
+          if (ev.id === localId && ev.ability in ABILITY_COOLDOWN_ESTIMATE) { abilityAt = now; abilityId = ev.ability; }
           break;
         case 'pickup':
           if (ev.id === localId) hud.notice(`Picked up ${ev.item.replace(/_/g, ' ')}`);

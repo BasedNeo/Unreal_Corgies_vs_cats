@@ -81,6 +81,23 @@ describe('slide and ground pound', () => {
     expect(e.char!.slideTime).toBe(0);
   });
 
+  it('a slide covers more ground than sprinting for the same time', async () => {
+    const run = async (slide: boolean) => {
+      const { sim, e } = await makeSim();
+      sim.placeCharacter(e, 0, 0.05, 40); // open lane toward -Z (crates sit on the 12 m ring)
+      for (let i = 0; i < 30; i++) sim.step();
+      let seq = 1;
+      const go = (b: number) => { sim.setInput(e.id, { seq: seq++, mx: 0, mz: 1, yaw: 0, pitch: 0, buttons: b, rt: 0 }); sim.step(); };
+      for (let i = 0; i < 45; i++) go(Btn.Sprint);
+      const z0 = e.pos.z;
+      go(Btn.Sprint | (slide ? Btn.Crouch : 0));
+      for (let i = 0; i < 38; i++) go(Btn.Sprint);
+      return z0 - e.pos.z;
+    };
+    const sprint = await run(false), slid = await run(true);
+    expect(slid).toBeGreaterThan(sprint);
+  });
+
   it('ground pounds from the air and emits the impact', async () => {
     const { sim, e } = await makeSim();
     for (let i = 0; i < 30; i++) sim.step();

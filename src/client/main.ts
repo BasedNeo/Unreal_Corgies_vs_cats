@@ -10,7 +10,7 @@ import { createRenderContext } from './engine/renderer';
 import { createAdaptiveQuality } from './engine/adaptive-quality';
 import { createWorldData } from '../shared/world/world-data';
 import { createWorldView } from './world/world-view';
-import { createWorkerTransport, createWebSocketTransport, type NetEmulation } from './net/transport';
+import { createWorkerTransport, createWebSocketTransport, type NetEmulation, type Transport } from './net/transport';
 import { NetClient } from './net/net-client';
 import { serverUrlForPage } from './net/server-url';
 import { InputState } from './input/input';
@@ -27,6 +27,7 @@ import { loadSettings, type Settings } from './ui/settings';
 import { bus } from './core/events';
 import { TICK_DT } from '../shared/constants';
 import { CLASS_IDS, EFlag, type ClassId, type TeamId } from '../shared/types';
+import type { EntityState } from '../shared/protocol';
 
 const params = new URLSearchParams(location.search);
 
@@ -54,16 +55,24 @@ async function main(): Promise<void> {
   const mode = params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish';
   // Skirmish: a corgi squad of bots with you; cat waves come from the match rules. TDM: bot-filled teams.
   const bots = (params.get('bots') ?? (mode === 'team-deathmatch' ? '4,5' : '3,0')).split(',').map(Number) as [number, number];
-  loadingStep(serverUrl ? 'Calling the server…' : 'Waking up the squad…');
-  const transport = serverUrl
-    ? await createWebSocketTransport(serverUrl, em)
-    : createWorkerTransport({ seed, mode, bots }, em);
-  debug.transport = transport.kind;
-
-  const net = new NetClient(transport);
-  const cls = (CLASS_IDS as readonly string[]).includes(params.get('cls') ?? '') ? (params.get('cls') as ClassId) : 'assault';
+  // The session (authority + connection) starts only when the player presses PLAY — or immediately for
+  // ?autoplay / online links — so an offline match never runs behind the menu (QA W1 FTUE finding).
+  let net: NetClient | null = null;
+  let transport: Transport | null = null;
+  let starting = false;
+  const startSession = async (name: string, cls: ClassId, team: TeamId | -1): Promise<void> => {
+    if (net || starting) return;
+    starting = true;
+    loadingStep(serverUrl ? 'Calling the server…' : 'Waking up the squad…');
+    transport = serverUrl ? await createWebSocketTransport(serverUrl, em) : createWorkerTransport({ seed, mode, bots }, em);
+    debug.transport = transport.kind;
+    net = new NetClient(transport);
+    net.join(name, cls, team);
+  };
+  const urlCls = (CLASS_IDS as readonly string[]).includes(params.get('cls') ?? '') ? (params.get('cls') as ClassId) : 'assault';
   const teamParam = params.get('team');
-  net.join(params.get('name') ?? 'Rex', cls, teamParam === null ? -1 : (Number(teamParam) as TeamId));
+  const urlTeam: TeamId | -1 = teamParam === null ? -1 : (Number(teamParam) as TeamId);
+  const autoStart = params.has('autoplay') || !!serverUrl;
 
   const input = new InputState();
   input.bind(ctx.renderer.domElement);
@@ -92,29 +101,31 @@ async function main(): Promise<void> {
         location.search = `?server=${encodeURIComponent(o.server)}&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}`;
         return;
       }
+      if (!net) { void startSession(o.name, o.cls, o.team); return; }
       net.transport.send({ t: 'class', cls: o.cls });
       if (o.team !== -1) net.transport.send({ t: 'team', team: o.team });
     },
-    chooseClass: (c) => net.transport.send({ t: 'class', cls: c }),
-    chooseTeam: (team) => { if (team !== -1) net.transport.send({ t: 'team', team }); },
+    chooseClass: (c) => net?.transport.send({ t: 'class', cls: c }),
+    chooseTeam: (team) => { if (team !== -1) net?.transport.send({ t: 'team', team }); },
     setSetting: () => applySettings(hud.settings),
   });
   hud.setUiSound((k) => audio.ui(k));
   applySettings(hud.settings);
-  if (!params.has('autoplay') && !serverUrl) hud.showMenu(true);
+  if (autoStart) await startSession(params.get('name') ?? hud.settings.name ?? 'Rex', urlCls, urlTeam);
+  else hud.showMenu(true);
 
   bus.on('localSpawn', (id) => {
-    const s = net.latestState(id);
+    const s = net?.latestState(id);
     if (s) input.yaw = s.yaw;
   });
   bus.on('disconnected', (reason) => {
     hud.notice(`Disconnected: ${reason}`);
-    if (!net.canReconnect) return;
+    if (!net?.canReconnect) return;
     const btn = document.createElement('button');
     btn.textContent = 'Reconnect';
     btn.className = 'interactive';
     btn.style.cssText = 'position:absolute;left:50%;top:60%;transform:translateX(-50%);font:800 22px system-ui;padding:10px 22px;border:3px solid #1a120c;border-radius:12px;background:#f2c14e;cursor:pointer;pointer-events:auto';
-    btn.onclick = () => { btn.remove(); net.reconnect(); };
+    btn.onclick = () => { btn.remove(); void net?.reconnect(); };
     ui.appendChild(btn);
   });
   bus.on('roster', (r) => nameplates.setRoster(r));
@@ -134,7 +145,8 @@ async function main(): Promise<void> {
     hud.onGameEvent(ev);
   });
 
-  let acc = 0, seq = 0, last = performance.now(), fpsFrames = 0, fpsStart = last;
+  let acc = 0, seq = 0, last = performance.now(), fpsFrames = 0, fpsStart = last, menuT = 0;
+  const EMPTY = new Map<number, EntityState>();
   const focus = new THREE.Vector3();
   ctx.renderer.setAnimationLoop(() => {
     const now = performance.now();
@@ -144,17 +156,18 @@ async function main(): Promise<void> {
     acc += dt;
     while (acc >= TICK_DT) {
       acc -= TICK_DT;
-      if (net.connected) { const cmd = input.sample(++seq, TICK_DT); cmd.rt = Math.max(0, Math.round(net.renderTime(now) * net.tickHz)); net.pushInput(cmd); }
+      if (net?.connected) { const cmd = input.sample(++seq, TICK_DT); cmd.rt = Math.max(0, Math.round(net.renderTime(now) * net.tickHz)); net.pushInput(cmd); }
     }
-    net.flush();
+    net?.flush();
 
-    const states = net.interpolated(now);
+    const states = net ? net.interpolated(now) : EMPTY;
+    const localId = net?.localEntity ?? -1;
     const pdt = dt * fx.hitStop(); // hit-stop slows presentation only, never the sim
-    views.sync(states, net.localEntity, pdt);
+    views.sync(states, localId, pdt);
     vehicles.sync(states, pdt);
     bossFx.update(dt, states);
     bossBar.update(states, dt);
-    const local = states.get(net.localEntity) ?? null;
+    const local = states.get(localId) ?? null;
     const kart = local ? mountedVehicle(local, states) : null;
     if (kart) {
       const c = vehicleCameraFor(kart);
@@ -164,11 +177,18 @@ async function main(): Promise<void> {
     } else if (local) {
       focus.set(local.x, local.y, local.z);
       cam.update(focus, input.yaw, input.pitch, (local.flags & EFlag.Aiming) !== 0, dt, Math.hypot(local.vx, local.vz));
+    } else if (!net) {
+      // Menu backdrop: a slow orbit over the yard.
+      menuT += dt * 0.05;
+      ctx.camera.position.set(Math.sin(menuT) * 55, 18 + Math.sin(menuT * 0.7) * 4, Math.cos(menuT) * 55);
+      ctx.camera.lookAt(0, 2, 0);
     }
+    const lv = views.get(localId); // hide our own avatar when a wall squeezes the camera into it
+    if (lv) lv.avatar.root.visible = !!kart || cam.boom > 0.75;
     worldView.update(dt, ctx.camera);
-    fx.update(dt, states, net.localEntity);
-    audio.update(ctx.camera, states, net.localEntity, dt);
-    nameplates.update(states, net.localEntity, local?.team ?? 0, ctx.camera, (id) => views.get(id)?.avatar.height ?? 1.4);
+    fx.update(dt, states, localId);
+    audio.update(ctx.camera, states, localId, dt);
+    nameplates.update(states, localId, local?.team ?? 0, ctx.camera, (id) => views.get(id)?.avatar.height ?? 1.4);
     ctx.render();
     quality.update(frameMs);
 
@@ -176,12 +196,12 @@ async function main(): Promise<void> {
     if (now - fpsStart > 500) { debug.fps = (fpsFrames * 1000) / (now - fpsStart); fpsFrames = 0; fpsStart = now; }
     debug.frames++;
     debug.frameMs = frameMs;
-    debug.localEntity = net.localEntity;
+    debug.localEntity = localId;
     debug.entities = states.size;
     debug.local = local ? { x: local.x, y: local.y, z: local.z, hp: local.hp } : null;
     debug.ready = !!local && debug.frames > 5;
-    if (local && debug.frames > 2) hideLoading();
-    hud.update({ local, match: net.match, roster: net.roster, fps: debug.fps, rttMs: net.stats.rttMs, locked: input.locked || params.has('autoplay'), backend: ctx.backend, transport: transport.kind, states });
+    if ((local || !net) && debug.frames > 2) hideLoading();
+    hud.update({ local, match: net?.match ?? null, roster: net?.roster ?? [], fps: debug.fps, rttMs: net?.stats.rttMs ?? 0, locked: input.locked || params.has('autoplay') || !net, backend: ctx.backend, transport: transport?.kind ?? 'none', states });
   });
 }
 

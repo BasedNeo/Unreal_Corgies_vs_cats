@@ -1,7 +1,7 @@
 // Character movement on Rapier's kinematic character controller.
 // Exposed as a pure per-entity function so client-side prediction can replay inputs with the
 // exact same code the authority runs.
-import type { KinematicCharacterController, World } from '@dimforge/rapier3d-compat';
+import type { CharacterCollision, KinematicCharacterController, World } from '@dimforge/rapier3d-compat';
 import type { SimEntity } from '../entity';
 import { pressed, held } from '../entity';
 import type { SimSystem } from '../sim';
@@ -12,9 +12,14 @@ import { CHARACTER_MOVE_FILTER } from '../rapier';
 import type { GameEvent } from '../../shared/protocol';
 
 const SLIDE_TIME = 0.65;
-const SLIDE_FRICTION = 1.1;
+/** Slide entry speed as a multiple of sprint speed: a slide must out-distance sprinting (QA W1). */
+const SLIDE_BOOST = 1.25;
+const SLIDE_FRICTION = 0.55;
 const SLIDE_COOLDOWN = 0.35;
 const POUND_SPEED = -26;
+
+/** Reused result object for KCC collision queries (no per-tick allocation). */
+let collisionScratch: CharacterCollision | undefined;
 
 export interface MoveContext {
   world: World;
@@ -48,7 +53,7 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
   const hsNow = Math.hypot(e.vel.x, e.vel.z);
   if (pressed(e, Btn.Crouch) && c.grounded && c.slideTime <= 0 && c.slideCooldown <= 0 && hsNow > m.runSpeed * 0.9) {
     c.slideTime = SLIDE_TIME;
-    const boost = Math.max(hsNow, m.sprintSpeed * 1.08) / Math.max(0.001, hsNow);
+    const boost = Math.max(hsNow, m.sprintSpeed * SLIDE_BOOST) / Math.max(0.001, hsNow);
     e.vel.x *= boost; e.vel.z *= boost;
     ctx.emit?.({ e: 'ability', id: e.id, ability: 'slide', x: e.pos.x, y: e.pos.y, z: e.pos.z });
   }
@@ -114,11 +119,26 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
   const nx = t.x + mv.x, ny = t.y + mv.y, nz = t.z + mv.z;
   e.collider.setTranslation({ x: nx, y: ny, z: nz });
   e.pos.x = nx; e.pos.y = ny - (m.capsuleHalfHeight + m.capsuleRadius); e.pos.z = nz;
-  // Blocked horizontally: bleed velocity so we don't keep pushing into walls.
-  if (dt > 0) {
-    if (Math.abs(mv.x) < Math.abs(desired.x) * 0.5) e.vel.x = mv.x / dt;
-    if (Math.abs(mv.z) < Math.abs(desired.z) * 0.5) e.vel.z = mv.z / dt;
-    if (e.vel.y > 0 && mv.y < desired.y * 0.5) e.vel.y = 0; // head bump
+  // Collide & slide for velocity too: remove only the component pushing INTO what we actually hit (wall or
+  // ceiling normals). The old "movement shorter than half the request → zero the axis" rule turned one-tick
+  // controller hiccups into dead stops mid-sprint (QA W1).
+  const n = ctx.kcc.numComputedCollisions();
+  const feetBefore = t.y - (m.capsuleHalfHeight + m.capsuleRadius);
+  for (let i = 0; i < n; i++) {
+    const col = ctx.kcc.computedCollision(i, collisionScratch);
+    if (!col) continue;
+    collisionScratch = col;
+    // Contacts at the very bottom of the capsule are floor contacts, even when the controller reports a skewed
+    // normal (seam/edge artifacts on flat ground); treating them as walls kicked the character sideways.
+    if (col.witness2.y - feetBefore < 0.06) continue;
+    const nx = col.normal1.x, ny = col.normal1.y, nz = col.normal1.z; // outward from the obstacle
+    if (ny < -0.6) { if (e.vel.y > 0) e.vel.y = 0; continue; } // ceiling / head bump
+    if (ny > 0.6) continue; // floor-ish: grounding handles it
+    const hl = Math.hypot(nx, nz);
+    if (hl < 1e-4) continue;
+    const hx = nx / hl, hz = nz / hl;
+    const into = e.vel.x * hx + e.vel.z * hz;
+    if (into < 0) { e.vel.x -= hx * into; e.vel.z -= hz * into; }
   }
   if (c.grounded) {
     if (!wasGrounded && e.vel.y < -2) {

@@ -100,6 +100,22 @@ describe('server lifecycle over WebSockets', () => {
     await until(() => late.net.latestState(a.net.localEntity) !== null && late.net.latestState(oldEnt) === null, 2000, 'late sees new A only');
   });
 
+  it('one address may occupy at most maxRoomsPerIp distinct rooms (room-flood guard)', async () => {
+    const s = await start({ maxRoomsPerIp: 2, roomTtlMs: 5000 });
+    const a = await raw(`${s.wsUrl}/?room=r1`); a.hello();
+    const b = await raw(`${s.wsUrl}/?room=r2`); b.hello();
+    await until(() => s.rooms.size === 2, 8000, 'two rooms');
+    const c = await raw(`${s.wsUrl}/?room=r3`); c.hello();
+    await until(() => c.closed.code !== 0, 8000, 'third room refused');
+    expect(c.closed.code).toBe(1013);
+    expect(s.rooms.size).toBe(2);
+    // Joining a room that already exists is still fine.
+    const d = await raw(`${s.wsUrl}/?room=r1`); d.hello();
+    await sleep(300);
+    expect(d.closed.code).toBe(0);
+    for (const x of [a, b, c, d]) x.ws.close();
+  });
+
   it('rooms are isolated, created on demand and destroyed when empty', async () => {
     const s = await start({ roomTtlMs: 50 });
     const a = await player(`${s.wsUrl}/?room=alpha`, 'A');

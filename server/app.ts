@@ -236,6 +236,12 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
     async function join(hello: Extract<ClientMsg, { t: 'hello' }>): Promise<void> {
       let mr: ManagedRoom | null = null;
       let failed = false;
+      // A new room costs a whole simulation: cap how many distinct rooms one address may occupy.
+      if (!rooms.get(c.roomName)) {
+        const occupied = new Set<string>();
+        for (const o of clients.values()) if (o !== c && o.ip === c.ip && (o.joined || o.joining)) occupied.add(o.roomName);
+        if (occupied.size >= cfg.maxRoomsPerIp) { kick(c, 1013, 'too many rooms from your address'); return; }
+      }
       try {
         mr = await rooms.acquire(c.roomName, id);
       } catch (err) {

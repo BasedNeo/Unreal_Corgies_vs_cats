@@ -1,6 +1,8 @@
 // OWNER: L5 (juice). UI strings + presentation-only tuning (MASTER_PLAN §12: UI strings are theme data).
 // Original copy — no quotes, names or jokes from any existing franchise.
 import type { ClassId } from '../../shared/types';
+import { ABILITIES } from '../../shared/content/abilities';
+import { COMBAT_RULES } from '../../shared/content/weapons';
 
 export const TITLE = { left: 'CORGIS', vs: 'VS', right: 'CATS', tagline: 'The backyard war for the last tennis ball.' };
 
@@ -22,12 +24,13 @@ export const ABILITY_LABELS: Record<string, string> = {
 };
 
 /** Client-side cooldown estimates (s) used only when the lead can't pass authoritative values via HudModel.ability. */
-export const ABILITY_COOLDOWN_ESTIMATE: Record<string, number> = {
-  bark_blast: 8, shadow_cloak: 12, spotter_drone: 15, dig_charge: 10, squeak_barrier: 14, ear_glide: 6,
-};
+// Cooldowns and respawn time come from the authority's content tables so the HUD never contradicts the sim.
+export const ABILITY_COOLDOWN_ESTIMATE: Record<string, number> = Object.fromEntries(
+  Object.entries(ABILITIES).map(([id, def]) => [id, def.cooldown]),
+);
 
 /** Default respawn countdown (s) when HudModel.respawnIn is not provided. */
-export const RESPAWN_ESTIMATE = 5;
+export const RESPAWN_ESTIMATE = COMBAT_RULES.respawnDelay;
 /** Default reload duration (s) for the progress chip when HudModel.reloadFrac is not provided. */
 export const RELOAD_ESTIMATE = 1.6;
 

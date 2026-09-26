@@ -51,7 +51,8 @@ export interface Archetype {
 const DEG = Math.PI / 180;
 
 const BASE: Omit<Archetype, 'id' | 'label' | 'cls'> = {
-  speedMult: 1, reaction: [0.28, 0.45], aimErr: 6 * DEG, aimErrMin: 0.75 * DEG, aimSettle: 0.7,
+  // Human-feeling aim: bots settle to ~1.6° (a near miss at 20 m), not laser accuracy (QA W1 difficulty).
+  speedMult: 1, reaction: [0.35, 0.55], aimErr: 7.5 * DEG, aimErrMin: 1.6 * DEG, aimSettle: 0.9,
   turnRate: 5.5, aimLambda: 9, sightRange: 45, fovHalf: 55 * DEG, burst: [3, 7], burstPause: [0.2, 0.45],
   strafe: 0.8, jumpRate: 0.12, retreatHp: 0.3, telegraph: 0, headChance: 0.1, adsBeyond: 14,
 };
@@ -68,7 +69,7 @@ export const ARCHETYPES: Record<ArchetypeId, Archetype> = {
   // PvE wave fodder: a touch slower and looser than team-fill bots so co-op squads feel strong
   grunt: {
     ...BASE, id: 'grunt', label: 'Tabby', cls: 'assault', weapon: 'squeaker_rifle',
-    reaction: [0.35, 0.55], aimErr: 7 * DEG, aimErrMin: 1.1 * DEG, burstPause: [0.3, 0.6], retreatHp: 0.25,
+    reaction: [0.45, 0.7], aimErr: 9 * DEG, aimErrMin: 2.2 * DEG, burstPause: [0.35, 0.7], retreatHp: 0.25,
   },
   sniper: { ...BASE, ...SNIPER_TUNING, telegraph: 1.1, aimErrMin: 0.45 * DEG, id: 'sniper', label: 'Siamese', cls: 'overwatch', weapon: 'laser_longshot' },
   brute: {

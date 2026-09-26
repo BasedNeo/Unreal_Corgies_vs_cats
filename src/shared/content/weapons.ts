@@ -209,6 +209,11 @@ export const COMBAT_RULES = {
   friendlyFire: false,
   /** Seconds before a dead player / room bot respawns. */
   respawnDelay: 3,
+  /**
+   * Damage bots (and bosses) deal to human players, per mode. Bots don't miss the way humans do and never
+   * tire, so PvE damage is softened (QA W1: first death at 12–16 s, 3–4 deaths/min for a competent player).
+   */
+  botToPlayerDamage: { 'yard-skirmish': 0.42, 'team-deathmatch': 0.8 } as Record<string, number>,
   /** Seconds of spawn protection (ends early when the player fires). */
   spawnInvulnerable: 1.5,
   /** Seconds without taking damage before health regenerates. */

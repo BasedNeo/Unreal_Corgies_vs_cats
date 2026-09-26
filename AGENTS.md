@@ -26,3 +26,7 @@ Multiplayer third-person action-platformer shooter. Browser client (Three.js `th
 - Raycasts in the client must skip ink lines (`LineSegments2`) — use solid mesh lists.
 - Headless Chromium renders with SwiftShader (WebGL2 fallback, ~5–10 fps): judge looks from screenshots, fps on real GPUs.
 - Movement code is shared by the authority and client prediction: change `stepCharacter` only through the lead.
+- Never `git add -A` for an integration commit while other agents are editing: stage explicit paths, then run
+  `npm run verify` (checks the committed tree in isolation) before calling it green.
+- Snapshot quantization rounds height UP (`src/host/quantize.ts`): rounding to nearest parks characters on the KCC's
+  2 cm skin, where Rapier deadlocks on flat ground.

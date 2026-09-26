@@ -8,7 +8,8 @@ export default defineConfig({
   worker: { format: 'es' },
   build: {
     target: 'es2022',
-    sourcemap: true,
+    // Source maps only on request (VITE_SOURCEMAP=1): shipping them added 17 MB to dist/ (QA W1 P2).
+    sourcemap: process.env.VITE_SOURCEMAP === '1',
     chunkSizeWarningLimit: 4000,
   },
   test: {
