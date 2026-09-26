@@ -96,6 +96,18 @@ Newest first. Every task appends: what changed, proof (command + result + screen
     rams pets (`64d2684`);
   - an e2e for ADVENTURE → chapter 2 from the menu (`90e7f93`); the controls list and menu footer (`626fde5`);
   - a plane lift-off whoosh (`9fb5410`); no duplicate WAVE chip (`4bdfcb7`); kart/plane kill-feed glyphs (`2abe2c5`).
+  - Budgets after Wave 4 (§8.7), measured at the free-mode spawn view with `tools/perf-render.mjs`, A/B against
+    `62a41ba`:
+
+    | | Before Wave 4 | After | Budget |
+    |---|---|---|---|
+    | High: draws | 121 | 125 | 400 |
+    | High: triangles | 1.19 M | 1.29 M | 1.5 M |
+    | Low: draws | 71 | 74 | |
+    | Low: triangles | 680 k | 733 k | |
+
+    Initial download: 4.02 MB gzipped offline, 2.99 MB Brotli (budget 5 MB); online skips the worker chunk, about
+    2.3 MB gzipped.
 ### 2026-09-26 — Wave 3 complete (lead)
 - **All lanes merged**; every integration commit verified in isolation including e2e (`npm run verify -- --e2e`).
   Soak PASS across skirmish, TDM and core-rush (0 errors, tick p95 ≤ 1.4 ms).
@@ -201,7 +213,8 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 - Adventure (A1/A2):
   - bots shoot adventure props and breach with Dig Charges, but still don't drive, fly or climb (waived for a bot-only
     squad; humans get a 120 s grace);
-  - ch6 step 1 needs a Skyraider (online joiners bring their own kit and wait out the grace);
+  - ch6 step 1 needs a Skyraider. Joining a listed adventure room now takes the chapter's kit (`096be58`); a joiner
+    who types the room name by hand keeps their kit and waits out the grace.
   - ch5's difficulty for humans is unknown (bots never wipe);
   - one adventure chapter per page on the client; picker locks are cosmetic; sentry cones draw through walls
     (intended readability).
