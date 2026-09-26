@@ -19,7 +19,7 @@ import { surfaceAt } from '../../shared/world/queries';
 import { VEHICLES, TERMINALS, vehicleByIndex, terminalByIndex } from '../../shared/content/vehicles';
 import { toon, glow } from '../style/style-webgpu.js';
 import { PALETTE, STYLE } from '../style/style-tokens.js';
-import { kartAssets, KART_WHEELS, KART_EXHAUST, KART_HOOD } from './kart-model';
+import { kartAssets, KART_WHEELS, KART_EXHAUST, KART_HOOD, KART_CHUTE } from './kart-model';
 import { terminalAssets, SCREEN } from './terminal-model';
 import { measureObject } from './parts';
 
@@ -130,6 +130,14 @@ class Puffs {
 const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), tmpS = new THREE.Vector3(), tmpM = new THREE.Matrix4();
 const tmpE = new THREE.Euler(0, 0, 0, 'YXZ');
 
+/** Mowing only makes clippings on grass: terrain (not a deck/ramp) that is not a dirt/sand/mulch path. */
+function onLawn(world: WorldData | undefined, s: EntityState): boolean {
+  if (!world) return true;
+  if (surfaceAt(world, s.x, s.z, s.y + 0.3).kind !== 'terrain') return false;
+  const f = world.surface?.(s.x, s.z);
+  return !f || f.dirt + f.sand + f.mulch < 0.5;
+}
+
 class KartView {
   readonly root = new THREE.Group();
   private body = new THREE.Group();
@@ -149,6 +157,7 @@ class KartView {
   private grounded = true;
   private puffT = 0;
   private smokeT = 0;
+  private clipT = 0;
   private t = 0;
   readonly team: TeamId;
   readonly seed: number;
@@ -256,9 +265,19 @@ class KartView {
       const busy = (s.flags & EFlag.Busy) !== 0;
       this.puffT = boosting ? 0.045 : busy ? 0.22 - Math.min(0.12, speed * 0.008) : 0.6;
       tmpV.copy(KART_EXHAUST).applyMatrix4(this.body.matrixWorld);
-      const r = hash2(Math.floor(this.t * 60), this.seed, 7);
-      puffs.spawn(tmpV.x, tmpV.y + 0.05, tmpV.z, s.vx * 0.3 + (r - 0.5) * 0.4, 0.8 + r * 0.6, s.vz * 0.3 + (r - 0.5) * 0.4,
-        boosting ? 0.35 : 0.8, boosting ? 0.1 : 0.08, boosting ? 0.3 : 0.26, boosting ? PALETTE.glowOrange : r < 0.5 ? PALETTE.hullLight : PALETTE.concrete);
+      const r = hash2(Math.floor(this.t * 60), this.seed, 7), r2 = hash2(Math.floor(this.t * 60), this.seed, 8);
+      puffs.spawn(tmpV.x, tmpV.y + 0.05, tmpV.z, s.vx * 0.3 + (r - 0.5) * 0.4, 0.8 + r * 0.6, s.vz * 0.3 + (r2 - 0.5) * 0.4,
+        boosting ? 0.35 : 0.8, boosting ? 0.12 : 0.08, (boosting ? 0.3 : 0.22) * (0.8 + r2 * 0.5), boosting ? PALETTE.glowOrange : r < 0.5 ? PALETTE.hullLight : PALETTE.concrete);
+    }
+    // Mowing: the side chute spits grass clippings while the kart rolls over the lawn.
+    this.clipT -= dt;
+    if (grounded && speed > 3 && this.clipT <= 0 && onLawn(world, s)) {
+      this.clipT = 0.11 - Math.min(0.06, speed * 0.004);
+      tmpV.copy(KART_CHUTE).applyMatrix4(this.body.matrixWorld);
+      const rx = Math.cos(s.yaw), rz = -Math.sin(s.yaw);
+      const r = hash2(Math.floor(this.t * 70), this.seed, 5), r2 = hash2(Math.floor(this.t * 70), this.seed, 6);
+      const out = 2.2 + r * 1.5;
+      puffs.spawn(tmpV.x, tmpV.y, tmpV.z, s.vx * 0.5 + rx * out, 0.9 + r2 * 0.8, s.vz * 0.5 + rz * out, 0.45, 0.05, 0.13 + r * 0.06, r2 < 0.5 ? PALETTE.grass : PALETTE.grassDry);
     }
     this.smokeT -= dt;
     const hpFrac = s.maxHp > 0 ? s.hp / s.maxHp : 1;
@@ -268,14 +287,16 @@ class KartView {
         for (let i = 0; i < 2; i++) {
           const w = KART_WHEELS[i];
           tmpV.set(w.x, 0.08, w.z + 0.1).applyMatrix4(this.root.matrixWorld);
-          const r = hash2(Math.floor(this.t * 90), this.seed + i, 3);
-          puffs.spawn(tmpV.x, tmpV.y, tmpV.z, -s.vx * 0.12 + (r - 0.5), 0.5 + r * 0.4, -s.vz * 0.12 + (r - 0.5), 0.55, 0.12, 0.42, PALETTE.hullLight);
+          const r = hash2(Math.floor(this.t * 90), this.seed + i, 3), r2 = hash2(Math.floor(this.t * 90), this.seed + i, 4);
+          puffs.spawn(tmpV.x + (r2 - 0.5) * 0.2, tmpV.y, tmpV.z, -s.vx * 0.12 + (r - 0.5), 0.4 + r * 0.5, -s.vz * 0.12 + (r2 - 0.5),
+            0.5 + r2 * 0.3, 0.14, 0.34 + r * 0.3, r2 < 0.6 ? PALETTE.hullLight : PALETTE.concrete);
         }
       }
       if (hpFrac < 0.35) {
         tmpV.copy(KART_HOOD).applyMatrix4(this.body.matrixWorld);
         const r = hash2(Math.floor(this.t * 40), this.seed, 11);
-        puffs.spawn(tmpV.x + (r - 0.5) * 0.2, tmpV.y, tmpV.z, s.vx * 0.2, 1.1 + r * 0.5, s.vz * 0.2, 1.0, 0.1, 0.36, hpFrac < 0.15 ? PALETTE.ink : PALETTE.catGrey);
+        const fx = -Math.sin(s.yaw), fz = -Math.cos(s.yaw);
+        puffs.spawn(tmpV.x + (r - 0.5) * 0.2, tmpV.y, tmpV.z, s.vx * 0.2 + fx * 0.4, 1.2 + r * 0.5, s.vz * 0.2 + fz * 0.4, 1.0, 0.1, 0.36, hpFrac < 0.15 ? PALETTE.ink : PALETTE.catGrey);
       }
     }
   }
@@ -421,8 +442,8 @@ export function vehicleCameraFor(s: EntityState): VehicleCameraParams {
   const fwd = -Math.sin(s.yaw) * s.vx - Math.cos(s.yaw) * s.vz;
   const boosting = (s.flags & EFlag.Sprinting) !== 0;
   return {
-    distance: 5.2 + 1.8 * t,
-    height: 1.55,
+    distance: 4.4 + 1.8 * t,
+    height: 1.5,
     fov: 64 + 9 * t + (boosting ? 5 : 0),
     shoulder: 0,
     pitch: -0.2,

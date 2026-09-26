@@ -285,6 +285,7 @@ export class Room {
   /** Apply one input's movement ahead of the regular tick (same function, same order as the client). */
   private stepExtra(e: SimEntity, cmd: InputCmd): void {
     this.sim.setInput(e.id, cmd);
+    if (e.flags & EFlag.Mounted) return; // riders are moved by their vehicle during regular ticks
     stepCharacter(this.moveCtx, e, TICK_DT);
     // Map effects run right after movement in a regular tick (order 250); mirror that here.
     if (stepWorldEffects(this.sim.worldData, e, TICK_DT, this.moveCtx.emit).outOfBounds) {

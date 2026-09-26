@@ -7,7 +7,8 @@ import { aiSystems } from '../ai';
 import { matchSystems } from '../match';
 import { worldSystems } from '../world/systems';
 import { bossSystems } from '../boss';
+import { vehicleSystems } from '../vehicles';
 
 export function createDefaultSystems(): SimSystem[] {
-  return [...aiSystems(), movementSystem, ...worldSystems(), physicsStepSystem, ...combatSystems(), killPlaneSystem, ...matchSystems(), ...bossSystems()];
+  return [...aiSystems(), movementSystem, ...worldSystems(), physicsStepSystem, ...combatSystems(), killPlaneSystem, ...matchSystems(), ...bossSystems(), ...vehicleSystems()];
 }

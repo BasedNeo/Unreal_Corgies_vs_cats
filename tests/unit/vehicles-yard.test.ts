@@ -12,7 +12,9 @@ import { movementSystem } from '../../src/sim/systems/movement';
 import { physicsStepSystem } from '../../src/sim/systems/core';
 import { worldSystems } from '../../src/sim/world/systems';
 import { groups, Layer } from '../../src/sim/rapier';
-import { vehicleSystems, spawnKart, mountKart, findTerminalSite } from '../../src/sim/vehicles';
+import { vehicleSystems, spawnKart, mountKart, findTerminalSite, useTerminal } from '../../src/sim/vehicles';
+import { createDefaultSystems } from '../../src/sim/systems';
+import type { GameEvent } from '../../src/shared/protocol';
 import { TERMINALS, VEHICLES } from '../../src/shared/content/vehicles';
 
 const KART = VEHICLES.mower_kart;
@@ -153,4 +155,62 @@ describe('vehicles on the West Yard', () => {
     expect(kart.pos.x).toBeGreaterThan(bd.minX);
     expect(kart.pos.x).toBeLessThan(bd.maxX);
   });
+
+  it('places terminals only for Room match modes (or when asked), never in bare test sims', async () => {
+    const count = (sim: Sim) => [...sim.entities.values()].filter((e) => e.kind === EntityKind.Terminal).length;
+    const bare = await Sim.create({ seed: 1, world: createWorldData(1), systems: vehicleSystems() });
+    bare.step();
+    expect(count(bare)).toBe(0);
+    const neutral = await Sim.create({ seed: 1, world: createWorldData(1), systems: vehicleSystems() });
+    neutral.state.room = { mode: 'net-bandwidth' };
+    neutral.step();
+    expect(count(neutral)).toBe(0);
+    for (const mode of TERM.modes) {
+      const sim = await Sim.create({ seed: 1, world: createWorldData(1), systems: vehicleSystems() });
+      sim.state.room = { mode };
+      sim.step();
+      expect(count(sim)).toBe(2);
+    }
+  });
+
+  it('runs inside the full default system list: 16 bots + a kart driver for 30 s of team deathmatch', async () => {
+    const vs = vehicleSystems();
+    let vehicleMs = 0;
+    const timed = vs.map((s) => ({ ...s, update(sim: Sim, dt: number) { const t0 = performance.now(); s.update(sim, dt); vehicleMs += performance.now() - t0; } }));
+    // The default list already contains the vehicle systems (wired by the lead): swap them for timed copies.
+    const names = new Set(vs.map((s) => s.name));
+    const sim = await Sim.create({ seed: 2, world: createWorldData(1), systems: [...createDefaultSystems().filter((s) => !names.has(s.name)), ...timed] });
+    sim.state.room = { mode: 'team-deathmatch' };
+    for (let i = 0; i < 16; i++) {
+      const team = (i % 2) as TeamId;
+      sim.spawnCharacter({ kind: EntityKind.Bot, team, species: team === Team.Cats ? Species.Cat : Species.Corgi, cls: 'assault', name: `bot${i}` });
+    }
+    sim.step();
+    const term = [...sim.entities.values()].find((e) => e.kind === EntityKind.Terminal && e.team === Team.Corgis)!;
+    const fx = Math.sin(term.yaw), fz = Math.cos(term.yaw);
+    const p = pet(sim, Team.Corgis, term.pos.x - fx * 1.8, term.pos.z - fz * 1.8);
+    for (let i = 0; i < 400; i++) { sim.step(); sim.drainEvents(); } // warmup ends, bots spread out
+    vehicleMs = 0;
+    const kart = useTerminal(sim, term, p)!;
+    expect(kart).not.toBeNull();
+    sim.step();
+    mountKart(sim, kart, p);
+    const rng = mulberry32(11);
+    const evs: GameEvent[] = [];
+    let mx = 0, b = 0;
+    const ticks = 60 * 30;
+    for (let i = 0; i < ticks; i++) {
+      if (i % 50 === 0) { mx = rng() * 2 - 1; b = rng() < 0.3 ? Btn.Sprint : rng() < 0.3 ? Btn.Jump : 0; }
+      if (p.seat) sim.setInput(p.id, { seq: seq++, mx, mz: 1, yaw: p.input.yaw, pitch: 0, buttons: b, rt: 0 });
+      sim.step();
+      evs.push(...sim.drainEvents());
+      for (const e of sim.entities.values()) for (const v of [e.pos.x, e.pos.y, e.pos.z]) expect(Number.isFinite(v)).toBe(true);
+    }
+    const perTick = vehicleMs / ticks;
+    console.log(`[vehicles] full sim, 16 bots + 1 kart: vehicle systems ${perTick.toFixed(3)} ms/tick; hits on/by kart: ${evs.filter((e) => e.e === 'hit' && (e.dst === kart.id || e.src === p.id)).length}; kart hp ${kart.health!.hp}${kart.removed ? ' (destroyed)' : ''}`);
+    // Budget check is informative on shared/loaded machines; hard-fail only on a gross regression.
+    expect(perTick).toBeLessThan(process.env.CI ? 0.6 : 2.5);
+    expect([...sim.entities.values()].filter((e) => e.kind === EntityKind.Terminal)).toHaveLength(2);
+  });
 });
+

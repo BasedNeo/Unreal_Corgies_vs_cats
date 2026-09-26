@@ -42,8 +42,20 @@ const TELEPORT_TOLERANCE = 1.5;
 const KART_CLEAR_FILTER = groups(Layer.Vehicle, Layer.World | Layer.Vehicle | Layer.Character);
 const ticks = (s: number) => Math.round(s * TICK_HZ);
 
-/** Test/soak knobs, read on the first tick: `sim.state.vehicleConfig = { autoTerminals: false }`. */
+/**
+ * Test/lab knobs, read on the first tick: `sim.state.vehicleConfig = { autoTerminals: true | false }`.
+ * Default: terminals are placed when the Room's match mode lists them (TerminalDef.modes), so bare
+ * unit-test sims of other systems never get surprise kiosks in their arenas.
+ */
 export interface VehicleConfig { autoTerminals?: boolean }
+
+/** Should this sim place its terminals from the world data? */
+export function autoTerminalsFor(sim: Sim): boolean {
+  const cfg = sim.state.vehicleConfig as VehicleConfig | undefined;
+  if (cfg?.autoTerminals !== undefined) return cfg.autoTerminals;
+  const mode = (sim.state.room as { mode?: string } | undefined)?.mode;
+  return mode !== undefined && TERMINALS.kart_terminal.modes.includes(mode);
+}
 
 function blankEntity(sim: Sim, kind: typeof EntityKind.Vehicle | typeof EntityKind.Terminal, team: TeamId, name: string): SimEntity {
   const id = sim.allocId();
@@ -94,13 +106,12 @@ export function spawnKart(sim: Sim, vehicle: VehicleId, team: TeamId, x: number,
     sim.R.ColliderDesc.convexHull(kartHullPoints(d))!
       .setTranslation(x, y + d.halfHeight + 0.02, z).setCollisionGroups(VEHICLE_GROUPS),
   );
-  e.collider.setActiveCollisionTypes(sim.R.ActiveCollisionTypes.DEFAULT | sim.R.ActiveCollisionTypes.KINEMATIC_FIXED);
   tagCollider(sim, e);
   sim.entities.set(e.id, e);
   return e;
 }
 
-/** Place both teams' terminals from the world data (idempotent per Sim). */
+/** Place both teams' terminals from the world data (the interact system does this once, on tick 0). */
 export function placeTerminals(sim: Sim): SimEntity[] {
   const out: SimEntity[] = [];
   for (const team of [Team.Corgis, Team.Cats] as TeamId[]) {
@@ -489,6 +500,7 @@ function kartContacts(sim: Sim, kart: SimEntity, rider: SimEntity | undefined): 
     const kn = kart.vel.x * nx + kart.vel.z * nz;
     const cn = c.vel.x * nx + c.vel.z * nz;
     const closing = kn - cn;
+    const heavy = c.kind === EntityKind.Boss; // bosses are rammed (damage) but never shoved or launched
     if (closing > d.ramMinSpeed && (k.ramUntil[c.id] ?? -1) < sim.tick) {
       k.ramUntil[c.id] = sim.tick + ticks(d.ramCooldown);
       const enemy = COMBAT_RULES.friendlyFire || c.team !== team;
@@ -498,16 +510,18 @@ function kartContacts(sim: Sim, kart: SimEntity, rider: SimEntity | undefined): 
       }
       const s = (closing * d.ramKnockback + 2) * (enemy ? 1 : 0.5);
       const kx = nx * s + kart.vel.x * 0.25, kz = nz * s + kart.vel.z * 0.25, ky = (d.ramLift + closing * 0.2) * (enemy ? 1 : 0.5);
-      if (cn < 0) { c.vel.x -= cn * nx; c.vel.z -= cn * nz; }
-      if (c.dead) { c.vel.x += kx; c.vel.z += kz; c.vel.y = Math.max(c.vel.y, ky); c.char.grounded = false; }
-      else knockback(c, kx, ky, kz);
+      if (!heavy) {
+        if (cn < 0) { c.vel.x -= cn * nx; c.vel.z -= cn * nz; }
+        if (c.dead) { c.vel.x += kx; c.vel.z += kz; c.vel.y = Math.max(c.vel.y, ky); c.char.grounded = false; }
+        else knockback(c, kx, ky, kz);
+      }
       kart.vel.x *= 1 - d.ramKartSlow; kart.vel.z *= 1 - d.ramKartSlow;
-    } else if (closing > 0) {
+    } else if (closing > 0 && !heavy) {
       c.vel.x += closing * nx; c.vel.z += closing * nz; // carried along at the kart's pace
     }
     const pen = rr - dist;
     if (pen > 1e-3) {
-      const moved = shoveCharacter(sim, c, nx * pen, nz * pen);
+      const moved = heavy ? 0 : shoveCharacter(sim, c, nx * pen, nz * pen);
       if (moved < pen * 0.7 - 0.005 && kart.collider) {
         // Pinned against something solid: the kart gives way instead of swallowing the character.
         const back = pen - moved;
@@ -562,7 +576,7 @@ export const vehicleInteractSystem: SimSystem = {
     const rt = vehicleRuntime(sim);
     if (!rt.sitesPlaced) {
       rt.sitesPlaced = true;
-      if ((sim.state.vehicleConfig as VehicleConfig | undefined)?.autoTerminals !== false) placeTerminals(sim);
+      if (autoTerminalsFor(sim)) placeTerminals(sim);
     }
     // Riders that died, left or were teleported since the last tick.
     for (const e of sim.entities.values()) if (e.kart) validRider(sim, e);

@@ -13,6 +13,7 @@ export class InputState {
   sensitivity = 0.0022;
   invertY = false;
   locked = false;
+  private lastLook = 0;
   private keys = new Set<string>();
   private mouse = 0; // bit0 LMB, bit1 RMB
   private wheelNext = false;
@@ -44,6 +45,7 @@ export class InputState {
     document.addEventListener('pointerlockchange', () => { this.locked = document.pointerLockElement === el; });
     window.addEventListener('mousemove', (e) => {
       if (!this.locked) return;
+      if (e.movementX || e.movementY) this.lastLook = performance.now();
       this.yaw -= e.movementX * this.sensitivity;
       this.pitch -= e.movementY * this.sensitivity * (this.invertY ? -1 : 1);
       this.pitch = clamp(this.pitch, -1.2, 1.1);
@@ -51,6 +53,9 @@ export class InputState {
   }
 
   isDown(code: string): boolean { return this.keys.has(code); }
+
+  /** True if the player moved the view in the last `ms` (auto-follow cameras should back off). */
+  lookedRecently(ms = 900): boolean { return performance.now() - this.lastLook < ms; }
 
   /** Build the command for one simulation tick. */
   sample(seq: number, dt: number): InputCmd {
@@ -71,6 +76,7 @@ export class InputState {
       const dz = (v: number) => (Math.abs(v) < 0.15 ? 0 : v);
       mx += dz(pad.axes[0] ?? 0);
       mz -= dz(pad.axes[1] ?? 0);
+      if (Math.abs(pad.axes[2] ?? 0) > 0.15 || Math.abs(pad.axes[3] ?? 0) > 0.15) this.lastLook = performance.now();
       this.yaw -= dz(pad.axes[2] ?? 0) * 3.2 * dt;
       this.pitch = clamp(this.pitch - dz(pad.axes[3] ?? 0) * 2.2 * dt * (this.invertY ? -1 : 1), -1.2, 1.1);
       const bt = (i: number) => !!pad.buttons[i]?.pressed;

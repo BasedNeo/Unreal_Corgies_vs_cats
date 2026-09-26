@@ -20,6 +20,7 @@ import { createHud } from './ui/hud';
 import { createFx } from './fx';
 import { createAudio } from './audio';
 import { Nameplates } from './views/nameplates';
+import { createVehicleViews, vehicleCameraFor, mountedVehicle, followYaw } from './vehicles';
 import { loadSettings, type Settings } from './ui/settings';
 import { bus } from './core/events';
 import { TICK_DT } from '../shared/constants';
@@ -58,6 +59,7 @@ async function main(): Promise<void> {
   const input = new InputState();
   input.bind(ctx.renderer.domElement);
   const views = new EntityViews(ctx.scene);
+  const vehicles = createVehicleViews(ctx.scene, { world: worldData, camera: ctx.camera });
   const cam = createThirdPersonCamera(ctx.camera);
   cam.setColliders(worldView.cameraColliders);
   const quality = createAdaptiveQuality(ctx.renderer);
@@ -136,8 +138,15 @@ async function main(): Promise<void> {
     const states = net.interpolated(now);
     const pdt = dt * fx.hitStop(); // hit-stop slows presentation only, never the sim
     views.sync(states, net.localEntity, pdt);
+    vehicles.sync(states, pdt);
     const local = states.get(net.localEntity) ?? null;
-    if (local) {
+    const kart = local ? mountedVehicle(local, states) : null;
+    if (kart) {
+      const c = vehicleCameraFor(kart);
+      if (!input.lookedRecently()) input.yaw = followYaw(input.yaw, c.yaw, c.followRate, dt); // swing behind the kart
+      focus.set(kart.x, kart.y, kart.z);
+      cam.update(focus, input.yaw, input.pitch, false, dt, Math.hypot(kart.vx, kart.vz), c);
+    } else if (local) {
       focus.set(local.x, local.y, local.z);
       cam.update(focus, input.yaw, input.pitch, (local.flags & EFlag.Aiming) !== 0, dt, Math.hypot(local.vx, local.vz));
     }

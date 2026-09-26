@@ -4,7 +4,7 @@
 export { vehicleSystems, vehicleInteractSystem, kartStepSystem, vehicleDamageSystem } from './systems';
 export {
   spawnKart, spawnTerminal, placeTerminals, mountKart, dismountKart, useTerminal, damageKart, destroyKart,
-  findExitSpot, capsuleClear, seatPosition, type KartDamageSource, type VehicleConfig,
+  findExitSpot, capsuleClear, seatPosition, autoTerminalsFor, type KartDamageSource, type VehicleConfig,
 } from './systems';
 export {
   stepKart, kartInputFrom, newKartState, newKartStepResult, kartForwardSpeed, NO_KART_INPUT,

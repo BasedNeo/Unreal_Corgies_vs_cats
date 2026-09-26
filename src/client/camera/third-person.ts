@@ -3,8 +3,11 @@ import * as THREE from 'three/webgpu';
 import { damp } from '../../shared/math';
 import { AIM_RAY } from '../../shared/content/weapons';
 
+/** Chase-camera overrides while driving (from vehicleCameraFor); eased in/out over ~0.3 s. */
+export interface CameraVehicleParams { distance: number; height: number; fov: number; shoulder: number }
+
 export interface CameraRig {
-  update(target: THREE.Vector3, yaw: number, pitch: number, aiming: boolean, dt: number, speed: number): void;
+  update(target: THREE.Vector3, yaw: number, pitch: number, aiming: boolean, dt: number, speed: number, vehicle?: CameraVehicleParams | null): void;
   shake(amount: number): void;
   /** Objects the camera must not pass through (terrain, props). Only solid meshes are tested. */
   setColliders(objects: THREE.Object3D[]): void;
@@ -16,6 +19,8 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
   const ray = new THREE.Raycaster();
   const tmp = new THREE.Vector3(), dir = new THREE.Vector3(), want = new THREE.Vector3();
   let solids: THREE.Object3D[] = [];
+  let veh = 0; // 0 on foot … 1 driving
+  const lastVeh: CameraVehicleParams = { distance: 4.4, height: 1.5, fov: 64, shoulder: 0 };
   const rig: CameraRig = {
     setColliders(objects) {
       solids = [];
@@ -25,16 +30,23 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
       });
     },
     shake(a) { trauma = Math.min(1, trauma + a); },
-    update(target, yaw, pitch, aiming, dt, speed) {
-      const pivotTarget = tmp.set(target.x, target.y + AIM_RAY.pivotHeight, target.z); // must match the authority's crosshair ray
+    update(target, yaw, pitch, aiming, dt, speed, vehicle) {
+      if (vehicle) Object.assign(lastVeh, vehicle);
+      veh = damp(veh, vehicle ? 1 : 0, 10, dt); // ~0.3 s blend on mount/dismount
+      const mix = (a: number, b: number) => a + (b - a) * veh;
+      // On foot the pivot must match the authority's crosshair ray (AIM_RAY); driving uses the chase params.
+      const pivotTarget = tmp.set(target.x, target.y + mix(AIM_RAY.pivotHeight, lastVeh.height), target.z);
       if (first) { pivot.copy(pivotTarget); first = false; }
       // Follow tightly horizontally, softer vertically (hides jump bob).
       pivot.x = damp(pivot.x, pivotTarget.x, 22, dt);
       pivot.z = damp(pivot.z, pivotTarget.z, 22, dt);
       pivot.y = damp(pivot.y, pivotTarget.y, 10, dt);
-      dist = damp(dist, aiming ? 2.3 : 4.2 + Math.min(1.2, speed * 0.06), 10, dt);
-      shoulder = damp(shoulder, aiming ? AIM_RAY.shoulderAim : AIM_RAY.shoulderHip, 14, dt);
-      fov = damp(fov, aiming ? 48 : 62 + Math.min(8, speed * 0.5), 8, dt);
+      const footDist = aiming ? 2.3 : 4.2 + Math.min(1.2, speed * 0.06);
+      const footShoulder = aiming ? AIM_RAY.shoulderAim : AIM_RAY.shoulderHip;
+      const footFov = aiming ? 48 : 62 + Math.min(8, speed * 0.5);
+      dist = damp(dist, mix(footDist, lastVeh.distance), 10, dt);
+      shoulder = damp(shoulder, mix(footShoulder, lastVeh.shoulder), 14, dt);
+      fov = damp(fov, mix(footFov, lastVeh.fov), 8, dt);
       camera.fov = fov; camera.updateProjectionMatrix();
       const cp = Math.cos(pitch), sp = Math.sin(pitch);
       // Direction from pivot to camera (behind and above the view direction).

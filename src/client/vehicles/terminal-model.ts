@@ -1,5 +1,5 @@
 // "Kart-O-Matic" vehicle terminal: a chunky vending-machine kiosk in team colors with a big glowing
-// screen (status), a vending chute, a fat button, a toy kart mascot on the roof and a painted pad on
+// screen (status), a vending chute, a fat button, a steering-wheel sign on the roof and a painted pad on
 // the lawn where the kart pops out. Kiosk space: +Y up, screen faces -Z, ground at y = 0.
 // Draw calls: body (vertex-colored toon) + crease ink + screen (glow) + pad ring (toon) = 4.
 import * as THREE from 'three/webgpu';
@@ -7,7 +7,7 @@ import type { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeomet
 import { PALETTE } from '../style/style-tokens.js';
 import { Team, type TeamId } from '../../shared/types';
 import { PartBuilder, at, rbox, box, cyl, cone, torus } from './parts';
-import { KART_PALETTES, addMiniKart } from './kart-model';
+import { KART_PALETTES } from './kart-model';
 
 export interface TerminalAssets {
   body: THREE.BufferGeometry;
@@ -19,7 +19,7 @@ export interface TerminalAssets {
 }
 
 /** Screen placement in kiosk space (center x, bottom y, z) and size. */
-export const SCREEN = { x: 0, y: 1.2, z: -0.487, w: 0.66, h: 0.48 };
+export const SCREEN = { x: 0, y: 1.2, z: -0.497, w: 0.66, h: 0.48 };
 
 const cache = new Map<number, TerminalAssets>();
 
@@ -47,7 +47,15 @@ export function terminalAssets(team: TeamId): TerminalAssets {
   // Header sign with a trim band and a toy kart mascot on the roof.
   b.add(rbox(1.3, 0.32, 0.94, 0.1), at(0, 2.15, 0), P.trim);
   b.add(box(1.32, 0.07, 0.96), at(0, 2.15, 0), P.body);
-  addMiniKart(key, b, at(0, 2.31, 0.02, 0, Math.PI * 0.85), 0.62);
+  // Roof sign: a big upright steering wheel (reads "vehicles here" from across the yard).
+  const sign = team === Team.Cats ? P.accent : P.trim;
+  b.add(cyl(0.05, 0.06, 0.3, 6), at(0, 2.42, 0), P.dark);
+  b.add(torus(0.36, 0.075, 5, 20), at(0, 2.9, 0), sign, true);
+  b.add(cyl(0.11, 0.11, 0.1, 10), at(0, 2.9, 0, Math.PI / 2), P.dark, true);
+  for (let i = 0; i < 3; i++) {
+    const ang = Math.PI / 2 + (i / 3) * Math.PI * 2;
+    b.add(box(0.07, 0.3, 0.06), at(Math.cos(ang) * 0.2, 2.9 + Math.sin(ang) * 0.2, 0, 0, 0, ang - Math.PI / 2), sign);
+  }
   // Chevrons on the pad side pointing to where the kart appears.
   for (let i = 0; i < 2; i++) b.add(cone(0.12, 0.2, 3), at(0.6, 1.25 - i * 0.26, 0, Math.PI / 2, 0, -Math.PI / 2, 1, 1, 0.3), P.trim);
   const { geometry, lines } = b.build();

@@ -39,8 +39,10 @@ export const KART_WHEELS = [
 
 /** Exhaust tip (kart space), where puffs and the boost flame come out. */
 export const KART_EXHAUST = new THREE.Vector3(0.3, 1.06, 0.5);
-/** Hood center (damage smoke). */
-export const KART_HOOD = new THREE.Vector3(0, 0.7, -0.42);
+/** Side-discharge chute mouth (grass clippings) and its outward direction (+X). */
+export const KART_CHUTE = new THREE.Vector3(0.9, 0.2, -0.02);
+/** Hood front (damage smoke). */
+export const KART_HOOD = new THREE.Vector3(0, 0.62, -0.62);
 
 export interface KartAssets {
   body: THREE.BufferGeometry;
@@ -54,58 +56,46 @@ const cache = new Map<number, KartAssets>();
 
 function teamKey(team: TeamId): 0 | 1 { return team === Team.Cats ? 1 : 0; }
 
-function buildBody(team: 0 | 1, b: PartBuilder, scale = 1, withDetail = true): void {
+function buildBody(team: 0 | 1, b: PartBuilder): void {
   const P = KART_PALETTES[team];
-  const S = (m: THREE.Matrix4) => (scale === 1 ? m : new THREE.Matrix4().makeScale(scale, scale, scale).multiply(m));
   // Mower deck: the round skirt the collision body is built around, with a trim stripe and a dark underside.
-  b.add(cyl(0.68, 0.62, 0.16, 20), S(at(0, 0.2, 0.02, 0, 0, 0, 1, 1, 1.06)), P.body, true);
-  b.add(torus(0.685, 0.032, 3, 20), S(at(0, 0.265, 0.02, Math.PI / 2, 0, 0, 1, 1.06, 1)), P.trim);
-  b.add(cyl(0.6, 0.52, 0.1, 16), S(at(0, 0.08, 0.02)), P.dark);
+  b.add(cyl(0.68, 0.62, 0.16, 20), at(0, 0.2, 0.02, 0, 0, 0, 1, 1, 1.06), P.body, true);
+  b.add(torus(0.685, 0.032, 3, 20), at(0, 0.265, 0.02, Math.PI / 2, 0, 0, 1, 1.06, 1), P.trim);
+  b.add(cyl(0.6, 0.52, 0.1, 16), at(0, 0.08, 0.02), P.dark);
   // Tub + hood (the hood has a racing stripe and a face: headlight eyes, grille grin).
-  b.add(rbox(0.78, 0.26, 1.02, 0.1, 1), S(at(0, 0.38, 0.06)), P.body);
-  b.add(rbox(0.66, 0.3, 0.52, 0.12), S(at(0, 0.5, -0.42, -0.12)), P.body);
-  b.add(box(0.16, 0.03, 0.5), S(at(0, 0.66, -0.43, -0.12)), P.trim);
-  if (withDetail) {
-    b.add(rbox(0.36, 0.1, 0.06, 0.03, 1), S(at(0, 0.43, -0.685)), P.dark);
-    for (const sx of [-1, 1]) {
-      b.add(cyl(0.078, 0.078, 0.06, 12), S(at(sx * 0.18, 0.575, -0.665, Math.PI / 2)), P.eye, true);
-      b.add(cyl(0.036, 0.036, 0.02, 8), S(at(sx * 0.17, 0.585, -0.7, Math.PI / 2)), P.dark);
-    }
-    b.add(rbox(0.88, 0.1, 0.12, 0.05, 1), S(at(0, 0.22, -0.75)), P.dark);
-    b.add(box(0.92, 0.05, 0.05), S(at(0, 0.19, -0.5)), P.dark);
-    // Rear fenders over the big wheels.
-    for (const sx of [-1, 1]) b.add(torus(0.31, 0.055, 4, 9, Math.PI * 0.62), S(at(sx * 0.5, 0.27, 0.3, 0, Math.PI / 2, Math.PI * 0.19)), P.body);
-  }
-  // Bucket seat with piping and team ears on the headrest.
-  b.add(rbox(0.5, 0.12, 0.42, 0.05, 1), S(at(0, 0.56, 0.18)), P.seat);
-  b.add(rbox(0.52, 0.46, 0.12, 0.06), S(at(0, 0.82, 0.42, 0.18)), P.seat);
-  b.add(box(0.54, 0.05, 0.13), S(at(0, 1.03, 0.46, 0.18)), P.trim);
+  b.add(rbox(0.78, 0.26, 1.02, 0.1, 1), at(0, 0.38, 0.06), P.body);
+  b.add(rbox(0.66, 0.3, 0.52, 0.12), at(0, 0.5, -0.42, -0.12), P.body);
+  b.add(box(0.16, 0.03, 0.5), at(0, 0.66, -0.43, -0.12), P.trim);
+  b.add(rbox(0.36, 0.1, 0.06, 0.03, 1), at(0, 0.43, -0.685), P.dark);
   for (const sx of [-1, 1]) {
-    if (team === Team.Corgis) {
-      // big upright corgi ears
-      b.add(cone(0.12, 0.26, 6), S(at(sx * 0.17, 1.17, 0.47, 0.18, 0, -sx * 0.22, 1, 1, 0.35)), P.ear);
-      b.add(cone(0.075, 0.17, 6), S(at(sx * 0.165, 1.15, 0.44, 0.18, 0, -sx * 0.22, 1, 1, 0.2)), P.earInner);
-    } else {
-      // small pointy cat ears
-      b.add(cone(0.09, 0.2, 4), S(at(sx * 0.18, 1.14, 0.47, 0.18, Math.PI / 4, -sx * 0.3, 1, 1, 0.45)), P.ear);
-      b.add(cone(0.05, 0.12, 4), S(at(sx * 0.175, 1.12, 0.44, 0.18, Math.PI / 4, -sx * 0.3, 1, 1, 0.25)), P.earInner);
-    }
+    b.add(cyl(0.078, 0.078, 0.06, 12), at(sx * 0.18, 0.575, -0.665, Math.PI / 2), P.eye, true);
+    b.add(cyl(0.036, 0.036, 0.02, 8), at(sx * 0.17, 0.585, -0.7, Math.PI / 2), P.dark);
   }
-  if (withDetail) {
-    // Steering column + wheel, tilted toward the driver.
-    b.add(cyl(0.025, 0.025, 0.34, 6), S(at(0, 0.7, -0.15, 0.75)), P.dark);
-    b.add(torus(0.15, 0.028, 3, 12), S(at(0, 0.84, -0.04, -0.85)), P.dark);
-    b.add(cyl(0.05, 0.05, 0.04, 8), S(at(0, 0.84, -0.04, -0.85 + Math.PI / 2)), P.trim);
-    // Grass-catcher bag with a trim band.
-    b.add(rbox(0.64, 0.38, 0.24, 0.09, 1), S(at(0, 0.5, 0.6)), P.bag);
-    b.add(box(0.66, 0.06, 0.25), S(at(0, 0.6, 0.6)), P.trim);
-    // Exhaust stack.
-    b.add(cyl(0.045, 0.05, 0.42, 8), S(at(0.3, 0.8, 0.5)), P.metal, true);
-    b.add(cyl(0.066, 0.066, 0.05, 8), S(at(0.3, 1.02, 0.5)), P.dark);
-  }
+  b.add(rbox(0.88, 0.1, 0.12, 0.05, 1), at(0, 0.22, -0.75), P.dark);
+  b.add(box(0.92, 0.05, 0.05), at(0, 0.19, -0.5), P.dark);
+  // Side-discharge chute on the deck's right: the ride-on-mower tell (it spits grass clippings).
+  b.add(rbox(0.3, 0.12, 0.3, 0.04, 1), at(0.72, 0.22, -0.02, 0, 0, -0.35), P.dark);
+  b.add(box(0.05, 0.1, 0.26), at(0.86, 0.19, -0.02, 0, 0, -0.35), P.trim);
+  // Rear fenders over the big wheels.
+  for (const sx of [-1, 1]) b.add(torus(0.31, 0.055, 4, 9, Math.PI * 0.62), at(sx * 0.5, 0.27, 0.3, 0, Math.PI / 2, Math.PI * 0.19), P.body);
+  // Bucket seat with piping.
+  b.add(rbox(0.5, 0.12, 0.42, 0.05, 1), at(0, 0.56, 0.18), P.seat);
+  b.add(rbox(0.52, 0.46, 0.12, 0.06), at(0, 0.82, 0.42, 0.18), P.seat);
+  b.add(box(0.54, 0.05, 0.13), at(0, 1.03, 0.46, 0.18), P.trim);
+  // Steering column + wheel, tilted toward the driver.
+  b.add(cyl(0.025, 0.025, 0.34, 6), at(0, 0.7, -0.15, 0.75), P.dark);
+  b.add(torus(0.15, 0.028, 3, 12), at(0, 0.84, -0.04, -0.85), P.dark);
+  b.add(cyl(0.05, 0.05, 0.04, 8), at(0, 0.84, -0.04, -0.85 + Math.PI / 2), P.trim);
+  // Grass-catcher bag with a trim band.
+  b.add(rbox(0.64, 0.38, 0.24, 0.09, 1), at(0, 0.5, 0.6), P.bag);
+  b.add(box(0.66, 0.06, 0.25), at(0, 0.6, 0.6), P.trim);
+  // Exhaust stack.
+  b.add(cyl(0.045, 0.05, 0.42, 8), at(0.3, 0.8, 0.5), P.metal, true);
+  b.add(cyl(0.066, 0.066, 0.05, 8), at(0.3, 1.02, 0.5), P.dark);
   // Pennant whip: team flag well above head height, readable at range.
-  b.add(cyl(0.012, 0.016, 1.3, 5), S(at(-0.3, 1.2, 0.54)), P.dark);
-  b.add(cone(0.15, 0.46, 3), S(at(-0.3, 1.72, 0.76, Math.PI / 2, 0, 0, 1, 1, 0.18)), P.accent);
+  b.add(cyl(0.016, 0.022, 1.5, 5), at(-0.3, 1.25, 0.55), P.dark);
+  b.add(cone(0.2, 0.62, 3), at(-0.3, 1.78, 0.84, Math.PI / 2, 0, 0, 0.16, 1, 1), P.accent);
+  b.add(cyl(0.045, 0.045, 0.06, 6), at(-0.3, 2.0, 0.55), P.accent);
 }
 
 function buildWheel(team: 0 | 1): THREE.BufferGeometry {
@@ -133,25 +123,12 @@ export function kartAssets(team: TeamId): KartAssets {
   buildBody(key, b);
   const { geometry, lines } = b.build();
   const wheel = buildWheel(key);
-  const flame = new THREE.ConeGeometry(0.075, 0.34, 7);
-  flame.translate(0, 0.17, 0);
+  const flame = new THREE.ConeGeometry(0.1, 0.46, 7);
+  flame.translate(0, 0.23, 0);
   const wheelTris = (wheel.index!.count / 3) * 4;
   a = { body: geometry, lines, wheel, flame, triangles: b.triangles + wheelTris + flame.index!.count / 3 };
   cache.set(key, a);
   return a;
-}
-
-/** A small low-detail kart (roof mascot for terminals), appended to an existing builder. */
-export function addMiniKart(team: TeamId, b: PartBuilder, m: THREE.Matrix4, scale: number): void {
-  const key = teamKey(team);
-  const inner = new PartBuilder();
-  buildBody(key, inner, 1, false);
-  const P = KART_PALETTES[key];
-  for (const w of KART_WHEELS) inner.add(cyl(w.r, w.r, w.w, 8), at(w.x, w.y, w.z, 0, 0, Math.PI / 2), P.tire);
-  const { geometry } = inner.build();
-  geometry.applyMatrix4(new THREE.Matrix4().makeScale(scale, scale, scale));
-  geometry.userData.outlineReady = true;
-  b.add(geometry, m, -1);
 }
 
 /** Free the shared kart geometry (tests / hot reload). */

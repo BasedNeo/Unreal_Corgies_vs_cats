@@ -5,6 +5,7 @@ import { CLASS_IDS, EFlag, EntityKind, type ClassId, type TeamId, type SpeciesId
 import { angleDelta, damp, lerpAngle } from '../../shared/math';
 import { createAvatar } from '../procgen/characters';
 import type { Avatar } from './avatar';
+import { mountedBodyYaw } from '../vehicles';
 
 interface View {
   id: number;
@@ -46,6 +47,8 @@ export class EntityViews {
       let targetYaw = v.bodyYaw;
       if (aiming || speed < 0.5) targetYaw = aiming ? s.yaw : v.bodyYaw;
       if (!aiming && speed >= 0.5) targetYaw = Math.atan2(-s.vx, -s.vz);
+      const mountedYaw = mountedBodyYaw(s, states); // riders face their kart, not their velocity
+      if (mountedYaw !== null) targetYaw = mountedYaw;
       v.bodyYaw = lerpAngle(v.bodyYaw, targetYaw, 1 - Math.exp(-14 * dt));
       v.avatar.root.position.set(s.x, s.y, s.z);
       v.avatar.root.rotation.y = v.bodyYaw;

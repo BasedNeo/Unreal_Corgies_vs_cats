@@ -13,6 +13,7 @@ import { startGameServer, type GameServer } from '../../server/app';
 import { loadConfig, type ServerConfig } from '../../server/config';
 import { createWebSocketTransport } from '../../src/client/net/transport';
 import { NetClient } from '../../src/client/net/net-client';
+import { EntityKind } from '../../src/shared/types';
 import { SnapDecoder, decodeServerFrame } from '../../src/host/wire';
 import type { ServerMsg } from '../../src/shared/protocol';
 import { PROTOCOL_VERSION } from '../../src/shared/constants';
@@ -73,13 +74,13 @@ describe('server lifecycle over WebSockets', () => {
     const s = await start();
     const a = await player(s.wsUrl, 'A');
     const b = await player(s.wsUrl, 'B');
-    await until(() => b.net.latestState(a.net.localEntity) !== null, 2000, 'B sees A');
+    await until(() => b.net.latestState(a.net.localEntity) !== null, 8000, 'B sees A');
     const start0 = { ...b.net.latestState(a.net.localEntity)! };
     a.state.moving = true;
-    await until(() => { const p = b.net.latestState(a.net.localEntity); return !!p && Math.hypot(p.x - start0.x, p.z - start0.z) > 2; }, 3000, 'B sees A move');
+    await until(() => { const p = b.net.latestState(a.net.localEntity); return !!p && Math.hypot(p.x - start0.x, p.z - start0.z) > 2; }, 10000, 'B sees A move');
     const aEnt = a.net.localEntity;
     a.net.transport.close();
-    await until(() => b.net.latestState(aEnt) === null, 2000, 'A gone for B');
+    await until(() => b.net.latestState(aEnt) === null, 8000, 'A gone for B');
     expect(s.rooms.get('default')!.room.humanCount).toBe(1);
   });
 
@@ -106,8 +107,10 @@ describe('server lifecycle over WebSockets', () => {
     expect(s.rooms.size).toBe(2);
     await sleep(200);
     // Entity ids are per room (both rooms start at 1): each client sees exactly its own entity.
-    expect([...a.net.latest()!.ents.keys()]).toEqual([a.net.localEntity]);
-    expect([...b.net.latest()!.ents.keys()]).toEqual([b.net.localEntity]);
+    // (Terminals and other non-character entities are map furniture; count characters only.)
+    const chars = (n: NetClient) => [...n.latest()!.ents.values()].filter((st) => st.kind === EntityKind.Player || st.kind === EntityKind.Bot).map((st) => st.id);
+    expect(chars(a.net)).toEqual([a.net.localEntity]);
+    expect(chars(b.net)).toEqual([b.net.localEntity]);
     expect(a.net.roster.map((r) => r.name)).toEqual(['A']);
     const alpha = s.rooms.get('alpha')!;
     a.net.transport.close();

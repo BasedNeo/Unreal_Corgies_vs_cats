@@ -76,6 +76,35 @@ function propMeshes(ctx: RenderContext, props: PropBox[]): void {
   }
 }
 
+/** Minimal West Yard render (terrain grid + collider boxes/cylinders), used when the world view can't build. */
+function simpleWorld(ctx: RenderContext, data: WorldData): void {
+  const g = data.terrain;
+  if (g) {
+    const size = (g.n - 1) * g.cell;
+    const geo = new THREE.PlaneGeometry(size, size, g.n - 1, g.n - 1);
+    geo.rotateX(-Math.PI / 2);
+    const p = geo.getAttribute('position');
+    for (let i = 0; i < p.count; i++) p.setY(i, data.height(p.getX(i) + g.x0 + size / 2, p.getZ(i) + g.z0 + size / 2));
+    geo.translate(g.x0 + size / 2, 0, g.z0 + size / 2);
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, toon({ color: PALETTE.grass }));
+    m.receiveShadow = true;
+    ctx.scene.add(m);
+  } else groundDisc(ctx, data.halfExtent);
+  for (const b of data.props) {
+    if (b.type === 'boundary') continue;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(b.hx * 2, b.hy * 2, b.hz * 2), toon({ color: b.color ?? PALETTE.fenceWood }));
+    m.position.set(b.x, b.y, b.z); m.rotation.set(b.pitch ?? 0, b.rotY, b.roll ?? 0, 'YXZ');
+    m.castShadow = true; m.receiveShadow = true;
+    ctx.scene.add(m);
+  }
+  for (const c of data.cylinders ?? []) {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(c.r, c.r, c.hh * 2, 14), toon({ color: PALETTE.fenceDark }));
+    m.position.set(c.x, c.y, c.z); m.castShadow = true;
+    ctx.scene.add(m);
+  }
+}
+
 interface Rider { avatar: Avatar; id: number }
 function makeRider(ctx: RenderContext, id: number, species: number, team: TeamId, seed: number): Rider {
   const avatar = createAvatar({ species: species as 0 | 1, cls: 'assault', team, seed, isLocal: true });
@@ -159,48 +188,45 @@ async function main() {
   } else if (view === 'drive') {
     enableShadows(ctx, 30);
     groundDisc(ctx, 90);
-    // The unit tests' test yard: flat heightfield + a 20° ramp onto a deck + a jump pad + crates.
+    // The unit tests' kind of test yard: flat heightfield, a jump pad, a 20° ramp onto a 3 m deck, crates.
     const a = 20 * Math.PI / 180, len = 3 / Math.sin(a) + 1.2, run = Math.cos(a) * len;
     const props: PropBox[] = [
-      { type: 'ramp', x: 14, y: (Math.sin(a) * len) / 2 - 0.25 / Math.cos(a), z: -10 - run / 2, hx: 2.5, hy: 0.25, hz: len / 2, rotY: 0, pitch: a },
-      { type: 'deck', x: 14, y: 1.5, z: -10 - run - 5 + 0.3, hx: 3, hy: 1.5, hz: 5, rotY: 0 },
-      { type: 'crate', x: -6, y: 0.7, z: -14, hx: 0.7, hy: 0.7, hz: 0.7, rotY: 0.4 },
-      { type: 'crate', x: -9, y: 0.7, z: -6, hx: 0.7, hy: 0.7, hz: 0.7, rotY: 1.1 },
-      { type: 'crate', x: -3, y: 0.5, z: 4, hx: 0.5, hy: 0.5, hz: 0.5, rotY: 0.2 },
+      { type: 'ramp', x: 0, y: (Math.sin(a) * len) / 2 - 0.25 / Math.cos(a), z: -18 - run / 2, hx: 2.5, hy: 0.25, hz: len / 2, rotY: 0, pitch: a },
+      { type: 'deck', x: 0, y: 1.5, z: -18 - run - 5 + 0.3, hx: 3, hy: 1.5, hz: 5, rotY: 0 },
+      { type: 'crate', x: -5, y: 0.7, z: 4, hx: 0.7, hy: 0.7, hz: 0.7, rotY: 0.4 },
+      { type: 'crate', x: 5.5, y: 0.7, z: -6, hx: 0.7, hy: 0.7, hz: 0.7, rotY: 1.1 },
+      { type: 'crate', x: 4, y: 0.5, z: 22, hx: 0.5, hy: 0.5, hz: 0.5, rotY: 0.2 },
+      { type: 'crate', x: -7, y: 0.5, z: -50, hx: 0.5, hy: 0.5, hz: 0.5, rotY: 0.7 },
     ];
     const n = 81;
     const world: WorldData = {
       seed: 1, name: 'lab yard', height: () => 0, halfExtent: 80, killY: -30, props,
       terrain: { x0: -80, z0: -80, cell: 2, n, heights: new Float32Array(n * n) },
       spawns: [{ x: 0, y: 0, z: 20, yaw: 0, team: 0 }, { x: 0, y: 0, z: -40, yaw: Math.PI, team: 1 }],
-      jumpPads: [{ id: 'pad', x: -8, y: 0, z: 16, r: 2.2, vy: 16 }],
+      jumpPads: [{ id: 'pad', x: 0, y: 0, z: 14, r: 2.2, vy: 14 }],
       bounds: { minX: -78, maxX: 78, minZ: -78, maxZ: 78 },
     };
     propMeshes(ctx, props);
     const padMesh = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.3, 0.12, 24), toon({ color: PALETTE.tennisBall }));
-    padMesh.position.set(-8, 0.06, 16); padMesh.receiveShadow = true; ctx.scene.add(padMesh);
+    padMesh.position.set(0, 0.06, 14); padMesh.receiveShadow = true; ctx.scene.add(padMesh);
     const sim = await Sim.create({ seed: 5, world, systems: [...vehicleSystems(), movementSystem, ...worldSystems(), physicsStepSystem] });
     sim.state.vehicleConfig = { autoTerminals: false };
     sim.step();
     const kart = spawnKart(sim, 'mower_kart', Team.Corgis, 0, 0, 30, 0);
-    const kart2 = spawnKart(sim, 'mower_kart', Team.Cats, 4, 0, 24, 0.3);
+    const kart2 = spawnKart(sim, 'mower_kart', Team.Cats, 3.2, 0, 27, 0.5);
     const dog = sim.spawnCharacter({ team: Team.Corgis, species: Species.Corgi, cls: 'assault', name: 'Rex', x: 10, y: 0, z: 40 });
     sim.step();
     mountKart(sim, kart, dog);
     const vehicles = createVehicleViews(ctx.scene, { world, camera: cam });
     const rider = makeRider(ctx, dog.id, Species.Corgi, Team.Corgis, dog.seed);
-    // Scripted lap: launch, drift left, turbo, boost to the ramp, loop back over the jump pad.
+    // Scripted lap: launch over the jump pad, up the ramp and off the deck, drift a U-turn, mini-turbo,
+    // boost, then lazy circles. (t ≈ 1.8 airborne · 4.4 on the ramp · 5.6 off the deck · 7 drifting · 8.6 boosting)
     const script = (t: number): { mz: number; mx: number; b: number } => {
-      const T = t % 16;
-      if (T < 1.4) return { mz: 1, mx: 0, b: 0 };
-      if (T < 3.1) return { mz: 1, mx: -1, b: Btn.Jump };
-      if (T < 3.3) return { mz: 1, mx: 0, b: 0 };
-      if (T < 4.6) return { mz: 1, mx: 0.55, b: Btn.Sprint };
-      if (T < 6.5) return { mz: 1, mx: 0.05, b: 0 };
-      if (T < 8.3) return { mz: 1, mx: -1, b: Btn.Jump };
-      if (T < 10) return { mz: 1, mx: -0.2, b: Btn.Sprint };
-      if (T < 12) return { mz: 1, mx: 0.8, b: 0 };
-      return { mz: 1, mx: -0.3, b: 0 };
+      if (t < 6.2) return { mz: 1, mx: 0, b: 0 };
+      if (t < 8) return { mz: 1, mx: -1, b: Btn.Jump };
+      if (t < 8.2) return { mz: 1, mx: 0, b: 0 };
+      if (t < 9.8) return { mz: 1, mx: 0.1, b: Btn.Sprint };
+      return { mz: 1, mx: -0.45, b: (t % 6) < 1.5 ? Btn.Jump : 0 };
     };
     let t = 0, seq = 0, camYaw = kart.yaw;
     const camCtl = { dist: 5.5, fov: 64, h: 1.55, pitch: -0.2 };
@@ -241,8 +267,18 @@ async function main() {
   } else {
     // West Yard: runtime-placed terminals, a vended kart at each base, a driver seated in each.
     const data = createWorldData(1);
-    const worldView = createWorldView(ctx.scene, data);
+    let worldView: { update(dt: number, camera: THREE.Camera): void };
+    try {
+      worldView = createWorldView(ctx.scene, data);
+    } catch (err) {
+      // The world lane's view is in flight: fall back to a plain toon terrain + collider boxes.
+      console.warn('world view unavailable, using the lab fallback:', String(err));
+      simpleWorld(ctx, data);
+      enableShadows(ctx, 40);
+      worldView = { update() {} };
+    }
     const sim = await Sim.create({ seed: 1, world: data, systems: [...vehicleSystems(), movementSystem, ...worldSystems(), physicsStepSystem] });
+    sim.state.room = { mode: 'yard-skirmish' }; // as a Room would: the mode's map setup places the terminals
     sim.step(); sim.step();
     const terms = [...sim.entities.values()].filter((e) => e.kind === EntityKind.Terminal);
     for (const term of terms) {

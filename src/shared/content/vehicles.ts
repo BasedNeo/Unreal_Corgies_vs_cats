@@ -157,6 +157,8 @@ export interface TerminalDef {
   hx: number; hy: number; hz: number;
   /** The kart pops out this far (m) to the kiosk's right. */
   padOffset: number;
+  /** Match modes whose map setup places this terminal near each team's spawns (Room-hosted sims). */
+  modes: readonly string[];
 }
 
 export const VEHICLE_IDS = ['mower_kart'] as const;
@@ -194,7 +196,7 @@ export const TERMINALS: Record<TerminalId, TerminalDef> = {
   kart_terminal: {
     id: 'kart_terminal', name: 'Kart-O-Matic', catName: 'Kart-O-Matic',
     vehicle: 'mower_kart', useRange: 2.5, cooldown: 20, rearm: 3, cost: 0,
-    hx: 0.6, hy: 1.1, hz: 0.45, padOffset: 3.1,
+    hx: 0.6, hy: 1.1, hz: 0.45, padOffset: 3.1, modes: ['yard-skirmish', 'team-deathmatch'],
   },
 };
 
