@@ -9,6 +9,10 @@ import type { ServerMsg } from '../../src/shared/protocol';
 import { PROTOCOL_VERSION } from '../../src/shared/constants';
 import { sanitizeRoomSetup } from '../../src/host/guard';
 import { resolveServerUrl } from '../../src/client/net/server-url';
+import { Sim } from '../../src/sim/sim';
+import type { SimEntity } from '../../src/sim/entity';
+import { Room } from '../../src/host/room';
+import { findBoss } from '../../src/sim/boss';
 
 const servers: GameServer[] = [];
 const sockets: WsClient[] = [];
@@ -38,6 +42,25 @@ describe('room setup from the creator', () => {
     expect(sanitizeRoomSetup('god-mode', null)).toBeNull();
     expect(sanitizeRoomSetup(null, 'yard_day')).toBeNull();
   });
+
+  it('boss-rush rooms take a boss id (E1), only in boss-rush and only a plain id', () => {
+    expect(sanitizeRoomSetup('boss-rush', null, 'madame_pointille')).toEqual({ mode: 'boss-rush', boss: 'madame_pointille' });
+    expect(sanitizeRoomSetup('boss-rush', null, '<b>')).toEqual({ mode: 'boss-rush' });
+    expect(sanitizeRoomSetup('yard-skirmish', null, 'madame_pointille')).toEqual({ mode: 'yard-skirmish' });
+    const u = new URL(resolveServerUrl({ protocol: 'http:', host: 'lan:8787', search: '?online&room=duel&boss=madame_pointille' }, '/ws')!);
+    expect(u.searchParams.get('mode')).toBe('boss-rush'); // ?boss= alone implies boss-rush, as offline
+    expect(u.searchParams.get('boss')).toBe('madame_pointille');
+  });
+
+  it('a boss-rush Room with boss madame_pointille brings her in (not the Vac-Tank)', async () => {
+    const sim = await Sim.create({ seed: 7 });
+    const room = new Room(sim, { mode: 'boss-rush', boss: 'madame_pointille', botsPerTeam: [2, 0] });
+    let found: SimEntity | null = null;
+    for (let i = 0; i < 60 * 12 && !found; i++) { room.tick(); found = findBoss(sim, 'madame_pointille'); }
+    expect(found).toBeTruthy();
+    expect(findBoss(sim, 'vac_tank')).toBeNull();
+    room.dispose();
+  }, 60_000);
 
   it('the client forwards ?mode= / ?chapter= with the room', () => {
     const url = resolveServerUrl({ protocol: 'https:', host: 'play.example', search: '?room=Porch&mode=adventure&chapter=yard_day' }, '/ws')!;

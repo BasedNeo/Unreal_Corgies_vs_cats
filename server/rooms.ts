@@ -11,8 +11,8 @@ import type { MatchPhase } from '../src/shared/protocol';
 import { botsForMode, type ServerConfig } from './config';
 import type { RoomMode } from '../src/host/guard';
 
-/** How a new room is set up (from its first joiner's ?mode= / ?chapter=, validated by sanitizeRoomSetup). */
-export interface RoomSetup { mode: RoomMode; chapter?: string }
+/** How a new room is set up (from its first joiner's ?mode= / ?chapter= / ?boss=, validated by sanitizeRoomSetup). */
+export interface RoomSetup { mode: RoomMode; chapter?: string; boss?: string }
 
 /**
  * Room names starting with this are unlisted: anyone with the name can join (`?room=_porch`), but the room browser
@@ -203,7 +203,7 @@ export class RoomManager {
     const sim = await Sim.create({ seed: this.cfg.seed });
     // the server's MODE/BOTS apply unless the creator asked for a mode (co-op adventure, core-rush, …)
     const room = setup
-      ? new Room(sim, { mode: setup.mode, chapter: setup.chapter, botsPerTeam: botsForMode(setup.mode, this.cfg.bots) })
+      ? new Room(sim, { mode: setup.mode, chapter: setup.chapter, boss: setup.boss, botsPerTeam: botsForMode(setup.mode, this.cfg.bots) })
       : new Room(sim, { mode: this.cfg.mode, botsPerTeam: this.cfg.bots });
     const now = performance.now();
     const mr: ManagedRoom = {

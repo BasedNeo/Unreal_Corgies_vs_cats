@@ -401,3 +401,63 @@ export const squeakWall: Recipe = (v) => {
   glide(s.frequency, t, 110, 50, 0.15);
   return 0.45;
 };
+
+// ---- E1: Madame Pointillé, the sniper elite (keyed by her `ability` event names) ----
+
+/** dot_paint: the laser dot lands on someone — a soft rising sine "ping" (a warning, not a threat yet). */
+export const dotPing: Recipe = (v) => {
+  const t = v.t;
+  const out = gain(v);
+  ad(out.gain, t, 0.004, 0.22, 0.26);
+  const o = osc(v, 'sine', 1150, out, 0.3);
+  glide(o.frequency, t, 1150, 1760, 0.18);
+  return 0.3;
+};
+
+/** dot_glint: the lens glints, the shot is 0.45 s away — a bright, glassy "tink" with a shimmer. */
+export const glintTink: Recipe = (v) => {
+  const t = v.t;
+  const out = gain(v, 1);
+  const a = gain(v, 0.0001, out);
+  ad(a.gain, t, 0.001, 0.3, 0.22);
+  osc(v, 'triangle', 3520, filter(v, 'highpass', 1800, 0.7, a), 0.25);
+  const b = gain(v, 0.0001, out);
+  ad(b.gain, t + 0.035, 0.002, 0.14, 0.2);
+  osc(v, 'sine', 5274, b, 0.25, t + 0.035);
+  return 0.26;
+};
+
+/** dot_lost: the lock is broken — the ping falling away, quietly. */
+export const dotLost: Recipe = (v) => {
+  const t = v.t;
+  const out = gain(v);
+  ad(out.gain, t, 0.004, 0.12, 0.22);
+  const o = osc(v, 'sine', 1500, out, 0.25);
+  glide(o.frequency, t, 1500, 700, 0.2);
+  return 0.25;
+};
+
+/** shot_spoiled: a weak-point hit spoils her shot — a comic "clonk" and a little ricochet whistle. */
+export const clonk: Recipe = (v) => {
+  const t = v.t;
+  const out = gain(v, 1);
+  const c = gain(v, 0.0001, out);
+  ad(c.gain, t, 0.001, 0.7, 0.16);
+  const o = osc(v, 'square', 420, filter(v, 'bandpass', 900, 2.5, c), 0.18);
+  glide(o.frequency, t, 420, 260, 0.1);
+  const r = gain(v, 0.0001, out);
+  ad(r.gain, t + 0.06, 0.004, 0.16, 0.3);
+  const w = osc(v, 'sine', 2400, r, 0.36, t + 0.06);
+  glide(w.frequency, t + 0.06, 2400, 1100, 0.3);
+  return 0.4;
+};
+
+/** beret_off: phase 2 — the beret flies off with a cartoon "pop". */
+export const pop: Recipe = (v) => {
+  const t = v.t;
+  const out = gain(v);
+  ad(out.gain, t, 0.001, 0.55, 0.09);
+  const o = osc(v, 'sine', 380, out, 0.12);
+  glide(o.frequency, t, 380, 980, 0.05);
+  return 0.12;
+};

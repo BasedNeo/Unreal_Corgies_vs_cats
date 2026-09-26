@@ -89,6 +89,8 @@ export interface RoomOptions {
   defaultTeam?: TeamId;
   /** Adventure chapter id (mode 'adventure'); the sim reads sim.state.room.chapter. */
   chapter?: string;
+  /** Boss id for mode 'boss-rush' (E1: 'madame_pointille'; unknown → the Vac-Tank); read as sim.state.room.boss. */
+  boss?: string;
 }
 
 /** What handle() made of a message: 'abuse' should count against the sender's abuse meter. */
@@ -142,7 +144,7 @@ export class Room {
   private lastPhase: MatchState['phase'] | null = null;
 
   constructor(readonly sim: Sim, readonly opts: RoomOptions) {
-    sim.state.room = opts.chapter ? { mode: opts.mode, chapter: opts.chapter } : { mode: opts.mode };
+    sim.state.room = { mode: opts.mode, ...(opts.chapter ? { chapter: opts.chapter } : {}), ...(opts.boss ? { boss: opts.boss } : {}) };
     this.moveCtx = { world: sim.world, kcc: sim.kcc, emit: (ev) => sim.emit(ev) };
     this.fillBots();
   }

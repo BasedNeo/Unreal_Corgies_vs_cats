@@ -33,7 +33,8 @@ import { loadSettings, type Settings } from './ui/settings';
 import { bus } from './core/events';
 import { TICK_DT } from '../shared/constants';
 import { damp, lerpAngle } from '../shared/math';
-import { CLASS_IDS, EFlag, type ClassId, type TeamId } from '../shared/types';
+import { CLASS_IDS, EFlag, EntityKind, type ClassId, type TeamId } from '../shared/types';
+import { sniperPainting } from '../shared/content/bosses';
 import type { EntityState } from '../shared/protocol';
 
 const params = new URLSearchParams(location.search);
@@ -65,6 +66,8 @@ async function main(): Promise<void> {
   const botsFor = (m: string) => (params.get('bots') ?? (m === 'team-deathmatch' || m === 'core-rush' ? '4,4' : m === 'adventure' ? '4,0' : '3,0')).split(',').map(Number) as [number, number];
   // Adventure chapter (?chapter=, or the menu's chapter picker); the authority validates it.
   let chapter = /^[a-z0-9_]{1,32}$/.test(params.get('chapter') ?? '') ? params.get('chapter')! : undefined;
+  // ?boss=<id> (boss-rush showcase; '1' = the Vac-Tank): E1's Madame Pointillé is ?boss=madame_pointille.
+  const bossId = /^[a-z0-9_]{1,32}$/.test(params.get('boss') ?? '') ? params.get('boss')! : undefined;
   // The session (authority + connection) starts only when the player presses PLAY — or immediately for
   // ?autoplay / online links — so an offline match never runs behind the menu (QA W1 FTUE finding).
   let net: NetClient | null = null;
@@ -76,7 +79,7 @@ async function main(): Promise<void> {
     if (match && !params.has('boss')) mode = match; // the menu's MATCH selector (offline only)
     const bots = botsFor(mode);
     loadingStep(serverUrl ? 'Calling the server…' : 'Waking up the squad…');
-    transport = serverUrl ? await createWebSocketTransport(serverUrl, em) : createWorkerTransport({ seed, mode, bots, chapter: mode === 'adventure' ? chapter : undefined }, em);
+    transport = serverUrl ? await createWebSocketTransport(serverUrl, em) : createWorkerTransport({ seed, mode, bots, chapter: mode === 'adventure' ? chapter : undefined, boss: mode === 'boss-rush' ? bossId : undefined }, em);
     debug.transport = transport.kind;
     net = new NetClient(transport);
     net.join(name, cls, team);
@@ -109,6 +112,11 @@ async function main(): Promise<void> {
   spottedCue.style.color = '#ffe9e2';
   spottedCue.style.bottom = '124px';
   ui.appendChild(spottedCue);
+  // E1: the sniper's dot is on you (the beam can be off-screen while aiming down sights: the fair-play backstop).
+  const dotCue = spottedCue.cloneNode() as HTMLDivElement;
+  dotCue.textContent = 'DOT ON YOU';
+  dotCue.style.bottom = '156px';
+  ui.appendChild(dotCue);
   const cam = createThirdPersonCamera(ctx.camera);
   cam.setColliders(worldView.cameraColliders);
   const quality = ctx.adaptive;
@@ -270,6 +278,11 @@ async function main(): Promise<void> {
     }
     hiddenCue.style.display = local && (local.flags & EFlag.Stealthed) && !(local.flags & EFlag.Dead) ? 'block' : 'none';
     spottedCue.style.display = local && (local.flags & EFlag.Spotted) && !(local.flags & EFlag.Dead) ? 'block' : 'none';
+    let painted = false;
+    if (local && !(local.flags & EFlag.Dead)) {
+      for (const s of states.values()) if (s.kind === EntityKind.Boss && sniperPainting(s, local.x, local.y, local.z)) { painted = true; break; }
+    }
+    dotCue.style.display = painted ? 'block' : 'none';
     if (local && !(local.flags & EFlag.Dead)) {
       const d = districtAt(worldData, local.x, local.z, local.y)?.name ?? '';
       if (d !== districtCur) { districtCur = d; districtSince = now; }

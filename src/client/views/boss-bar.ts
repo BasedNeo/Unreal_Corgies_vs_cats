@@ -36,7 +36,7 @@ export class BossBar {
     const frac = Math.max(0, Math.min(1, boss.hp / Math.max(1, boss.maxHp)));
     this.ghostFrac = Math.max(frac, this.ghostFrac - dt * 0.35);
     this.el.style.display = 'block';
-    this.label.textContent = `${def.name.toUpperCase()}${this.flags.phase2 ? ' · LID OFF!' : ''}`;
+    this.label.textContent = `${def.name.toUpperCase()} · ${this.flags.phase2 ? `PHASE 2 · ${def.phase2Label}` : 'PHASE 1'}`;
     this.fill.style.width = `${(frac * 100).toFixed(1)}%`;
     this.ghost.style.width = `${(this.ghostFrac * 100).toFixed(1)}%`;
   }

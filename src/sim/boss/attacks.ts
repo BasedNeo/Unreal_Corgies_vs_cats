@@ -4,43 +4,29 @@
 // explode) and spawns hairballs and kittens. Nothing here deals damage outside an `active` stage.
 import type { Sim, SimSystem } from '../sim';
 import type { SimEntity } from '../entity';
-import { Anim, EntityKind, Species } from '../../shared/types';
-import { emptyInput } from '../../shared/input';
-import { weaponIndex, type ProjectileDef } from '../../shared/content/weapons';
-import { BossAttack, BossStage, BOSS_ABILITY, MIN_TELEGRAPH, BOSSES, bossMuzzle, bossTime, type BossDef, type P3 } from '../../shared/content/bosses';
-import { applyDamage, knockback, explode, ensureCombat, capsuleOf, rayCapsule, worldRay } from '../combat';
-import { reportNoise } from '../combat/state';
+import { EntityKind, Species } from '../../shared/types';
+import { weaponIndex } from '../../shared/content/weapons';
+import { BossAttack, BossStage, BOSS_ABILITY, bossMuzzle, hairballSpec, type VacTankDef, type P3 } from '../../shared/content/bosses';
+import { applyDamage, knockback, ensureCombat, capsuleOf, rayCapsule, worldRay } from '../combat';
 import { applyArchetype, ARCHETYPES } from '../ai';
-import { bossDef, bossesOf, writeBossFlags, type BossState } from './state';
+import { bossesOf, tankDef, writeBossFlags, type BossState } from './state';
 import { bossNavGrid, groundAt } from './nav';
 import { nearestWalkable, cellX, cellZ } from '../ai/nav';
+import { launchHairball, stepHairballs } from './hairball';
+import { sniperEffects } from './sniper';
 
 const LASER_WPN = weaponIndex('laser_longshot');
 /** The laser dot scorches feet within this reach (m, beyond the capsule radius) and this height of the ground. */
 export const LASER_BURN = 0.35;
 export const LASER_BURN_HEIGHT = 0.6;
 const scratch: SimEntity[] = [];
-const hairballs: SimEntity[] = [];
 const m: P3 = { x: 0, y: 0, z: 0 };
 
-/** Blast definitions per boss and phase (phase 2 hits harder). */
-const blastCache = new Map<string, ProjectileDef>();
-function blastFor(def: BossDef, phase2: boolean): ProjectileDef {
-  const key = `${def.id}:${phase2 ? 2 : 1}`;
-  let b = blastCache.get(key);
-  if (!b) {
-    const base = def.mortar.blast;
-    b = phase2 ? { ...base, explodeDamage: base.explodeDamage * def.phase2.dmgMult } : base;
-    blastCache.set(key, b);
-  }
-  return b;
-}
-
-const dmgScale = (def: BossDef, b: BossState) => (b.phase2 ? def.phase2.dmgMult : 1);
+const dmgScale = (def: VacTankDef, b: BossState) => (b.phase2 ? def.phase2.dmgMult : 1);
 
 // ------------------------------------------------------------------ laser pointer sweep
 
-function laserSweep(sim: Sim, e: SimEntity, b: BossState, def: BossDef): void {
+function laserSweep(sim: Sim, e: SimEntity, b: BossState, def: VacTankDef): void {
   const mz = bossMuzzle(def, e.pos.x, e.pos.y, e.pos.z, b.aimYaw, b.aimPitch, m);
   let dx = b.dotX - mz.x, dy = b.dotY - mz.y, dz = b.dotZ - mz.z;
   const len = Math.hypot(dx, dy, dz) || 1;
@@ -78,48 +64,17 @@ function laserSweep(sim: Sim, e: SimEntity, b: BossState, def: BossDef): void {
 
 // ------------------------------------------------------------------ hairball mortar
 
-function launchShell(sim: Sim, e: SimEntity, b: BossState, def: BossDef, i: number): void {
+function launchShell(sim: Sim, e: SimEntity, b: BossState, def: VacTankDef, i: number): void {
   const tx = b.shells[i * 3], ty = b.shells[i * 3 + 1], tz = b.shells[i * 3 + 2];
   const fx = -Math.sin(b.aimYaw), fz = -Math.cos(b.aimYaw);
   const lat = (i - (b.shells.length / 3 - 1) / 2) * 0.45;
   const sx = e.pos.x - fx * def.turret.mortarBack - fz * lat, sy = e.pos.y + def.turret.mortarY, sz = e.pos.z - fz * def.turret.mortarBack + fx * lat;
-  const T = bossTime(def, def.mortar.flight, b.phase2, MIN_TELEGRAPH + 0.35);
-  const g = def.mortar.gravity;
-  const vx = (tx - sx) / T, vz = (tz - sz) / T, vy = (ty - sy) / T - 0.5 * g * T;
-  const h: SimEntity = {
-    id: sim.allocId(), kind: EntityKind.Projectile, team: e.team, species: Species.Cat, cls: null, seed: e.id, name: 'hairball',
-    pos: { x: sx, y: sy, z: sz }, vel: { x: vx, y: vy, z: vz }, yaw: Math.atan2(-vx, -vz), pitch: Math.atan2(vy, Math.hypot(vx, vz)),
-    collider: null, input: emptyInput(0), prevButtons: 0, lastInputSeq: 0, char: null, health: null,
-    anim: Anim.Idle, flags: 0, dead: false, respawnTick: 0, weapon: -1, ammo: 0, ownerPid: null, removed: false, data: {},
-    hairball: { boss: e.id, sx, sy, sz, vx, vy, vz, g, t: 0, T, tx, ty, tz, phase2: b.phase2 },
-  };
-  sim.entities.set(h.id, h);
-  // the warning circle: exactly where (and T seconds before) it lands
-  sim.emit({ e: 'ability', id: e.id, ability: BOSS_ABILITY.mortarShell, x: tx, y: ty, z: tz });
-  reportNoise(sim, e, 30);
-}
-
-function stepHairball(sim: Sim, h: SimEntity, dt: number): void {
-  const s = h.hairball!;
-  const owner = sim.entities.get(s.boss);
-  if (s.t < 0 || !owner) { sim.removeEntity(h.id); return; } // fizzled (boss defeated / removed)
-  s.t += dt;
-  if (s.t >= s.T - 1e-9) {
-    const def = owner.boss ? bossDef(owner.boss) : BOSSES[0];
-    explode(sim, s.tx, s.ty + 0.5, s.tz, blastFor(def, s.phase2), owner.id, owner.team, -1);
-    sim.removeEntity(h.id);
-    return;
-  }
-  const t = s.t;
-  h.pos.x = s.sx + s.vx * t; h.pos.y = s.sy + s.vy * t + 0.5 * s.g * t * t; h.pos.z = s.sz + s.vz * t;
-  h.vel.x = s.vx; h.vel.y = s.vy + s.g * t; h.vel.z = s.vz;
-  h.yaw = Math.atan2(-h.vel.x, -h.vel.z);
-  h.pitch = Math.atan2(h.vel.y, Math.hypot(h.vel.x, h.vel.z));
+  launchHairball(sim, e, sx, sy, sz, tx, ty, tz, hairballSpec(def, b.phase2).flight, def.mortar.gravity, b.phase2);
 }
 
 // ------------------------------------------------------------------ brush spin
 
-function brushSpin(sim: Sim, e: SimEntity, b: BossState, def: BossDef): void {
+function brushSpin(sim: Sim, e: SimEntity, b: BossState, def: VacTankDef): void {
   const R = def.spin.radius;
   for (const t of sim.entities.values()) {
     if (!t.char || t.dead || t.team === e.team || t.boss || b.hitIds.includes(t.id)) continue;
@@ -138,7 +93,7 @@ function brushSpin(sim: Sim, e: SimEntity, b: BossState, def: BossDef): void {
 
 // ------------------------------------------------------------------ kittens
 
-export function spawnKitten(sim: Sim, e: SimEntity, b: BossState, def: BossDef, i: number): SimEntity {
+export function spawnKitten(sim: Sim, e: SimEntity, b: BossState, def: VacTankDef, i: number): SimEntity {
   const arch = ARCHETYPES.kitten;
   const bx = Math.sin(b.heading), bz = Math.cos(b.heading); // backward (heading faces -Z at 0)
   const lat = (i - 1) * 1.4;
@@ -160,7 +115,7 @@ export function spawnKitten(sim: Sim, e: SimEntity, b: BossState, def: BossDef, 
   return k;
 }
 
-function deployKittens(sim: Sim, e: SimEntity, b: BossState, def: BossDef, t0: number): void {
+function deployKittens(sim: Sim, e: SimEntity, b: BossState, def: VacTankDef, t0: number): void {
   while (b.kitSpawned < def.kittens.count && b.stageT >= t0 + b.kitSpawned * def.kittens.stagger) {
     if (b.kitSpawned === 0) {
       const bx = Math.sin(b.heading), bz = Math.cos(b.heading);
@@ -174,7 +129,7 @@ function deployKittens(sim: Sim, e: SimEntity, b: BossState, def: BossDef, t0: n
 // ------------------------------------------------------------------ system
 
 function effects(sim: Sim, e: SimEntity, b: BossState): void {
-  const def = bossDef(b);
+  const def = tankDef(b);
   switch (b.attack) {
     case BossAttack.Laser:
       if (b.stage === BossStage.Active) laserSweep(sim, e, b, def);
@@ -201,15 +156,13 @@ export const bossAttackSystem: SimSystem = {
   order: 455,
   update(sim, dt) {
     for (const e of bossesOf(sim, scratch)) {
+      if (e.sniper) { sniperEffects(sim, e, dt); continue; } // E1: tracking, the shot, the lob, snapshot fields
       e.weapon = -1;
       e.ammo = 0;
       if (!e.dead) effects(sim, e, e.boss!);
       writeBossFlags(e, e.boss!);
     }
     scratch.length = 0;
-    hairballs.length = 0;
-    for (const h of sim.entities.values()) if (h.hairball) hairballs.push(h);
-    for (const h of hairballs) if (!h.removed) stepHairball(sim, h, dt);
-    hairballs.length = 0;
+    stepHairballs(sim, dt);
   },
 };

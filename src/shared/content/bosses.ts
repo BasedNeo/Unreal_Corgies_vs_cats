@@ -1,7 +1,12 @@
-// Boss set pieces as data (theme content, MASTER_PLAN §12). OWNER: B1 boss lane.
+// Boss set pieces as data (theme content, MASTER_PLAN §12). OWNER: boss lane (B1 Vac-Tank, E1 sniper elite).
 // The authoritative boss systems (src/sim/boss) read these numbers; the client (src/client/procgen/boss)
 // reads the same table for geometry anchors (muzzle, weak point), telegraph radii and timings, so a
 // tuning change here moves the sim, the model and the FX together.
+//
+// Two kinds of boss share one table (BOSSES, indexed by EntityState.cls) and one entity kind:
+//   'tank'   — The Vac-Tank (B1): a robot-vacuum war machine driven over the lawn by Baron Von Floof.
+//   'sniper' — Madame Pointillé (E1): a Siamese sniper elite who "paints" her targets with a laser dot
+//              from three perches across the lawn from the garage Rooftops (the laser-pointer duel).
 //
 // Snapshot encoding for EntityKind.Boss entities (no protocol change):
 //   EntityState.cls    index into BOSSES
@@ -12,8 +17,9 @@
 // Units: meters, seconds, radians, hit points.
 import type { ProjectileDef } from './weapons';
 
-export const BOSS_IDS = ['vac_tank'] as const;
+export const BOSS_IDS = ['vac_tank', 'madame_pointille'] as const;
 export type BossId = (typeof BOSS_IDS)[number];
+export type BossKind = 'tank' | 'sniper';
 
 /** Attack / state ids carried in the snapshot flags (3 bits). */
 export const BossAttack = { None: 0, Laser: 1, Mortar: 2, Spin: 3, Kittens: 4, PhaseShift: 5, Intro: 6, Dying: 7 } as const;
@@ -58,23 +64,41 @@ export interface WeakZone {
   r: number;
 }
 
-export interface BossDef {
+/** Fields every boss has (boss bar, hp scaling, taunts). */
+export interface BossBase {
   id: BossId;
+  kind: BossKind;
+  /** Boss bar title. */
   name: string;
-  pilot: string;
-  /** Max hp = baseHp + hpPerExtraPlayer × (corgi combatants at spawn − 1). */
+  /** Who says the taunts (bark subtitles: "Speaker: “line”"). */
+  speaker: string;
+  /** Boss bar suffix in phase 2 (e.g. "LID OFF!"). */
+  phase2Label: string;
+  /**
+   * Max hp = baseHp + hpPerExtraPlayer × (squad − 1). The squad counts human corgis as 1 and corgi bots
+   * as `botWeight` each (bots that can't reach a boss shouldn't make a solo player's fight longer).
+   */
   baseHp: number;
   hpPerExtraPlayer: number;
+  botWeight: number;
   /** Points for the squad on defeat (`score` event, reason 'boss'). */
   score: number;
+  /** Visual top (crown / ears) for nameplates/camera. */
+  height: number;
+  /** Seconds of the intro (invulnerable, no attacks). */
+  intro: number;
+  /** Minimum seconds between two taunts. */
+  barkCooldown: number;
+}
+
+/** The Vac-Tank (B1): hp sphere + turret + mortar + brushes + kitten hatch. */
+export interface VacTankDef extends BossBase {
+  kind: 'tank';
+  pilot: string;
   /** Hit sphere radius (m), centred `radius` above the feet. Also the KCC collider and the push-out body. */
   radius: number;
-  /** Visual top (crown) for nameplates/camera. */
-  height: number;
   /** Top of the chassis disc. */
   deckY: number;
-  /** Seconds of the drop-in (invulnerable, no attacks). */
-  intro: number;
   /** Spawn height above the ground for the drop-in. */
   dropHeight: number;
   move: {
@@ -160,8 +184,6 @@ export interface BossDef {
     cooldown: number;
   };
   kittens: { windup: number; count: number; stagger: number; cooldown: number; maxAlive: number };
-  /** Minimum seconds between two taunts. */
-  barkCooldown: number;
 }
 
 /** Hard floor for every telegraph / wind-up / warning (s), whatever the phase speed-up. */
@@ -180,13 +202,17 @@ const HAIRBALL_BLAST: ProjectileDef = {
  * tread undercarriage, crimson disc chassis with cardboard armor, a laser-pointer cannon, cardboard
  * mortar tubes full of hairballs and a rear hatch full of kittens.
  */
-export const VAC_TANK: BossDef = {
+export const VAC_TANK: VacTankDef = {
   id: 'vac_tank',
+  kind: 'tank',
   name: 'The Vac-Tank',
   pilot: 'Baron Von Floof',
+  speaker: 'Baron Von Floof',
+  phase2Label: 'LID OFF!',
   // Calibrated with headless fights (L3 bots vs boss, West Yard): 4 → 29.9k ≈ 3.2 min, 2 → 15.3k.
   baseHp: 8000,
   hpPerExtraPlayer: 7300,
+  botWeight: 1,
   score: 25,
   radius: 2.5,
   height: 5,
@@ -210,7 +236,279 @@ export const VAC_TANK: BossDef = {
   barkCooldown: 7,
 };
 
-export const BOSSES: readonly BossDef[] = [VAC_TANK];
+// ------------------------------------------------------------------ E1: the Siamese sniper elite
+
+/** Sniper state ids carried in the snapshot flags (the same 3 bits as BossAttack). */
+export const SniperAct = { None: 0, Track: 1, Lob: 2, Leap: 3, Stagger: 4, PhaseShift: 5, Intro: 6, Dying: 7 } as const;
+export type SniperActId = (typeof SniperAct)[keyof typeof SniperAct];
+export const SNIPER_ACT_NAMES = ['none', 'track', 'lob', 'leap', 'stagger', 'phase_shift', 'intro', 'dying'] as const;
+
+/**
+ * `GameEvent.ability` names emitted by the sniper (id = boss entity). The shot itself is an ordinary
+ * `fire` event (wpn = laser_longshot) so the FX/audio lanes draw the laser beam and play the zap; the
+ * hairball lob reuses the Vac-Tank's `hairball_windup` / `hairball_mortar` (warning circle) events.
+ */
+export const SNIPER_ABILITY = {
+  /** The dot appears and sweeps onto a target (x,y,z = where it first lands). Audio: a soft "ping". */
+  paint: 'dot_paint',
+  /** The device glints: the shot comes in `track.glint` s (x,y,z = lens = weak point). Audio: a "tink". */
+  glint: 'dot_glint',
+  /** The target broke line of sight long enough: the lock is lost (x,y,z = the last dot). */
+  lost: 'dot_lost',
+  /** A weak-point hit during the glint spoiled the shot: she staggers (x,y,z = lens). */
+  spoiled: 'shot_spoiled',
+  /** Relocation starts: a readable crouch, then a leap (x,y,z = destination perch feet: draw a marker). */
+  leap: 'sniper_leap',
+  /** Phase 2: the beret flies off (x,y,z = head). */
+  beretOff: 'beret_off',
+} as const;
+
+/** A sniper perch: feet on a surface, facing yaw (0 = -Z). */
+export interface SniperPerch { id: string; name: string; x: number; y: number; z: number; yaw: number }
+
+/** Madame Pointillé (E1): a character-sized, kinematic boss that holds perches and paints targets. */
+export interface SniperDef extends BossBase {
+  kind: 'sniper';
+  /** Model scale relative to a regular cat; the hit capsule scales with it. */
+  scale: number;
+  capsule: { r: number; halfH: number };
+  /**
+   * Aim pivot (the rifle's shoulder pivot: `pivotY` above the feet, `side` m to her right) and the laser
+   * device's reach along the aim from it — matched to the model's muzzle in the aim pose. The device (lens)
+   * is the beam origin, the glint and the weak point (a sphere of radius `r` around the lens).
+   */
+  lens: { pivotY: number; side: number; reach: number; r: number };
+  /** Damage multiplier for shots through the device (crit). */
+  weak: { mult: number };
+  track: {
+    /** Seconds of painted tracking before the shot (phase 1 / 2; never below MIN_TELEGRAPH). */
+    time: number;
+    timeP2: number;
+    /** How fast the aim point (so the dot) chases the target's chest (m/s at the target): sprinting outruns phase 1. */
+    dotSpeed: number;
+    dotSpeedP2: number;
+    /** Line of sight broken this long (s) loses the lock: the dot drifts off and she re-acquires from zero. */
+    lose: number;
+    /** While the target is hidden, tracking progress drains `decay`× as fast as it builds. */
+    decay: number;
+    /** The device glints for the last `glint` s of the track: a weak-point hit then spoils the shot. */
+    glint: number;
+    /** Acquisition range (m); the dot starts `sweepIn` m to the side of its target and sweeps onto it. */
+    range: number;
+    sweepIn: number;
+  };
+  shot: { damage: number; knockback: number };
+  /** Pause after a shot (the punish window) and after a spoiled shot. */
+  recover: number;
+  stagger: number;
+  /** Pause between attacks (s, random in range). */
+  idle: [number, number];
+  /** Hairball lob: flushes a target that hid behind cover. */
+  lob: {
+    windup: number;
+    /** Flight time = how long each warning circle is up before it lands. */
+    flight: number;
+    count: number;
+    countP2: number;
+    bracket: number;
+    /** A lost target still hidden this long (s) earns a lob at its last seen spot. */
+    hiddenFor: number;
+    cooldown: number;
+    minRange: number;
+    maxRange: number;
+    gravity: number;
+    /** Launch height above the feet (her mouth). */
+    mouthY: number;
+    blast: ProjectileDef;
+  };
+  relocate: {
+    /** Seconds on a perch before she moves on (phase 1 / 2, random in range). */
+    every: [number, number];
+    everyP2: [number, number];
+    /** Damage taken on one perch (fraction of max hp) that makes her move. */
+    hurtFrac: number;
+    /** An enemy this close (and level with her) makes her move. */
+    close: number;
+    /** Crouch before the leap (readable) and the landing recovery. */
+    windup: number;
+    land: number;
+    /** Longest single leap (m); longer trips hop via the perch nearest the midpoint. */
+    maxLeap: number;
+  };
+  phase2: { at: number; speedup: number; dmgMult: number; shiftTime: number };
+  /** Default perches (West Yard). spawnBoss can pass others; index 0 is where she starts. */
+  perches: SniperPerch[];
+}
+
+const yawFacing = (x: number, z: number, tx: number, tz: number) => Math.atan2(-(tx - x), -(tz - z));
+/** Garage roof (D3's Rooftops) centroid: every West Yard sniper perch faces it. */
+const ROOFTOPS_C = { x: 78.5, z: -55 };
+const westYardPerch = (id: string, name: string, x: number, y: number, z: number): SniperPerch => ({ id, name, x, y, z, yaw: yawFacing(x, z, ROOFTOPS_C.x, ROOFTOPS_C.z) });
+
+/**
+ * West Yard perches, across the lawn from the garage Rooftops (the patio side, 44–92 m from the roof
+ * perches). Each has its own character: the umbrella (mid range, 12 m up), the house roof edge (long
+ * range, 30 m up, overlooks everything) and the kettle-grill lid (close, low, easy to flank). They sit on
+ * visual-only surfaces (umbrella canopy, the eave in front of the house collider, the lid dome): the sniper
+ * is kinematic, so nothing under her needs a collider — and when she is defeated she tumbles off.
+ */
+export const WEST_YARD_SNIPER_PERCHES: SniperPerch[] = [
+  westYardPerch('patio_umbrella', 'Patio umbrella', 23, 12.1, -90),
+  westYardPerch('house_eave', 'House roof edge', -5, 30.1, -97.5),
+  westYardPerch('grill_lid', 'Kettle grill lid', 43.4, 5.6, -91.3),
+];
+
+const LOB_BLAST: ProjectileDef = {
+  speed: 0, gravity: -22, radius: 0.35, lifetime: 3, bounces: 0, restitution: 0, bounceBonus: 0,
+  explodeRadius: 3.2, explodeDamage: 34, explodeInner: 0.7, explodeEdgeFrac: 0.25, selfDamageMult: 0,
+  knockback: 9, fuse: true,
+};
+
+/**
+ * Madame Pointillé, the Dot Artiste: an elite Siamese sniper (1.4× a cat) in a crimson beret who
+ * "paints" her subjects with a laser dot before every shot. Original character.
+ */
+export const MADAME_POINTILLE: SniperDef = {
+  id: 'madame_pointille',
+  kind: 'sniper',
+  name: 'Madame Pointillé',
+  speaker: 'Madame Pointillé',
+  phase2Label: 'BERET OFF!',
+  baseHp: 2200,
+  hpPerExtraPlayer: 1600,
+  botWeight: 1,
+  score: 20,
+  height: 1.78,
+  intro: 1.8,
+  barkCooldown: 6,
+  scale: 1.4,
+  capsule: { r: 0.46, halfH: 0.42 },
+  lens: { pivotY: 0.9, side: 0.17, reach: 1.44, r: 0.24 },
+  weak: { mult: 2 },
+  track: { time: 1.1, timeP2: 0.85, dotSpeed: 8.5, dotSpeedP2: 11.5, lose: 0.45, decay: 1.5, glint: 0.45, range: 125, sweepIn: 3.2 },
+  shot: { damage: 44, knockback: 4 },
+  recover: 1.3,
+  stagger: 1.5,
+  idle: [0.5, 1.0],
+  lob: { windup: 0.7, flight: 1.4, count: 1, countP2: 2, bracket: 2.8, hiddenFor: 1.2, cooldown: 7, minRange: 8, maxRange: 80, gravity: -22, mouthY: 1.5, blast: LOB_BLAST },
+  relocate: { every: [16, 22], everyP2: [10, 14], hurtFrac: 0.14, close: 5.5, windup: 0.45, land: 0.35, maxLeap: 36 },
+  phase2: { at: 0.5, speedup: 1.3, dmgMult: 1.1, shiftTime: 1.6 },
+  perches: WEST_YARD_SNIPER_PERCHES,
+};
+
+export type BossDef = VacTankDef | SniperDef;
+
+/** Every boss; EntityState.cls = index here (append only: snapshots carry the number). */
+export const BOSSES: readonly BossDef[] = [VAC_TANK, MADAME_POINTILLE];
+
+export const isTankDef = (d: BossDef): d is VacTankDef => d.kind === 'tank';
+export const isSniperDef = (d: BossDef): d is SniperDef => d.kind === 'sniper';
+
+/** Hairball blast + flight time for either boss (phase 2 flies faster, never under MIN_TELEGRAPH + 0.35). */
+export function hairballSpec(def: BossDef, phase2: boolean): { blast: ProjectileDef; flight: number } {
+  const flight = def.kind === 'tank' ? def.mortar.flight : def.lob.flight;
+  return { blast: def.kind === 'tank' ? def.mortar.blast : def.lob.blast, flight: bossTime(def, flight, phase2, MIN_TELEGRAPH + 0.35) };
+}
+
+/** Seconds of painted tracking before a shot (never below the fairness floor). */
+export function sniperTrackTime(def: SniperDef, phase2: boolean): number {
+  return Math.max(MIN_TELEGRAPH, phase2 ? def.track.timeP2 : def.track.time);
+}
+
+/** Snapshot `ammo` of a sniper = dot distance from the lens along the aim, in these units per meter (0 = no beam). */
+export const SNIPER_DOT_SCALE = 100;
+
+/** Aim pivot (the rifle's shoulder pivot, to her right) of a sniper at feet (x, y, z) aiming at `yaw`. */
+export function sniperPivot(def: SniperDef, x: number, y: number, z: number, yaw: number, out: P3): P3 {
+  out.x = x + Math.cos(yaw) * def.lens.side;
+  out.y = y + def.lens.pivotY;
+  out.z = z - Math.sin(yaw) * def.lens.side;
+  return out;
+}
+
+/** Laser device (lens = beam origin = weak point) for a sniper at feet (x,y,z) aiming (yaw, pitch). */
+export function sniperLens(def: SniperDef, x: number, y: number, z: number, yaw: number, pitch: number, out: P3): P3 {
+  const c = Math.cos(pitch);
+  sniperPivot(def, x, y, z, yaw, out);
+  out.x += -Math.sin(yaw) * c * def.lens.reach;
+  out.y += Math.sin(pitch) * def.lens.reach;
+  out.z += -Math.cos(yaw) * c * def.lens.reach;
+  return out;
+}
+
+/** The laser dot of a sniper snapshot (null when the beam is off): lens + aim × ammo / SNIPER_DOT_SCALE. */
+export function sniperDot(def: SniperDef, s: { x: number; y: number; z: number; yaw: number; pitch: number; ammo: number }, out: P3): P3 | null {
+  if (!(s.ammo > 0)) return null;
+  sniperLens(def, s.x, s.y, s.z, s.yaw, s.pitch, out);
+  const d = s.ammo / SNIPER_DOT_SCALE, c = Math.cos(s.pitch);
+  out.x += -Math.sin(s.yaw) * c * d;
+  out.y += Math.sin(s.pitch) * d;
+  out.z += -Math.cos(s.yaw) * c * d;
+  return out;
+}
+
+/** Is the device glinting (the weak-point window before a shot) in this flag state? */
+export function sniperGlinting(def: SniperDef, f: BossFlagState): boolean {
+  if (f.attack !== SniperAct.Track || f.stage !== BossStage.Telegraph) return false;
+  return f.progress >= 1 - def.track.glint / sniperTrackTime(def, f.phase2) - 1e-6;
+}
+
+/**
+ * HUD helper: is a sniper boss snapshot painting a character standing at feet (x, y, z) right now (the dot on
+ * its body while she tracks)? For a "DOT ON YOU" cue on the local player. Pure; any boss state is accepted.
+ */
+export function sniperPainting(s: { cls: number; flags: number; x: number; y: number; z: number; yaw: number; pitch: number; ammo: number }, x: number, y: number, z: number, height = 1.3): boolean {
+  const def = BOSSES[s.cls];
+  if (!def || def.kind !== 'sniper') return false;
+  const f = unpackBossFlags(s.flags, paintScratch);
+  if (f.attack !== SniperAct.Track || f.stage !== BossStage.Telegraph) return false;
+  const d = sniperDot(def, s, paintDot);
+  return !!d && Math.hypot(d.x - x, d.z - z) < 1.2 && d.y > y - 0.3 && d.y < y + height + 0.3;
+}
+const paintScratch: BossFlagState = { attack: 0, stage: 0, phase2: false, progress: 0 };
+const paintDot: P3 = { x: 0, y: 0, z: 0 };
+
+/** One hop of a relocation: a parabolic leap from the previous point to (x, y, z) in `t` s with `bump` m of arc. */
+export interface SniperHop { x: number; y: number; z: number; t: number; bump: number }
+
+/** Leap time and arc for a hop of horizontal length d (m) and height change dy. */
+export function leapShape(d: number, dy: number): { t: number; bump: number } {
+  return { t: Math.min(1.9, Math.max(0.8, 0.5 + d / 24 + Math.max(0, dy) / 30)), bump: 2 + 0.07 * d + Math.max(0, dy) * 0.25 };
+}
+
+/** Relocation route between two perches: one leap, or two via the perch nearest the midpoint when too far. */
+export function sniperRoute(def: SniperDef, perches: readonly SniperPerch[], from: number, to: number, out: SniperHop[] = []): SniperHop[] {
+  out.length = 0;
+  const a = perches[from], b = perches[to];
+  const hop = (p: SniperPerch, q: SniperPerch) => { const s = leapShape(Math.hypot(q.x - p.x, q.z - p.z), q.y - p.y); out.push({ x: q.x, y: q.y, z: q.z, t: s.t, bump: s.bump }); };
+  if (Math.hypot(b.x - a.x, b.z - a.z) > def.relocate.maxLeap) {
+    const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+    let via = -1, vd = Infinity;
+    for (let i = 0; i < perches.length; i++) {
+      if (i === from || i === to) continue;
+      const d = Math.hypot(perches[i].x - mx, perches[i].z - mz);
+      if (d < vd) { vd = d; via = i; }
+    }
+    if (via >= 0) { hop(a, perches[via]); hop(perches[via], b); return out; }
+  }
+  hop(a, b);
+  return out;
+}
+
+/** Position (and velocity) along one hop at time t ∈ [0, hop.t] from (sx, sy, sz): chord + parabolic bump. */
+export function hopAt(sx: number, sy: number, sz: number, h: SniperHop, t: number, pos: P3, vel?: P3): P3 {
+  const u = Math.min(1, Math.max(0, t / h.t));
+  pos.x = sx + (h.x - sx) * u;
+  pos.z = sz + (h.z - sz) * u;
+  pos.y = sy + (h.y - sy) * u + 4 * h.bump * u * (1 - u);
+  if (vel) {
+    vel.x = (h.x - sx) / h.t;
+    vel.z = (h.z - sz) / h.t;
+    vel.y = ((h.y - sy) + 4 * h.bump * (1 - 2 * u)) / h.t;
+  }
+  return pos;
+}
+
 
 export function bossIndex(id: string): number {
   return BOSSES.findIndex((b) => b.id === id);
@@ -227,13 +525,13 @@ export function bossTime(def: BossDef, seconds: number, phase2: boolean, floor =
 }
 
 /** Weak-point zone for the current phase. */
-export function weakZone(def: BossDef, phase2: boolean): WeakZone {
+export function weakZone(def: VacTankDef, phase2: boolean): WeakZone {
   return phase2 ? def.weak.phase2 : def.weak.phase1;
 }
 
-/** Max hp for a squad of `players` corgi combatants (players and squad bots). */
+/** Max hp for a squad of `players` corgi combatants (bots already weighted by `botWeight`; may be fractional). */
 export function bossMaxHp(def: BossDef, players: number): number {
-  return Math.round(def.baseHp + def.hpPerExtraPlayer * Math.max(0, Math.max(1, Math.floor(players)) - 1));
+  return Math.round(def.baseHp + def.hpPerExtraPlayer * Math.max(0, Math.max(1, players) - 1));
 }
 
 // ------------------------------------------------------------------ snapshot flags
@@ -266,7 +564,7 @@ export function unpackBossFlags(flags: number, out: BossFlagState = { attack: 0,
 export interface P3 { x: number; y: number; z: number }
 
 /** Laser lens (beam origin) in world space for a boss at feet (x,y,z) aiming (yaw, pitch). */
-export function bossMuzzle(def: BossDef, x: number, y: number, z: number, yaw: number, pitch: number, out: P3): P3 {
+export function bossMuzzle(def: VacTankDef, x: number, y: number, z: number, yaw: number, pitch: number, out: P3): P3 {
   const fx = -Math.sin(yaw), fz = -Math.cos(yaw), c = Math.cos(pitch);
   const t = def.turret;
   out.x = x + fx * t.pivotFwd + fx * c * t.barrel;
@@ -306,7 +604,7 @@ export function rayGround(height: (x: number, z: number) => number, ox: number, 
  * boss body (feet at bx,by,bz). Returns the push distance and writes the unit direction into `dir`
  * (0 when not touching). Pure — client prediction can use it to stay in sync with the authority.
  */
-export function bossContactPush(def: BossDef, bx: number, by: number, bz: number, cx: number, cy: number, cz: number, ch: number, cr: number, dir: { x: number; z: number }): number {
+export function bossContactPush(def: VacTankDef, bx: number, by: number, bz: number, cx: number, cy: number, cz: number, ch: number, cr: number, dir: { x: number; z: number }): number {
   const R = def.radius;
   const sc = by + R; // sphere centre height
   const lo = cy, hi = cy + ch;
@@ -322,9 +620,10 @@ export function bossContactPush(def: BossDef, bx: number, by: number, bz: number
 
 // ------------------------------------------------------------------ taunts (original lines)
 
-export type BossBarkKey = 'intro' | 'laser' | 'mortar' | 'spin' | 'kittens' | 'phase2' | 'kill' | 'lowHp' | 'defeat' | 'victory' | 'hurt';
+export type BossBarkKey = 'intro' | 'laser' | 'mortar' | 'spin' | 'kittens' | 'phase2' | 'kill' | 'lowHp' | 'defeat' | 'victory' | 'hurt'
+  | 'miss' | 'leap' | 'spoiled';
 
-export const BOSS_BARKS: Record<BossId, Record<BossBarkKey, readonly string[]>> = {
+export const BOSS_BARKS: Record<BossId, Partial<Record<BossBarkKey, readonly string[]>>> = {
   vac_tank: {
     intro: ['Behold the Vac-Tank! This yard is now my personal lounge.', 'Sit. Stay. Get vacuumed.', 'Ah, corgis. I have cushions older than you.'],
     laser: ['Chase the dot. CHASE IT.', 'Red dot! Irresistible, isn\'t it?', 'Follow the light, little loaf.'],
@@ -337,5 +636,19 @@ export const BOSS_BARKS: Record<BossId, Record<BossBarkKey, readonly string[]>> 
     hurt: ['Mind the paint job!', 'Ow. My dignity.', 'Do you KNOW who I am?'],
     defeat: ['Curse you and your stubby little legs!', 'I shall return... after a nap!', 'Not the ejector seeeaaat!'],
     victory: ['And THAT is why cats rule the yard.', 'Tidy. Spotless. Corgi-free.'],
+  },
+  madame_pointille: {
+    intro: ['Hold still, darlings. I am painting.', 'A fresh canvas! How delightful.', 'Every masterpiece begins with one little dot.'],
+    laser: ['Hold that pose.', 'Ah, the light is perfect.', 'Say \'kibble\'!', 'A little red... just... there.'],
+    kill: ['Magnifique.', 'Art is pain. Mostly yours.', 'Signed, framed, done.', 'Hm. Needs more drama.'],
+    miss: ['Hold STILL!', 'Philistine! You moved!', 'The light was wrong. Obviously.'],
+    mortar: ['Hhhk... a sculpture! Catch!', 'Try hiding from THIS medium.'],
+    leap: ['Too crowded. I need space to create.', 'Moving my easel.', 'The critics are too close!'],
+    hurt: ['My whiskers!', 'Rude!', 'Do you know how long this pose took?'],
+    spoiled: ['My LENS!', 'You smudged it!', 'Ow! Right in the art!'],
+    phase2: ['You knocked off my beret. Now it is personal.', 'No more watercolours. Only red.', 'Fine. Abstract expressionism it is!'],
+    lowHp: ['I am... misunderstood!', 'The critics will hear of this!'],
+    defeat: ['My final piece... \'Still Life with Corgi\'...', 'I was ahead of my tiiime!'],
+    victory: ['Another gallery of sleepy corgis.', 'Exhibition closed.'],
   },
 };

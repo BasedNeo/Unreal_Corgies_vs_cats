@@ -8,13 +8,13 @@ import { createWorldData, createFlatWorldData } from '../../src/shared/world/wor
 import { Btn } from '../../src/shared/input';
 import { WEAPONS } from '../../src/shared/content/weapons';
 import {
-  BOSSES, BossAttack, BOSS_ABILITY, BOSS_FLAG_PHASE2, MIN_TELEGRAPH, bossMaxHp, unpackBossFlags, bossContactPush,
+  VAC_TANK, BossAttack, BOSS_ABILITY, BOSS_FLAG_PHASE2, MIN_TELEGRAPH, bossMaxHp, unpackBossFlags, bossContactPush,
 } from '../../src/shared/content/bosses';
 import { spawnBoss, forceBossAttack, skipBossIntro, countSquad } from '../../src/sim/boss';
 import { applyDamage, kill, eyeHeight, capsuleOf } from '../../src/sim/combat';
 import type { MatchConfigOverrides } from '../../src/sim/match';
 
-const DEF = BOSSES[0];
+const DEF = VAC_TANK;
 type Ev = GameEvent & { t: number };
 
 async function flatSim(seed = 3): Promise<Sim> {

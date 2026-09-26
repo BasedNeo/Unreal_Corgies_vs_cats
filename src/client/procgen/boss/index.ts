@@ -1,6 +1,7 @@
-// OWNER: B1 boss lane. createBossAvatar() — the Vac-Tank with Baron Von Floof at the controls,
-// implementing the shared Avatar contract (src/client/views/avatar.ts) so the lead routes
-// EntityKind.Boss states to it from entity-views (see docs/handoff/B1.md).
+// OWNER: boss lane. createBossAvatar() — routes a boss snapshot (EntityState.cls = BOSSES index) to its
+// model: the Vac-Tank with Baron Von Floof at the controls (B1, this file) or Madame Pointillé, the
+// Siamese sniper elite (E1, sniper.ts). Both implement the shared Avatar contract (src/client/views/avatar.ts)
+// so the lead routes EntityKind.Boss states here from entity-views (see docs/handoff/B1.md, E1.md).
 //
 // Everything the model does is derived from the AvatarFrame the host already builds for characters:
 //   speed → treads/wheels · aimYawOffset/aimPitch → turret + laser barrel · hpFrac → hit shudder/flash,
@@ -19,12 +20,14 @@ import { Spring, approach, smooth01, elasticOut } from '../../anim/springs';
 import type { Expression } from '../../anim/face';
 import { Anim, type TeamId } from '../../../shared/types';
 import {
-  BossAttack, BossStage, BOSS_ABILITY, bossByIndex, unpackBossFlags, type BossDef, type BossFlagState,
+  BossAttack, BossStage, BOSS_ABILITY, VAC_TANK, bossByIndex, unpackBossFlags, type VacTankDef as BossDef, type BossFlagState,
 } from '../../../shared/content/bosses';
 import { buildMechRig, buildMechGeometry, type MechGeometry } from './mech';
 import { createPilot, PILOT_SCALE, type Pilot } from './pilot';
+import { createSniperAvatar, type SniperAvatar } from './sniper';
 
 export { createBossTelegraphFx, bossTelegraphFx, type BossTelegraphFx, type TelegraphPrimitive } from './telegraph-fx';
+export { createSniperAvatar, type SniperAvatar, type SniperAvatarStats } from './sniper';
 
 export const BOSS_TRI_BUDGET = 15000;
 export const BOSS_DRAW_BUDGET = 8;
@@ -41,7 +44,9 @@ export interface BossAvatarOptions {
 
 export interface BossAvatarStats { triangles: number; drawCalls: number; bones: number; pilotTriangles: number; mechTriangles: number }
 
-export interface BossAvatar extends Avatar {
+/** The Vac-Tank's avatar (B1). */
+export interface TankAvatar extends Avatar {
+  kind: 'tank';
   def: BossDef;
   stats: BossAvatarStats;
   mech: THREE.SkinnedMesh;
@@ -83,8 +88,19 @@ function releaseMech(def: BossDef): void {
 const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1), _e = new THREE.Euler();
 const TAU = Math.PI * 2;
 
+/** Any boss model (discriminated by `kind`). */
+export type BossAvatar = TankAvatar | SniperAvatar;
+
+/** The model for a boss snapshot (`boss` = EntityState.cls). */
 export function createBossAvatar(opts: BossAvatarOptions = {}): BossAvatar {
   const def = bossByIndex(opts.boss ?? 0);
+  if (def.kind === 'sniper') return createSniperAvatar(def, (opts.seed ?? 1) >>> 0);
+  return createTankAvatar({ ...opts, def });
+}
+
+/** The Vac-Tank model (B1). */
+export function createTankAvatar(opts: BossAvatarOptions & { def?: BossDef } = {}): TankAvatar {
+  const def = opts.def ?? VAC_TANK;
   const seed = (opts.seed ?? 1) >>> 0;
   const asset = acquireMech(def);
   const rig = new RigInstance(asset.rig);
@@ -173,7 +189,8 @@ export function createBossAvatar(opts: BossAvatarOptions = {}): BossAvatar {
 
   const pose = rig.pose;
 
-  const avatar: BossAvatar = {
+  const avatar: TankAvatar = {
+    kind: 'tank',
     root,
     height: def.height,
     def,

@@ -13,9 +13,9 @@ let room: Room | null = null;
 const pending: unknown[] = [];
 const conn: Conn = { id: 'local', send: (m: ServerMsg) => self.postMessage(m) };
 
-async function boot(cfg: { seed: number; mode: string; bots: [number, number]; chapter?: string }) {
+async function boot(cfg: { seed: number; mode: string; bots: [number, number]; chapter?: string; boss?: string }) {
   const sim = await Sim.create({ seed: cfg.seed });
-  room = new Room(sim, { mode: cfg.mode, botsPerTeam: cfg.bots, defaultTeam: 0, chapter: cfg.chapter });
+  room = new Room(sim, { mode: cfg.mode, botsPerTeam: cfg.bots, defaultTeam: 0, chapter: cfg.chapter, boss: cfg.boss });
   startRoomLoop(room);
   for (const m of pending.splice(0)) handle(m);
 }

@@ -18,6 +18,8 @@ import * as S from './presets';
 /** Class ability → recipe (bark blast also barks; see the 'ability' case). */
 const ABILITY_SFX: Record<string, S.Recipe> = {
   ear_glide: S.whoosh, shadow_cloak: S.poof, spotter_drone: S.droneWhir, dig_charge: S.chargeArm, squeak_barrier: S.squeakWall,
+  // E1 sniper: the dot's life (paint → glint → shot, or lost / spoiled), her leaps and phase 2
+  dot_paint: S.dotPing, dot_glint: S.glintTink, dot_lost: S.dotLost, shot_spoiled: S.clonk, sniper_leap: S.whoosh, beret_off: S.pop,
 };
 import { WeaponTable, type WeaponFxId } from '../fx/weapon-fx';
 

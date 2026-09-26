@@ -16,9 +16,10 @@ import { CHARACTER_MOVE_FILTER } from '../rapier';
 import { combatLive, isStealthed, ticksOf, capsuleOf } from '../combat/state';
 import { worldLineClear } from '../combat/geometry';
 import {
-  BossAttack, BossStage, BOSS_ABILITY, MIN_TELEGRAPH, bossContactPush, bossMuzzle, bossTime, type BossDef, type P3,
+  BossAttack, BossStage, BOSS_ABILITY, MIN_TELEGRAPH, bossContactPush, bossMuzzle, bossTime, type VacTankDef as BossDef, type P3,
 } from '../../shared/content/bosses';
-import { bossBark, bossDef, bossesOf, setStage, writeBossFlags, type BossState } from './state';
+import { bossBark, bossesOf, setStage, tankDef, writeBossFlags, type BossState } from './state';
+import { updateSniper } from './sniper';
 import { bossNavGrid, discClear, nearestClear, sweepClear } from './nav';
 
 const scratch: SimEntity[] = [];
@@ -498,7 +499,7 @@ function defeat(sim: Sim, e: SimEntity, b: BossState, def: BossDef, dt: number):
 
 export function updateBoss(sim: Sim, e: SimEntity, dt: number): void {
   const b = e.boss!;
-  const def = bossDef(b);
+  const def = tankDef(b);
   if (e.dead) { defeat(sim, e, b, def, dt); writeBossFlags(e, b); return; }
   const h = e.health!;
   h.lastDamageTick = Math.max(h.lastDamageTick, sim.tick - 1); // bosses never regenerate
@@ -526,7 +527,10 @@ export const bossBrainSystem: SimSystem = {
   name: 'boss-brain',
   order: 150,
   update(sim, dt) {
-    for (const e of bossesOf(sim, scratch)) updateBoss(sim, e, dt);
+    for (const e of bossesOf(sim, scratch)) {
+      if (e.sniper) updateSniper(sim, e, dt); // E1: the sniper elite (perches, relocation, decisions)
+      else updateBoss(sim, e, dt);
+    }
     scratch.length = 0;
   },
 };

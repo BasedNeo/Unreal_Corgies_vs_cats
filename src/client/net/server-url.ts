@@ -18,12 +18,13 @@ export interface PageLocation {
 }
 
 function withRoom(url: string, room: string | null, params?: URLSearchParams): string {
-  const mode = params?.get('mode'), chapter = params?.get('chapter');
+  const boss = params?.get('boss'), mode = params?.get('mode') ?? (boss ? 'boss-rush' : null), chapter = params?.get('chapter');
   if (!room && !mode) return url;
   const u = new URL(url);
   if (room) u.searchParams.set('room', sanitizeRoomName(room));
   if (mode) u.searchParams.set('mode', mode);
   if (mode && chapter) u.searchParams.set('chapter', chapter);
+  if (mode === 'boss-rush' && boss) u.searchParams.set('boss', boss); // ?boss=<id> online too (E1)
   return u.toString();
 }
 

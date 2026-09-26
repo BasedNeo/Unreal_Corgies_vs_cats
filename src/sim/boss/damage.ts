@@ -16,10 +16,11 @@ import type { SimEntity } from '../entity';
 import type { GameEvent } from '../../shared/protocol';
 import { EntityKind } from '../../shared/types';
 import { WEAPONS, weaponByIndex, COMBAT_RULES } from '../../shared/content/weapons';
-import { weakZone, type BossDef } from '../../shared/content/bosses';
+import { sniperLens, weakZone, type VacTankDef as BossDef, type P3 } from '../../shared/content/bosses';
 import { kill, rayCapsule } from '../combat';
 import { rewindTick, currentStateTick } from '../combat/lagcomp';
-import { bossBark, bossDef, type BossState } from './state';
+import { bossBark, sniperDef, tankDef, type BossState } from './state';
+import { sniperGlintingNow, spoilSniperShot } from './sniper';
 
 type FireEv = Extract<GameEvent, { e: 'fire' }>;
 type HitEv = Extract<GameEvent, { e: 'hit' }>;
@@ -47,8 +48,9 @@ export function rayHitsWeakPoint(def: BossDef, phase2: boolean, bx: number, by: 
 }
 
 function regrade(sim: Sim, ev: HitEv, boss: SimEntity, fire: FireEv | null): void {
+  if (boss.sniper) { regradeSniper(sim, ev, boss, fire); return; }
   const b = boss.boss as BossState;
-  const def = bossDef(b);
+  const def = tankDef(b);
   const shooter = sim.entities.get(ev.src);
   const wdef = fire ? weaponByIndex(fire.wpn) : null;
   let headMult = 1;
@@ -88,6 +90,72 @@ function regrade(sim: Sim, ev: HitEv, boss: SimEntity, fire: FireEv | null): voi
     h.hp = 0;
     kill(sim, boss, { id: ev.src, team: shooter?.team ?? (boss.team === 0 ? 1 : 0), weapon: fire ? fire.wpn : -1 });
   }
+}
+
+const lens: P3 = { x: 0, y: 0, z: 0 };
+
+/** Distance along a unit ray to a sphere (centre c, radius r), -1 on a miss. */
+function raySphere(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, c: P3, r: number): number {
+  const lx = ox - c.x, ly = oy - c.y, lz = oz - c.z;
+  const b = dx * lx + dy * ly + dz * lz;
+  const k = lx * lx + ly * ly + lz * lz - r * r;
+  const h = b * b - k;
+  if (h < 0) return -1;
+  const t = -b - Math.sqrt(h);
+  return t >= 0 ? t : k <= 0 ? 0 : -1;
+}
+
+/** Does a shot ray pass through the sniper's laser device (lens sphere) before it stopped at `len`? */
+export function rayHitsSniperDevice(boss: SimEntity, bx: number, by: number, bz: number, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, len: number): boolean {
+  const s = boss.sniper!;
+  const def = sniperDef(boss.boss!);
+  sniperLens(def, bx, by, bz, s.aimYaw, s.aimPitch, lens);
+  const t = raySphere(ox, oy, oz, dx, dy, dz, lens, def.lens.r);
+  return t >= 0 && t <= len + 0.05;
+}
+
+/**
+ * E1 sniper: the combat lane's own grading stands (body, or head zone ×headMult), except shots through the
+ * laser device (the glinting lens): ×weak.mult, crit — and during the glint that spoils her shot.
+ */
+function regradeSniper(sim: Sim, ev: HitEv, boss: SimEntity, fire: FireEv | null): void {
+  const b = boss.boss as BossState;
+  const s = boss.sniper!;
+  const def = sniperDef(b);
+  const shooter = sim.entities.get(ev.src);
+  const wdef = fire ? weaponByIndex(fire.wpn) : null;
+  let device = false;
+  const wasCrit = ev.crit;
+  if (fire && wdef && wdef.kind === 'hitscan') {
+    let dx = ev.x - fire.x, dy = ev.y - fire.y, dz = ev.z - fire.z;
+    const l = Math.hypot(dx, dy, dz);
+    if (l > 1e-6) {
+      dx /= l; dy /= l; dz /= l;
+      const p = bossPosFor(sim, boss, shooter);
+      device = rayHitsSniperDevice(boss, p.x, p.y, p.z, fire.x, fire.y, fire.z, dx, dy, dz, l);
+    }
+  }
+  const h = boss.health!;
+  if (device && wdef) {
+    const base = ev.dmg / (ev.crit ? wdef.headMult : 1);
+    const want = Math.max(1, Math.round(base * def.weak.mult));
+    if (!boss.dead && want !== ev.dmg) {
+      const delta = Math.min(want - ev.dmg, h.hp);
+      h.hp = Math.min(h.max, h.hp - delta);
+      ev.dmg += delta;
+    }
+    ev.crit = true;
+    s.stats.deviceHits++;
+  } else if (wasCrit) s.stats.headHits++;
+  else s.stats.bodyHits++;
+  s.hurtHere += ev.dmg;
+  noteHit(sim, boss, b, ev, shooter, device);
+  if (!boss.dead && h.hp <= 0) {
+    h.hp = 0;
+    kill(sim, boss, { id: ev.src, team: shooter?.team ?? (boss.team === 0 ? 1 : 0), weapon: fire ? fire.wpn : -1 });
+    return;
+  }
+  if (device && !boss.dead && sniperGlintingNow(boss)) spoilSniperShot(sim, boss);
 }
 
 /** Stats, aggro and the "ouch" taunt for a (regraded) hit on a boss. */

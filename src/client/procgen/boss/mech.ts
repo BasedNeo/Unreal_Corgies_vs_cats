@@ -12,7 +12,7 @@ import { PALETTE } from '../../style/style-tokens.js';
 import { mixHex } from '../characters/colors';
 import { MeshBuilder, ellipsoid, sweep, ring, mirrorX, xform, ellipseLoop, type ColorFn, type Prim, type V3 } from '../characters/mesh-builder';
 import { puck, rbox, tube, lathe, wedge } from './prims';
-import type { BossDef } from '../../../shared/content/bosses';
+import type { VacTankDef as BossDef } from '../../../shared/content/bosses';
 
 const P = PALETTE;
 export const COL = {

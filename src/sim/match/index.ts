@@ -19,7 +19,7 @@ import { applyArchetype, simNavGrid } from '../ai';
 import { ARCHETYPES, type ArchetypeId } from '../ai/archetypes';
 import { nearestWalkable, cellX, cellZ } from '../ai/nav';
 import { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type MatchConfigOverrides } from './config';
-import { spawnBoss, bossWaveStatus } from '../boss'; // B1 hook: boss waves
+import { spawnBoss, bossWaveStatus, bossRushConfig } from '../boss'; // B1 hook: boss waves (E1: which boss)
 import { objectiveState, takeObjectiveScore, foldObjectiveText } from '../interact'; // S1: mission chain
 import { coreRushConfig, setupCorePads, stepCorePads } from './core-rush';
 import { CORE_PAD_LABELS } from '../../shared/content/modes';
@@ -363,7 +363,7 @@ export const matchSystem: SimSystem = {
     let mode = roomMode(sim);
     if (mode === 'boss-rush') {
       // Test/showcase mode: a skirmish whose only wave is the boss (?mode=boss-rush or ?boss=1).
-      sim.state.matchConfig ??= { skirmish: { warmup: 5, waves: [{ counts: {}, boss: 'vac_tank', label: 'BOSS' }] } };
+      sim.state.matchConfig ??= bossRushConfig((sim.state.room as { boss?: string } | undefined)?.boss);
       (sim.state.room as { mode: string }).mode = mode = 'yard-skirmish';
     }
     const kills = combatBus(sim).kills;

@@ -1,5 +1,6 @@
-// OWNER: B1 boss lane. "The Vac-Tank" — Baron Von Floof's robot-vacuum war machine, the skirmish
-// finale. Authoritative and deterministic (sim.rng only; no three/DOM/Math.random).
+// OWNER: boss lane. Bosses: "The Vac-Tank" (B1) — Baron Von Floof's robot-vacuum war machine, the
+// skirmish finale — and Madame Pointillé (E1), the Siamese sniper elite of the laser-pointer duel
+// (sniper.ts). Authoritative and deterministic (sim.rng only; no three/DOM/Math.random).
 //
 // Systems (bossSystems()):
 //   150 boss-brain    target, telegraphed attack state machine, aim, movement intent (KCC via stepCharacter)
@@ -16,8 +17,9 @@ import { emptyInput } from '../../shared/input';
 import { CHARACTER_GROUPS } from '../rapier';
 import { ensureCombat, ticksOf } from '../combat/state';
 import {
-  BOSSES, BossAttack, BossStage, BOSS_ABILITY, BOSS_ATTACK_NAMES, bossIndex, bossMaxHp, type BossDef,
+  BOSSES, BossAttack, BossStage, BOSS_ABILITY, BOSS_ATTACK_NAMES, VAC_TANK, bossIndex, bossMaxHp, type SniperPerch, type VacTankDef,
 } from '../../shared/content/bosses';
+import { spawnSniper, weightedSquad } from './sniper';
 import { bossBrainSystem } from './brain';
 import { bossAttackSystem } from './attacks';
 import { bossDamageSystem } from './damage';
@@ -27,20 +29,28 @@ import { bossNavGrid, nearestClear } from './nav';
 export { bossBrainSystem, updateBoss, DEFEAT_TIME, EJECT_AT } from './brain';
 export { bossAttackSystem, spawnKitten } from './attacks';
 export { bossDamageSystem, rayHitsWeakPoint } from './damage';
-export { bossesOf, isBoss, bossDef, type BossState, type BossStats, type HairballState } from './state';
+export { bossesOf, isBoss, bossDef, tankDef, sniperDef, type BossState, type BossStats, type HairballState, type SniperState, type SniperShot, type SniperStats } from './state';
+export { spawnSniper, updateSniper, sniperEffects, spoilSniperShot, sniperGlintingNow, weightedSquad } from './sniper';
+export { launchHairball, hairballBlast } from './hairball';
 
 export function bossSystems(): SimSystem[] {
   return [bossBrainSystem, bossAttackSystem, bossDamageSystem];
 }
 
 export interface SpawnBossOptions {
-  /** Boss id from BOSSES (default: the first, 'vac_tank'). */
+  /** Boss id from BOSSES (default: the first, 'vac_tank'; the sniper elite is 'madame_pointille'). */
   boss?: string;
-  /** Corgi combatants to scale hp for (default: every character on the opposing team right now). */
+  /**
+   * Corgi combatants to scale hp for (default: every character on the opposing team right now; the sniper
+   * counts corgi bots at its `botWeight`).
+   */
   players?: number;
   team?: TeamId;
   /** Drop in from above (default true): lands with a `land` event and a short invulnerable intro. */
   drop?: boolean;
+  /** Sniper only: perches to hold (default: the West Yard perches in BOSSES) and the starting perch index. */
+  perches?: SniperPerch[];
+  perch?: number;
 }
 
 /** Corgi combatants (players and squad bots, alive or respawning) the boss will face. */
@@ -54,7 +64,7 @@ export function countSquad(sim: Sim, bossTeam: TeamId): number {
  * Default arena spot: halfway between the boss team's spawns and the map centre, on a patch of plain
  * lawn wide enough for the tank (falls back to the raw point before the nav grid exists).
  */
-export function defaultBossSpawn(sim: Sim, def: BossDef = BOSSES[0], team: TeamId = Team.Cats): { x: number; z: number } {
+export function defaultBossSpawn(sim: Sim, def: VacTankDef = VAC_TANK, team: TeamId = Team.Cats): { x: number; z: number } {
   const own = sim.worldData.spawns.filter((s) => s.team === team);
   let cx = 0, cz = 0;
   for (const s of own) { cx += s.x; cz += s.z; }
@@ -74,8 +84,14 @@ export function defaultBossSpawn(sim: Sim, def: BossDef = BOSSES[0], team: TeamI
  */
 export function spawnBoss(sim: Sim, at?: { x: number; z: number; y?: number; yaw?: number }, opts: SpawnBossOptions = {}): SimEntity {
   const idx = Math.max(0, bossIndex(opts.boss ?? BOSSES[0].id));
-  const def = BOSSES[idx];
+  const any = BOSSES[idx];
   const team = opts.team ?? Team.Cats;
+  if (any.kind === 'sniper') {
+    // E1: the sniper holds perches (`at` picks the nearest one to start on)
+    const players = opts.players ?? weightedSquad(sim, team, any.botWeight);
+    return spawnSniper(sim, idx, any, at, { team, players, perches: opts.perches, perch: opts.perch, drop: opts.drop });
+  }
+  const def = any;
   const p = at ?? defaultBossSpawn(sim, def, team);
   const ground = at?.y ?? sim.worldData.height(p.x, p.z);
   const drop = opts.drop ?? true;
@@ -134,10 +150,10 @@ export function spawnBoss(sim: Sim, at?: { x: number; z: number; y?: number; yaw
   return e;
 }
 
-/** Tests / lab: make the boss start this attack as soon as it is idle (name from BOSS_ATTACK_NAMES or id). */
+/** Tests / lab: make the boss start this attack as soon as it is idle (name from BOSS_ATTACK_NAMES or id). Vac-Tank only. */
 export function forceBossAttack(boss: SimEntity, attack: number | 'laser' | 'mortar' | 'spin' | 'kittens'): void {
   const b = boss.boss;
-  if (!b) return;
+  if (!b || boss.sniper) return;
   const id = typeof attack === 'number' ? attack : (BOSS_ATTACK_NAMES as readonly string[]).indexOf(attack);
   if (id < BossAttack.Laser || id > BossAttack.Kittens) return;
   b.forced = id;
@@ -148,7 +164,7 @@ export function forceBossAttack(boss: SimEntity, attack: number | 'laser' | 'mor
 /** Tests / lab: skip the drop-in intro (the boss becomes attackable and starts choosing attacks). */
 export function skipBossIntro(sim: Sim, boss: SimEntity): void {
   const b = boss.boss;
-  if (!b || b.attack !== BossAttack.Intro) return;
+  if (!b || b.attack !== BossAttack.Intro) return; // (SniperAct.Intro has the same id)
   b.attack = BossAttack.None;
   setStage(b, BossStage.Idle, 1);
   b.readyAt = sim.time;
@@ -175,3 +191,19 @@ export function bossWaveStatus(sim: Sim, id: number): { alive: boolean; score: n
 }
 
 export { bossesOf as bossEntities };
+
+/** The living boss with this BOSSES id (adventure `defeat` steps with `boss: '<id>'`), or null. */
+export function findBoss(sim: Sim, bossId: string): SimEntity | null {
+  const idx = bossIndex(bossId);
+  for (const e of sim.entities.values()) if (e.kind === EntityKind.Boss && e.boss && e.boss.def === idx && !e.dead) return e;
+  return null;
+}
+
+/**
+ * Match config for a boss-rush / showcase: a skirmish whose only wave is this boss (unknown ids fall back to
+ * the Vac-Tank). For match/index.ts: `sim.state.matchConfig ??= bossRushConfig(room.boss)`.
+ */
+export function bossRushConfig(bossId?: string): { skirmish: { warmup: number; waves: { counts: Record<string, number>; boss: string; label: string }[] } } {
+  const id = bossId && bossIndex(bossId) >= 0 ? bossId : BOSSES[0].id;
+  return { skirmish: { warmup: 5, waves: [{ counts: {}, boss: id, label: 'BOSS' }] } };
+}

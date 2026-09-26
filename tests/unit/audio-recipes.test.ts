@@ -53,7 +53,7 @@ describe('SFX recipes', () => {
 
   it('are all exported and include the Wave 3 ability voices', () => {
     const names = recipes.map(([n]) => n);
-    for (const n of ['droneWhir', 'chargeArm', 'squeakWall', 'whoosh', 'poof', 'whoomp']) expect(names).toContain(n);
+    for (const n of ['droneWhir', 'chargeArm', 'squeakWall', 'whoosh', 'poof', 'whoomp', 'dotPing', 'glintTink', 'dotLost', 'clonk', 'pop']) expect(names).toContain(n);
   });
 
   it('schedule without Web Audio errors and report a finite duration, for every strength/variant', () => {

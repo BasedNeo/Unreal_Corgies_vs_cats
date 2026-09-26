@@ -26,7 +26,8 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
   combat/                          weapons, lag-compensated hitscan, projectiles, damage, lifecycle/respawn, abilities
   ai/                              brain (HFSM, perception, aim), archetypes, nav (1 m grid A*)
   match/                           yard-skirmish (waves) · team-deathmatch
-  vehicles/  boss/                 Wave 2 lanes (Mower Kart + terminals; Vac-Tank boss)
+  vehicles/  boss/                 Wave 2 lanes (Mower Kart + terminals; Vac-Tank boss) · boss/ also the sniper elite
+                                   (E1: sniper.ts perches/dot/shot/leaps, hairball.ts shared lob); ?boss=<id> → Room
   vehicles/plane*.ts pilot.ts      R1 RC plane: pure flight step (plane.ts), order 191 seats/gun/damage/crashes
                                    (plane-systems.ts), scripted pilot (pilot.ts); common.ts = kart+plane helpers, stun
   interact/                        order 150: Ordnance kiosk kit swaps, Upgrade Cores + buffs, Golden Kibble,
