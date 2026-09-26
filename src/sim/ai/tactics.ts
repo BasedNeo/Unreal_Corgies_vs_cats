@@ -495,8 +495,12 @@ export function objectiveInteract(sim: Sim, e: SimEntity, t: TacticsState): numb
 // ---------------------------------------------------------------- adventure (A1)
 
 /** Take a spot inside a zone (kept while it stays inside); the bot fights from inside it (brain holdZone). */
-function zoneGoal(sim: Sim, t: TacticsState, g: NavGrid, x: number, z: number, r: number, id: number, prev: string, prevId: EntityId): void {
-  t.goal = 'step'; t.interact = false; t.hold = true;
+/**
+ * Stand in a zone. `hold` only for zones the squad defends (hold / survive steps): Breachers mine a hold zone, which
+ * next to the Garage breach wall would blow it before the human's own step (Q2 P1-1: bots help, never steal the win).
+ */
+function zoneGoal(sim: Sim, t: TacticsState, g: NavGrid, x: number, z: number, r: number, id: number, prev: string, prevId: EntityId, hold = false): void {
+  t.goal = 'step'; t.interact = false; t.hold = hold;
   t.gr = r; t.gy = sim.worldData.height(x, z); t.cx = x; t.cz = z;
   const same = prev === 'step' && prevId === id && Math.hypot(t.gx - x, t.gz - z) < r * 0.95;
   if (!same) {
@@ -583,7 +587,7 @@ function adventureGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, char
   switch (tr.type) {
     case 'reach':
     case 'hold':
-      zoneGoal(sim, t, g, tr.params.x, tr.params.z, tr.params.radius, zid - 2, prev, prevId);
+      zoneGoal(sim, t, g, tr.params.x, tr.params.z, tr.params.radius, zid - 2, prev, prevId, tr.type === 'hold');
       return;
     case 'interact': {
       const p = tr.params;
@@ -622,7 +626,7 @@ function adventureGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, char
       return;
     }
     case 'survive':
-      zoneGoal(sim, t, g, st.anchorX, st.anchorZ, 7, zid - 5, prev, prevId);
+      zoneGoal(sim, t, g, st.anchorX, st.anchorZ, 7, zid - 5, prev, prevId, true);
       return;
   }
   zoneGoal(sim, t, g, st.anchorX, st.anchorZ, 5, zid - 1, prev, prevId);
