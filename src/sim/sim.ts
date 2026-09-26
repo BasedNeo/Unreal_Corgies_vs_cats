@@ -186,6 +186,11 @@ export class Sim {
     this.time += dt;
   }
 
+  /** This tick's events so far, read in place (never drained): systems that react to earlier systems' events. */
+  peekEvents(): readonly GameEvent[] {
+    return this.events;
+  }
+
   toState(e: SimEntity): EntityState {
     return {
       id: e.id, kind: e.kind, team: e.team, species: e.species,

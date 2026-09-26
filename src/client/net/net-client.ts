@@ -384,6 +384,7 @@ export class NetClient {
     this.lastAck = m.ack;
     while (this.unacked.length && this.unacked[0].seq <= m.ack) this.unacked.shift();
     this.syncClock(m.tick, now);
+    this.predictor?.syncWorld(ents.values()); // C2: barriers block predicted movement too
     this.reconcileLocal(ents.get(m.you) ?? null, m.ack);
     this.match = m.match;
     bus.emit('match', m.match);

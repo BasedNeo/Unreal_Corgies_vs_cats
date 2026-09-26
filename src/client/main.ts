@@ -27,6 +27,7 @@ import { createBossTelegraphFx } from './procgen/boss';
 import { createVehicleViews, vehicleCameraFor, mountedVehicle, followYaw } from './vehicles';
 import { createInteractViews, createInteractPrompts } from './interact';
 import { createCoreRushView } from './modes/core-rush-view';
+import { createAbilityViews } from './abilities';
 import { loadSettings, type Settings } from './ui/settings';
 import { bus } from './core/events';
 import { TICK_DT } from '../shared/constants';
@@ -90,11 +91,19 @@ async function main(): Promise<void> {
   // S1: Ordnance kiosks, Upgrade Cores, Golden Kibble, the mission beacon (3D) + E prompt, kit picker, buffs, mission card
   const interact = createInteractViews(ctx.scene, { world: worldData, camera: ctx.camera });
   const rush = createCoreRushView(ctx.scene, ui); // core-rush pads + A·B·C strip (idle in other modes)
+  const abilityViews = createAbilityViews(ctx.scene, { camera: ctx.camera }); // C2: drones, charges, barriers, spotted markers
   // Concealment cue: the sim sets EFlag.Stealthed while the local corgi is hidden in tall grass.
   const hiddenCue = document.createElement('div');
   hiddenCue.textContent = 'HIDDEN';
   hiddenCue.style.cssText = 'position:absolute;left:50%;bottom:92px;transform:translateX(-50%);padding:4px 12px;border:3px solid #1a120c;border-radius:10px;background:#3f6e2acc;color:#e9f7d2;font:900 14px/1 "Lilita One",system-ui,sans-serif;letter-spacing:.12em;box-shadow:2px 2px 0 #1a120c;display:none;pointer-events:none';
   ui.appendChild(hiddenCue);
+  // Spotted cue: an enemy Spotter Drone has you marked (EFlag.Spotted) — they can see you through walls.
+  const spottedCue = hiddenCue.cloneNode() as HTMLDivElement;
+  spottedCue.textContent = 'SPOTTED';
+  spottedCue.style.background = '#b8342acc';
+  spottedCue.style.color = '#ffe9e2';
+  spottedCue.style.bottom = '124px';
+  ui.appendChild(spottedCue);
   const cam = createThirdPersonCamera(ctx.camera);
   cam.setColliders(worldView.cameraColliders);
   const quality = ctx.adaptive;
@@ -176,6 +185,7 @@ async function main(): Promise<void> {
     if (ev.e === 'ability') views.trigger(ev.id, ev.ability);
     bossFx.onGameEvent(ev);
     interact.onGameEvent(ev);
+    abilityViews.onGameEvent(ev);
     prompts.onGameEvent(ev, net?.localEntity ?? -1);
     const r = fx.onGameEvent(ev);
     if (r.shake > 0) cam.shake(r.shake);
@@ -210,6 +220,7 @@ async function main(): Promise<void> {
     interact.sync(states, pdt);
     prompts.update(states, localId, dt);
     rush.sync(states, states.get(localId)?.team ?? 0, ctx.camera, dt);
+    abilityViews.sync(states, (states.get(localId)?.team ?? -1) as TeamId | -1, pdt);
     bossFx.update(dt, states);
     bossBar.update(states, dt);
     const local = states.get(localId) ?? null;
@@ -229,6 +240,7 @@ async function main(): Promise<void> {
       ctx.camera.lookAt(0, 2, 0);
     }
     hiddenCue.style.display = local && (local.flags & EFlag.Stealthed) && !(local.flags & EFlag.Dead) ? 'block' : 'none';
+    spottedCue.style.display = local && (local.flags & EFlag.Spotted) && !(local.flags & EFlag.Dead) ? 'block' : 'none';
     if (local && !(local.flags & EFlag.Dead)) {
       const d = districtAt(worldData, local.x, local.z, local.y)?.name ?? '';
       if (d !== districtCur) { districtCur = d; districtSince = now; }

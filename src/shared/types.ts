@@ -16,8 +16,9 @@ export type SpeciesId = (typeof Species)[keyof typeof Species];
 export const CLASS_IDS = ['assault', 'infiltrator', 'overwatch', 'breacher', 'warden', 'skyraider'] as const;
 export type ClassId = (typeof CLASS_IDS)[number];
 
-/** Zone: a capturable area (core-rush Core Pads). Append only: the wire carries the number. */
-export const EntityKind = { Player: 0, Bot: 1, Projectile: 2, Pickup: 3, Vehicle: 4, Prop: 5, Boss: 6, Terminal: 7, Zone: 8 } as const;
+/** Zone: a capturable area (core-rush Core Pads). Ability: a class-ability entity (drone, charge, barrier; cls = ABILITY_IDS index).
+ *  Append only: the wire carries the number. */
+export const EntityKind = { Player: 0, Bot: 1, Projectile: 2, Pickup: 3, Vehicle: 4, Prop: 5, Boss: 6, Terminal: 7, Zone: 8, Ability: 9 } as const;
 export type EntityKindId = (typeof EntityKind)[keyof typeof EntityKind];
 
 /** Locomotion/presentation state the client animates from. Derived by the sim, never trusted from clients. */

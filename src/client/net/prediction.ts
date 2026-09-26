@@ -21,6 +21,8 @@ import type { EntityState, GameEvent } from '../../shared/protocol';
 import { Btn, sanitizeInput, type InputCmd } from '../../shared/input';
 import { BUFF_FLAGS, CLASS_IDS, EFlag } from '../../shared/types';
 import { PICKUPS } from '../../shared/content/pickups';
+import type { Collider } from '@dimforge/rapier3d-compat';
+import { mirrorBarriers } from '../../sim/combat/ability-barrier';
 import { TICK_DT, TICK_HZ } from '../../shared/constants';
 import { quantizeMotion } from '../../host/quantize';
 
@@ -63,6 +65,8 @@ export class LocalPredictor {
   private e: SimEntity | null = null;
   private localId = -1;
   private key = '';
+  /** Squeak Barriers mirrored from snapshots: predicted movement collides with them like the authority's (C2). */
+  private barriers = new Map<number, Collider>();
   /** Class move speeds before buffs (Zoomies+ scales walk/run/sprint exactly as the authority's buff does). */
   private baseMove = { walkSpeed: 0, runSpeed: 0, sprintSpeed: 0 };
   private hist: Hist[] = [];
@@ -215,6 +219,11 @@ export class LocalPredictor {
       anim: e.anim,
       flags: (base.flags & ~MOVE_FLAGS) | (e.flags & MOVE_FLAGS),
     };
+  }
+
+  /** Mirror the authority's barrier colliders into the predictor's world. Call with each snapshot, before reconcile. */
+  syncWorld(states: Iterable<EntityState>): void {
+    mirrorBarriers(this.sim, states, this.barriers);
   }
 
   /** Take the authority's buff bits; returns true when Zoomies+ turned on/off (movement speeds changed). */

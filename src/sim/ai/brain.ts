@@ -10,6 +10,10 @@
 // World (G1): weather scales the sight range (storm x0.6) and tall-grass concealment (e.conceal from the
 // world lane's conceal system) shrinks the distance a target is spotted at (5 m fully hidden, x2 when
 // already tracked; halved concealment when the observer's eye is > 3.5 m above the target's feet).
+// Spotter Drones (C2): enemies carrying EFlag.Spotted are known to the other team — a room bot with nobody in sight
+// goes to investigate the nearest spotted enemy (it still needs its own line of sight to shoot); with nothing better
+// to do it shoots down enemy drones in sight. A room bot also goes to help a human teammate under fire nearby.
+// Class abilities and objective play (Upgrade Cores, the objective chain) are decided in tactics.ts.
 import type { Sim } from '../sim';
 import type { SimEntity } from '../entity';
 import { Btn, type InputCmd } from '../../shared/input';
@@ -23,6 +27,11 @@ import { worldLineClear } from '../combat/geometry';
 import { ARCHETYPES, archetypeForClass, type Archetype, type ArchetypeId } from './archetypes';
 import { type NavGrid, cellX, cellZ, findPath, lineWalkable, nearestWalkable, randomCell } from './nav';
 import { concealLevel, concealRevealRange, weatherSightMult } from '../world/env';
+import { abilityEntities } from '../combat/ability-core';
+import { DRONE } from '../combat/ability-tuning';
+import {
+  abilityIntent, buddyInTrouble, createTactics, objectiveInteract, pushBand, raiderAir, skipGoal, updateObjectiveGoal, type TacticsState,
+} from './tactics';
 
 export type AiMode = 'patrol' | 'alert' | 'engage' | 'cover' | 'regroup';
 
@@ -77,6 +86,8 @@ export interface AiState {
   /** When true the brain writes into `out` instead of e.input (used by headless net-bot clients). */
   external: boolean;
   out: InputCmd;
+  /** Ability and objective tactics (tactics.ts). */
+  tac: TacticsState;
 }
 
 declare module '../entity' {
@@ -107,6 +118,7 @@ export function createBrain(arch: ArchetypeId, yaw: number): AiState {
     strafeDir: 1, strafeTimer: 0, wantMove: false, lastX: 0, lastZ: 0, odo: 0, checkTimer: 0, stuck: 0,
     detourUntil: 0, detourX: 0, detourZ: 0, coverCooldown: 0, wasDead: false, jumpNext: false, seq: 0, external: false,
     out: { seq: 0, mx: 0, mz: 0, yaw, pitch: 0, buttons: 0, rt: 0 },
+    tac: createTactics(),
   };
 }
 
@@ -186,6 +198,31 @@ function perceive(sim: Sim, e: SimEntity, ai: AiState, a: Archetype, ctx: AiCont
     ai.lkx = best.pos.x; ai.lky = best.pos.y; ai.lkz = best.pos.z;
   } else {
     ai.visible = false;
+    // an enemy our drones spot: go and look (no line of sight needed to know where; still needed to shoot)
+    // (room bots only: PvE waves already hunt the squad; knowing more would only make them harder)
+    if (!e.combat?.pve && (ai.mode === 'patrol' || ai.mode === 'regroup' || (ai.mode === 'alert' && sim.tick - ai.modeTick > 60))) {
+      let spot: SimEntity | null = null, sd = sight * 1.2;
+      for (const t of ctx.chars) {
+        if (t.team === e.team || !(t.flags & EFlag.Spotted)) continue;
+        const d = Math.hypot(t.pos.x - e.pos.x, t.pos.z - e.pos.z);
+        if (d < sd) { sd = d; spot = t; }
+      }
+      if (spot) {
+        ai.alertX = spot.pos.x; ai.alertZ = spot.pos.z;
+        if (ai.mode !== 'alert') setMode(sim, ai, 'alert'); else ai.modeTick = sim.tick;
+        return;
+      }
+      // a human teammate under fire nearby: go help (toward whoever is shooting them)
+      if (ai.mode !== 'alert') {
+        const buddy = buddyInTrouble(sim, e, ctx.chars);
+        const foe = buddy ? sim.entities.get(buddy.health!.lastAttacker) : undefined;
+        if (buddy && foe && foe.char && !foe.dead && foe.team !== e.team) {
+          ai.alertX = (buddy.pos.x + foe.pos.x) * 0.5; ai.alertZ = (buddy.pos.z + foe.pos.z) * 0.5;
+          setMode(sim, ai, 'alert');
+          return;
+        }
+      }
+    }
   }
   // hearing: gunfire / explosions / barks from the other team within earshot
   const noise = combatBus(sim).noise;
@@ -412,8 +449,26 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   ai.wantMove = false;
   const modeAge = (sim.tick - ai.modeTick) / TICK_HZ;
 
+  updateObjectiveGoal(sim, e, ai.tac, g, ctx.chars); // (re-evaluated every 0.5 s; followed in patrol)
   switch (ai.mode) {
     case 'patrol': {
+      const t = ai.tac;
+      if (t.goal) {
+        // objective / Upgrade Core: walk there (straight in over the last few meters to a core), interact, hold
+        const d = steerTo(sim, e, ai, ctx, t.gx, t.gz, false);
+        if (t.goal === 'core' && d < 4.5 && d > 0.2) { mv.x = (t.gx - e.pos.x) / d; mv.z = (t.gz - e.pos.z) / d; }
+        if (t.goal === 'step' && t.interact && d < 1.5) {
+          // from the closest walkable cell, straight in until the point is in reach
+          const dc = Math.hypot(t.cx - e.pos.x, t.cz - e.pos.z);
+          if (dc > t.gr - 0.5) { mv.x = (t.cx - e.pos.x) / dc; mv.z = (t.cz - e.pos.z) / dc; }
+        }
+        if (t.hold && d < 1.2) { mv.x = 0; mv.z = 0; }
+        mv.sprint = d > 12;
+        if (t.goal === 'core' && sim.tick - t.goalSince > 25 * TICK_HZ) skipGoal(sim, t);
+        if (mv.x || mv.z) lookYaw = Math.atan2(-mv.x, -mv.z);
+        ai.hasGoal = false;
+        break;
+      }
       if (!ai.hasGoal && sim.tick >= ai.waitUntil) pickPatrolGoal(sim, e, ai, ctx);
       if (ai.hasGoal) {
         const d = steerTo(sim, e, ai, ctx, ai.goalX, ai.goalZ, false);
@@ -441,11 +496,11 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
           setMode(sim, ai, 'cover');
           ai.hasGoal = true;
           ai.coverCooldown = 14;
-          if (e.abil && abilityDef(e.abil.id)?.kind === 'cloak' && e.abil.cooldown <= 0) buttons |= Btn.Ability;
+          if (e.abil && abilityDef(e.abil.id)?.kind === 'cloak' && e.abil.cooldown <= 0 && !(e.prevButtons & Btn.Ability)) buttons |= Btn.Ability;
           break;
         }
       }
-      const [minR, maxR] = a.preferRange ?? def.aiRange;
+      const [minR, maxR] = pushBand(sim, ai.tac) ?? a.preferRange ?? def.aiRange;
       const tx = ai.visible ? target.pos.x : ai.lkx, tz = ai.visible ? target.pos.z : ai.lkz;
       const dx = tx - e.pos.x, dz = tz - e.pos.z;
       const dist = Math.hypot(dx, dz) || 1e-3;
@@ -468,10 +523,10 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
         if (l > 1) { mv.x /= l; mv.z /= l; }
         if (a.jumpRate > 0 && sim.rng() < a.jumpRate * dt) ai.jumpNext = true;
       }
-      // bark blast at point-blank enemies in front
-      if (e.abil && e.abil.cooldown <= 0 && ai.visible && dist < 4.2) {
-        const ad = abilityDef(e.abil.id);
-        if (ad?.kind === 'cone_blast') buttons |= Btn.Ability;
+      // the objective runner keeps heading for an interact step while trading shots with a distant enemy
+      if (ai.tac.goal === 'step' && ai.tac.interact && dist > 18) {
+        steerTo(sim, e, ai, ctx, ai.tac.gx, ai.tac.gz, true);
+        mv.sprint = false;
       }
       break;
     }
@@ -482,7 +537,7 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
       if (threat) lookYaw = Math.atan2(-(threat.pos.x - e.pos.x), -(threat.pos.z - e.pos.z));
       const close = threat && ai.visible && Math.hypot(threat.pos.x - e.pos.x, threat.pos.z - e.pos.z) < 7;
       if (close) setMode(sim, ai, 'engage');
-      else if (hp.hp >= hp.max * 0.6 || modeAge > 6) setMode(sim, ai, 'regroup');
+      else if ((hp.hp >= hp.max * 0.6 && sim.tick >= ai.tac.holdUntil) || modeAge > 6) setMode(sim, ai, 'regroup');
       break;
     }
     case 'regroup': {
@@ -507,6 +562,40 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
     }
   }
 
+  // holding an objective zone: fight, investigate and take cover from inside it; use an interact step in reach
+  if (ai.mode !== 'patrol') holdZone(e, ai.tac);
+  buttons |= objectiveInteract(sim, e, ai.tac);
+
+  // ---- class ability (tactics.ts) and the skyraider's glide hops
+  {
+    const tdist = target ? Math.hypot(target.pos.x - e.pos.x, target.pos.z - e.pos.z) : Infinity;
+    const intent = abilityIntent(sim, e, ai.tac, a, g, ctx.chars, {
+      target, visible: ai.visible, dist: tdist, mode: ai.mode, modeTick: ai.modeTick, lastSeenTick: ai.lastSeenTick,
+      alertX: ai.alertX, alertZ: ai.alertZ, aimYaw: ai.yaw,
+    });
+    if (intent.retarget) {
+      target = intent.retarget;
+      if (ai.target !== target.id) { ai.target = target.id; ai.reaction = Math.min(ai.reaction, 0.15); ai.trackTime = 0; }
+      ai.lastSeenTick = sim.tick; ai.lkx = target.pos.x; ai.lky = target.pos.y; ai.lkz = target.pos.z;
+    }
+    if (intent.press) buttons |= Btn.Ability;
+    if (intent.cover && ai.mode !== 'cover' && target) {
+      let ok = true;
+      if (abilityDef(e.abil!.id)?.kind === 'barrier') { ai.goalX = e.pos.x; ai.goalZ = e.pos.z; } // stay behind the new wall
+      else ok = findCover(sim, e, ai, ctx, target.pos.x, target.pos.y + 1.1, target.pos.z);
+      if (ok) {
+        const gx = ai.goalX, gz = ai.goalZ;
+        setMode(sim, ai, 'cover');
+        ai.goalX = gx; ai.goalZ = gz; ai.hasGoal = true;
+        ai.coverCooldown = 10;
+        ai.tac.holdUntil = sim.tick + Math.round(2.5 * TICK_HZ);
+      }
+    }
+    const air = raiderAir(sim, e, ai.tac, ai.mode === 'patrol' && Math.hypot(mv.x, mv.z) > 0.5 && mv.sprint);
+    if (air.hop) ai.jumpNext = true;
+    buttons |= air.buttons;
+  }
+
   // ---- stuck detection (odometer while wanting to move) + recovery
   ai.wantMove = Math.hypot(mv.x, mv.z) > 0.45;
   ai.odo += Math.hypot(e.pos.x - ai.lastX, e.pos.z - ai.lastZ);
@@ -521,7 +610,7 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
       const here = nearestWalkable(g, e.pos.x, e.pos.z, 4);
       const c = randomCell(g, sim.rng, here >= 0 ? g.region[here] : -1, e.pos.x, e.pos.z, 6, 2.5);
       if (c >= 0) { ai.detourX = cellX(g, c); ai.detourZ = cellZ(g, c); ai.detourUntil = sim.tick + 70; ai.path.length = 0; }
-      if (ai.stuck >= 3) { ai.hasGoal = false; ai.stuck = 0; if (ai.mode !== 'engage') setMode(sim, ai, 'patrol'); }
+      if (ai.stuck >= 3) { ai.hasGoal = false; ai.stuck = 0; if (ai.tac.goal) skipGoal(sim, ai.tac); if (ai.mode !== 'engage') setMode(sim, ai, 'patrol'); }
     }
   }
   if (sim.tick < ai.detourUntil) {
@@ -543,7 +632,7 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   // ---- aim + trigger
   if (target && (ai.visible || sim.tick - ai.lastSeenTick < 20) && ai.mode !== 'cover') {
     const tdist = Math.hypot(target.pos.x - e.pos.x, target.pos.z - e.pos.z);
-    aiming = tdist > a.adsBeyond || a.telegraph > 0;
+    aiming = (tdist > a.adsBeyond || a.telegraph > 0) && !pushBand(sim, ai.tac); // a push runs in, hip-firing
     const shoulder = e.ownerPid === null ? 0 : aiming ? AIM_RAY.shoulderAim : AIM_RAY.shoulderHip;
     const ia = idealAim(e, target, def, a, ai.aimHead, shoulder);
     ai.errTimer -= dt;
@@ -567,6 +656,9 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
     const inRange = ia.dist <= (def.pellets > 1 ? (a.preferRange ?? def.aiRange)[1] * 1.35 : def.range * 0.92);
     const canShoot = ai.visible && ai.reaction <= 0 && aligned && inRange && w.reload === 0 && w.ammo > 0;
     buttons |= trigger(sim, e, ai, a, def, canShoot, dt);
+  } else if (droneShot(sim, e, ai, a, def, dt) >= 0) {
+    // nobody to fight: shoot down an enemy Spotter Drone in sight (hitscan kits), firing once lined up
+    buttons |= trigger(sim, e, ai, a, def, ai.tac.droneLined, dt);
   } else {
     ai.telegraph = 0; ai.chargeHold = 0;
     turnToward(ai, a, lookYaw, lookPitch, dt, 0.6);
@@ -623,6 +715,57 @@ function trigger(sim: Sim, e: SimEntity, ai: AiState, a: Archetype, def: WeaponD
   if (e.prevButtons & Btn.Fire) return 0; // release a tick between presses
   ai.semiTimer = 1 / def.fireRate + rand(sim, 0.02, 0.16);
   return Btn.Fire;
+}
+
+/**
+ * No character target: an enemy drone within reach and in sight (checked with perception, every 6 ticks) is aimed
+ * at. Returns -1 (no drone), 0 (turning to it) or 1 (lined up: tac.droneLined, the caller pulls the trigger).
+ * Hitscan, non-charge kits only.
+ */
+function droneShot(sim: Sim, e: SimEntity, ai: AiState, a: Archetype, def: WeaponDef, dt: number): number {
+  const t = ai.tac;
+  t.droneLined = false;
+  if (def.kind !== 'hitscan' || def.chargeTime > 0 || e.wpn!.reload > 0 || e.wpn!.ammo <= 0) { t.drone = -1; return -1; }
+  const reach = Math.min(40, def.pellets > 1 ? 18 : def.range * 0.8);
+  const ex = e.pos.x, ey = e.pos.y + eyeHeight(e), ez = e.pos.z;
+  if (sim.tick >= ai.nextPerceive - 1) {
+    t.drone = -1;
+    let bd = reach;
+    for (const d of abilityEntities(sim)) {
+      if (d.abx!.kind !== 'drone' || d.team === e.team) continue;
+      const dist = Math.hypot(d.pos.x - ex, d.pos.y - ey, d.pos.z - ez);
+      if (dist > bd) continue;
+      const k = (dist - DRONE.radius - 0.1) / dist;
+      if (!worldLineClear(sim, ex, ey, ez, ex + (d.pos.x - ex) * k, ey + (d.pos.y - ey) * k, ez + (d.pos.z - ez) * k)) continue;
+      bd = dist; t.drone = d.id;
+    }
+  }
+  const d = t.drone >= 0 ? sim.entities.get(t.drone) : undefined;
+  if (!d || d.removed) { t.drone = -1; return -1; }
+  const dx = d.pos.x - ex, dy = d.pos.y - ey, dz = d.pos.z - ez;
+  const h = Math.hypot(dx, dz);
+  const yaw = Math.atan2(-dx, -dz), pitch = Math.atan2(dy, h);
+  turnToward(ai, a, yaw, pitch, dt);
+  const tol = Math.atan2(DRONE.radius * 0.8, Math.hypot(h, dy));
+  t.droneLined = Math.abs(angleDelta(ai.yaw, yaw)) < tol && Math.abs(ai.pitch - pitch) < tol;
+  return t.droneLined ? 1 : 0;
+}
+
+/**
+ * While the bot's objective is a hold zone and it is near it, keep the fight inside: back into the zone when it
+ * drifted out, and drop any move component that would carry it out.
+ */
+function holdZone(e: SimEntity, t: TacticsState): void {
+  if (t.goal !== 'step' || !t.hold) return;
+  const ox = e.pos.x - t.cx, oz = e.pos.z - t.cz;
+  const d = Math.hypot(ox, oz);
+  if (d > t.gr + 14) return; // far away (just respawned): fight normally on the way
+  const lim = Math.max(t.gr * 0.75, Math.hypot(t.gx - t.cx, t.gz - t.cz) + 1); // (the middle may be a prop)
+  if (d > lim) { mv.x = -ox / d; mv.z = -oz / d; mv.sprint = false; return; }
+  if (d > t.gr * 0.4) {
+    const out = (mv.x * ox + mv.z * oz) / d;
+    if (out > 0) { mv.x -= (ox / d) * out; mv.z -= (oz / d) * out; }
+  }
 }
 
 /** True for characters the AI system drives. */

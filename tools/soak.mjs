@@ -7,7 +7,7 @@
 //
 //   npx tsx tools/soak.mjs                      # 60 s per mode, soak match config (a full match fits in 60 s)
 //   npx tsx tools/soak.mjs --seconds 300 --full # shipping match config, longer
-//   options: --modes yard-skirmish,team-deathmatch[,core-rush]  --seed 1  --no-netbot  --repeat 3  --json artifacts/soak.json
+//   options: --modes yard-skirmish,team-deathmatch,core-rush  --seed 1  --no-netbot  --repeat 3  --json artifacts/soak.json
 //
 // Exit 1 on: any runtime error / non-finite state, a bot stuck (wants to move, doesn't) > 5 s,
 // tick p95 > 3 ms, or (soak config) a mode that never completes a match.
@@ -32,7 +32,7 @@ const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 const SECONDS = Number(opt('seconds', 60));
 const SEED = Number(opt('seed', 1));
-const MODES = opt('modes', 'yard-skirmish,team-deathmatch').split(',');
+const MODES = opt('modes', 'yard-skirmish,team-deathmatch,core-rush').split(',');
 const FULL = argv.includes('--full');
 const NETBOT = !argv.includes('--no-netbot');
 const OUT = opt('json', 'artifacts/soak.json');

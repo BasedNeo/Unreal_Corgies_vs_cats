@@ -57,19 +57,19 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
     id: 'spotter_drone', name: 'Spotter Drone', catName: 'Bird Watcher', kind: 'drone',
     description: 'Launch a squeaky drone that marks enemies in a 30 m radius for your team for 6 s.',
     cooldown: 20, duration: 6, range: 30, halfAngle: 0, damage: 0, knockback: 0, knockUp: 0,
-    revealRange: 0, breakOnFire: false, noise: 20, live: false,
+    revealRange: 0, breakOnFire: false, noise: 20, live: true,
   },
   dig_charge: {
     id: 'dig_charge', name: 'Dig Charge', catName: 'Litter Mine', kind: 'charge',
     description: 'Bury a charge that detonates when an enemy steps within 3 m (70 damage, 5 m blast).',
     cooldown: 14, duration: 30, range: 5, halfAngle: 0, damage: 70, knockback: 9, knockUp: 5,
-    revealRange: 0, breakOnFire: false, noise: 10, live: false,
+    revealRange: 0, breakOnFire: false, noise: 10, live: true,
   },
   squeak_barrier: {
     id: 'squeak_barrier', name: 'Squeak Barrier', catName: 'Scratch Wall', kind: 'barrier',
     description: 'Raise a 4 m wide squeaky-toy wall with 300 hp for 8 s that blocks shots.',
     cooldown: 18, duration: 8, range: 4, halfAngle: 0, damage: 0, knockback: 0, knockUp: 0,
-    revealRange: 0, breakOnFire: false, noise: 12, live: false,
+    revealRange: 0, breakOnFire: false, noise: 12, live: true,
   },
   ear_glide: {
     id: 'ear_glide', name: 'Ear Glide', catName: 'Tail Sail', kind: 'glide',
