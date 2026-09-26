@@ -56,8 +56,15 @@ describe('ability views', () => {
     v.sync(less, Team.Corgis, 1 / 60);
     expect(v.stats()).toMatchObject({ drones: 1, charges: 1, barriers: 1 });
     expect(scene.getObjectByName('ability_10')).toBeTruthy(); // tumbling down
+    // every object of a view that goes gets a 'dispose' event: the renderer's per-object state (render objects and
+    // their uniform buffers) hangs off the shared drone geometry and team materials until it does (a TDM leak)
+    const gone: THREE.Object3D[] = [];
+    scene.getObjectByName('ability_10')!.traverse((o) => gone.push(o));
+    const released = new Set<THREE.Object3D>();
+    for (const o of gone) (o as unknown as THREE.EventDispatcher<{ dispose: object }>).addEventListener('dispose', () => released.add(o));
     for (let i = 0; i < 60; i++) v.sync(less, Team.Corgis, 1 / 60);
     expect(scene.getObjectByName('ability_10')).toBeUndefined();
+    expect(released.size).toBe(gone.length);
     expect(scene.getObjectByName('ability_30')).toBeUndefined();
     v.dispose();
     expect(scene.getObjectByName('ability-views')).toBeUndefined();

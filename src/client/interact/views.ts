@@ -11,6 +11,7 @@
 import * as THREE from 'three/webgpu';
 import { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
 import type { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { releaseObject3D } from '../engine/release';
 import type { EntityState, GameEvent } from '../../shared/protocol';
 import { EFlag, EntityKind, Team, type TeamId } from '../../shared/types';
 import type { WorldData } from '../../shared/world/world-data';
@@ -134,6 +135,7 @@ class KioskView {
 
   dispose(): void {
     this.root.removeFromParent();
+    releaseObject3D(this.root);
     this.tiles.geometry.dispose();
   }
 }
@@ -246,7 +248,7 @@ class CoreView {
     this.pips.instanceMatrix.needsUpdate = true;
   }
 
-  dispose(): void { this.root.removeFromParent(); this.pips.dispose(); }
+  dispose(): void { this.root.removeFromParent(); releaseObject3D(this.root); this.pips.dispose(); }
 }
 
 // ------------------------------------------------------------------------------------------------ kibble
@@ -383,7 +385,7 @@ class BeaconView {
     return true;
   }
 
-  dispose(): void { this.root.removeFromParent(); this.pips.dispose(); }
+  dispose(): void { this.root.removeFromParent(); releaseObject3D(this.root); this.pips.dispose(); }
 }
 
 // ------------------------------------------------------------------------------------------------ factory

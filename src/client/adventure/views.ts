@@ -9,6 +9,7 @@
 // Materials only via toon() / glow() / stylize(); every geometry here is owned and disposed by this module.
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { releaseObject3D } from '../engine/release';
 import type { EntityState } from '../../shared/protocol';
 import { EFlag, EntityKind, Team } from '../../shared/types';
 import { ADVENTURE_ITEM_IDS, ADVENTURE_ITEM_SEED } from '../../shared/content/chapters';
@@ -149,7 +150,7 @@ export function createAdventureViews(scene: THREE.Scene): AdventureViews {
         it.ring.position.y = 0.05;
         it.ring.scale.setScalar(1 + Math.sin(it.t * 3.1) * 0.08);
       }
-      for (const [id, it] of items) if (!seen.has(id)) { it.root.removeFromParent(); items.delete(id); }
+      for (const [id, it] of items) if (!seen.has(id)) { it.root.removeFromParent(); releaseObject3D(it.root); items.delete(id); }
       // sentry cones
       const show = !!view?.sneaking;
       seen.clear();
@@ -172,7 +173,7 @@ export function createAdventureViews(scene: THREE.Scene): AdventureViews {
           m.material = s.flags & EFlag.Alerted ? hot : calm;
         }
       }
-      for (const [id, m] of cones) if (!seen.has(id)) { m.removeFromParent(); cones.delete(id); }
+      for (const [id, m] of cones) if (!seen.has(id)) { m.removeFromParent(); releaseObject3D(m); cones.delete(id); }
     },
     stats() { return { cones: cones.size, items: items.size }; },
     dispose() {

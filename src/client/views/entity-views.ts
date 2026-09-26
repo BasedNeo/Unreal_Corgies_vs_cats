@@ -3,6 +3,7 @@
 // keeps it grounded (and shows jump height); one instanced draw for all characters.
 import * as THREE from 'three/webgpu';
 import { float, length, smoothstep, uv, uniform } from 'three/tsl';
+import { releaseObject3D } from '../engine/release';
 import type { EntityState } from '../../shared/protocol';
 import { CLASS_IDS, EFlag, EntityKind, type ClassId, type TeamId, type SpeciesId } from '../../shared/types';
 import { angleDelta, damp, lerpAngle } from '../../shared/math';
@@ -66,7 +67,7 @@ export class EntityViews {
 
   sync(states: Map<number, EntityState>, localId: number, dt: number): void {
     for (const [id, v] of this.views) {
-      if (!states.has(id)) { this.group.remove(v.avatar.root); v.avatar.dispose(); this.views.delete(id); }
+      if (!states.has(id)) { this.group.remove(v.avatar.root); releaseObject3D(v.avatar.root); v.avatar.dispose(); this.views.delete(id); }
     }
     for (const [id, s] of states) {
       const isBoss = s.kind === EntityKind.Boss;
@@ -74,7 +75,7 @@ export class EntityViews {
       const cls: ClassId = CLASS_IDS[s.cls] ?? 'assault';
       const key = isBoss ? `boss:${s.cls}:${s.seed}` : `${s.species}:${cls}:${s.team}:${s.seed}`;
       let v = this.views.get(id);
-      if (v && v.key !== key) { this.group.remove(v.avatar.root); v.avatar.dispose(); this.views.delete(id); v = undefined; }
+      if (v && v.key !== key) { this.group.remove(v.avatar.root); releaseObject3D(v.avatar.root); v.avatar.dispose(); this.views.delete(id); v = undefined; }
       if (!v) {
         const avatar = isBoss
           ? createBossAvatar({ boss: s.cls, seed: s.seed, team: s.team as TeamId })

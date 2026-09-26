@@ -14,6 +14,7 @@
 import * as THREE from 'three/webgpu';
 import { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
 import type { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { releaseObject3D } from '../engine/release';
 import type { EntityState, GameEvent } from '../../shared/protocol';
 import { EFlag, EntityKind, Species, Team, type TeamId } from '../../shared/types';
 import { ABILITIES, ABILITY_IDS, type AbilityKind } from '../../shared/content/abilities';
@@ -300,7 +301,7 @@ export function createAbilityViews(scene: THREE.Scene, opts: AbilityViewsOptions
       }
       for (let i = leaving.length - 1; i >= 0; i--) {
         const v = leaving[i];
-        if (v.exit(dt)) { group.remove(v.root); leaving.splice(i, 1); }
+        if (v.exit(dt)) { group.remove(v.root); releaseObject3D(v.root); leaving.splice(i, 1); }
       }
     },
     onGameEvent(ev) {

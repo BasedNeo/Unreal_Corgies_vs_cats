@@ -15,6 +15,7 @@
 // damage smoke; the Rooftop Hangar has a spinning propeller sign and painted runway markings.
 import * as THREE from 'three/webgpu';
 import { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
+import { releaseObject3D } from '../engine/release';
 import type { EntityState } from '../../shared/protocol';
 import { EFlag, EntityKind, type TeamId } from '../../shared/types';
 import { angleDelta, clamp, damp, lerpAngle } from '../../shared/math';
@@ -314,6 +315,7 @@ class KartView {
 
   dispose(): void {
     this.root.removeFromParent();
+    releaseObject3D(this.root);
     this.wheels.dispose();
   }
 }
@@ -472,6 +474,7 @@ class PlaneView {
 
   dispose(): void {
     this.root.removeFromParent();
+    releaseObject3D(this.root);
     this.wheels.dispose();
   }
 }
@@ -533,7 +536,7 @@ class HangarView {
     this.root.rotation.y = s.yaw;
   }
 
-  dispose(): void { this.root.removeFromParent(); this.runway.removeFromParent(); this.runway.geometry.dispose(); }
+  dispose(): void { this.root.removeFromParent(); releaseObject3D(this.root); this.runway.removeFromParent(); this.runway.geometry.dispose(); }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -591,7 +594,7 @@ class TerminalView {
     this.root.rotation.y = s.yaw;
   }
 
-  dispose(): void { this.root.removeFromParent(); }
+  dispose(): void { this.root.removeFromParent(); releaseObject3D(this.root); }
 }
 
 // ---------------------------------------------------------------------------------------------
