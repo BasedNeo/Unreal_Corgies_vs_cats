@@ -44,16 +44,17 @@ const c = (key: string) => uniform(worldColor(key).clone());
 
 export interface TerrainMaterial { material: THREE.MeshToonNodeMaterial; uniforms: Record<string, ReturnType<typeof uniform>> }
 
-export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.4 }: { ink?: boolean; yardHalf?: number; flatten?: number } = {}): TerrainMaterial {
+export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.4, detail = true }: { ink?: boolean; yardHalf?: number; flatten?: number; detail?: boolean } = {}): TerrainMaterial {
   const U = {
     grass: c('grass'), grassDark: c('grassDark'), grassDry: c('grassDry'), clover: c('clover'),
     dirt: c('dirt'), sand: c('sand'), mulch: c('mulch'), bark: c('bark'), stripe: uniform(0.85), yardHalf: uniform(yardHalf),
   };
   const surf = attribute('surf', 'vec4');
   const p = positionWorld;
+  // low quality: one noise octave feeds every pattern (cheap for software rasterizers)
   const nBig = mx_noise_float(p.xz.mul(0.045));                   // ~22 m variation
-  const nMid = mx_noise_float(p.xz.mul(0.21).add(vec2(13.7, 4.1)));   // ~5 m patches
-  const nFine = mx_noise_float(p.xz.mul(1.3).add(vec2(-7.3, 2.9)));   // ~0.8 m grain
+  const nMid = detail ? mx_noise_float(p.xz.mul(0.21).add(vec2(13.7, 4.1))) : nBig.mul(0.7);   // ~5 m patches
+  const nFine = detail ? mx_noise_float(p.xz.mul(1.3).add(vec2(-7.3, 2.9))) : nBig.mul(-0.5);   // ~0.8 m grain
   // Lawn: mowing stripes (7 m bands along z), clover patches, a little large-scale hue drift.
   const stripe = step(0.5, fract(p.x.add(nBig.mul(2.2)).div(14)));
   const lightGrass = mix(U.grass, U.grassDry, 0.3);

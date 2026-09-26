@@ -14,11 +14,14 @@ import { createFoliage } from './foliage';
 import { createYardSky } from './sky';
 
 export interface WorldViewOptions {
+  /** Quality tier. low: no foliage, 1024 shadow map, cloudless sky, flat ground shading (headless /
+   *  SwiftShader / integrated GPUs); med: 60% foliage, 1536 shadows; high (default): everything. */
+  quality?: 'low' | 'med' | 'high';
   /** 0..1 time of day (0 midnight, .25 sunrise, .5 noon, .75 sunset). Default: WorldData.timeOfDay or 0.68. */
   timeOfDay?: number;
   /** Game-time day speed in days per real second (0 = frozen, the default). */
   daySpeed?: number;
-  /** Foliage density multiplier (quality tiers: low 0.4, med 0.7, high 1). */
+  /** Foliage density multiplier; overrides the tier (low 0, med 0.6, high 1). */
   foliageDensity?: number;
   shadowMapSize?: number;
   /** Ink hull on the terrain (silhouette lines on hills). */
@@ -42,7 +45,8 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
   const root = new THREE.Group();
   root.name = 'world';
 
-  const terrainMat = createTerrainMaterial({ ink: opts.terrainInk ?? false });
+  const q = opts.quality ?? 'high';
+  const terrainMat = createTerrainMaterial({ ink: opts.terrainInk ?? false, detail: q !== 'low' });
   const terrain = createTerrainView(data, terrainMat.material);
   root.add(terrain.group);
 
@@ -54,13 +58,18 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
   const water = createWaterView(data);
   root.add(water.group);
 
-  const foliage = data.surface ? createFoliage(data, { density: opts.foliageDensity ?? 1 }) : null;
+  const density = opts.foliageDensity ?? (q === 'low' ? 0 : q === 'med' ? 0.6 : 1);
+  const foliage = data.surface && density > 0 ? createFoliage(data, { density }) : null;
   if (foliage) root.add(foliage.group);
 
   const proxy = createColliderProxy(data);
   root.add(terrain.proxy, proxy.group);
 
-  const sky = createYardSky(scene, { timeOfDay: opts.timeOfDay ?? data.timeOfDay ?? 0.68, shadowMap: opts.shadowMapSize });
+  const sky = createYardSky(scene, {
+    timeOfDay: opts.timeOfDay ?? data.timeOfDay ?? 0.68,
+    shadowMap: opts.shadowMapSize ?? (q === 'low' ? 1024 : q === 'med' ? 1536 : 2048),
+    clouds: q !== 'low',
+  });
   scene.add(root);
 
   let daySpeed = opts.daySpeed ?? 0;

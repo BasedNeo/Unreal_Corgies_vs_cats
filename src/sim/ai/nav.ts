@@ -8,6 +8,7 @@ import type { Sim } from '../sim';
 import type { WorldData } from '../../shared/world/world-data';
 import { WORLD_RAY_FILTER } from '../combat/geometry';
 import { Layer } from '../rapier';
+import { isTerrainCollider } from '../world/build';
 
 export const NAV_CELL = 1;
 /** Capsule tested per cell: bottom at ground + CLEARANCE (the KCC autostep height). */
@@ -88,13 +89,13 @@ function propAabbs(d: WorldData): Aabb[] {
   return out;
 }
 
-/** Static (World-layer) collider count and the terrain heightfield collider, if any. */
+/** Static (World-layer) collider count and the terrain collider (trimesh or heightfield), if any. */
 function staticColliders(sim: Sim): { count: number; terrain: Collider | undefined } {
   let count = 0, terrain: Collider | undefined;
   sim.world.forEachCollider((c) => {
     if (((c.collisionGroups() >>> 16) & Layer.World) === 0) return;
     count++;
-    if (c.shapeType() === sim.R.ShapeType.HeightField) terrain = c;
+    if (isTerrainCollider(c)) terrain = c;
   });
   return { count, terrain };
 }

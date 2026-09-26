@@ -108,6 +108,7 @@ export class Room {
   private rosterTimer = 0;
   private readonly moveCtx: MoveContext;
   private disposed = false;
+  private lastPhase: MatchState['phase'] | null = null;
 
   constructor(readonly sim: Sim, readonly opts: RoomOptions) {
     sim.state.room = { mode: opts.mode };
@@ -196,10 +197,18 @@ export class Room {
     }
     this.sim.step();
     this.quantizePlayers();
+    let restarted = false;
     for (const ev of this.sim.drainEvents()) {
       this.pendingEvents.push(ev);
       if (ev.e === 'death') this.creditDeath(ev.id, ev.by);
+      else if (ev.e === 'score' && ev.reason === 'reset') restarted = true;
     }
+    // Match restart (match rules emit score 'reset'; ended -> warmup/live as a fallback signal):
+    // per-player K/D/score in the roster start over with the new match.
+    const phase = this.match.phase;
+    if (this.lastPhase === 'ended' && phase !== 'ended') restarted = true;
+    this.lastPhase = phase;
+    if (restarted) this.resetStats();
     if (this.sim.tick % SNAPSHOT_EVERY === 0) this.sendSnapshots();
     this.rosterTimer++;
     if (this.rosterDirty || this.rosterTimer >= TICK_HZ * 2) this.sendRoster();
@@ -348,6 +357,11 @@ export class Room {
       for (let i = bots.length; i < target; i++) this.addBot(team, CLASS_IDS[i % 3]);
       for (let i = target; i < bots.length; i++) this.removeSlot(bots[i].pid);
     }
+  }
+
+  private resetStats(): void {
+    for (const p of this.players.values()) { p.kills = 0; p.deaths = 0; p.score = 0; }
+    this.rosterDirty = true;
   }
 
   private creditDeath(victim: EntityId, killer: EntityId): void {

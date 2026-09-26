@@ -19,7 +19,7 @@ import { createHud } from './ui/hud';
 import { createFx } from './fx';
 import { createAudio } from './audio';
 import { Nameplates } from './views/nameplates';
-import type { Settings } from './ui/settings';
+import { loadSettings, type Settings } from './ui/settings';
 import { bus } from './core/events';
 import { TICK_DT } from '../shared/constants';
 import { CLASS_IDS, EFlag, type ClassId, type TeamId } from '../shared/types';
@@ -34,7 +34,10 @@ async function main(): Promise<void> {
 
   const seed = Number(params.get('seed') ?? 1);
   const worldData = createWorldData(seed);
-  const worldView = createWorldView(ctx.scene, worldData);
+  const boot = loadSettings();
+  const q = (params.get('quality') as Settings['quality'] | null) ?? boot.quality;
+  const worldView = createWorldView(ctx.scene, worldData, { quality: q === 'medium' ? 'med' : q });
+  if (params.has('t')) worldView.setTimeOfDay(Number(params.get('t')));
 
   const em: NetEmulation = { lagMs: Number(params.get('lag') ?? 0), jitterMs: Number(params.get('jitter') ?? 0), lossPct: Number(params.get('loss') ?? 0) };
   const serverUrl = params.get('server');

@@ -54,6 +54,7 @@ interface Client {
   bytesOut: number;
   snapsSkipped: number;
   congestedSince: number;
+  closing: boolean;
   closed: boolean;
 }
 
@@ -158,7 +159,8 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
   });
 
   function kick(c: Client, code: number, reason: string, notify = true): void {
-    if (c.closed) return;
+    if (c.closed || c.closing) return;
+    c.closing = true;
     if (notify && c.ws.readyState === WebSocket.OPEN) {
       try { c.ws.send(JSON.stringify({ t: 'reject', reason } satisfies ServerMsg)); } catch { /* socket already failing */ }
     }
@@ -175,7 +177,7 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
       connectedAt: now, lastMsgAt: now, lastSeenAt: now, pingSentAt: 0, rttMs: 0,
       msgs: new TokenBucket(cfg.msgBurst, cfg.msgRate, now), bytes: new TokenBucket(cfg.byteBurst, cfg.byteRate, now),
       abuse: new AbuseMeter(cfg.kickScore, 10_000, now), encoder: encoding === 'delta' ? new SnapEncoder() : null,
-      bytesIn: 0, bytesOut: 0, snapsSkipped: 0, congestedSince: 0, closed: false,
+      bytesIn: 0, bytesOut: 0, snapsSkipped: 0, congestedSince: 0, closing: false, closed: false,
     };
     clients.set(id, c);
     perIp.set(ip, (perIp.get(ip) ?? 0) + 1);
@@ -202,6 +204,7 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
     };
 
     const strike = (weight: number, reason: string) => {
+      if (c.abuse.total < 3) log(`[cvc] ${id} refused frame: ${reason}`); // first few only: no log spam under attack
       if (c.abuse.strike(performance.now(), weight)) kick(c, 1008, `kicked: ${reason}`);
     };
 

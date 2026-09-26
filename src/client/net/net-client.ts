@@ -259,6 +259,7 @@ export class NetClient {
    */
   tickTimers(): void {
     const now = this.now();
+    this.publishDebug();
     this.silentPeriods = this.msgSinceTimer ? 0 : this.silentPeriods + 1;
     this.msgSinceTimer = false;
     if (this.connected && this.silentPeriods * this.pingEvery >= this.timeoutMs) {
@@ -487,6 +488,8 @@ export class NetClient {
     d.interpDelayMs = Math.round(this.stats.interpDelayMs);
     d.jitterMs = +this.stats.jitterMs.toFixed(1);
     d.pending = this.unacked.length;
+    const ts = this.transport.stats;
+    if (ts) { d.msgsIn = ts.msgsIn; d.msgsOut = ts.msgsOut; d.bytesIn = ts.bytesIn; d.bytesOut = ts.bytesOut; }
     d.predicting = !!this.predictor?.active;
     d.predErrCm = { last: +(this.prediction.last * 100).toFixed(2), mean: +(this.prediction.mean * 100).toFixed(2), p95: +(this.prediction.p95 * 100).toFixed(2), max: +(this.prediction.max * 100).toFixed(2) };
     d.corrections = this.prediction.corrections;

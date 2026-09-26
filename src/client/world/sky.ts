@@ -71,7 +71,7 @@ export interface YardSky {
   dispose(): void;
 }
 
-export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; shadowSize?: number; shadowMap?: number } = {}): YardSky {
+export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; shadowSize?: number; shadowMap?: number; clouds?: boolean } = {}): YardSky {
   // --- style light rig: reuse createStyleLights() output if the renderer added it ---
   let rig = scene.getObjectByName('style_lights') as THREE.Group | undefined;
   let ownRig = false;
@@ -115,12 +115,13 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
   sky = sky.add(U.sunCol.mul(pow(sd, float(24)).mul(0.09).add(pow(sd, float(160)).mul(0.22))).mul(U.sunVis));
   // cartoon clouds: flat layer, hard-edged two-tone
   const cuv = dir.xz.div(up.add(0.12)).mul(0.9).add(vec2(time.mul(0.006), time.mul(0.002)));
-  const n = mx_fractal_noise_float(cuv.mul(0.55), 3, 2.0, 0.5);
-  const n2 = mx_fractal_noise_float(cuv.mul(0.55).add(vec2(U.sunDir.x, U.sunDir.z).mul(0.05)), 3, 2.0, 0.5);
-  const cover = smoothstep(0.03, 0.06, n.add(0.02)).mul(smoothstep(0.04, 0.22, dir.y));
+  const withClouds = opts.clouds !== false;
+  const n = withClouds ? mx_fractal_noise_float(cuv.mul(0.55), 3, 2.0, 0.5) : float(-1);
+  const n2 = withClouds ? mx_fractal_noise_float(cuv.mul(0.55).add(vec2(U.sunDir.x, U.sunDir.z).mul(0.05)), 3, 2.0, 0.5) : float(-1);
+  const cover = withClouds ? smoothstep(0.03, 0.06, n.add(0.02)).mul(smoothstep(0.04, 0.22, dir.y)) : float(0);
   const shade = step(n2, n.sub(0.035));
   const cloudCol = mix(U.cloudShade, U.cloud, shade);
-  sky = mix(sky, cloudCol, cover.mul(0.92));
+  if (withClouds) sky = mix(sky, cloudCol, cover.mul(0.92));
   // sun disc (bright -> bloom) drawn over clouds' gaps
   const disc = smoothstep(0.9993, 0.99965, sd).mul(U.sunVis);
   sky = mix(sky, U.sunCol.mul(2.1), disc.mul(float(1).sub(cover.mul(0.85))));

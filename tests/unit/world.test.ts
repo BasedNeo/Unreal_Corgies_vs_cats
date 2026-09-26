@@ -71,11 +71,11 @@ describe('colliders match height() and the rendered triangles', () => {
   beforeAll(() => {
     world = new R.World({ x: 0, y: -24, z: 0 });
     buildStaticWorld(R, world, data);
-    world.forEachCollider((c) => { if (c.shape.type === R.ShapeType.HeightField) hf = c; });
+    world.forEachCollider((c) => { if (c.shape.type === R.ShapeType.TriMesh || c.shape.type === R.ShapeType.HeightField) hf = c; });
     world.step();
   });
 
-  it('heightfield raycasts agree with height() within 1 cm at 200 random points', () => {
+  it('terrain collider raycasts agree with height() within 1 cm at 200 random points', () => {
     expect(hf).toBeTruthy();
     const rnd = mulberry32(123);
     let worst = 0;
@@ -88,6 +88,17 @@ describe('colliders match height() and the rendered triangles', () => {
       worst = Math.max(worst, Math.abs(y - data.height(x, z)));
     }
     expect(worst).toBeLessThan(0.01);
+  });
+
+  it('straight-down rays never slip through the terrain on a 0.5 m lattice (grid-aligned rays)', () => {
+    let miss = 0, n = 0;
+    for (let z = -99; z <= 99; z += 0.5) for (let x = -99; x <= 99; x += 0.5) {
+      n++;
+      const hit = world.castRay(new R.Ray({ x, y: 60, z }, { x: 0, y: -1, z: 0 }), 120, true, undefined, undefined, undefined, undefined, (c) => c.handle === hf.handle);
+      if (!hit || Math.abs(60 - hit.timeOfImpact - data.height(x, z)) > 0.01) miss++;
+    }
+    expect(n).toBeGreaterThan(150000);
+    expect(miss).toBe(0);
   });
 
   it('rendered terrain triangles (client chunk arrays) equal height() at 200 random points', () => {

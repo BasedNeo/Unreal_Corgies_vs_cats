@@ -22,7 +22,10 @@ async function main() {
   const seed = Number(params.get('seed') ?? 1);
   const t0 = performance.now();
   const data = createWorldData(seed);
-  const view = createWorldView(ctx.scene, data, { timeOfDay: params.has('t') ? Number(params.get('t')) : undefined });
+  const view = createWorldView(ctx.scene, data, {
+    timeOfDay: params.has('t') ? Number(params.get('t')) : undefined,
+    quality: (params.get('q') as 'low' | 'med' | 'high' | null) ?? undefined,
+  });
   const buildMs = performance.now() - t0;
   (globalThis as unknown as { __lab: unknown }).__lab = { scene: ctx.scene, view, data, renderer: ctx.renderer, ctx, THREE, TSL };
   const lab = debug as unknown as typeof debug & LabDebug;

@@ -72,6 +72,31 @@ describe('lifecycle under 150 ms / 3 %', () => {
   });
 });
 
+describe('roster stats', () => {
+  it('reset per-player kills/deaths/score when the match restarts', async () => {
+    const sim = await Sim.create({ seed: 1 });
+    const room = new Room(sim, { mode: 'test', botsPerTeam: [0, 0] });
+    const conn = (id: string) => ({ id, send: () => {} });
+    const a = room.join(conn('a'), { t: 'hello', v: 1, name: 'a', team: 0, cls: 'assault' })!;
+    const b = room.join(conn('b'), { t: 'hello', v: 1, name: 'b', team: 1, cls: 'assault' })!;
+    sim.emit({ e: 'death', id: b.entity, by: a.entity });
+    room.tick();
+    expect([a.kills, a.score, b.deaths]).toEqual([1, 100, 1]);
+    sim.emit({ e: 'score', team: 0, pts: 0, reason: 'reset' }); // what the match rules emit on restart
+    room.tick();
+    expect([a.kills, a.score, b.deaths]).toEqual([0, 0, 0]);
+    // Fallback signal: phase leaves 'ended'.
+    sim.emit({ e: 'death', id: a.entity, by: b.entity });
+    sim.state.match = { mode: 'test', phase: 'ended', timeLeft: 5, score: [0, 1], objective: '', wave: 0, winner: 1 };
+    room.tick();
+    expect([b.kills, a.deaths]).toEqual([1, 1]);
+    sim.state.match = { mode: 'test', phase: 'warmup', timeLeft: 5, score: [0, 0], objective: '', wave: 0, winner: -1 };
+    room.tick();
+    expect([b.kills, a.deaths]).toEqual([0, 0]);
+    room.dispose();
+  });
+});
+
 describe('client liveness', () => {
   function fake() {
     let deliver: (m: ServerMsg) => void = () => {};
