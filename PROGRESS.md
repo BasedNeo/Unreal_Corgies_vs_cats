@@ -28,6 +28,18 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 | Q1 verification | ✅ | docs/qa/W1_VERIFICATION.md — 55/100, P0/P1 fixes landed |
 
 ## Log
+### 2026-09-26 — Wave 4 in flight (lead)
+- Lanes A1 (adventure framework, chapters 1–2), X1 (destructibles), R1 (RC plane), E1 (Siamese sniper elite) are
+  building against `docs/design/ADVENTURE.md`; A2 (chapters 3–6) and INT4 follow.
+- Lead quality loop meanwhile, each commit verified in isolation with e2e:
+  - blob shadows on the low tier (`4724e38`);
+  - outline ink capped beyond 8 m (`59d357d`);
+  - a voice per class ability (`f2237ae`);
+  - B = taunt, where bots taunt too on some kills (`17cc1c9`);
+  - the kill cam faces your killer while you wait to respawn (`62a41ba`);
+  - adventure rooms list their chapter in the room browser (`0859476`);
+  - an e2e for the menu's MATCH selector (`74c2fb2`);
+  - the README and playtest script were rewritten.
 ### 2026-09-26 — Wave 3 complete (lead)
 - **All lanes merged**; every integration commit verified in isolation including e2e (`npm run verify -- --e2e`).
   Soak PASS across skirmish, TDM and core-rush (0 errors, tick p95 ≤ 1.4 ms).
@@ -118,22 +130,24 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 - Next: Wave 1 lanes in parallel (see MASTER_PLAN §10).
 
 ## Known issues
-- Rapier KCC on the West Yard heightfield costs ~0.13 ms/character/tick (8× flat) → 1.1–2.2 ms/tick at full rooms (L3).
+- Rapier KCC on the heightfield was ~0.13 ms/character/tick. The P1 terrain fast path (grounded capsules only) brought
+  28 characters to tick p95 1.72 ms, max 3.16 ms; airborne and structure moves still pay the full KCC (L3, P1).
 - Straight-down raycasts on the heightfield slip through at grid lines ~23 %: use `WorldData.height()` (L3).
 - Firefight snapshot bandwidth 30.6 KB/s after delta encoding (was 64 KB/s) — inside budget (L4).
 - Combat knockback is not predicted → occasional smoothed corrections > 0.5 m in live soaks (L4).
 - Offline play downloads Rapier twice (worker + prediction chunk), ~3.75 MB gz total (L4).
 - Client world build blocks the main thread ~1.3 s at load (L2).
 - Bots treat decks/roofs as obstacles; Warden bots weak in the open (L3).
-- Character faces faceted in close-ups; expressions read cute rather than fierce at portrait distance (lead review of L1).
 - Proposed contract additions (L3): archetype on EntityState, weapon on `death`, `MatchState.enemiesLeft`.
-- Upgrade-core buffs are not in snapshots: the HUD rebuilds them from events (late joiners miss running buffs) and
-  Zoomies+ causes small prediction corrections (~3 cm/snapshot) (S1).
 - `EntityState.cls` carries content indexes through `CLASS_IDS`: 6 entries per content table at most (S1, B1).
 - Bots don't climb to the Rooftops perches (they fight in the Garage fine) (D3/C2).
-- With shadows off (low tier) characters have no ground shadow; a blob shadow would fix it (P2).
 - Ability entities: shotgun damage to drones/barriers is estimated from the first pellet; your own barrier and drone
   block your team's shots (C2).
+- Fixed since first logged:
+  - upgrade-core buffs now ride in snapshots as `EFlag` buff bits, so late joiners see them and Zoomies+ no longer
+    causes corrections (M2);
+  - the low tier has blob shadows (`4724e38`);
+  - faces are smoother, with attitude expressions (K1).
 
 ## Human verdicts
 _(none yet — first human session after Wave 1 integration)_
