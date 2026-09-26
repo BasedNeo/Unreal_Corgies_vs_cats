@@ -26,6 +26,7 @@ npm run dev            # http://localhost:5173 → main menu → PLAY (offline: 
 | E | interact (kiosk, kart, mission) |
 | C | crouch: while sprinting it slides; in the air it ground-pounds |
 | Enter / T | chat |
+| B | taunt |
 | Tab | scoreboard |
 
 ## Run it (about 5 minutes each, and note anything that surprises you)

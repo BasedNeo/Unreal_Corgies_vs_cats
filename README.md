@@ -42,6 +42,7 @@ npm run dev                 # http://localhost:5173 → main menu → pick a MAT
 | E | interact (kiosks, karts, mission) |
 | C | slide while sprinting; in the air, ground-pound |
 | Enter | chat |
+| B | taunt (a voiced comic line) |
 | Tab | scoreboard |
 
 Six classes can be swapped at your base's Ordnance Kiosk:
