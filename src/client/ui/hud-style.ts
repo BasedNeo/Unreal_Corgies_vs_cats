@@ -223,7 +223,8 @@ export const HUD_CSS = `
 #cvc-hud .mm-play{display:flex;flex-direction:column;gap:${u(10)};margin-top:${u(6)}}
 #cvc-hud .mm-join{display:flex;gap:${u(8)};align-items:stretch}
 #cvc-hud .mm-join input{flex:1;min-width:0}
-#cvc-hud .mm-foot{position:absolute;left:0;right:0;bottom:${u(12)};display:flex;justify-content:center;gap:${u(16)};font:700 ${u(12)} ${FONT_BODY};color:var(--paper);text-shadow:0 1px 0 var(--ink);opacity:.9}
+#cvc-hud .mm-foot{position:absolute;left:0;right:0;bottom:${u(12)};display:flex;flex-wrap:wrap;justify-content:center;gap:${u(6)} ${u(14)};padding:0 ${u(16)};font:700 ${u(12)} ${FONT_BODY};color:var(--paper);text-shadow:0 1px 0 var(--ink);opacity:.9}
+#cvc-hud .mm-foot span{white-space:nowrap}
 #cvc-hud .cc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:${u(10)}}
 #cvc-hud .cc{position:relative;text-align:left;font:inherit;color:var(--ink);background:#fffaf0;border:${u(3)} solid var(--ink);border-radius:${u(10)};padding:${u(8)} ${u(10)} ${u(10)};box-shadow:${u(3)} ${u(3)} 0 var(--ink);cursor:pointer;display:grid;grid-template-columns:${u(40)} 1fr;column-gap:${u(8)};row-gap:${u(2)};align-items:center;transition:transform .1s}
 #cvc-hud .cc:hover{transform:translateY(${u(-2)})}

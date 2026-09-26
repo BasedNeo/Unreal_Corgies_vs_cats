@@ -41,7 +41,8 @@ export const DEATH_QUIPS = {
 
 export const CONTROLS: Array<[string, string]> = [
   ['WASD', 'Move'], ['SPACE ×2', 'Double jump'], ['SHIFT', 'Zoomies'], ['MOUSE', 'Aim · fire'],
-  ['RMB', 'Aim down'], ['Q', 'Ability'], ['R', 'Reload'], ['TAB', 'Scoreboard'],
+  ['RMB', 'Aim down'], ['Q', 'Ability'], ['R', 'Reload'], ['E', 'Interact'], ['C', 'Slide · pound'], ['B', 'Taunt'],
+  ['ENTER', 'Chat'], ['TAB', 'Scoreboard'],
 ];
 
 // ---- U1 (ux): chat, room browser, first-match tips, quality notice ----
