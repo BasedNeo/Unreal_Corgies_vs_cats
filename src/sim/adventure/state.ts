@@ -98,8 +98,14 @@ export interface CheckpointEnemy {
   route?: number[];
 }
 
+/** Where a squad member stood (feet) when a checkpoint step began. */
+export interface CheckpointSpot { id: EntityId; x: number; y: number; z: number; yaw: number }
+
 export interface CheckpointSnap {
   step: number;
+  /** The squad's standing spots at the checkpoint: a restart puts everyone back there, as they first arrived (Q2 P2-2:
+   *  a tight formation at the anchor stood the Porch Siege squad behind the porch, out of sight of the last wave). */
+  squad?: CheckpointSpot[];
   counters: Record<string, number>;
   anchorX: number; anchorZ: number; anchorY: number;
   /** A2: barricades standing at the checkpoint (they stand again, at full health, on a restart). */

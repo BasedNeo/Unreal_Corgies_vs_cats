@@ -93,6 +93,9 @@ export const BRIEFING_SECONDS = 7;
 export const BRIEFING_WAIT_SECONDS = 10;
 /** Seconds between a squad wipe and the restart at the last checkpoint (fail forward). */
 export const FAIL_BEAT_SECONDS = 3;
+/** After a checkpoint restart the checkpoint's cats hold still this long (the REGROUP bark): the squad gets its
+ *  bearings first, so a retry is never harder than arriving there was (Q2 P2-2). */
+export const REGROUP_SECONDS = 2;
 /** Seconds the result stays up before the room moves on to the next chapter (or replays the last one). */
 export const COMPLETE_HOLD_SECONDS = 30;
 /** Team points per step and per chapter (MatchState.score; `score` events with reason `step` / `chapter`). */

@@ -27,7 +27,7 @@ export {
   planeStepSystem, spawnPlane, mountPlane, dismountPlane, damagePlane, destroyPlane, planeSeatPosition, planeLocalToWorld,
   planeCenterOf, planeExitSpot, nearestPlane, type PlaneDamageSource,
 } from './plane-systems';
-export { isStunned, stunnedUntil } from './common';
+export { isStunned, stunCharacter, stunnedUntil } from './common';
 export { planeAutopilot, type AutopilotGoal, type AutopilotState } from './pilot';
 
 /**

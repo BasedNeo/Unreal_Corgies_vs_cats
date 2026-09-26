@@ -20,7 +20,7 @@ import { hash2, mulberry32 } from '../../shared/rng';
 import type { GameEvent, MatchState } from '../../shared/protocol';
 import {
   ADVENTURE_CHAIN_INDEX, ADVENTURE_PHASES, ALARM_BARKS, BRIEFING_SECONDS, CHAPTERS, CHAPTER_POINTS, COLLECT_RADIUS,
-  BRIEFING_WAIT_SECONDS, COMPLETE_HOLD_SECONDS, FAIL_BEAT_SECONDS, GRACE_BARK, HOLD_DECAY, HOLD_HEIGHT, KIOSK_PROMPT, REACH_HEIGHT, REGROUP_BARK,
+  BRIEFING_WAIT_SECONDS, COMPLETE_HOLD_SECONDS, FAIL_BEAT_SECONDS, REGROUP_SECONDS, GRACE_BARK, HOLD_DECAY, HOLD_HEIGHT, KIOSK_PROMPT, REACH_HEIGHT, REGROUP_BARK,
   STEP_POINTS, STEP_ROSTER, STRICT_GRACE_SECONDS,
   chapterById, medalFor, roomChapterAfter, type ChapterDef, type ChapterStep,
 } from '../../shared/content/chapters';
@@ -32,10 +32,11 @@ import type { InteractConfig } from '../interact/state';
 import type { ObjectiveState } from '../interact/objectives';
 import {
   adventureConfig, adventureRuntime, adventureState, checkpointHooks, isAdventureMode, isSquad, readDestructible, setAdventureRuntime, squadHasHuman, squadOf,
-  type AdventureRuntime, type AdventureState, type CheckpointEnemy,
+  type AdventureRuntime, type AdventureState, type CheckpointEnemy, type CheckpointSpot,
 } from './state';
 import { spawnChapterCat, spawnItem } from './spawns';
 import { clearBarricades, clearVehicles, kitPup, kitPups, parkStepVehicles, raiseBarricade, reparkVehicles, standingBarricades } from './props';
+import { stunCharacter } from '../vehicles';
 import { simNavGrid } from '../ai';
 import { cellX, cellZ, isWalkable, nearestWalkable } from '../ai/nav';
 
@@ -100,15 +101,16 @@ function nearRuntimeSolid(sim: Sim, x: number, z: number): boolean {
  * (A2: an elevated rally point, e.g. a roof) the spot is on that surface instead: within 1.2 m of its height (not
  * off its edge or down a hatch), clear of props.
  */
-function formationSpot(sim: Sim, ax: number, az: number, k: number, ay = -1): { x: number; y: number; z: number } {
+function formationSpot(sim: Sim, ax: number, az: number, k: number, ay = -1, taken: readonly { x: number; z: number }[] = []): { x: number; y: number; z: number } {
   const d = sim.worldData;
   const g = simNavGrid(sim);
   const up = ay > ground(sim, ax, az) + 1.5;
   const top = up ? ay + 1 : ground(sim, ax, az) + 3;
-  for (let tries = 0; tries < 24; tries++) {
+  for (let tries = 0; tries < 36; tries++) {
     const ring = 1.6 + 1.3 * Math.floor((k + tries) / 5);
     const a = (k + tries * 0.5) * 2.39996;
     const x = ax + Math.cos(a) * ring, z = az + Math.sin(a) * ring;
+    if (taken.some((t) => Math.hypot(t.x - x, t.z - z) < SPOT_GAP)) continue; // never two pups on one spot
     const s = surfaceAt(d, x, z, top);
     if (up && Math.abs(s.y - ay) > 1.2) continue;
     if (occupiedAt(d, x, s.y + 0.7, z) || (!up && waterAt(d, x, z)) || nearRuntimeSolid(sim, x, z)) continue;
@@ -123,10 +125,33 @@ function formationSpot(sim: Sim, ax: number, az: number, k: number, ay = -1): { 
   return { x: ax, y: surfaceAt(d, ax, az, top).y + 0.05, z: az };
 }
 
-function placeMember(sim: Sim, e: SimEntity, k: number, st: AdventureState, respawn: boolean): void {
+/** Minimum distance between two squad members' standing spots when the squad is placed (m). */
+const SPOT_GAP = 1.1;
+
+/** Positions of the members already placed this tick (so the next one doesn't stand on them). */
+function placedSpots(sim: Sim): { x: number; z: number }[] {
+  const rt = adventureRuntime(sim)!;
+  if (rt.placedTick !== sim.tick) return [];
+  const out: { x: number; z: number }[] = [];
+  for (const id of rt.placed) { const o = sim.entities.get(id); if (o) out.push({ x: o.pos.x, z: o.pos.z }); }
+  return out;
+}
+
+/** A checkpoint spot is still good to stand on: dry, open, walkable, clear of vehicles/kiosks and of the others. */
+function spotStillGood(sim: Sim, s: CheckpointSpot, taken: readonly { x: number; z: number }[]): boolean {
+  const d = sim.worldData, g = simNavGrid(sim);
+  if (taken.some((t) => Math.hypot(t.x - s.x, t.z - s.z) < SPOT_GAP)) return false;
+  if (occupiedAt(d, s.x, s.y + 0.7, s.z) || waterAt(d, s.x, s.z) || nearRuntimeSolid(sim, s.x, s.z)) return false;
+  // on the ground the nav grid must agree; up on a roof (above the terrain) the surface must still be there
+  return s.y > ground(sim, s.x, s.z) + 1.5 ? Math.abs(surfaceAt(d, s.x, s.z, s.y + 1).y - s.y) < 0.6 : !g || isWalkable(g, s.x, s.z);
+}
+
+function placeMember(sim: Sim, e: SimEntity, k: number, st: AdventureState, respawn: boolean, at?: CheckpointSpot): void {
+  const taken = placedSpots(sim);
+  const kept = at && spotStillGood(sim, at, taken) ? at : null;
   // humans rally up on an elevated rally point (a roof); pups can't climb, so they gather on the ground below it
-  const p = formationSpot(sim, st.anchorX, st.anchorZ, k, e.kind === EntityKind.Player ? st.anchorY : -1);
-  const yaw = st.step >= 0 && (st.x !== st.anchorX || st.z !== st.anchorZ) ? yawToward(p.x, p.z, st.x, st.z) : adventureRuntime(sim)!.def!.start.yaw;
+  const p = kept ? { x: kept.x, y: kept.y, z: kept.z } : formationSpot(sim, st.anchorX, st.anchorZ, k, e.kind === EntityKind.Player ? st.anchorY : -1, taken);
+  const yaw = kept ? kept.yaw : st.step >= 0 && (st.x !== st.anchorX || st.z !== st.anchorZ) ? yawToward(p.x, p.z, st.x, st.z) : adventureRuntime(sim)!.def!.start.yaw;
   if (respawn) respawnNow(sim, e, { x: p.x, y: p.y, z: p.z, yaw });
   else {
     sim.placeCharacter(e, p.x, p.y, p.z);
@@ -260,10 +285,13 @@ function saveCheckpoint(sim: Sim, rt: AdventureRuntime, st: AdventureState): voi
     if (!e || !alive(e)) continue;
     enemies.push({ arch: r.arch, tag: r.tag, step: r.step, x: e.pos.x, y: e.pos.y, z: e.pos.z, yaw: e.yaw, route: e.adv?.sentry ? [...e.adv.sentry.route] : undefined });
   }
+  // where the squad stands as the step begins (on its feet: not seated in a vehicle, not mid-jump)
+  const squad: CheckpointSpot[] = [];
+  for (const c of squadOf(sim, scratch)) if (alive(c) && !c.seat && c.char?.grounded) squad.push({ id: c.id, x: c.pos.x, y: c.pos.y, z: c.pos.z, yaw: c.yaw });
   const extra: Record<string, unknown> = {};
   for (const [name, h] of checkpointHooks()) extra[name] = h.save(sim);
   rt.snap = {
-    step: st.step, counters: { ...st.counters }, anchorX: st.anchorX, anchorZ: st.anchorZ, anchorY: st.anchorY, enemies,
+    step: st.step, counters: { ...st.counters }, anchorX: st.anchorX, anchorZ: st.anchorZ, anchorY: st.anchorY, enemies, squad,
     broken: [...rt.destructBroken], extra, barricades: standingBarricades(sim, rt),
   };
 }
@@ -634,11 +662,14 @@ export function restartAtCheckpoint(sim: Sim): void {
   else { st.x = st.anchorX; st.z = st.anchorZ; }
   (sim.state.rules as MatchRules).combatLive = true;
   const squad = squadOf(sim, scratch).slice().sort((a, b) => a.id - b.id);
-  squad.forEach((e, k) => placeMember(sim, e, k, st, true));
+  // everyone back where they stood when the step began (a newcomer, or a spot gone bad, gets the formation)
+  squad.forEach((e, k) => placeMember(sim, e, k, st, true, snap.squad?.find((s) => s.id === e.id)));
   let n = 0;
   for (const c of snap.enemies) {
     spawnChapterCat(sim, rt, { arch: c.arch, x: c.x, z: c.z, y: c.y, yaw: c.yaw, tag: c.tag, step: c.step, jitter: 0, sentry: !!c.route, route: c.route }, ++n);
   }
+  // the regroup beat: the respawned squad starts cold (no targets yet), the cats don't, so they hold still a moment
+  for (const id of rt.enemies.keys()) { const c = sim.entities.get(id); if (c?.char && alive(c)) stunCharacter(sim, c, REGROUP_SECONDS); }
   spawnStepItems(sim, rt, step);
   // A2: the checkpoint's barricades stand again (full health); vehicles of the steps so far are parked again
   const owner = squad[0];

@@ -22,7 +22,7 @@ import { EFlag, EntityKind, Species, Team, type ClassId } from '../../src/shared
 import type { GameEvent } from '../../src/shared/protocol';
 import { TICK_HZ } from '../../src/shared/constants';
 import { surfaceAt, yawToward } from '../../src/shared/world/queries';
-import { BARRICADE_HP, chapterById, type ChapterDef } from '../../src/shared/content/chapters';
+import { BARRICADE_HP, REGROUP_SECONDS, chapterById, type ChapterDef } from '../../src/shared/content/chapters';
 
 function withAdventure() {
   const sys = createDefaultSystems();
@@ -141,7 +141,7 @@ describe('chapter 4 "Laser Pointer at Dawn": the perch is up on the roof', () =>
 
 describe('chapter 5 "The Porch Siege": barricades', () => {
   it('E at each plank pile raises two corgi walls; the checkpoint remembers all four; a restart stands them again at full health', async () => {
-    const p = await play('porch_siege', 'warden');
+    const p = await play('porch_siege', 'warden', 3);
     const { sim, h } = p;
     const walls = () => [...sim.entities.values()].filter((e) => e.abx?.kind === 'barrier' && e.health?.max === BARRICADE_HP);
     sim.placeCharacter(h, -62, sim.worldData.height(-62, -70) + 0.05, -70);
@@ -157,11 +157,27 @@ describe('chapter 5 "The Porch Siege": barricades', () => {
     expect(walls().length).toBe(4);
     expect(adventureRuntime(sim)!.snap!.barricades.length).toBe(4);
     walls()[0].health!.hp = 3;
+    const spots = adventureRuntime(sim)!.snap!.squad!;
+    expect(spots.length).toBeGreaterThanOrEqual(3); // the squad on its feet as the hold step began
     restartAtCheckpoint(sim);
     p.tick();
     expect(walls().length).toBe(4);
     expect(walls().every((w) => w.health!.hp === BARRICADE_HP)).toBe(true);
     expect(p.st().step).toBe(2);
+    // Q2 P2-2: the squad is back where it stood when the step began (not bunched on the anchor), no two on one spot,
+    // and the checkpoint's cats hold still for the regroup beat
+    const back = spots.filter((s) => { const e = sim.entities.get(s.id)!; return Math.hypot(e.pos.x - s.x, e.pos.z - s.z) < 0.5; });
+    expect(back.length).toBeGreaterThanOrEqual(spots.length - 1);
+    const squad = [...sim.entities.values()].filter((e) => e.char && e.team === Team.Corgis);
+    for (const a of squad) for (const b of squad) if (a.id < b.id) expect(Math.hypot(a.pos.x - b.pos.x, a.pos.z - b.pos.z)).toBeGreaterThan(0.9);
+    const cats = [...sim.entities.values()].filter((e) => e.char && e.team === Team.Cats && !e.dead);
+    expect(cats.length).toBeGreaterThan(0);
+    const at = cats.map((c) => [c.pos.x, c.pos.z]);
+    expect(cats.every((c) => (c.flags & EFlag.Stunned) !== 0)).toBe(true);
+    p.ticks(Math.round((REGROUP_SECONDS - 0.3) * TICK_HZ));
+    cats.forEach((c, i) => expect(Math.hypot(c.pos.x - at[i][0], c.pos.z - at[i][1])).toBeLessThan(0.3));
+    p.ticks(Math.round(1.5 * TICK_HZ));
+    expect(cats.some((c) => Math.hypot(c.pos.x - at[cats.indexOf(c)][0], c.pos.z - at[cats.indexOf(c)][1]) > 1)).toBe(true);
   }, 60000);
 });
 
