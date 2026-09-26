@@ -6,6 +6,7 @@
 // a chapter plays its featured kit (swap at any Ordnance Kiosk), on the corgi side.
 // U2 (ux): LOCKER (between ROOMS and SETTINGS) opens the locker (locker.ts) in the right card; the button carries the
 // level and a count of new looks.
+import { DEFAULT_MAP, MAPS, isMapId, mapsForMode, type MapId } from '../../shared/world/maps';
 import { CLASSES } from '../../shared/content/classes';
 import { CLASS_IDS, type ClassId, type TeamId } from '../../shared/types';
 import { classIcon } from './icons';
@@ -36,6 +37,7 @@ export const MATCH_MODES: ReadonlyArray<{ id: MatchMode; label: string; hint: st
 /** Chapter picker CSS (A1; scoped like the HUD's, injected once). */
 const CHAPTER_CSS = (u: (n: number) => string) => `
 #cvc-hud .seg.mm-match{display:grid;grid-template-columns:1fr 1fr}
+#cvc-hud .mm-hintrow{display:flex;align-items:center;justify-content:space-between;gap:${u(8)}} #cvc-hud .mm-mapbtn{flex:0 0 auto;font-size:${u(11)};padding:${u(3)} ${u(8)};white-space:nowrap}
 #cvc-hud .seg.mm-match button{border-right:${u(3)} solid var(--ink);border-bottom:${u(3)} solid var(--ink);font-size:${u(14)};padding:${u(6)} ${u(6)}}
 #cvc-hud .seg.mm-match button:nth-child(2n){border-right:none} #cvc-hud .seg.mm-match button:nth-last-child(-n+2){border-bottom:none}
 #cvc-hud .seg.mm-match button[data-match=adventure][aria-checked=true]{background:var(--corgi)}
@@ -87,6 +89,8 @@ export interface PlayOptions {
   room?: string;
   /** Adventure chapter id (match 'adventure', offline or online). */
   chapter?: string;
+  /** W8: the battleground (registry id) for a PvP match or a new online room; absent for adventure. */
+  map?: string;
   name: string;
   team: TeamId | -1;
   cls: ClassId;
@@ -118,6 +122,8 @@ export interface MenuDeps {
   roomPoller?: RoomPoller;
   /** The offline match type pre-selected in the MATCH selector (the page's ?mode=). */
   match?: string;
+  /** W8: the map pre-selected (the page's ?map=). The MAP button shows only when the registry has more than one. */
+  map?: string;
   // ---- U2 addition (optional) ----
   /** The profile the LOCKER reads and writes (default: the device's, localStorage `cvc.profile`). */
   profile?: LockerStore;
@@ -315,7 +321,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
           <div class="seg mm-match" role="radiogroup" aria-label="Match">
             ${MATCH_MODES.map((m) => `<button data-nav data-match="${m.id}" role="radio">${m.label}</button>`).join('')}
           </div>
-          <span class="mm-label" data-match-hint style="opacity:.8;letter-spacing:0;text-transform:none;margin-top:.3em"></span></div>
+          <div class="mm-hintrow"><span class="mm-label" data-match-hint style="opacity:.8;letter-spacing:0;text-transform:none;margin-top:.3em"></span><button class="btn small mm-mapbtn hidden" data-nav data-map aria-label="Map"></button></div></div>
         <div class="mm-play">
           <button class="btn primary" data-nav data-play>PLAY OFFLINE ▸</button>
           <div class="mm-join"><input type="text" data-nav data-server spellcheck="false" autocomplete="off" aria-label="Server URL"><button class="btn small" data-nav data-join>JOIN</button></div>
@@ -366,6 +372,10 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
   const matchBtns = [...el.querySelectorAll<HTMLButtonElement>('[data-match]')];
   const matchHint = el.querySelector<HTMLElement>('[data-match-hint]')!;
   let match: MatchMode = MATCH_MODES.some((m) => m.id === deps.match) ? (deps.match as MatchMode) : 'yard-skirmish';
+  // W8: MAP ▸ cycles the maps that can host the picked match (a compact button on the hint row: the card keeps its height)
+  const mapBtn = el.querySelector<HTMLButtonElement>('[data-map]')!;
+  let map: MapId = isMapId(deps.map) ? deps.map : DEFAULT_MAP;
+  const mapsFor = (m: MatchMode): MapId[] => mapsForMode(m);
   const classesView = el.querySelector<HTMLElement>('.mm-classes')!;
   const chaptersView = el.querySelector<HTMLElement>('.mm-chapters')!;
   const chBtns = [...el.querySelectorAll<HTMLButtonElement>('[data-ch]')];
@@ -426,6 +436,11 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
     for (const b of clsBtns) b.setAttribute('aria-checked', String(b.dataset.cls === s.cls));
     for (const b of matchBtns) b.setAttribute('aria-checked', String(b.dataset.match === match));
     matchHint.textContent = MATCH_MODES.find((m) => m.id === match)?.hint ?? '';
+    const maps = mapsFor(match);
+    if (!maps.includes(map)) map = maps[0] ?? DEFAULT_MAP;
+    mapBtn.classList.toggle('hidden', maps.length < 2);
+    mapBtn.textContent = `MAP ▸ ${MAPS[map].title.toUpperCase()}`;
+    mapBtn.title = maps.length < 2 ? '' : `Battleground: ${MAPS[map].title} (click for the next one)`;
     paintChapters();
     const teamRow = teamBtns[0]?.closest<HTMLElement>('.mm-field');
     if (teamRow) { teamRow.style.opacity = match === 'adventure' ? '0.45' : ''; teamRow.title = match === 'adventure' ? 'Adventure: the squad is all corgis' : ''; }
@@ -481,6 +496,12 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
   });
   for (const b of teamBtns) b.addEventListener('click', () => { s.team = Number(b.dataset.team) as -1 | 0 | 1; deps.onSetting('team', s.team); deps.onTeam(s.team); deps.sound?.('click'); paint(); });
   for (const b of matchBtns) b.addEventListener('click', () => { match = b.dataset.match as MatchMode; deps.sound?.('click'); paint(); });
+  mapBtn.addEventListener('click', () => {
+    const maps = mapsFor(match);
+    map = maps[(maps.indexOf(map) + 1) % maps.length] ?? DEFAULT_MAP;
+    deps.sound?.('click');
+    paint();
+  });
   for (const b of clsBtns) b.addEventListener('click', () => { s.cls = b.dataset.cls as ClassId; deps.onSetting('cls', s.cls); deps.onClass(s.cls); deps.sound?.('click'); paint(); });
   for (const b of chBtns) b.addEventListener('click', () => {
     const def = chapterById(b.dataset.ch);
@@ -512,7 +533,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
       deps.onPlay({ mode, server, room: mode === 'online' ? room : undefined, match: 'adventure', chapter: chapter.id, name: s.name, team: 0, cls: chapter.cls });
       return;
     }
-    deps.onPlay({ mode, server, room: mode === 'online' ? room : undefined, match: mode === 'offline' ? match : undefined, name: s.name, team: s.team, cls: s.cls });
+    deps.onPlay({ mode, server, room: mode === 'online' ? room : undefined, match: mode === 'offline' ? match : undefined, map: mapsFor(match).includes(map) ? map : undefined, name: s.name, team: s.team, cls: s.cls });
   };
   el.querySelector('[data-play]')!.addEventListener('click', () => play('offline'));
   el.querySelector('[data-join]')!.addEventListener('click', () => play('online'));

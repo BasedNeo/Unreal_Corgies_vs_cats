@@ -1,7 +1,7 @@
 // Wave 8 M1 (docs/design/EXPANSION_VISION.md): the map registry and the map id's trip through the authority
 // (Sim, Room welcome) and the client (reload into the authority's world). The West Yard stays the default everywhere.
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MAP, MAP_IDS, MAPS, isMapId, mapForMode, sanitizeMap } from '../../src/shared/world/maps';
+import { DEFAULT_MAP, MAP_IDS, MAPS, isMapId, mapForMode, mapsForMode, sanitizeMap } from '../../src/shared/world/maps';
 import { createWorldData } from '../../src/shared/world/world-data';
 import { sanitizeRoomSetup, ROOM_MODES } from '../../src/host/guard';
 import { Sim } from '../../src/sim/sim';
@@ -38,6 +38,16 @@ describe('map registry', () => {
     for (const id of MAP_IDS) for (const mode of ROOM_MODES) {
       expect(mapForMode(id, mode)).toBe(MAPS[id].modes.includes(mode) ? id : DEFAULT_MAP);
     }
+  });
+
+  it('the maps a mode can be played on (the menu cycles these) always include the default map, in registry order', () => {
+    for (const mode of ROOM_MODES) {
+      const maps = mapsForMode(mode);
+      expect(maps[0]).toBe(DEFAULT_MAP);
+      expect(maps).toEqual(MAP_IDS.filter((id) => MAPS[id].modes.includes(mode)));
+    }
+    expect(mapsForMode('adventure')).toEqual(['west_yard']); // chapters are authored for the West Yard
+    expect(mapsForMode('no-such-mode')).toEqual([]);
   });
 
   it('a room setup always names the map the room will run', () => {

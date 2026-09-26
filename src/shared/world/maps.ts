@@ -30,6 +30,11 @@ export function sanitizeMap(id: unknown): MapId {
   return isMapId(id) ? id : DEFAULT_MAP;
 }
 
+/** Maps that can host `mode`, in registry order (the menu's MAP button cycles these; the default map is always one). */
+export function mapsForMode(mode: string): MapId[] {
+  return MAP_IDS.filter((id) => MAPS[id].modes.includes(mode));
+}
+
 /** The map a room in `mode` will really run for a requested id: unknown ids, and maps that can't host the mode, fall
  *  back to the default map (so a listing or a welcome never names a map the sim isn't playing). */
 export function mapForMode(id: unknown, mode: string): MapId {

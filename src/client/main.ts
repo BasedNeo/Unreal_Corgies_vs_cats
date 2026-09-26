@@ -61,7 +61,6 @@ async function main(): Promise<void> {
 
   // Wave 8: the battleground (?map=, kept only if it can host the mode); an online room's welcome can overrule it
   const mapId = mapForMode(params.get('map'), params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish');
-  const mapQ = mapId === DEFAULT_MAP ? '' : `&map=${mapId}`;
   const mapTitle = MAPS[mapId].title;
   loadingStep(mapTitle === 'West Yard' ? 'Mowing West Yard…' : `Scouting ${mapTitle}…`);
   await new Promise((r) => setTimeout(r, 0)); // let the step text paint before the blocking world build
@@ -160,18 +159,22 @@ async function main(): Promise<void> {
     play(o) {
       void audio.unlock();
       ctx.renderer.domElement.requestPointerLock?.();
+      const pickQ = o.map && o.map !== DEFAULT_MAP && o.match !== 'adventure' ? `&map=${encodeURIComponent(o.map)}` : ''; // W8: the MAP pick
       if (o.mode === 'online' && o.server) {
         const room = o.room ? `&room=${encodeURIComponent(o.room)}` : '';
         const adv = o.match === 'adventure' && o.chapter ? `&mode=adventure&chapter=${encodeURIComponent(o.chapter)}` : ''; // A1: co-op chapter room
-        location.search = `?server=${encodeURIComponent(o.server)}&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}${room}${adv}${mapQ}`;
+        location.search = `?server=${encodeURIComponent(o.server)}&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}${room}${adv}${pickQ}`;
         return;
       }
-      if (!net) { if (o.chapter) chapter = o.chapter; void startSession(o.name, o.cls, o.team, o.match); return; } // A1: the picked chapter
-      if (!serverUrl && o.match && (o.match !== mode || (o.match === 'adventure' && o.chapter !== chapter))) {
+      // W8: another map than the one built at boot needs a fresh page (the world view is built once)
+      const newWorld = !serverUrl && (o.match === 'adventure' ? DEFAULT_MAP : o.map ?? mapId) !== mapId;
+      if (!net && !newWorld) { if (o.chapter) chapter = o.chapter; void startSession(o.name, o.cls, o.team, o.match); return; } // A1: the picked chapter
+      if (!serverUrl && o.match && (newWorld || o.match !== mode || (o.match === 'adventure' && o.chapter !== chapter))) {
         // a different offline match type (or chapter) needs a fresh authority: restart the page straight into it
-        location.search = `?mode=${o.match}${o.chapter ? `&chapter=${encodeURIComponent(o.chapter)}` : ''}&autoplay&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}${mapQ}`;
+        location.search = `?mode=${o.match}${o.chapter ? `&chapter=${encodeURIComponent(o.chapter)}` : ''}&autoplay&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}${pickQ}`;
         return;
       }
+      if (!net) return;
       net.transport.send({ t: 'class', cls: o.cls });
       if (o.team !== -1) net.transport.send({ t: 'team', team: o.team });
     },
@@ -183,7 +186,7 @@ async function main(): Promise<void> {
     chatOpenChanged: (open) => { input.suspended = open; },
     // U2/N2: a LOCKER equip mid-session reaches the authority; worn from that species' next spawn
     setLook: (species, look) => { net?.transport.send({ t: 'look', species, look }); },
-  }, { match: mode });
+  }, { match: mode, map: mapId });
   hud.setUiSound((k) => audio.ui(k));
   const prompts = createInteractPrompts(ui, { send: (msg) => net?.transport.send(msg), sound: (k) => audio.ui(k) });
   const planeHud = createPlaneHud(ui);

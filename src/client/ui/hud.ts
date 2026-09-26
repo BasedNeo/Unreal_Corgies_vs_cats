@@ -137,6 +137,8 @@ export interface HudOptions {
   roomPoller?: RoomPoller;
   /** Offline match type pre-selected in the menu (the page's ?mode=). */
   match?: string;
+  /** W8: the map pre-selected in the menu (the page's ?map=). */
+  map?: string;
 }
 
 export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts: HudOptions = {}): Hud {
@@ -254,6 +256,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
     onLook: (sp, look) => actions?.setLook?.(sp, look), // U2
     roomPoller: opts.roomPoller,
     match: opts.match,
+    map: opts.map,
   };
   const menu: Menu = createMenu(el, deps);
   const pauseSettings = createSettingsPanel(deps, () => { lkSettings.classList.add('hidden'); lkMain.classList.remove('hidden'); }, 'RESUME ▸');
