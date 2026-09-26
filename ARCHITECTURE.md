@@ -23,7 +23,10 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
                                    index.ts order: ai 100 · interact/boss 150 · vehicles 190 · move 200 ·
                                    world 250 · physics 300 · combat 400-700 · kill plane 650 · match 800
   world/                           buildStaticWorld (trimesh terrain + prop colliders), world systems + stepWorldEffects
-  combat/                          weapons, lag-compensated hitscan, projectiles, damage, lifecycle/respawn, abilities
+  combat/                          weapons, lag-compensated hitscan, projectiles, damage, lifecycle/respawn, abilities;
+                                   listeners for layers that import combat: addBlastListener (blasts, after characters)
+                                   and addProjectileHitListener (non-explosive direct hits on a collider: vehicles,
+                                   destructibles); friendlyShotPass lets a team's shots through its own barriers/drones
   ai/                              brain (HFSM, perception, aim), archetypes, nav (1 m grid A*)
   match/                           yard-skirmish (waves) · team-deathmatch
   vehicles/  boss/                 Wave 2 lanes (Mower Kart + terminals; Vac-Tank boss) · boss/ also the sniper elite
@@ -58,7 +61,9 @@ src/client/
                                    (Garden, Garage + Rooftops districts; quality tiers apply live where possible)
                                    destruct-view.ts + destruct-debris.ts: standing/rubble index ranges, pooled debris
   ui/  audio/  fx/                 comic HUD + menus (MATCH selector, room browser) + chat + tips + settings ·
-                                   procedural audio + music · pooled FX + words
+                                   procedural audio + music (S2: vehicle-loops.ts engine loops from snapshot states,
+                                   presets-engines.ts; vehicle/break voices; adventure stingers) · pooled FX + words ·
+                                   plane-hud.ts cockpit strip
   vehicles/                        kart + terminal views (Wave 2) · RC plane + Rooftop Hangar views (R1)
   interact/                        kiosk/core/kibble/beacon views · E prompt, kit picker, buff chips, mission card
   abilities/                       drone, charge, barrier views + spotted markers
