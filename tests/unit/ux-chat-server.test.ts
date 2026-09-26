@@ -65,6 +65,7 @@ describe('chat + presence over the Node server', () => {
     await sleep(300);
     expect(a.chats()).toEqual([`Ann: ${cleanChatText(raw)}`]); // exactly what the client-side cleaner predicts
     expect(b.chats()).toEqual(a.chats());
+    expect(b.msgs.find((m) => m.t === 'chat')).toMatchObject({ from: 'Ann', team: 0 }); // names aren't unique: the team rides along
     await sleep(600);
     a.say('later');
     await until(() => b.chats().length === 2, 5000, 'second chat');

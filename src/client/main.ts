@@ -145,7 +145,7 @@ async function main(): Promise<void> {
   });
   bus.on('roster', (r) => nameplates.setRoster(r));
   bus.on('notice', (t) => hud.serverNotice(t));
-  bus.on('chat', (m) => hud.chat(m.from, m.text));
+  bus.on('chat', (m) => hud.chat(m.from, m.text, m.team));
   bus.on('game', (ev) => {
     if (ev.e === 'jump') views.trigger(ev.id, 'jump');
     if (ev.e === 'land') views.trigger(ev.id, 'land', ev.impact);

@@ -94,7 +94,8 @@ export interface Hud {
   setUiSound(fn: (kind: UiSoundKind) => void): void;
   // ---- U1 additions ----
   /** A chat line from the authority (bus 'chat'). */
-  chat(from: string, text: string): void;
+  /** `team` from the server when known; otherwise the roster is searched by name. */
+  chat(from: string, text: string, team?: number): void;
   /** A server notice (bus 'notice'): goes to the chat feed; also toasts unless it is a join/leave line. */
   serverNotice(text: string): void;
   /** True while the chat input is open (game input should be suspended). */
@@ -703,7 +704,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
       setTimeout(() => t.remove(), 3300);
     },
 
-    chat(from, text) { chat.receive(from, text); },
+    chat(from, text, team) { chat.receive(from, text, team); },
     serverNotice(text) {
       chat.system(text);
       if (!isPresenceNotice(text)) hud.notice(text);

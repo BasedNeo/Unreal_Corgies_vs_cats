@@ -51,7 +51,7 @@ export interface Chat {
   /** Close; keepDraft=true remembers the typed text for the next open. */
   close(keepDraft?: boolean): void;
   /** A chat line from the authority (bus 'chat'). */
-  receive(from: string, text: string): void;
+  receive(from: string, text: string, team?: number): void;
   /** A server notice / presence line (bus 'notice'). */
   system(text: string): void;
   update(f: ChatFrame): void;
@@ -165,8 +165,8 @@ export function createChat(parent: HTMLElement, deps: ChatDeps = {}): Chat {
       if (refocusTimer) { clearTimeout(refocusTimer); refocusTimer = null; }
       input.blur();
     },
-    receive(from, text) {
-      const team = teamOfName(roster, from);
+    receive(from, text, sentTeam) {
+      const team = sentTeam === 0 || sentTeam === 1 ? sentTeam : teamOfName(roster, from);
       feed.receive(from, text, clock(), team, myName);
       render(clock(), true);
     },

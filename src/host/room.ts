@@ -207,7 +207,7 @@ export class Room {
         if (!text) return 'ignored';
         if (this.sim.tick - p.net.lastChatTick < TICK_HZ / 2) return 'ignored';
         p.net.lastChatTick = this.sim.tick;
-        this.broadcast({ t: 'chat', from: p.name, text });
+        this.broadcast({ t: 'chat', from: p.name, team: p.team, text });
         return 'ok';
       }
       case 'hello':

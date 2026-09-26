@@ -6,7 +6,7 @@ export interface ClientEvents {
   match: MatchState;
   roster: RosterEntry[];
   notice: string;
-  chat: { from: string; text: string };
+  chat: { from: string; text: string; team?: number };
   connected: { pid: string; entity: number };
   disconnected: string;
   localSpawn: number;

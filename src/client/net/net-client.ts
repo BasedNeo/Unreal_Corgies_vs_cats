@@ -341,7 +341,7 @@ export class NetClient {
         break;
       }
       case 'notice': bus.emit('notice', m.text); break;
-      case 'chat': bus.emit('chat', { from: m.from, text: m.text }); break;
+      case 'chat': bus.emit('chat', { from: m.from, text: m.text, team: m.team }); break;
       case 'reject': this.markDisconnected(m.reason); break;
     }
     this.publishDebug();

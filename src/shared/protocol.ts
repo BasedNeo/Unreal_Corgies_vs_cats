@@ -104,5 +104,6 @@ export type ServerMsg =
   | { t: 'roster'; players: RosterEntry[] }
   | { t: 'pong'; id: number; ct: number; st: number }
   | { t: 'notice'; text: string }
-  | { t: 'chat'; from: string; text: string }
+  /** team: the sender's team when sent (names are not unique; clients color by it). */
+  | { t: 'chat'; from: string; text: string; team?: TeamId }
   | { t: 'reject'; reason: string };
