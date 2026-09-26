@@ -307,7 +307,7 @@ describe('production server (static dist + /ws on one port)', () => {
 
 // U1: the room browser's public room list.
 describe('room list (GET /rooms)', () => {
-  const KEYS = ['bots', 'humans', 'maxPlayers', 'mode', 'name', 'phase', 'players'];
+  const KEYS = ['bots', 'humans', 'map', 'maxPlayers', 'mode', 'name', 'phase', 'players']; // map: a content id (W8), not who plays
 
   it('lists live public rooms with head counts only: no addresses, ids or player names; unlisted rooms hidden', async () => {
     const s = await start({ bots: [2, 1], roomTtlMs: 5000 });
@@ -326,7 +326,7 @@ describe('room list (GET /rooms)', () => {
     for (const r of list) expect(Object.keys(r).sort()).toEqual(KEYS);
     const botsIn = (room: string) => [...s.rooms.get(room)!.room.players.values()].filter((p) => p.bot).length;
     expect(botsIn('alpha')).toBeGreaterThan(0);
-    expect(list[0]).toEqual({ name: 'alpha', mode: 'yard-skirmish', players: 2 + botsIn('alpha'), humans: 2, bots: botsIn('alpha'), maxPlayers: 12, phase: expect.stringMatching(/^(warmup|live|ended)$/) });
+    expect(list[0]).toEqual({ name: 'alpha', mode: 'yard-skirmish', players: 2 + botsIn('alpha'), humans: 2, bots: botsIn('alpha'), maxPlayers: 12, phase: expect.stringMatching(/^(warmup|live|ended)$/), map: 'west_yard' });
     expect(list[1]).toMatchObject({ name: 'bravo', humans: 1, bots: botsIn('bravo'), players: 1 + botsIn('bravo') });
     // Nothing that identifies who is connected, from where.
     for (const leak of ['127.0.0.1', '::1', 'Ann', 'Bob', 'Cy', 'Dee', 'secret', '"c1"', 'ip', 'pid']) expect(text).not.toContain(leak);
