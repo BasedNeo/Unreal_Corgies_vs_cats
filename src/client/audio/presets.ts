@@ -351,3 +351,53 @@ export function drive(ctx: BaseAudioContext, amount: number): WaveShaperNode {
   w.oversample = '2x';
   return w;
 }
+
+/** Spotter Drone launch: a toy propeller whirring up (buzzy saw with a wobble) and a little radio chirp. */
+export const droneWhir: Recipe = (v) => {
+  const t = v.t, p = vary(v, 0.04);
+  const out = gain(v);
+  ahr(out.gain, t, 0.05, 0.32, 0.35, 0.25);
+  const o = osc(v, 'sawtooth', 140 * p, filter(v, 'bandpass', 900, 1.4, out), 0.7);
+  glide(o.frequency, t, 140 * p, 320 * p, 0.45);
+  const w = v.ctx.createOscillator(); w.frequency.value = 38; const wg = v.ctx.createGain();
+  wg.gain.value = 18; w.connect(wg); wg.connect(o.frequency); w.start(t); w.stop(t + 0.7);
+  const chirp = gain(v, 0.0001, out);
+  ad(chirp.gain, t + 0.42, 0.003, 0.22, 0.07);
+  const c = osc(v, 'square', 1800 * p, filter(v, 'lowpass', 3000, 1, chirp), 0.1, t + 0.42);
+  glide(c.frequency, t + 0.42, 1800 * p, 2600 * p, 0.06);
+  return 0.72;
+};
+
+/** Dig Charge: a shovel thunk into dirt, then two arming beeps. */
+export const chargeArm: Recipe = (v) => {
+  const t = v.t;
+  const out = gain(v, 1);
+  const th = gain(v, 0.0001, out);
+  ad(th.gain, t, 0.002, 0.8, 0.12);
+  const o = osc(v, 'sine', 170, th, 0.15);
+  glide(o.frequency, t, 170, 55, 0.12);
+  const dirt = gain(v, 0.0001, out);
+  ad(dirt.gain, t, 0.003, 0.35, 0.12);
+  noiseSrc(v, filter(v, 'lowpass', 1200, 0.8, dirt), 0.14, 'brown');
+  for (const dt of [0.55, 0.8]) {
+    const b = gain(v, 0.0001, out);
+    ad(b.gain, t + dt, 0.002, 0.18, 0.06);
+    osc(v, 'square', 1320, filter(v, 'lowpass', 2600, 1, b), 0.07, t + dt);
+  }
+  return 0.9;
+};
+
+/** Squeak Barrier: a giant rubber-toy squeak (rise and fall) over a soft thump as the wall pops up. */
+export const squeakWall: Recipe = (v) => {
+  const t = v.t, p = vary(v, 0.05);
+  const out = gain(v);
+  ad(out.gain, t, 0.004, 0.45, 0.4);
+  const o = osc(v, 'triangle', 520 * p, filter(v, 'bandpass', 1400, 2.2, out), 0.45);
+  glide(o.frequency, t, 520 * p, 1250 * p, 0.12);
+  glide(o.frequency, t + 0.14, 1250 * p, 700 * p, 0.22);
+  const th = gain(v, 0.0001, out);
+  ad(th.gain, t, 0.003, 0.6, 0.16);
+  const s = osc(v, 'sine', 110, th, 0.2);
+  glide(s.frequency, t, 110, 50, 0.15);
+  return 0.45;
+};

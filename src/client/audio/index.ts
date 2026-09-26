@@ -14,6 +14,11 @@ import { CombatIntensity, intensityFor, type IntensityContext } from './intensit
 import { Music } from './music';
 import { speak } from './gibberish';
 import * as S from './presets';
+
+/** Class ability → recipe (bark blast also barks; see the 'ability' case). */
+const ABILITY_SFX: Record<string, S.Recipe> = {
+  ear_glide: S.whoosh, shadow_cloak: S.poof, spotter_drone: S.droneWhir, dig_charge: S.chargeArm, squeak_barrier: S.squeakWall,
+};
 import { WeaponTable, type WeaponFxId } from '../fx/weapon-fx';
 
 export type { Volumes } from './engine';
@@ -175,7 +180,8 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
           break;
         case 'ability':
           // movement abilities swish (air), the rest land with a whoomp
-          engine.play(ev.ability === 'ear_glide' ? S.whoosh : S.whoomp, { x: ev.x, y: ev.y, z: ev.z, priority: 2, category: 'impact', refDist: 5 });
+          // each class ability has its own voice (readability: you can hear what was used and where)
+          engine.play(ABILITY_SFX[ev.ability] ?? S.whoomp, { x: ev.x, y: ev.y, z: ev.z, priority: 2, category: 'impact', refDist: 5 });
           if (ev.ability === 'bark_blast') engine.play(S.bark, { x: ev.x, y: ev.y + 1, z: ev.z, k: 0.8, gain: 1, priority: 2, category: 'voice', refDist: 6 });
           break;
         default:
