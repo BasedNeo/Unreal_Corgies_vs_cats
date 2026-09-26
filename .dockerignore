@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-server
+artifacts
+test-results
+playwright-report
+.git
+.vite
+docs
+labs
+tests
+tools
+*.log
+.DS_Store

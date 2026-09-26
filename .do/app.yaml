@@ -1,0 +1,32 @@
+# DigitalOcean App Platform spec — one service: the Node authority serving the client + /ws on one port.
+#   doctl apps create --spec .do/app.yaml      (first time)
+#   doctl apps update <app-id> --spec .do/app.yaml
+# See docs/ops/DEPLOY.md. Rooms live in process memory: keep instance_count at 1 until matchmaking exists.
+name: corgis-vs-cats
+region: nyc
+services:
+  - name: game
+    github:
+      repo: BasedNeo/Unreal_Corgies_vs_cats
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 10
+      period_seconds: 15
+    envs:
+      # App Platform terminates TLS in front of us and sets X-Forwarded-For: per-IP limits must read it.
+      - key: TRUST_PROXY
+        value: "true"
+      - key: MAX_ROOMS
+        value: "16"
+      - key: LOG
+        value: "1"
+      # /stats?reset=1&token=... for monitoring tools (set the value in the DO dashboard, never in git).
+      - key: STATS_TOKEN
+        type: SECRET
+        scope: RUN_TIME
