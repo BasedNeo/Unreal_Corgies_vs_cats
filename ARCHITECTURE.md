@@ -18,6 +18,7 @@ src/shared/                        PURE contracts + data (runs everywhere; no th
   world/                           WorldData contract (world-types), West Yard + Garden builders, terrain,
                                    queries (height/surface/concealment), weather/time-of-day from tick, kit;
                                    maps.ts: the map registry (MAP_IDS, mapForMode, mapsForMode; W8)
+                                   the-lot.ts + lot/ (layout, terrain, pipes, props, scenery): The Lot (W8 M2)
                                    fortifications.ts (W7 E4): the Yard War front as data: both forward bases
                                    (kibble-sack walls, MG nest, bird-table watchtower, flag, armory, motor pool,
                                    floodlights, hedgehogs, barricades) plus trenches and craters; BattleLayout

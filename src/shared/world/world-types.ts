@@ -233,6 +233,9 @@ export interface WorldData {
   name: string;
   /** Registry id (src/shared/world/maps.ts) when built by createWorldData; absent for hand-made test worlds. */
   map?: string;
+  /** Terrain below this height (m) reads as a wet pond bed in the view (default −0.12, the West Yard pond). Maps with dry
+   *  pits set it lower; their water zones cover their own beds. */
+  bedLevel?: number;
   /** Terrain height at world XZ (meters). Must be deterministic and identical on every machine. */
   height(x: number, z: number): number;
   /** Half-size of the playable square, centered on the origin. */

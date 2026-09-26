@@ -3,8 +3,9 @@
 // OWNER: lead (shared contract). A map lane adds its builder here at hand-back.
 import type { WorldData } from './world-types';
 import { buildWestYard } from './west-yard';
+import { buildTheLot } from './the-lot';
 
-export const MAP_IDS = ['west_yard'] as const;
+export const MAP_IDS = ['west_yard', 'the_lot'] as const;
 export type MapId = (typeof MAP_IDS)[number];
 export const DEFAULT_MAP: MapId = 'west_yard';
 
@@ -21,6 +22,7 @@ const PVP = ['yard-skirmish', 'team-deathmatch', 'core-rush'] as const;
 
 export const MAPS: Record<MapId, MapDef> = {
   west_yard: { id: 'west_yard', title: 'West Yard', modes: [...PVP, 'boss-rush', 'adventure'], build: buildWestYard },
+  the_lot: { id: 'the_lot', title: 'The Lot', modes: ['yard-skirmish', 'team-deathmatch', 'core-rush'], build: buildTheLot },
 };
 
 export const isMapId = (id: unknown): id is MapId => typeof id === 'string' && (MAP_IDS as readonly string[]).includes(id);

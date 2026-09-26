@@ -88,13 +88,16 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
 
   const q = opts.quality ?? 'high';
   const P = QUALITY[toQualityTier(q)];                  // world knobs of the tier (engine/quality.ts)
-  const terrainMat = createTerrainMaterial({ ink: opts.terrainInk ?? false, detail: P.terrainDetail });
+  // W8: the yard edge, the far-scenery radius and the pond-bed level follow the map (the West Yard's values are unchanged)
+  const b = data.bounds;
+  const edge = b ? Math.max(-b.minX, b.maxX, -b.minZ, b.maxZ) : data.halfExtent;
+  const terrainMat = createTerrainMaterial({ ink: opts.terrainInk ?? false, detail: P.terrainDetail, yardHalf: edge + 1, bedLevel: data.bedLevel ?? -0.12 });
   const terrain = createTerrainView(data, terrainMat.material);
   root.add(terrain.group);
 
   const fence = data.fences?.length ? createFenceView(data.fences, data.height) : null;
   if (fence) root.add(fence.boards);
-  const props = buildPrimMeshes([...(data.prims ?? []), ...(fence?.prims ?? [])]);
+  const props = buildPrimMeshes([...(data.prims ?? []), ...(fence?.prims ?? [])], { far: edge + 8 });
   root.add(props.group);
   // crease ink is built in every tier and only hidden on low, so the tier can switch live
   const setPropCreases = (on: boolean) => { for (const m of props.meshes) for (const c of m.children) if (c.userData.styleInk) c.visible = on; };

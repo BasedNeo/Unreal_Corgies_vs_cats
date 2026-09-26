@@ -268,7 +268,7 @@ export interface PrimMeshes {
   stats: { prims: number; triangles: number; meshes: number };
 }
 
-export function buildPrimMeshes(prims: readonly VisualPrim[], opts: { cell?: number; creases?: boolean } = {}): PrimMeshes {
+export function buildPrimMeshes(prims: readonly VisualPrim[], opts: { cell?: number; creases?: boolean; /** W8: beyond this |x| or |z| a prim is far scenery (no shadow, no crease ink); default 125 = the West Yard. */ far?: number } = {}): PrimMeshes {
   const cell = opts.cell ?? 100;
   const buckets = new Map<string, Builder>();
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -282,7 +282,7 @@ export function buildPrimMeshes(prims: readonly VisualPrim[], opts: { cell?: num
     q.setFromEuler(e);
     m.compose(pos.set(p.x, p.y, p.z), q, one);
     // cell: yard quadrants; far scenery in its own cell
-    const far = Math.max(Math.abs(p.x), Math.abs(p.z)) > 125;
+    const far = Math.max(Math.abs(p.x), Math.abs(p.z)) > (opts.far ?? 125);
     const ck = far ? 'far' : `${Math.floor(p.x / cell)},${Math.floor(p.z / cell)}`;
     const key = `${ck}|${group}`;
     let b = buckets.get(key);

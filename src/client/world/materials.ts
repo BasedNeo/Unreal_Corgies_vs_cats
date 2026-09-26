@@ -88,7 +88,7 @@ export const WORLD_WEATHER = {
 
 export interface TerrainMaterial { material: THREE.MeshToonNodeMaterial; uniforms: Record<string, ReturnType<typeof uniform>> }
 
-export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.4, detail = true }: { ink?: boolean; yardHalf?: number; flatten?: number; detail?: boolean } = {}): TerrainMaterial {
+export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.4, detail = true, bedLevel = -0.12 }: { ink?: boolean; yardHalf?: number; flatten?: number; detail?: boolean; /** W8: below this height the ground reads as a wet pond bed (The Lot's dry pits sit far lower). */ bedLevel?: number } = {}): TerrainMaterial {
   const U = {
     grass: c('grass'), grassDark: c('grassDark'), grassDry: c('grassDry'), clover: c('clover'),
     dirt: c('dirt'), sand: c('sand'), mulch: c('mulch'), bark: c('bark'), stripe: uniform(0.4), yardHalf: uniform(yardHalf),
@@ -136,7 +136,7 @@ export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.
   col = mix(col, U.soot, smoothstep(0.34, 0.68, sc).mul(0.9));
   const pud = smoothstep(0.5, 0.58, bat.z.add(nFine.mul(0.1)).add(nMid.mul(0.08))).toVar('battlePuddle');
   // Pond bed: dark mud under the water line.
-  const wet = smoothstep(-0.12, -0.45, p.y);
+  const wet = smoothstep(bedLevel, bedLevel - 0.33, p.y);
   col = mix(col, U.dirt.mul(0.55), wet);
   // Neighbours' ground beyond the fence line: no mowing stripes, cooler and patchier (other people's
   // lawns, unevenly kept), so the yard reads as the stage and the far field recedes (G1, L2 critique).
