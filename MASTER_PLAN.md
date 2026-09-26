@@ -394,6 +394,19 @@ test stays the first item in PROGRESS "Human verdicts" and its findings pre-empt
 - **U1 ux** — chat, room browser, first-match tips, quality-change notice.
 - **Lead** — M1 Ear Glide in the shared movement (predicted), M2 buff bits in snapshots, integration.
 
+**Wave 3 as built ✅** — all lanes above plus core-rush mode, netcode freeze + catch-up (TCP stall emulation),
+deploy prep; K1 character polish (class silhouettes, attitude). See PROGRESS.
+
+### Wave 4 — The adventure (`docs/design/ADVENTURE.md`, `docs/sprints/WAVE4_PLAN.md`)
+"The Last Tennis Ball": six district chapters, one kit each, alone with bot pups or in online co-op (rooms are set
+up by their first joiner's `?mode=adventure&chapter=`).
+- **A1 adventure** — mode, chapter contract, triggers (reach/interact/hold/collect/defeat/destroy/survive), stealth
+  alarm, checkpoints (fail forward), captions, chapter picker; chapters 1–2. Then **A2**: chapters 3–6.
+- **X1 destruct** — breakable props (garage breach wall, tuna-can stacks) with nav + prediction updates.
+- **R1 vehicles** — RC plane from a Rooftops hangar (Skyraider flies it best).
+- **E1 boss** — the Siamese sniper elite: a laser-pointer duel mini-boss.
+- **Lead** — per-room setup (done), integration, chapter wiring, verification.
+
 ### Quality loop (runs forever after the slice)
 Capture bookmarks → diagnose with `game-worlds-iteration-coach` → change one thing → gate → before/after →
 `LEARNINGS.jsonl` (`game-worlds-knowledge-extractor`). Consistency check of all docs every 3 loops.
