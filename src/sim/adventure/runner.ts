@@ -380,16 +380,17 @@ function evalStep(sim: Sim, rt: AdventureRuntime, st: AdventureState, step: Chap
   const t = step.trigger;
   // A2: the human-only rules (vehicle, airborne, minY) hold for STRICT_GRACE_SECONDS, then fail forward
   const strictRules = human && rt.stepTicks <= STRICT_GRACE_SECONDS * TICK_HZ;
-  // B2: bots drive, fly and glide now: `vehicle` / `airborne` hold for a bot-only squad too, with the same grace
-  // (minY stays waived for bots)
+  // B2: bots drive, fly and glide now: `vehicle` / `airborne` hold for a bot-only squad too, with the same grace.
+  // N1: bots climb, so a reach step's `minY` (a roof) holds for them too; an interact step's `minY` stays a human rule
+  // (no bot climb route onto the shed roof yet: ch6's ball would wait out the grace)
   const strictMoves = rt.stepTicks <= STRICT_GRACE_SECONDS * TICK_HZ;
   switch (t.type) {
     case 'reach': {
       const p = t.params, y = ground(sim, p.x, p.z);
-      // A2: maxY lifts the zone's ceiling (a plane over the shed); minY is a floor for humans (bots can't climb)
+      // A2: maxY lifts the zone's ceiling (a plane over the shed); minY is a floor (a roof), for bots too since N1
       const h = p.maxY !== undefined ? Math.max(REACH_HEIGHT, p.maxY - y) : REACH_HEIGHT;
       const strict = strictMoves && (p.vehicle || p.airborne);
-      const floor = strictRules && p.minY !== undefined ? p.minY : -Infinity;
+      const floor = strictMoves && p.minY !== undefined ? p.minY : -Infinity;
       for (const c of squad) {
         if (!alive(c) || !inCylinder(c, p.x, y, p.z, p.radius, h)) continue;
         if (human && c.kind !== EntityKind.Player) continue; // the pups escort; the human gets there (first success is theirs)

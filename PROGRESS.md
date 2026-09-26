@@ -217,7 +217,9 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 - Ability entities: shotgun damage to drones/barriers is estimated from the first pellet (C2).
 - Adventure (A1/A2):
   - bots shoot adventure props and breach with Dig Charges. They climb when a goal sets a roof height (N1; the roof-zone
-    tactics of `docs/handoff/N1.md` §4.1 landed with B2), but the runner still waives `minY` for bot-only squads.
+    tactics of `docs/handoff/N1.md` §4.1 landed with B2), so a reach step's `minY` now holds for bot-only squads
+    (ch4's perch: same times as with the waiver, 6/6 seeds). An interact step's `minY` stays waived for bots: they
+    have no climb route onto the shed roof, and ch6's ball would wait out the 120 s grace (6/6 seeds).
     Bot-only squads drive ch3's getaway and fly/glide ch6 for real: `vehicle`/`airborne` are strict for them too,
     with the same 120 s grace as humans (B2). Pups don't take karts for plain travel;
   - ch6 step 1 needs a Skyraider. Joining a listed adventure room now takes the chapter's kit (`096be58`); a joiner

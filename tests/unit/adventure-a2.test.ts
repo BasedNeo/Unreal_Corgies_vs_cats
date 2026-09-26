@@ -110,7 +110,7 @@ describe('A2 runner: the pups’ kits', () => {
 describe('A2 runner: height rules and the grace', () => {
   const up: ChapterStep = { id: 'up', text: 'Up there', trigger: { type: 'reach', params: { x: 20, z: 0, radius: 3, minY: 4 } } };
 
-  it('minY: a human below the floor does not count, one up there does; a bot-only squad has it waived', async () => {
+  it('minY: a human below the floor does not count, one up there does; a bot-only squad too (N1: bots climb), until the grace', async () => {
     const sim = await advSim(chapter([up, { id: 'after', text: 'After', trigger: { type: 'survive', params: { seconds: 60 } } }]));
     const h = human(sim);
     live(sim);
@@ -125,7 +125,10 @@ describe('A2 runner: height rules and the grace', () => {
     live(bots);
     teleport(bots, pup, 20, 0);
     run(bots, 0.2);
-    expect(st(bots).step).toBe(1); // waived: bots can't climb
+    expect(st(bots).step).toBe(0); // bots climb since N1: on the ground under it is not enough for them either
+    teleport(bots, pup, 20, 0, 5);
+    run(bots, 1 / TICK_HZ);
+    expect(st(bots).step).toBe(1);
   });
 
   it('maxY lifts the zone’s ceiling (a plane over the shed): 20 m up counts only with it', async () => {

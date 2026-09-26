@@ -7,9 +7,9 @@
 //   reach     a squad member inside the cylinder (radius, feet from ground − 2 to ground + 12, or up to `maxY`) — a
 //             human when the squad has one (the pups escort; the player's arrival is the success). `vehicle`: that
 //             member must be seated (EFlag.Mounted) or drive a vehicle that is inside; `airborne`: that member must be
-//             off the ground; `minY`: its feet at least that high (a roof). A squad with no human: any pup counts and
-//             all three are waived (bots don't drive, glide or climb on purpose). With a human they fail forward
-//             after STRICT_GRACE_SECONDS on the step (a pup says GRACE_BARK): nobody is stuck without the kit.
+//             off the ground; `minY`: its feet at least that high (a roof). A squad with no human: any pup counts, and
+//             all three hold for pups too (B2: bots drive, fly and glide; N1: they climb). Either way they fail
+//             forward after STRICT_GRACE_SECONDS on the step (a pup says GRACE_BARK): nobody is stuck without the kit.
 //   interact  Interact (E) pressed inside the radius (`minY` as for reach). If the squad has a human, only a human
 //             counts (bots help, never steal the win). `item`: the object waits at the point as an item prop and E
 //             takes it (a `pickup` event). prompt === KIOSK_PROMPT marks a step done AT the Ordnance Kiosk: the client
@@ -35,9 +35,10 @@ import { OBJECTIVE_CHAIN_IDS, ADVENTURE_CHAIN_INDEX, type ObjectiveChain, type O
 // chapters 1–2 read exactly as before):
 //   start.y         an elevated start (feet height, e.g. a roof): humans start up there, pups on the ground below
 //   pups            the kits of the squad pups in order (humans replace pups from the end); default: the Room's kits
-//   reach/interact  minY / maxY: world feet height the member must be at (a roof; a plane over the shed). minY is a
-//                   floor for humans only; a squad with no human has it waived, like `vehicle` and `airborne` (bots
-//                   can't climb). maxY raises the zone's ceiling (default: ground + REACH_HEIGHT).
+//   reach/interact  minY / maxY: world feet height the member must be at (a roof; a plane over the shed). On a reach
+//                   step minY holds for pups too (they climb since N1); on an interact step it is a human rule (no
+//                   bot climb route onto the shed roof yet). maxY raises the zone's ceiling (default: ground +
+//                   REACH_HEIGHT).
 //   interact item   an item prop drawn at the point while the step runs (the last tennis ball); E takes it
 //   vehicles        vehicles parked for the squad when the step starts (re-parked if wrecked while still needed)
 //   raise           barricades raised when the step completes (long-lived Squeak Barrier walls: the Porch Siege)
