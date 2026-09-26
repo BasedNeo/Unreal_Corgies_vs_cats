@@ -173,5 +173,5 @@ describe('team-deathmatch', () => {
     const kills = [...room.players.values()].reduce((s, p) => s + p.kills, 0);
     expect(kills).toBeGreaterThan(0);
     expect(m.score[0] + m.score[1]).toBe(kills);
-  });
+  }, 90000); // 45 s of a live 6-bot room: ~4 s alone, but the whole suite on a loaded shared box has hit 30 s
 });
