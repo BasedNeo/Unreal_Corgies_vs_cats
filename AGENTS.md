@@ -27,6 +27,10 @@ Multiplayer third-person action-platformer shooter. Browser client (Three.js `th
 - Headless Chromium renders with SwiftShader (WebGL2 fallback, ~5–10 fps): judge looks from screenshots, fps on real GPUs.
 - Movement code is shared by the authority and client prediction: change `stepCharacter` only through the lead.
 - Never `git add -A` for an integration commit while other agents are editing: stage explicit paths, then run
-  `npm run verify` (checks the committed tree in isolation) before calling it green.
+  `npm run verify` (checks the committed tree in isolation) before calling it green. Commit first: verify tests
+  the commit, not the index. Gate the push on its exit code (`if npm run verify; then git push …`); piping it into
+  `tail` hides a FAIL.
+- A file another lane is also editing (e.g. a shared test): stage only your hunk (apply your change to
+  `git show HEAD:<file>`, then `git hash-object -w` + `git update-index --cacheinfo`).
 - Snapshot quantization rounds height UP (`src/host/quantize.ts`): rounding to nearest parks characters on the KCC's
   2 cm skin, where Rapier deadlocks on flat ground.
