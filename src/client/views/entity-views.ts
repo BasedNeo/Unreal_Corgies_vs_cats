@@ -9,6 +9,8 @@ import { CLASS_IDS, EFlag, EntityKind, type ClassId, type TeamId, type SpeciesId
 import { angleDelta, damp, lerpAngle } from '../../shared/math';
 import { createAvatar } from '../procgen/characters';
 import { createBossAvatar } from '../procgen/boss';
+import { applyLook } from '../procgen/cosmetics';
+import { randomLook, type Look } from '../../shared/content/cosmetics';
 import type { Avatar } from './avatar';
 import { mountedBodyTilt, mountedBodyYaw } from '../vehicles';
 
@@ -18,6 +20,8 @@ interface View {
   bodyYaw: number;
   lastState: EntityState;
   key: string;
+  /** N2: the look it wears ('' = classic) */
+  lookKey: string;
 }
 
 const MAX_BLOBS = 64;
@@ -25,6 +29,8 @@ const MAX_BLOBS = 64;
 export interface EntityViewsOptions {
   /** Walkable surface height (m) at or below y (terrain, decks, roofs): blob shadows sit on it. */
   surfaceAt?: (x: number, z: number, y: number) => number;
+  /** N2: a player's equipped look (from the roster); bots wear randomLook(seed) without asking. */
+  lookOf?: (entityId: number) => Look | undefined;
 }
 
 export class EntityViews {
@@ -76,13 +82,20 @@ export class EntityViews {
       const key = isBoss ? `boss:${s.cls}:${s.seed}` : `${s.species}:${cls}:${s.team}:${s.seed}`;
       let v = this.views.get(id);
       if (v && v.key !== key) { this.group.remove(v.avatar.root); releaseObject3D(v.avatar.root); v.avatar.dispose(); this.views.delete(id); v = undefined; }
+      // N2: players wear their roster look, bots their seeded one (deterministic, no network), bosses none
+      const look: Look | null = isBoss ? null
+        : this.opts.lookOf?.(id) ?? (s.kind === EntityKind.Bot ? randomLook(s.seed, s.species as SpeciesId) : null);
+      const lookKey = look ? `${look.coat ?? ''}|${look.neck ?? ''}` : '';
       if (!v) {
         const avatar = isBoss
           ? createBossAvatar({ boss: s.cls, seed: s.seed, team: s.team as TeamId })
-          : createAvatar({ species: s.species as SpeciesId, cls, team: s.team as TeamId, seed: s.seed, isLocal: id === localId });
+          : createAvatar({ species: s.species as SpeciesId, cls, team: s.team as TeamId, seed: s.seed, isLocal: id === localId, look });
         this.group.add(avatar.root);
-        v = { id, avatar, bodyYaw: s.yaw, lastState: s, key };
+        v = { id, avatar, bodyYaw: s.yaw, lastState: s, key, lookKey };
         this.views.set(id, v);
+      } else if (v.lookKey !== lookKey) {
+        applyLook(v.avatar, look); // a roster look arrived (or changed): repaint in place, same view
+        v.lookKey = lookKey;
       }
       const speed = Math.hypot(s.vx, s.vz);
       const aiming = (s.flags & (EFlag.Aiming | EFlag.Firing)) !== 0;

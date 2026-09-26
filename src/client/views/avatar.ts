@@ -1,6 +1,7 @@
 // Contract between entity views and the character system (src/client/procgen/characters).
 import type * as THREE from 'three/webgpu';
 import type { AnimId, ClassId, SpeciesId, TeamId } from '../../shared/types';
+import type { Look } from '../../shared/content/cosmetics';
 
 export interface AvatarOptions {
   species: SpeciesId;
@@ -8,6 +9,8 @@ export interface AvatarOptions {
   team: TeamId;
   seed: number;
   isLocal: boolean;
+  /** C3/N2: coat + neckwear (null = the seed's classic coat and the team collar). */
+  look?: Look | null;
 }
 
 /** Everything an avatar needs each render frame to animate itself. */

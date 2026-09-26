@@ -130,3 +130,53 @@ export const ADVENTURE_STRINGS = {
   keysHint: '[ENTER] next · [BACKSPACE] replay',
   sentryCone: 'sentry',
 };
+
+// ---- P2/U2 (profile + ux): the LOCKER view and the reward card ----
+/** Mode names for first-win lines and hints (MatchState.mode / C3 FIRST_WIN_MODES ids). */
+export const MODE_NAMES: Record<string, string> = {
+  'yard-skirmish': 'Skirmish', 'team-deathmatch': 'Deathmatch', 'core-rush': 'Core Rush', 'boss-rush': 'Boss Rush', adventure: 'Adventure',
+};
+
+export const LOCKER_STRINGS = {
+  button: 'LOCKER',
+  title: 'LOCKER',
+  note: 'looks never change stats',
+  species: { corgi: 'CORGI', cat: 'CAT' } as Record<'corgi' | 'cat', string>,
+  slots: { coat: 'COAT', neck: 'NECKWEAR', taunt: 'TAUNTS' } as Record<string, string>,
+  level: 'LV',
+  xp: 'XP',
+  xpOf: (into: number, need: number) => `${into} / ${need} XP`,
+  maxed: 'MAX',
+  next: (level: number, name: string) => `Next look at level ${level}: ${name}`,
+  nextMore: (level: number, name: string, more: number) => `Next looks at level ${level}: ${name} +${more}`,
+  noNext: 'Every level look is yours. Paws and first wins still unlock more.',
+  equipped: 'WEARING',
+  isNew: 'NEW',
+  locked: 'LOCKED',
+  wearNote: (name: string) => `${name} on. You wear it from your next spawn.`,
+  lockedNote: (name: string, hint: string) => `${name} is locked · ${hint}`,
+  idle: 'Pick a look to wear it. It shows from your next spawn, online too.',
+  back: '‹ CLASSES',
+  backChapters: '‹ CHAPTERS',
+  newCount: (n: number) => `${n} new look${n === 1 ? '' : 's'}`,
+  keys: 'Arrows · Enter wears · Esc back — D-pad · A · B',
+  tauntQuote: (line: string) => `“${line}”`,
+};
+
+export const REWARD_STRINGS = {
+  xp: (n: number) => `+${n} XP`,
+  title: 'REWARDS',
+  levelUp: 'LEVEL UP!',
+  level: (n: number) => `LV ${n}`,
+  newLook: 'NEW LOOK!',
+  newLooks: (n: number) => `${n} NEW LOOKS!`,
+  wearIt: 'Wear it from the LOCKER',
+  more: (n: number) => `+${n} more`,
+  next: (level: number, name: string) => `Next: level ${level} · ${name}`,
+  lines: {
+    played: 'Played it out', win: 'Win', draw: 'Draw', loss: 'Good fight', knockouts: 'Knockouts', steps: 'Objectives',
+    cores: 'Upgrade Cores', pads: 'Core Pads', newBest: 'New best paw',
+  } as Record<string, string>,
+  medal: (m: 'gold' | 'silver' | 'bronze') => `${m[0].toUpperCase()}${m.slice(1)} paw`,
+  firstWin: (mode: string) => `First ${MODE_NAMES[mode] ?? mode} win`,
+};

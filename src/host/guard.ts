@@ -7,6 +7,7 @@ import { CLASS_IDS, type ClassId, type TeamId } from '../shared/types';
 import { CHAPTERS, chapterById } from '../shared/content/chapters';
 import { BOSS_IDS } from '../shared/content/bosses';
 import { mapForMode, type MapId } from '../shared/world/maps';
+import { sanitizeLook } from '../shared/content/cosmetics';
 
 /** Most commands one input message may carry (new + redundant resends). */
 export const MAX_CMDS_PER_MSG = 32;
@@ -42,7 +43,11 @@ export function validateClientMsg(raw: unknown): Validated {
       const name = typeof r.name === 'string' ? cleanText(r.name, 64).replace(/[^\w \-.]/g, '').slice(0, MAX_NAME) : '';
       const team: TeamId | -1 = r.team === 0 || r.team === 1 ? r.team : -1;
       const cls: ClassId = typeof r.cls === 'string' && (CLASS_IDS as readonly string[]).includes(r.cls) ? (r.cls as ClassId) : 'assault';
-      return { ok: true, msg: { t: 'hello', v: r.v, name: name || 'Player', team, cls } };
+      // N2: looks are sanitized here, so the Room never sees raw input (unknown ids, wrong species, huge strings dropped)
+      const L = r.looks && typeof r.looks === 'object' && !Array.isArray(r.looks) ? (r.looks as Record<string, unknown>) : {};
+      const own = (k: string) => (Object.prototype.hasOwnProperty.call(L, k) ? L[k] : undefined);
+      const looks = { corgi: sanitizeLook(own('corgi'), 'corgi'), cat: sanitizeLook(own('cat'), 'cat') };
+      return { ok: true, msg: { t: 'hello', v: r.v, name: name || 'Player', team, cls, looks } };
     }
     case 'input': {
       if (!Array.isArray(r.cmds) || r.cmds.length === 0) return { ok: false, reason: 'input.cmds' };
@@ -72,6 +77,10 @@ export function validateClientMsg(raw: unknown): Validated {
       const text = cleanText(r.text, MAX_CHAT);
       if (!text) return { ok: false, reason: 'chat empty' };
       return { ok: true, msg: { t: 'chat', text } };
+    }
+    case 'look': {
+      if (r.species !== 'corgi' && r.species !== 'cat') return { ok: false, reason: 'look.species' };
+      return { ok: true, msg: { t: 'look', species: r.species, look: sanitizeLook(r.look, r.species) } };
     }
     default:
       return { ok: false, reason: 'unknown type' };

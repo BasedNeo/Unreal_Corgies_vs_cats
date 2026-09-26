@@ -12,6 +12,8 @@ import { QUALITY, toQualityTier } from './engine/quality';
 import { createWorldData } from '../shared/world/world-data';
 import { DEFAULT_MAP, MAPS, mapForMode } from '../shared/world/maps';
 import { worldReloadSearch } from './net/map-sync';
+import { MatchTally, currentLook, recordMatch } from './profile'; // P2
+import { createRewardCard } from './ui/rewards'; // U2
 import { createWorldView } from './world/world-view';
 import { districtAt, surfaceAt } from '../shared/world/queries';
 import { createWorkerTransport, createWebSocketTransport, type NetEmulation, type Transport } from './net/transport';
@@ -91,7 +93,8 @@ async function main(): Promise<void> {
     transport = serverUrl ? await createWebSocketTransport(serverUrl, em) : createWorkerTransport({ seed, mode, bots, map: mapId, chapter: mode === 'adventure' ? chapter : undefined, boss: mode === 'boss-rush' ? bossId : undefined }, em);
     debug.transport = transport.kind;
     net = new NetClient(transport);
-    net.join(name, cls, team);
+    // N2: both species' equipped looks (AUTO team and kiosk switches decide the species server-side)
+    net.join(name, cls, team, { corgi: currentLook('corgi'), cat: currentLook('cat') });
   };
   const urlCls = (CLASS_IDS as readonly string[]).includes(params.get('cls') ?? '') ? (params.get('cls') as ClassId) : 'assault';
   const teamParam = params.get('team');
@@ -100,7 +103,10 @@ async function main(): Promise<void> {
 
   const input = new InputState();
   input.bind(ctx.renderer.domElement);
-  const views = new EntityViews(ctx.scene, { surfaceAt: (x, z, y) => surfaceAt(worldData, x, z, y).y });
+  const views = new EntityViews(ctx.scene, {
+    surfaceAt: (x, z, y) => surfaceAt(worldData, x, z, y).y,
+    lookOf: (id) => net?.roster.find((r) => r.entity === id)?.look, // N2: players' looks ride the roster
+  });
   views.setBlobShadows(!QUALITY[toQualityTier(q)].shadows); // low tier: no shadow pass → blob shadows
   const vehicles = createVehicleViews(ctx.scene, { world: worldData, camera: ctx.camera });
   const bossFx = createBossTelegraphFx(ctx.scene, { heightAt: (x, z) => worldData.height(x, z) });
@@ -175,6 +181,8 @@ async function main(): Promise<void> {
     // U1 chat: the authority echoes every line (rate-limited); the game sees no keys while chat is open
     sendChat: (text) => { if (!net?.connected) return false; net.transport.send({ t: 'chat', text }); return true; },
     chatOpenChanged: (open) => { input.suspended = open; },
+    // U2/N2: a LOCKER equip mid-session reaches the authority; worn from that species' next spawn
+    setLook: (species, look) => { net?.transport.send({ t: 'look', species, look }); },
   }, { match: mode });
   hud.setUiSound((k) => audio.ui(k));
   const prompts = createInteractPrompts(ui, { send: (msg) => net?.transport.send(msg), sound: (k) => audio.ui(k) });
@@ -191,10 +199,13 @@ async function main(): Promise<void> {
     sound: (k) => audio.ui(k),
     onNext: (id) => { location.search = adventureUrl(id); },
     onReplay: (id) => { location.search = adventureUrl(id); },
-    onMenu: () => { document.exitPointerLock?.(); hud.showMenu(true); }, // THE END → the chapter picker (a replay is one click)
+    onMenu: () => { document.exitPointerLock?.(); rewards.hide(); hud.showMenu(true); }, // THE END → the chapter picker (a replay is one click)
     // a new chapter: face its first objective (the start yaw) and use its time of day
     onChapter: (def) => { input.yaw = def.start.yaw; if (def.t !== undefined && !params.has('t')) worldView.setTimeOfDay(def.t); },
   });
+  // P2/U2: the local player's result at each match / chapter end → XP, unlocks, the reward card (never blocks anything)
+  const tally = new MatchTally();
+  const rewards = createRewardCard(ui, { sound: () => audio.ui('open') });
   applySettings(hud.settings);
   if (autoStart) await startSession(params.get('name') ?? hud.settings.name ?? 'Rex', urlCls, urlTeam);
   else hud.showMenu(true);
@@ -246,6 +257,7 @@ async function main(): Promise<void> {
     if (r.shake > 0) cam.shake(r.shake);
     audio.onGameEvent(ev);
     hud.onGameEvent(ev);
+    tally.onEvent(ev, net?.localEntity ?? -1); // P2
   });
 
   let acc = 0, seq = 0, last = performance.now(), fpsFrames = 0, fpsStart = last, menuT = 0;
@@ -273,6 +285,9 @@ async function main(): Promise<void> {
     views.sync(states, localId, pdt);
     vehicles.sync(states, pdt);
     adventure.update(states, net?.match ?? null, localId, dt); // A1: before interact.sync (points S1's chain slot at the chapter)
+    const result = tally.update({ match: net?.match ?? null, localId, states, dt, adventure: adventure.view,
+      mode: !serverUrl && mode === 'boss-rush' ? 'boss-rush' : undefined }); // P2: boss-rush runs as yard-skirmish
+    if (result) rewards.show(recordMatch(result), result.mode === 'adventure' ? 'chapter' : 'match');
     advViews.sync(states, adventure.view, pdt);
     interact.sync(states, pdt);
     prompts.update(states, localId, dt);
@@ -350,6 +365,7 @@ async function main(): Promise<void> {
     debug.frameMs = frameMs;
     debug.localEntity = localId;
     debug.entities = states.size;
+    debug.localLook = views.get(localId)?.lookKey ?? '';
     debug.local = local ? { x: local.x, y: local.y, z: local.z, hp: local.hp } : null;
     debug.ready = !!local && debug.frames > 5;
     if ((local || !net) && debug.frames > 2) hideLoading();

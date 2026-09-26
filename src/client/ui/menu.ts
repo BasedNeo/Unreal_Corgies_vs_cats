@@ -4,6 +4,8 @@
 // A1 (adventure): ADVENTURE in the MATCH selector; with it picked, the right card shows the chapter picker (six slots:
 // playable, locked-but-visible, or coming soon; paws from localStorage `cvc.adventure`) instead of the class grid —
 // a chapter plays its featured kit (swap at any Ordnance Kiosk), on the corgi side.
+// U2 (ux): LOCKER (between ROOMS and SETTINGS) opens the locker (locker.ts) in the right card; the button carries the
+// level and a count of new looks.
 import { CLASSES } from '../../shared/content/classes';
 import { CLASS_IDS, type ClassId, type TeamId } from '../../shared/types';
 import { classIcon } from './icons';
@@ -17,6 +19,10 @@ import { FONT_BODY, FONT_DISPLAY } from './fonts';
 import { CHAPTER_PLAN, chapterById, type ChapterDef } from '../../shared/content/chapters';
 import { isUnlocked, loadProgress, type AdventureProgress } from '../adventure/progress';
 import { pawSvg } from '../adventure/hud';
+import { createLocker, unseenLooks, type LockerStore } from './locker';
+import { LOCKER_STRINGS } from './strings';
+import { profileStore } from '../profile';
+import type { Look } from '../../shared/content/cosmetics';
 
 /** Offline match types the menu offers (the online server decides its own). */
 export type MatchMode = 'yard-skirmish' | 'team-deathmatch' | 'core-rush' | 'adventure';
@@ -112,6 +118,11 @@ export interface MenuDeps {
   roomPoller?: RoomPoller;
   /** The offline match type pre-selected in the MATCH selector (the page's ?mode=). */
   match?: string;
+  // ---- U2 addition (optional) ----
+  /** The profile the LOCKER reads and writes (default: the device's, localStorage `cvc.profile`). */
+  profile?: LockerStore;
+  /** A look was equipped in the LOCKER (the species' full look now): send it so the next spawn wears it. */
+  onLook?(species: 'corgi' | 'cat', look: Required<Look>): void;
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -269,7 +280,7 @@ export class PadNav {
 }
 
 // ---------------------------------------------------------------- main menu
-export type MenuView = 'main' | 'settings' | 'rooms';
+export type MenuView = 'main' | 'settings' | 'rooms' | 'locker';
 
 export interface Menu {
   el: HTMLElement;
@@ -308,7 +319,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
         <div class="mm-play">
           <button class="btn primary" data-nav data-play>PLAY OFFLINE ▸</button>
           <div class="mm-join"><input type="text" data-nav data-server spellcheck="false" autocomplete="off" aria-label="Server URL"><button class="btn small" data-nav data-join>JOIN</button></div>
-          <div class="mm-row"><button class="btn small" data-nav data-rooms>${ROOM_STRINGS.browse}</button><button class="btn small" data-nav data-settings>⚙ SETTINGS</button></div>
+          <div class="mm-row"><button class="btn small" data-nav data-rooms>${ROOM_STRINGS.browse}</button><button class="btn small mm-lkb" data-nav data-locker aria-label="${LOCKER_STRINGS.button}">${LOCKER_STRINGS.button}<span class="lvc" aria-hidden="true"></span><span class="nwc hidden" aria-hidden="true"></span></button><button class="btn small" data-nav data-settings>⚙ SETTINGS</button></div>
         </div>
       </div>
       <div class="panel halftone mm-card mm-right">
@@ -342,6 +353,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
         </div>
         <div class="mm-settings hidden"></div>
         <div class="mm-rooms hidden"></div>
+        <div class="mm-locker hidden"></div>
       </div>
     </div>
     <div class="mm-foot">${CONTROLS.map(([k, v]) => `<span><kbd>${k}</kbd> ${v}</span>`).join('')}</div>`;
@@ -384,6 +396,28 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
     sound: deps.sound,
   });
   roomsView.appendChild(rooms.el);
+  const lockerView = el.querySelector<HTMLElement>('.mm-locker')!;
+  const lockerBtn = el.querySelector<HTMLButtonElement>('[data-locker]')!;
+  const profile = (): LockerStore => deps.profile ?? profileStore();
+  const locker = createLocker({
+    species: () => (match !== 'adventure' && s.team === 1 ? 'cat' : 'corgi'), // the side you'll play (adventure: corgis)
+    onBack: () => showView('main'),
+    backLabel: () => (match === 'adventure' ? LOCKER_STRINGS.backChapters : LOCKER_STRINGS.back),
+    sound: deps.sound,
+    store: deps.profile,
+    onEquip: (sp, look) => deps.onLook?.(sp, look),
+  });
+  lockerView.appendChild(locker.el);
+  const paintLockerButton = () => {
+    const p = profile().load();
+    const fresh = unseenLooks(p).length;
+    lockerBtn.querySelector('.lvc')!.textContent = `${LOCKER_STRINGS.level} ${p.level}`;
+    const nwc = lockerBtn.querySelector<HTMLElement>('.nwc')!;
+    nwc.classList.toggle('hidden', fresh === 0);
+    nwc.textContent = String(fresh);
+    lockerBtn.title = fresh ? LOCKER_STRINGS.newCount(fresh) : '';
+    lockerBtn.setAttribute('aria-label', `${LOCKER_STRINGS.button} · ${LOCKER_STRINGS.level} ${p.level}${fresh ? ` · ${LOCKER_STRINGS.newCount(fresh)}` : ''}`);
+  };
 
   const paint = () => {
     nameIn.value = s.name;
@@ -400,6 +434,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
     right.classList.toggle('t1', s.team === 1);
     right.classList.toggle('t0', s.team !== 1);
     settingsPanel.refresh();
+    paintLockerButton();
   };
   const paintChapters = () => {
     for (const b of chBtns) {
@@ -421,11 +456,15 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
     chaptersView.classList.toggle('hidden', v !== 'main' || match !== 'adventure');
     settingsView.classList.toggle('hidden', v !== 'settings');
     roomsView.classList.toggle('hidden', v !== 'rooms');
+    lockerView.classList.toggle('hidden', v !== 'locker');
+    if (v === 'locker') locker.open(); else locker.close();
+    paintLockerButton();
     // the controls strip belongs to the main card; the taller settings panel needs the room
     el.querySelector<HTMLElement>('.mm-foot')?.classList.toggle('hidden', v === 'settings');
     if (v === 'rooms' && open) rooms.open(); else rooms.close();
-    const first = (v === 'settings' ? settingsView : v === 'rooms' ? roomsView : el.querySelector('[data-play]')) as HTMLElement | null;
-    (v === 'main' ? first : first?.querySelector<HTMLElement>('[data-nav]'))?.focus();
+    const first = (v === 'settings' ? settingsView : v === 'rooms' ? roomsView : v === 'locker' ? lockerView : el.querySelector('[data-play]')) as HTMLElement | null;
+    if (v === 'locker') (lockerView.querySelector<HTMLElement>('[data-sp][aria-checked=true]') ?? lockerView.querySelector<HTMLElement>('[data-nav]'))?.focus();
+    else (v === 'main' ? first : first?.querySelector<HTMLElement>('[data-nav]'))?.focus();
   };
 
   const commitName = () => {
@@ -479,6 +518,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
   el.querySelector('[data-join]')!.addEventListener('click', () => play('online'));
   el.querySelector('[data-settings]')!.addEventListener('click', () => { deps.sound?.('click'); showView('settings'); });
   el.querySelector('[data-rooms]')!.addEventListener('click', () => { deps.sound?.('click'); showView('rooms'); });
+  lockerBtn.addEventListener('click', () => { deps.sound?.('click'); showView('locker'); });
   for (const b of el.querySelectorAll<HTMLElement>('[data-nav]')) b.addEventListener('mouseenter', () => deps.sound?.('hover'));
 
   const back = () => { if (view !== 'main') { deps.sound?.('back'); showView('main'); } };

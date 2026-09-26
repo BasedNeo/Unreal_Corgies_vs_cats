@@ -1,5 +1,6 @@
 // Wire protocol between clients and the authority (Web Worker host offline, Node server online).
 // JSON messages; entity states are packed into fixed-order number arrays to keep snapshots small.
+import type { Look } from './content/cosmetics';
 import type { ClassId, EntityId, EntityKindId, SpeciesId, TeamId, AnimId } from './types';
 import type { InputCmd } from './input';
 
@@ -86,16 +87,22 @@ export interface RosterEntry {
   deaths: number;
   score: number;
   ping: number;
+  /** Equipped look for the entity's species (sanitized by the authority). Absent for bots (randomLook(seed)) and for
+   *  players with no look (the seed's classic coat). Rides the roster, never the snapshot. */
+  look?: Look;
 }
 
 // ---- client -> authority ----
 export type ClientMsg =
-  | { t: 'hello'; v: number; name: string; team: TeamId | -1; cls: ClassId }
+  /** `looks`: the equipped look per species (a team switch respawns you as the other one); sanitized by the authority. */
+  | { t: 'hello'; v: number; name: string; team: TeamId | -1; cls: ClassId; looks?: { corgi?: Look; cat?: Look } }
   | { t: 'input'; cmds: InputCmd[] }
   | { t: 'ping'; id: number; ct: number }
   | { t: 'class'; cls: ClassId }
   | { t: 'team'; team: TeamId }
-  | { t: 'chat'; text: string };
+  | { t: 'chat'; text: string }
+  /** U2/N2: a look equipped in the LOCKER mid-session; the authority applies it at that species' next spawn. */
+  | { t: 'look'; species: 'corgi' | 'cat'; look: Look };
 
 // ---- authority -> client ----
 export type ServerMsg =

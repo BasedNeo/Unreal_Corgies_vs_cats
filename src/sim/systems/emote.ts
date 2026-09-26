@@ -5,9 +5,15 @@
 import type { SimSystem } from '../sim';
 import { pressed } from '../entity';
 import { Btn } from '../../shared/input';
-import { EntityKind, type SpeciesId } from '../../shared/types';
+import { EntityKind } from '../../shared/types';
 import { combatBus } from '../combat/state';
-import { BOT_TAUNT_CHANCE, TAUNTS, TAUNT_COOLDOWN } from '../../shared/content/taunts';
+import { BOT_TAUNT_CHANCE, TAUNT_COOLDOWN } from '../../shared/content/taunts';
+import { randomLook, tauntLines, type Look } from '../../shared/content/cosmetics';
+import type { SimEntity } from '../entity';
+
+/** The character's look (N2: set by the Room); chapter-spawned bots have no slot, so theirs comes from the seed. */
+const lookOf = (e: SimEntity): Look | undefined =>
+  (e.data.look as Look | undefined) ?? (e.kind === EntityKind.Bot ? randomLook(e.seed, e.species) : undefined);
 import { TICK_HZ } from '../../shared/constants';
 
 function hash01(a: number, b: number): number {
@@ -21,22 +27,22 @@ export const emoteSystem: SimSystem = {
   order: 790,
   update(sim) {
     const cd = TAUNT_COOLDOWN * TICK_HZ;
-    const taunt = (id: number, species: SpeciesId, data: Record<string, unknown>) => {
-      const last = (data.tauntTick as number | undefined) ?? -1e9;
+    const taunt = (e: SimEntity) => {
+      const last = (e.data.tauntTick as number | undefined) ?? -1e9;
       if (sim.tick - last < cd) return;
-      data.tauntTick = sim.tick;
-      const lines = TAUNTS[species] ?? TAUNTS[0];
-      sim.emit({ e: 'bark', id, line: lines[Math.floor(hash01(sim.tick, id) * lines.length) % lines.length] });
+      e.data.tauntTick = sim.tick;
+      const lines = tauntLines(lookOf(e), e.species); // C3: the look's taunt pack (the species' classic lines by default)
+      sim.emit({ e: 'bark', id: e.id, line: lines[Math.floor(hash01(sim.tick, e.id) * lines.length) % lines.length] });
     };
     for (const e of sim.entities.values()) {
       if (!e.char || e.dead || e.kind !== EntityKind.Player) continue;
-      if (pressed(e, Btn.Emote)) taunt(e.id, e.species, e.data);
+      if (pressed(e, Btn.Emote)) taunt(e);
     }
     for (const k of combatBus(sim).kills) {
       if (k.tick !== sim.tick || k.killer === k.victim) continue;
       const killer = sim.entities.get(k.killer);
       if (!killer?.char || killer.dead || killer.kind !== EntityKind.Bot) continue;
-      if (hash01(k.victim, sim.tick) < BOT_TAUNT_CHANCE) taunt(killer.id, killer.species, killer.data);
+      if (hash01(k.victim, sim.tick) < BOT_TAUNT_CHANCE) taunt(killer);
     }
   },
 };

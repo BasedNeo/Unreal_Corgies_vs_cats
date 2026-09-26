@@ -24,6 +24,19 @@ import { SNAPSHOT_EVERY, MAX_PLAYERS_PER_ROOM, PROTOCOL_VERSION, TICK_HZ, TICK_D
 import { MAX_CMDS_PER_MSG, cleanText } from './guard';
 import { quantizeMotion } from './quantize';
 import { DEFAULT_MAP } from '../shared/world/maps';
+import { randomLook, sanitizeLook, type Look } from '../shared/content/cosmetics';
+
+/** The look a player's body wears (set at spawn); undefined for bots and for players with no look (classic coat). */
+function wornLook(sim: Sim, p: PlayerSlot): Look | undefined {
+  if (p.bot) return undefined;
+  const l = sim.entities.get(p.entity)?.data.look as Look | undefined;
+  return l && Object.keys(l).length ? l : undefined;
+}
+
+/** N2: the sim knows each character's look (taunt packs): the player's equipped one, or the bot's seeded one. */
+function wearLook(e: SimEntity, p: Pick<PlayerSlot, 'bot' | 'team' | 'looks'>): void {
+  e.data.look = p.bot ? randomLook(e.seed, e.species) : p.looks[p.team === Team.Cats ? 'cat' : 'corgi'];
+}
 import { trySwapKit, swapKit, drainRosterCredits } from '../sim/interact';
 
 export interface Conn {
@@ -77,6 +90,8 @@ export interface PlayerSlot {
   /** Class / team chosen away from a kiosk: applied on the player's next respawn (S1, no free heal/teleport). */
   pendingCls?: ClassId;
   pendingTeam?: TeamId;
+  /** N2: equipped looks per species (sanitized; empty for bots, whose look comes from their seed). */
+  looks: { corgi: Look; cat: Look };
 }
 
 /** "At deploy": alive, full health and within this many meters of one of the team's spawn points. */
@@ -171,7 +186,9 @@ export class Room {
     const team: TeamId = this.opts.mode === 'adventure' ? Team.Corgis
       : hello.team === Team.Corgis || hello.team === Team.Cats ? hello.team : (this.opts.defaultTeam ?? this.smallerTeam());
     const name = cleanText(String(hello.name ?? 'Player'), 64).replace(/[^\w \-.]/g, '').slice(0, 16) || 'Player';
-    const slot = this.addSlot(conn.id, name, conn, false, team, cls);
+    // sanitize again: the worker host passes the validated message, but direct callers may not
+    const looks = { corgi: sanitizeLook(hello.looks?.corgi, 'corgi'), cat: sanitizeLook(hello.looks?.cat, 'cat') };
+    const slot = this.addSlot(conn.id, name, conn, false, team, cls, looks);
     conn.send({ t: 'welcome', pid: slot.pid, entity: slot.entity, tick: this.sim.tick, mapSeed: this.sim.seed, map: this.sim.worldData.map ?? DEFAULT_MAP, mode: this.opts.mode, tickHz: TICK_HZ });
     this.fillBots();
     this.rosterDirty = true;
@@ -229,6 +246,11 @@ export class Room {
         this.broadcast({ t: 'chat', from: p.name, team: p.team, text });
         return 'ok';
       }
+      case 'look':
+        // U2/N2: worn from this species' next spawn (the roster shows what the body wears, so views follow then)
+        if (msg.species !== 'corgi' && msg.species !== 'cat') return 'abuse';
+        p.looks[msg.species] = sanitizeLook(msg.look, msg.species);
+        return 'ok';
       case 'hello':
         return 'ignored';
       default:
@@ -265,6 +287,7 @@ export class Room {
       for (const p of this.players.values()) {
         const e = !p.bot && spawned.includes(p.entity) ? this.sim.entities.get(p.entity) : undefined;
         if (e) p.lastCmd = { ...p.lastCmd, yaw: e.yaw, pitch: 0, mx: 0, mz: 0 };
+        if (e && e.data.look !== p.looks[p.team === Team.Cats ? 'cat' : 'corgi']) { wearLook(e, p); this.rosterDirty = true; } // a LOCKER equip
       }
     }
     // Match restart (match rules emit score 'reset'; ended -> warmup/live as a fallback signal):
@@ -394,10 +417,11 @@ export class Room {
 
   // ---- slots ----
 
-  private addSlot(pid: string, name: string, conn: Conn | null, bot: boolean, team: TeamId, cls: ClassId): PlayerSlot {
+  private addSlot(pid: string, name: string, conn: Conn | null, bot: boolean, team: TeamId, cls: ClassId, looks: PlayerSlot['looks'] = { corgi: {}, cat: {} }): PlayerSlot {
     const species = team === Team.Cats ? Species.Cat : Species.Corgi;
     const e = this.sim.spawnCharacter({ kind: bot ? EntityKind.Bot : EntityKind.Player, team, species, cls, name, ownerPid: bot ? null : pid });
-    const slot: PlayerSlot = { pid, name, conn, bot, team, cls, entity: e.id, queue: [], lastCmd: { ...emptyInput(0), yaw: e.yaw }, kills: 0, deaths: 0, score: 0, ping: 0, net: newSlotNet() };
+    const slot: PlayerSlot = { pid, name, conn, bot, team, cls, entity: e.id, queue: [], lastCmd: { ...emptyInput(0), yaw: e.yaw }, kills: 0, deaths: 0, score: 0, ping: 0, net: newSlotNet(), looks };
+    wearLook(e, slot);
     this.players.set(pid, slot);
     this.rosterDirty = true;
     return slot;
@@ -416,6 +440,7 @@ export class Room {
     this.sim.removeEntity(p.entity);
     const species = p.team === Team.Cats ? Species.Cat : Species.Corgi;
     const e = this.sim.spawnCharacter({ kind: p.bot ? EntityKind.Bot : EntityKind.Player, team: p.team, species, cls: p.cls, name: p.name, ownerPid: p.bot ? null : p.pid });
+    wearLook(e, p);
     p.entity = e.id;
     p.queue = [];
     if (p.conn) p.conn.send({ t: 'welcome', pid: p.pid, entity: e.id, tick: this.sim.tick, mapSeed: this.sim.seed, map: this.sim.worldData.map ?? DEFAULT_MAP, mode: this.opts.mode, tickHz: TICK_HZ });
@@ -507,6 +532,7 @@ export class Room {
       cls: p.bot ? ((this.sim.entities.get(p.entity)?.cls as ClassId | null | undefined) ?? p.cls) : p.cls,
       entity: p.entity, bot: p.bot,
       kills: p.kills, deaths: p.deaths, score: p.score, ping: p.ping,
+      ...(wornLook(this.sim, p) ? { look: wornLook(this.sim, p) } : {}), // N2: players only; bots derive theirs from the seed
     }));
     this.broadcast({ t: 'roster', players });
   }

@@ -8,6 +8,7 @@
 // U1 (ux, docs/handoff/U1.md): text chat (Enter/T; bus 'chat' → hud.chat, bus 'notice' → hud.serverNotice,
 // actions.sendChat, actions.chatOpenChanged → input.suspended), first-match tips, the room browser in the menu and
 // the quality "applies after reload" notice. All optional: the old wiring still compiles and runs.
+import type { Look } from '../../shared/content/cosmetics';
 import type { EntityState, GameEvent, MatchState, RosterEntry } from '../../shared/protocol';
 import { CLASS_IDS, EFlag, EntityKind, Species, type ClassId, type TeamId } from '../../shared/types';
 import { CLASSES } from '../../shared/content/classes';
@@ -74,6 +75,8 @@ export interface HudActions {
   chatOpenChanged(open: boolean): void;
   /** Settings › Quality › Reload now. Default: reload this page without ?quality=. */
   reload(): void;
+  /** U2: a look was equipped in the LOCKER (that species' full look): send it so the next spawn wears it. */
+  setLook(species: 'corgi' | 'cat', look: Required<Look>): void;
 }
 
 export interface Hud {
@@ -248,6 +251,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
     inSession: () => session,
     onReload: () => { if (actions?.reload) actions.reload(); else location.replace(reloadUrl(location.href)); },
     onResetTips: tips ? () => tips.reset() : undefined,
+    onLook: (sp, look) => actions?.setLook?.(sp, look), // U2
     roomPoller: opts.roomPoller,
     match: opts.match,
   };

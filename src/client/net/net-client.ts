@@ -11,13 +11,15 @@
 // globalThis.__cvc.net debug block. ?predict=0 disables prediction (A/B testing).
 import type { Transport } from './transport';
 import type { LocalPredictor, ReconcileResult } from './prediction';
-import { unpackEntity, type EntityState, type GameEvent, type MatchState, type RosterEntry, type ServerMsg } from '../../shared/protocol';
+import { unpackEntity, type ClientMsg, type EntityState, type GameEvent, type MatchState, type RosterEntry, type ServerMsg } from '../../shared/protocol';
 import type { InputCmd } from '../../shared/input';
 import { EFlag, type ClassId, type TeamId } from '../../shared/types';
 import { INTERP_DELAY, PROTOCOL_VERSION, SNAPSHOT_EVERY, TICK_HZ } from '../../shared/constants';
 import { lerp, lerpAngle } from '../../shared/math';
 import { bus } from '../core/events';
 import { DEFAULT_MAP, sanitizeMap, type MapId } from '../../shared/world/maps';
+
+type HelloLooks = NonNullable<Extract<ClientMsg, { t: 'hello' }>['looks']>;
 
 interface Snapshot {
   tick: number;
@@ -153,7 +155,7 @@ export class NetClient {
   private closeEmitted = false;
   /** 'localSpawn' still owed for the entity announced by the last welcome. */
   private spawnPending = false;
-  private joinArgs: { name: string; cls: ClassId; team: TeamId | -1 } | null = null;
+  private joinArgs: { name: string; cls: ClassId; team: TeamId | -1; looks?: HelloLooks } | null = null;
   private pingId = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private snapCount = 0;
@@ -179,9 +181,10 @@ export class NetClient {
     if (dbg && typeof dbg === 'object') dbg.net = this.debug;
   }
 
-  join(name: string, cls: ClassId, team: TeamId | -1): void {
-    this.joinArgs = { name, cls, team };
-    this.transport.send({ t: 'hello', v: PROTOCOL_VERSION, name, cls, team });
+  /** `looks`: the equipped look per species (N2; the authority sanitizes it and puts it on the roster). */
+  join(name: string, cls: ClassId, team: TeamId | -1, looks?: HelloLooks): void {
+    this.joinArgs = { name, cls, team, looks };
+    this.transport.send({ t: 'hello', v: PROTOCOL_VERSION, name, cls, team, ...(looks ? { looks } : {}) });
   }
 
   /** Queue one sampled input for sending and apply it to the local prediction immediately. */
@@ -260,7 +263,7 @@ export class NetClient {
     await this.transport.reconnect();
     this.closeEmitted = false;
     this.silentPeriods = 0;
-    if (this.joinArgs) this.join(this.joinArgs.name, this.joinArgs.cls, this.joinArgs.team);
+    if (this.joinArgs) this.join(this.joinArgs.name, this.joinArgs.cls, this.joinArgs.team, this.joinArgs.looks);
   }
 
   /** Stop timers and free the prediction world. */

@@ -69,10 +69,14 @@ src/client/
   views/                           Avatar contract, entity-views (entity → avatar), nameplates
   procgen/characters/  anim/       procedural corgi/cat bodies, skeleton (47 bones), class silhouette gear, weapons ·
                                    animator (glide pose, kill grin), face, springs; silhouette.ts = range-readability check
+  procgen/cosmetics/               C3: applyLook (coats repaint the fur, neckwear replaces the team collar), readability
+  profile/                         P2: `cvc.profile` (schema + migration from `cvc.adventure`), XP + level curve, unlock
+                                   rules, MatchTally (events → result), store; currentLook / recordMatch
   world/                           world view: terrain, fences, prims, foliage, water, sky/day-night, lamps
                                    (Garden, Garage + Rooftops districts; quality tiers apply live where possible)
                                    destruct-view.ts + destruct-debris.ts: standing/rubble index ranges, pooled debris
-  ui/  audio/  fx/                 comic HUD + menus (MATCH selector, room browser) + chat + tips + settings ·
+  ui/  audio/  fx/                 comic HUD + menus (MATCH selector, room browser, LOCKER) + chat + tips + settings ·
+                                   reward card (rewards.ts, never interactive) ·
                                    procedural audio + music (S2: vehicle-loops.ts engine loops from snapshot states,
                                    presets-engines.ts; vehicle/break voices; adventure stingers) · pooled FX + words ·
                                    plane-hud.ts cockpit strip
