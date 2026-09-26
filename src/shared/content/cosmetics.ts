@@ -1,17 +1,19 @@
-// OWNER: C3 cosmetics lane. Looks players earn by playing: coat patterns true to each species, neckwear and taunt
-// packs. Pure data + pure functions (runs on the server, in the sim worker and in the client; no three, no DOM, no
-// Math.random). Looks never change stats: the sim reads a look only to pick taunt lines (tauntLines), and the client
+// OWNER: C3 cosmetics lane. Looks players earn by playing: coat patterns true to each species, neckwear, taunt packs
+// and (W9 K3) a rank. Pure data + pure functions (runs on the server, in the sim worker and in the client; no three, no
+// DOM, no Math.random). Looks never change stats: the sim reads a look only to pick taunt lines (tauntLines), and the client
 // only to paint the character (src/client/procgen/cosmetics). Class hats and silhouettes stay the class cue (K1);
 // neckwear stays out of the head outline and coats only repaint fur, so team colours keep their read.
 //
 // Unlock rules (P2 evaluates them; the locker shows unlockHint): a few at levels 2–6, the gold paw of every
-// adventure chapter unlocks something, and the first win in every mode unlocks something.
+// adventure chapter unlocks something, and the first win in every mode unlocks something. The veteran rank (K3) is the
+// long goal at level 10: the corgi sergeant's chevrons and the cat commander's medal. A rank is worn as the K2 veteran
+// kit plus its insignia (src/client/procgen/characters); like every look it changes no stat.
 import { mulberry32 } from '../rng';
 import { Species, type SpeciesId } from '../types';
 import { CHAPTERS, type Medal } from './chapters';
 import { TAUNTS } from './taunts';
 
-export type CosmeticSlot = 'coat' | 'neck' | 'taunt';
+export type CosmeticSlot = 'coat' | 'neck' | 'taunt' | 'rank';
 export type CosmeticSpecies = 'corgi' | 'cat' | 'both';
 /** The modes that have a first-win unlock (the room modes). */
 export const FIRST_WIN_MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault', 'boss-rush', 'adventure'] as const;
@@ -34,9 +36,9 @@ export interface CosmeticDef {
 }
 
 /** A look: one id per slot. Missing or invalid slots mean the default for that slot. */
-export type Look = { coat?: string; neck?: string; taunt?: string };
+export type Look = { coat?: string; neck?: string; taunt?: string; rank?: string };
 
-export const LOOK_SLOTS: readonly CosmeticSlot[] = ['coat', 'neck', 'taunt'];
+export const LOOK_SLOTS: readonly CosmeticSlot[] = ['coat', 'neck', 'taunt', 'rank'];
 /** Longest id sanitizeLook accepts (every content id is shorter; longer strings are dropped unread). */
 export const MAX_LOOK_ID_LEN = 32;
 
@@ -72,7 +74,14 @@ export const COSMETICS: readonly CosmeticDef[] = [
   { id: 'taunt_cat_hunter', slot: 'taunt', species: 'cat', name: 'Apex Hunter', unlock: gold('porch_siege') },
   { id: 'taunt_cat_midnight', slot: 'taunt', species: 'cat', name: '3 AM Zoomies', unlock: win('adventure') },
   { id: 'taunt_fetch', slot: 'taunt', species: 'both', name: 'Fetch This!', unlock: win('base-assault') }, // W9 G4a
+  // --- rank (K3; the veteran kit + the species' insignia; no stat changes) ---
+  { id: 'rank_none', slot: 'rank', species: 'both', name: 'No Rank', unlock: D },
+  { id: 'rank_sergeant', slot: 'rank', species: 'corgi', name: "Sergeant's Chevrons", unlock: lvl(10) },
+  { id: 'rank_commander', slot: 'rank', species: 'cat', name: "Commander's Medal", unlock: lvl(10) },
 ];
+
+/** The rank ids worn as the veteran kit (K2's sergeant / commander). */
+export const VETERAN_RANKS: readonly string[] = ['rank_sergeant', 'rank_commander'];
 
 /**
  * Taunt lines per pack: 4–6 short comic lines each, original, in the voice of taunts.ts (the voice synth turns them
@@ -114,10 +123,19 @@ export function cosmeticsFor(species: SpeciesId | 'corgi' | 'cat', slot: Cosmeti
   return COSMETICS.filter((c) => c.slot === slot && fitsSpecies(c, species));
 }
 
-/** The always-available look of a species (red corgi / grey tabby, the team collar, the classic taunts). */
+/** The always-available look of a species (red corgi / grey tabby, the team collar, the classic taunts, no rank). */
 export function defaultLook(species: SpeciesId | 'corgi' | 'cat'): Required<Look> {
   const cat = speciesKey(species) === 'cat';
-  return { coat: cat ? 'cat_tabby' : 'corgi_red', neck: 'neck_none', taunt: cat ? 'taunt_cat_classic' : 'taunt_corgi_classic' };
+  return { coat: cat ? 'cat_tabby' : 'corgi_red', neck: 'neck_none', taunt: cat ? 'taunt_cat_classic' : 'taunt_corgi_classic', rank: 'rank_none' };
+}
+
+/**
+ * Does this look wear a veteran rank for this species (K3)? Sanitized like everything else: a rank of the other
+ * species, an unknown id or junk is no rank. Players only: bots' veterans come from their seed (isVeteranSeed).
+ */
+export function wearsVeteranRank(look: Look | null | undefined, species: SpeciesId | 'corgi' | 'cat'): boolean {
+  const r = sanitizeLook(look, species).rank;
+  return r !== undefined && VETERAN_RANKS.includes(r);
 }
 
 /**
@@ -154,7 +172,11 @@ export function resolveLook(look: unknown, species: SpeciesId | 'corgi' | 'cat')
   return { ...defaultLook(species), ...sanitizeLook(look, species) };
 }
 
-/** Bots: a seeded look from the whole catalogue (bots show off what can be earned). Same seed → same look. */
+/**
+ * Bots: a seeded look from the whole catalogue (bots show off what can be earned). Same seed → same look. The rank is
+ * always 'rank_none' and draws nothing from the RNG (bots' veterans come from their seed, isVeteranSeed; K3 left every
+ * existing bot look exactly as it was).
+ */
 export function randomLook(seed: number, species: SpeciesId | 'corgi' | 'cat'): Required<Look> {
   const rng = mulberry32(((seed >>> 0) ^ 0x10c3c0a7) >>> 0);
   const pick = <T>(a: readonly T[]): T => a[Math.min(a.length - 1, Math.floor(rng() * a.length))];
@@ -164,7 +186,7 @@ export function randomLook(seed: number, species: SpeciesId | 'corgi' | 'cat'): 
   // The team collar stays the most common neck (~1 in 3), so a lobby is not wall-to-wall accessories.
   const neck = rng() < 0.34 ? 'neck_none' : pick(necks.filter((n) => n.id !== 'neck_none')).id;
   const taunt = pick(taunts).id;
-  return { coat, neck, taunt };
+  return { coat, neck, taunt, rank: 'rank_none' };
 }
 
 /** The taunt lines of a look's pack (unknown, missing or wrong-species pack → the species' classic lines). */

@@ -94,6 +94,9 @@ src/client/
                                    `veteran` variant is picked for bots by isVeteranSeed (≈ 1 in 6); X3 weapons are
                                    hard-surface kits with a `finish`
                                    W7 P3: a detail LOD past 20 m (CharacterAvatar.detail, set by the body's onBeforeRender)
+  procgen/characters/squads.ts     W9 K3 squad kits (alley-cat raider / tabby heavy) on the shared rig, same draws; the kit is
+                                   picked from class + max hp (ai/archetypes.ts squadKitFor), no protocol field; a `rank`
+                                   look slot wears the K2 veteran kit + insignia (cosmetics.ts wearsVeteranRank)
   procgen/cosmetics/               C3: applyLook (coats repaint the fur, neckwear replaces the team collar), readability
   profile/                         P2: `cvc.profile` (schema + migration from `cvc.adventure`), XP + level curve, unlock
                                    rules, MatchTally (events → result), store; currentLook / recordMatch

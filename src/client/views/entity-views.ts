@@ -7,10 +7,11 @@ import { releaseObject3D } from '../engine/release';
 import type { EntityState } from '../../shared/protocol';
 import { CLASS_IDS, EFlag, EntityKind, type ClassId, type TeamId, type SpeciesId } from '../../shared/types';
 import { angleDelta, damp, lerpAngle } from '../../shared/math';
-import { createAvatar, isVeteranSeed } from '../procgen/characters';
+import { createCharacter, isVeteranSeed } from '../procgen/characters';
 import { createBossAvatar } from '../procgen/boss';
 import { applyLook } from '../procgen/cosmetics';
-import { randomLook, type Look } from '../../shared/content/cosmetics';
+import { randomLook, wearsVeteranRank, type Look } from '../../shared/content/cosmetics';
+import { squadKitFor } from '../../sim/ai/archetypes';
 import type { Avatar } from './avatar';
 import { mountedBodyTilt, mountedBodyYaw } from '../vehicles';
 
@@ -79,19 +80,22 @@ export class EntityViews {
       const isBoss = s.kind === EntityKind.Boss;
       if (!isBoss && s.kind !== EntityKind.Player && s.kind !== EntityKind.Bot) continue;
       const cls: ClassId = CLASS_IDS[s.cls] ?? 'assault';
-      // K2: about 1 bot in 6 is a veteran, picked from the seed (the same on every machine, no network)
-      const veteran = !isBoss && s.kind === EntityKind.Bot && isVeteranSeed(s.seed);
-      const key = isBoss ? `boss:${s.cls}:${s.seed}` : `${s.species}:${cls}:${s.team}:${s.seed}${veteran ? ':vet' : ''}`;
-      let v = this.views.get(id);
-      if (v && v.key !== key) { this.group.remove(v.avatar.root); releaseObject3D(v.avatar.root); v.avatar.dispose(); this.views.delete(id); v = undefined; }
       // N2: players wear their roster look, bots their seeded one (deterministic, no network), bosses none
       const look: Look | null = isBoss ? null
         : this.opts.lookOf?.(id) ?? (s.kind === EntityKind.Bot ? randomLook(s.seed, s.species as SpeciesId) : null);
+      // W9 K3: a PvE squad kit from the class + max hp the snapshot already carries (squadKitFor); K2: about 1 bot in 6
+      // is a veteran, picked from the seed (the same on every machine, no network); players are veterans when their
+      // roster look wears a rank (the level-10 unlock). Each is its own kit, so a change rebuilds the view.
+      const squad = !isBoss && s.kind === EntityKind.Bot ? squadKitFor(cls, s.maxHp) : null;
+      const veteran = !isBoss && !squad && (s.kind === EntityKind.Bot ? isVeteranSeed(s.seed) : wearsVeteranRank(look, s.species as SpeciesId));
+      const key = isBoss ? `boss:${s.cls}:${s.seed}` : `${s.species}:${cls}:${s.team}:${s.seed}${veteran ? ':vet' : ''}${squad ? `:${squad}` : ''}`;
+      let v = this.views.get(id);
+      if (v && v.key !== key) { this.group.remove(v.avatar.root); releaseObject3D(v.avatar.root); v.avatar.dispose(); this.views.delete(id); v = undefined; }
       const lookKey = look ? `${look.coat ?? ''}|${look.neck ?? ''}` : '';
       if (!v) {
         const avatar = isBoss
           ? createBossAvatar({ boss: s.cls, seed: s.seed, team: s.team as TeamId })
-          : createAvatar({ species: s.species as SpeciesId, cls, team: s.team as TeamId, seed: s.seed, isLocal: id === localId, look, veteran });
+          : createCharacter({ species: s.species as SpeciesId, cls, team: s.team as TeamId, seed: s.seed, isLocal: id === localId, look, veteran, squad });
         this.group.add(avatar.root);
         v = { id, avatar, bodyYaw: s.yaw, lastState: s, key, lookKey };
         this.views.set(id, v);

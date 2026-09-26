@@ -1,4 +1,4 @@
-// OWNER: U2 (ux). The LOCKER view of the main menu: species toggle (corgi / cat), three slots (coat, neckwear, taunt),
+// OWNER: U2 (ux). The LOCKER view of the main menu: species toggle (corgi / cat), the slots (coat, neckwear, taunt; W9 K3: rank),
 // an item grid where locked looks show how to earn them, the level and XP bar with the next look to play for.
 // Equipping saves to the profile (src/client/profile) and applies on the next spawn (the lead sends currentLook() in
 // hello). Previews are swatches, glyphs and a taunt pack's first line: no second renderer.
@@ -116,6 +116,18 @@ export function neckGlyph(id: string): string {
   return `<svg viewBox="0 0 48 48" aria-hidden="true">${body}</svg>`;
 }
 
+/** K3 rank glyph (inline SVG): gold chevrons (corgi sergeant), a battered brass medal (cat commander), an empty sleeve. */
+export function rankGlyph(id: string): string {
+  const body = (() => {
+    switch (id) {
+      case 'rank_sergeant': return [14, 23, 32].map((y) => `<path d="M9 ${y} L24 ${y + 9} L39 ${y} L39 ${y + 5} L24 ${y + 14} L9 ${y + 5} Z" fill="#e3b23c" stroke="${INK}" stroke-width="2.4" stroke-linejoin="round"/>`).join('');
+      case 'rank_commander': return `<path d="M17 6 L24 20 L31 6 Z" fill="#8a1f24" stroke="${INK}" stroke-width="2.4" stroke-linejoin="round"/><circle cx="24" cy="31" r="11" fill="#b8893a" stroke="${INK}" stroke-width="2.6"/><path d="M24 24 l2.2 4.6 5 .6 -3.7 3.4 1 5 -4.5 -2.5 -4.5 2.5 1 -5 -3.7 -3.4 5 -.6 z" fill="#e0c078" stroke="${INK}" stroke-width="1.4" stroke-linejoin="round"/><path d="M33 27 l3 -2" stroke="${INK}" stroke-width="2"/>`;
+      default: return `<path d="M12 14 H36 V38 H12 Z" fill="none" stroke="#c9c0ae" stroke-width="2.6" stroke-dasharray="4 3"/>`;
+    }
+  })();
+  return `<svg viewBox="0 0 48 48" aria-hidden="true">${body}</svg>`;
+}
+
 /** A taunt pack's first line (its preview). */
 export function tauntPreview(id: string): string {
   return TAUNT_PACKS[id]?.[0] ?? '';
@@ -125,6 +137,7 @@ export function tauntPreview(id: string): string {
 export function itemPreview(item: Pick<CosmeticDef, 'id' | 'slot'>): string {
   if (item.slot === 'coat') return `<span class="lo-sw" style="background:${coatSwatch(item.id)}"></span>`;
   if (item.slot === 'neck') return `<span class="lo-gl">${neckGlyph(item.id)}</span>`;
+  if (item.slot === 'rank') return `<span class="lo-gl">${rankGlyph(item.id)}</span>`;
   return `<span class="lo-q">${esc(S.tauntQuote(tauntPreview(item.id)))}</span>`;
 }
 

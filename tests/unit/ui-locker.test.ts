@@ -58,7 +58,7 @@ describe('locker model', () => {
     const m = lockerModel(withXp(400, { level: 3 }), 'corgi', 'coat');
     expect(m).toMatchObject({ level: 3, into: 100, need: 250 });
     expect(m.frac).toBeCloseTo(0.4);
-    const done = withXp(xpForLevel(7), { unlocked: ['corgi_tricolor', 'cat_tuxedo', 'neck_bandana', 'corgi_sable', 'cat_calico'] });
+    const done = withXp(xpForLevel(7), { unlocked: ['corgi_tricolor', 'cat_tuxedo', 'neck_bandana', 'corgi_sable', 'cat_calico', 'rank_sergeant', 'rank_commander'] });
     expect(nextLine(lockerModel(done, 'cat', 'coat'))).toMatch(/Every level look is yours/);
   });
 });

@@ -277,7 +277,7 @@ function startWave(sim: Sim, rt: MatchRuntime, cfg: SkirmishConfig, n: number): 
     roomCats++;
   }
   let cut = q.length - Math.max(Math.ceil(q.length / 2), q.length - roomCats);
-  for (const trim of ['grunt', 'kitten', 'sniper', 'brute'] as ArchetypeId[]) {
+  for (const trim of ['grunt', 'kitten', 'alley_raider', 'sniper', 'tabby_heavy', 'brute'] as ArchetypeId[]) { // W9 K3 squads trim before the heavy hitters
     for (let i = q.length - 1; i >= 0 && cut > 0; i--) if (q[i] === trim) { q.splice(i, 1); cut--; }
   }
   for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(sim.rng() * (i + 1)); const t = q[i]; q[i] = q[j]; q[j] = t; }

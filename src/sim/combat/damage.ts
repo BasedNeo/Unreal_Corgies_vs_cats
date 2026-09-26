@@ -4,6 +4,7 @@ import type { SimEntity } from '../entity';
 import { Anim, EFlag, EntityKind, type EntityId, type TeamId } from '../../shared/types';
 import { COMBAT_RULES, WEAPONS } from '../../shared/content/weapons';
 import { combatBus, combatLive, ensureCombat, isInvulnerable, ticksOf } from './state';
+import { guardFactor } from '../ai/archetypes';
 
 const DEATH_CLEAR = EFlag.Firing | EFlag.Reloading | EFlag.Aiming | EFlag.Sprinting | EFlag.Stealthed | EFlag.Invulnerable | EFlag.Alerted;
 
@@ -32,6 +33,7 @@ export function applyDamage(sim: Sim, dst: SimEntity, amount: number, src: Damag
       amount *= COMBAT_RULES.botToPlayerDamage[mode] ?? 1;
     }
   }
+  if (!self && dst.ai && dst.combat?.pve) { const a = sim.entities.get(src.id); if (a) amount *= guardFactor(dst.ai.arch, dst.yaw, dst.pos.x, dst.pos.z, a.pos.x, a.pos.z); } // W9 K3: a PvE shield-bearer's frontal guard (archetype data; 1 for everyone else)
   const dmg = Math.min(h.hp, Math.max(1, Math.round(amount)));
   h.hp -= dmg;
   h.lastDamageTick = sim.tick;

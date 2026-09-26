@@ -52,11 +52,16 @@ export const SKIRMISH: SkirmishConfig = {
   waves: [
     // opening waves trickle in (few alive at once) so a new player learns to fight one or two cats at a time
     { counts: { grunt: 3 }, maxAlive: 2 },
-    { counts: { grunt: 4, kitten: 2 }, maxAlive: 4 },
-    { counts: { grunt: 4, sniper: 1, kitten: 4 } },
-    { counts: { grunt: 5, sniper: 2, brute: 1, kitten: 4 } },
+    // W9 K3 squads, one new answer per wave: the alley-cat raiders (flankers) debut in wave 2 in place of a grunt and a
+    // kitten, the tabby heavy (shield-bearer) in wave 3 in place of a grunt and a kitten; wave 4 fields both; the
+    // finale keeps a light escort. Every wave is the same size or smaller (qa-difficulty band: docs/handoff/K3.md).
+    // Pre-K3: [grunt 3] · [grunt 4, kitten 2] · [grunt 4, sniper 1, kitten 4] · [grunt 5, sniper 2, brute 1, kitten 4] ·
+    // [grunt 3, kitten 3 + boss].
+    { counts: { grunt: 3, alley_raider: 2, kitten: 1 }, maxAlive: 4 },
+    { counts: { grunt: 3, tabby_heavy: 1, sniper: 1, kitten: 3 } },
+    { counts: { grunt: 3, alley_raider: 2, tabby_heavy: 1, sniper: 2, brute: 1, kitten: 2 } },
     // finale: the Vac-Tank (B1) with a light escort (the old final wave was 6 grunts, 2 snipers, 2 brutes, 6 kittens)
-    { counts: { grunt: 3, kitten: 3 }, label: 'FINAL WAVE', boss: 'vac_tank' },
+    { counts: { grunt: 2, alley_raider: 2, kitten: 2 }, label: 'FINAL WAVE', boss: 'vac_tank' },
   ],
   maxAlive: 10,
   spawnInterval: 1.6,

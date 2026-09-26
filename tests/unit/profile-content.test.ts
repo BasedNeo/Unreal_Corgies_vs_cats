@@ -23,7 +23,7 @@ describe('C3 content: every unlock rule is understood and reachable', () => {
       expect(r.kind, item.id).not.toBe('never');
       if (r.kind === 'medal') expect(CHAPTERS.some((c) => c.id === r.chapter), item.id).toBe(true);
       if (r.kind === 'firstWin') expect(FIRST_WIN_MODES as readonly string[]).toContain(r.mode);
-      if (r.kind === 'level') expect(xpForLevel(r.level), item.id).toBeLessThanOrEqual(2000); // ≤ ~10 typical matches
+      if (r.kind === 'level') expect(xpForLevel(r.level), item.id).toBeLessThanOrEqual(xpForLevel(10)); // ≤ level 10: the veteran rank (W9 K3) is the long goal
     }
   });
 
@@ -103,7 +103,7 @@ describe('public API over the real catalogue', () => {
     expect(equipLook('corgi', { coat: 'corgi_tricolor', neck: 'neck_none' }).ok).toBe(true);
     expect(equipLook(Species.Cat, { taunt: 'taunt_cat_royal', coat: 'cat_tuxedo' }).ok).toBe(true);
     const look = currentLook('corgi');
-    expect(look).toEqual({ coat: 'corgi_tricolor', neck: 'neck_none', taunt: 'taunt_corgi_classic' });
+    expect(look).toEqual({ coat: 'corgi_tricolor', neck: 'neck_none', taunt: 'taunt_corgi_classic', rank: 'rank_none' });
     expect(isValidLook(look, 'corgi')).toBe(true);
     expect(isValidLook(currentLook('cat'), 'cat')).toBe(true);
     expect(loadProfile().equipped.cat).toEqual({ taunt: 'taunt_cat_royal', coat: 'cat_tuxedo' });

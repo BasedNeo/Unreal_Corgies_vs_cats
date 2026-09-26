@@ -330,7 +330,9 @@ export function buildBody(mb: MeshBuilder, plan: BodyPlan, coat: Coat, q: number
       // an armoured bracer over the forearm (one extra ring makes its top edge; the rest is paint on the sleeve).
       armPath = [add(sh, [-0.03 * k, 0.01, 0]), lerp3(sh, j.elbow[s], 0.45), j.elbow[s], lerp3(j.elbow[s], j.wrist[s], 0.14), lerp3(j.elbow[s], j.wrist[s], 0.6), j.wrist[s]];
       armR = [[ra * 1.05, ra * 1.05], [ra * 0.98, ra * 0.98], [(ra + rb) / 2, (ra + rb) / 2], [rb * 1.2, rb * 1.2], [rb * 1.22, rb * 1.22], [rb * 1.08, rb * 1.08]];
-      armColor = (x, y, z, _u, v) => (v < 0.3 ? suit.band : v > 0.58 ? paintAt(suit.paint, x, y, z, v > 0.97 ? 1 : 0) : Math.abs(v - 0.4) < 0.05 ? suit.seam : suit.cloth);
+      // W9 K3: the team armband runs the whole upper sleeve, through the elbow ring (was v < 0.3, one ring pair: the
+      // triangles on its edge averaged into the lifted suit colour and lost the team hue at range).
+      armColor = (x, y, z, _u, v) => (v < 0.45 ? suit.band : v > 0.58 ? paintAt(suit.paint, x, y, z, v > 0.97 ? 1 : 0) : suit.cloth);
     } else {
       armPath = [add(sh, [-0.03 * k, 0.01, 0]), lerp3(sh, j.elbow[s], 0.45), j.elbow[s], lerp3(j.elbow[s], j.wrist[s], 0.55), j.wrist[s]];
       armR = [[ra * 1.05, ra * 1.05], [ra * 0.98, ra * 0.98], [(ra + rb) / 2, (ra + rb) / 2], [rb, rb], [rb * 0.95, rb * 0.95]];

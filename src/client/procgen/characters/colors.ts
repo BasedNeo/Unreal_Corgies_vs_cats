@@ -33,6 +33,17 @@ export const OLIVE = tok('olive', mixHex(PALETTE.grassDark, PALETTE.fenceDark, 0
 export const KHAKI = tok('khaki', mixHex(PALETTE.fenceWood, PALETTE.grassDry, 0.35));
 /** Dark under-suit (arms, legs, gloves). */
 export const UNDERSUIT = tok('underSuit', mixHex(PALETTE.catBlack, INK, 0.38));
+/**
+ * W9 K3 under-suit value lift (docs/handoff/K3.md): the near-black `underSuit` (sRGB luma 35) made the limbs vanish
+ * under dusk (docs/qa/W7_GALLERY.md, "35 m lineup"). The field suits keep the hardened palette but carry a value
+ * (luma ~70): corgis a dark olive drab (it sits with the ochre and gunmetal plates), cats a lifted warm charcoal (below
+ * the brass, next to the charcoal camo). Both stay under the plates' and the fur's value and are never a team hue
+ * (tested). Measured: it reads wherever the suit is lit; at 35 m the backs sit on the ramp floor and albedo barely moves
+ * the image (even a 4x suit), so value at that range is a lighting job (P4's rim light). The `underSuit` token itself
+ * is the style lane's; only the characters' suits read these.
+ */
+export const SUIT_CORGI = mixHex(UNDERSUIT, OLIVE, 0.6);
+export const SUIT_CAT = mixHex(mixHex(CHARCOAL, INK, 0.45), mixHex(PALETTE.catGrey, OXBLOOD, 0.12), 0.2);
 /** Wet yard mud on boots, knees and fur. */
 export const MUD = tok('mud', mixHex(PALETTE.mulch, PALETTE.dirt, 0.35));
 /** Healed scar: pale pink, hairless skin. */

@@ -20,8 +20,8 @@
 import { PALETTE } from '../../style/style-tokens.js';
 import { Team, type ClassId, type TeamId } from '../../../shared/types';
 import {
-  mixHex, paintAt, muddy, INK, OCHRE, CAMO_BLACK, GUNMETAL, WORN_STEEL, OXBLOOD, CHARCOAL, BRASS, OLIVE, KHAKI, UNDERSUIT,
-  type Paint,
+  mixHex, paintAt, muddy, valueNoise3, INK, OCHRE, CAMO_BLACK, GUNMETAL, WORN_STEEL, OXBLOOD, CHARCOAL, BRASS, OLIVE, KHAKI, UNDERSUIT,
+  SUIT_CORGI, SUIT_CAT, type Paint,
 } from './colors';
 import { ellipsoid, sweep, ring, lathe, ellipseLoop, xform, seg, isLite, SURF, type ColorFn, type MeshBuilder, type Surf, type V3 } from './mesh-builder';
 import { computeJoints, cutAngle, SIDES, SX, type HeadCut } from './skeleton';
@@ -36,7 +36,7 @@ export function teamColors(team: TeamId): TeamColors {
   return { main: PALETTE.hull, trim: PALETTE.hullDark, dark: PALETTE.hullDark, light: PALETTE.hullLight, emblem: PALETTE.accent };
 }
 
-const LEATHER = mixHex(PALETTE.fenceDark, PALETTE.mulch, 0.3);
+export const LEATHER = mixHex(PALETTE.fenceDark, PALETTE.mulch, 0.3);
 /** Aviator scarf: off-white on both teams (reads against every coat), grubby after a week in the field. */
 const SCARF = mixHex(mixHex(PALETTE.catWhite, PALETTE.corgiCream, 0.3), KHAKI, 0.25);
 /** Hazard-yellow breaching charges (the K1 cue beside the Breacher's head). */
@@ -64,7 +64,7 @@ export interface FactionGear {
 
 export function factionGear(species: 'corgi' | 'cat'): FactionGear {
   if (species === 'cat') {
-    const suit = mixHex(CHARCOAL, INK, 0.45);
+    const suit = SUIT_CAT; // K3: lifted from mixHex(CHARCOAL, INK, 0.45)
     return {
       paint: { base: OXBLOOD, camo: CHARCOAL, chip: mixHex(WORN_STEEL, BRASS, 0.35), scale: 6, stripes: true },
       suit, seam: mixHex(suit, INK, 0.5), glove: mixHex(OXBLOOD, INK, 0.62), boot: mixHex(CHARCOAL, INK, 0.25), sole: INK,
@@ -74,15 +74,15 @@ export function factionGear(species: 'corgi' | 'cat'): FactionGear {
   }
   return {
     paint: { base: OCHRE, camo: CAMO_BLACK, chip: WORN_STEEL, scale: 7.5, stripes: false },
-    suit: UNDERSUIT, seam: mixHex(UNDERSUIT, INK, 0.5), glove: mixHex(LEATHER, INK, 0.55), boot: mixHex(LEATHER, INK, 0.35), sole: INK,
+    suit: SUIT_CORGI, seam: mixHex(SUIT_CORGI, INK, 0.5), glove: mixHex(LEATHER, INK, 0.55), boot: mixHex(LEATHER, INK, 0.35), sole: INK, // K3: suit lifted from UNDERSUIT
     web: mixHex(OLIVE, INK, 0.5), pouch: OLIVE, fitting: WORN_STEEL,
     soft: mixHex(KHAKI, OLIVE, 0.35), hood: mixHex(UNDERSUIT, OLIVE, 0.3),
   };
 }
 
 /** Headgear dome per class: how far it grows off the cranium, where it is cut, how square it is. */
-interface Headgear { grow: number; cut: HeadCut; p: number; rows?: number }
-const HEADGEAR: Partial<Record<ClassId, Headgear>> = {
+export interface Headgear { grow: number; cut: HeadCut; p: number; rows?: number }
+export const HEADGEAR: Partial<Record<ClassId, Headgear>> = {
   assault: { grow: 0.022, cut: { front: 0.27, back: 0.6 }, p: 2.2 },
   infiltrator: { grow: 0.03, cut: { front: 0.25, back: 0.8, side: 0.7 }, p: 2.2, rows: 7 },
   overwatch: { grow: 0.024, cut: { front: 0.25, back: 0.5 }, p: 2.4 },
@@ -102,7 +102,7 @@ const SHOULDER: Record<ClassId, number> = { assault: 0.082, infiltrator: 0.064, 
 const CONE = { b0: [0.265, 0.06] as [number, number], f0: [0.43, -0.2] as [number, number], ry: 0.92 };
 
 /** Which side carries the scar and the bitten ear: varies by class so a squad does not look cloned. */
-const SCAR_SIDE: Record<ClassId, 'L' | 'R'> = { assault: 'L', infiltrator: 'R', overwatch: 'L', breacher: 'R', warden: 'L', skyraider: 'R' };
+export const SCAR_SIDE: Record<ClassId, 'L' | 'R'> = { assault: 'L', infiltrator: 'R', overwatch: 'L', breacher: 'R', warden: 'L', skyraider: 'R' };
 
 /** What the body wears for a kit (body.ts BodyDress): suit, boots, armbands, the hidden cranium, battle wear. */
 export function dressFor(plan: BodyPlan, cls: ClassId, team: TeamId, veteran = false): BodyDress {
@@ -132,7 +132,7 @@ export function torsoAt(plan: BodyPlan, y: number): [number, number, number] {
 }
 
 /** Plate-carrier thickness over the torso. */
-const carrierPad = (cls: ClassId) => (cls === 'breacher' ? 0.04 : 0.026);
+export const carrierPad = (cls: ClassId) => (cls === 'breacher' ? 0.04 : 0.026);
 /** Chest plate: centre height, half width, half height, front z. */
 function chestPlate(plan: BodyPlan, cls: ClassId) {
   const heavy = cls === 'breacher', pad = carrierPad(cls);
@@ -186,7 +186,9 @@ export function buildGear(mb: MeshBuilder, plan: BodyPlan, cls: ClassId, team: T
     if (Math.abs(y - plan.spineY) < 0.014) return fg.seam;
     return paint(x, y, z, 0, 0);
   };
-  mb.add(sweep(vestPath, vestR, seg(12, q, 9), { up: [1, 0, 0], capStart: 1, capEnd: 1, capStartLen: 0.25, capEndLen: 0.35 }), vestColor, { auto: ['hips', 'spine', 'chest'] });
+  // (Open ends, W9 K3: the bottom sits inside the trousers' seat and the top under the armour collar and the ruff, so
+  // the two end caps were never seen; their ~48 NPC / ~60 hero triangles pay for the rear team strobe and rank insignia.)
+  mb.add(sweep(vestPath, vestR, seg(12, q, 9), { up: [1, 0, 0], capStart: 0, capEnd: 0 }), vestColor, { auto: ['hips', 'spine', 'chest'] });
   // Armoured collar: the carrier rises round the neck (the fur ruff spills over it at the throat).
   if (plan.hardened) {
     const ac = armourCollar(plan);
@@ -262,9 +264,11 @@ export function buildGear(mb: MeshBuilder, plan: BodyPlan, cls: ClassId, team: T
     const kneeColor: ColorFn = (x, y, z) => paintAt(fg.paint, x, y, z, Math.abs(y - kn[1] - 0.008) > 0.042 * kp ? 1 : 0);
     mb.add(ellipsoid([kn[0], kn[1] + 0.008, kn[2] - plan.thighR * 0.88], [0.05 * kp, 0.056 * kp, 0.026], seg(6, q, 4), seg(4, q, 3), { p: 3 }), kneeColor, { rigid: `shin.${s}` });
     if (vet) {
-      // Veterans: a plate on the front of each thigh.
+      // Veterans: a plate on the front of each thigh. W9 K3: its face is a team shell over faction paint (the shoulder
+      // shells' language), so the rank insignia on the sleeves never costs the veteran its team read.
       const hp = j.hip[s], t: V3 = [hp[0] * 1.05, (hp[1] + kn[1]) / 2 + 0.01, (hp[2] + kn[2]) / 2 - plan.thighR * 0.9];
-      mb.add(ellipsoid(t, [0.058, 0.05, 0.022], seg(6, q, 4), seg(4, q, 3), { p: 3.2, rot: [0.12, 0, 0] }), (x, y, z) => paintAt(fg.paint, x, y, z), { rigid: `thigh.${s}` });
+      mb.add(ellipsoid(t, [0.058, 0.05, 0.022], seg(6, q, 4), seg(4, q, 3), { p: 3.2, rot: [0.12, 0, 0] }),
+        (x, y, z) => (z < t[2] ? tc.main : paintAt(fg.paint, x, y, z)), { rigid: `thigh.${s}` });
     }
   }
 
@@ -477,6 +481,11 @@ export function buildGear(mb: MeshBuilder, plan: BodyPlan, cls: ClassId, team: T
     }
   }
 
+  // W9 K3 rank insignia (veterans, bots by seed and players wearing a rank, cosmetics.ts): the corgi sergeant's chevrons
+  // on both upper sleeves (two on the hero tier, one at the NPC tier), the cat commander's battered brass medal on a
+  // team ribbon over the right chest. The crest (helmet classes) / badge (soft headgear) above is the cap badge.
+  if (vet) rankInsignia(mb, plan, cls, tc, q, rank);
+
   // Veteran cats: a black eye patch over the scarred eye, strapped round the head.
   if (vet && isCat) {
     mb.surface(SURF.leather);
@@ -488,8 +497,53 @@ export function buildGear(mb: MeshBuilder, plan: BodyPlan, cls: ClassId, team: T
   }
 }
 
+/** K3 rank insignia: chevrons (corgi) or a medal (cat). See buildGear. */
+function rankInsignia(mb: MeshBuilder, plan: BodyPlan, cls: ClassId, tc: TeamColors, q: number, rank: number): void {
+  const j = computeJoints(plan);
+  const lite = isLite(q);
+  if (plan.species === 'cat') {
+    // A battered brass medal on a two-stripe team ribbon, high on the right chest (the unit patch's mirror; lower down
+    // the forearm crosses the chest in the idle and aim poses).
+    const cp = chestPlate(plan, cls);
+    const x = cp.pw * 0.5, ry = cp.cy + cp.ph * 0.44, z = cp.z - cp.depth + 0.003;
+    mb.surface(SURF.cloth).add(ellipsoid([x, ry, z], [0.019, 0.023, 0.006], seg(5, q, 4), 3, { p: 3.2 }),
+      (xx) => (Math.abs(xx - x) < 0.005 ? mixHex(tc.main, INK, 0.45) : tc.main), { auto: ['spine', 'chest'] });
+    const my = ry - 0.04, shine = mixHex(rank, PALETTE.accentHot, 0.35);
+    mb.surface(SURF.fitting).add(ellipsoid([x, my, z - 0.003], [0.026, 0.026, 0.009], seg(8, q, 6), 3, { p: 2.2 }),
+      (xx, yy, zz) => (valueNoise3(xx * 60, yy * 60, zz * 60, 97) > 0.66 ? mixHex(rank, INK, 0.4) : shine), { auto: ['spine', 'chest'] }); // dents, tarnish
+    return;
+  }
+  // Chevrons (∧) wrapped round the outer upper sleeve, below the shoulder plate.
+  mb.surface(SURF.fitting);
+  const n = lite ? 1 : 2;
+  for (const s of SIDES) {
+    const k = SX[s];
+    const sh: V3 = [j.shoulder[s][0] - 0.03 * k, j.shoulder[s][1] + 0.01, j.shoulder[s][2]], el = j.elbow[s];
+    const ax = [el[0] - sh[0], el[1] - sh[1], el[2] - sh[2]], al = Math.hypot(ax[0], ax[1], ax[2]);
+    const a: V3 = [ax[0] / al, ax[1] / al, ax[2] / al];
+    // outward (toward the character's side) and around-the-arm axes
+    const d = k * a[0];
+    const o0: V3 = [k - d * a[0], -d * a[1], -d * a[2]], ol = Math.hypot(o0[0], o0[1], o0[2]);
+    const o: V3 = [o0[0] / ol, o0[1] / ol, o0[2] / ol];
+    const b: V3 = [a[1] * o[2] - a[2] * o[1], a[2] * o[0] - a[0] * o[2], a[0] * o[1] - a[1] * o[0]];
+    const ra = plan.armR[0] * 1.02 + 0.005;
+    for (let i = 0; i < n; i++) {
+      const along = al * (0.54 + i * 0.2);
+      const at = (th: number, t: number): V3 => {
+        const c = Math.cos(th), sn = Math.sin(th), l = along + t;
+        return [sh[0] + a[0] * l + (o[0] * c + b[0] * sn) * ra, sh[1] + a[1] * l + (o[1] * c + b[1] * sn) * ra, sh[2] + a[2] * l + (o[2] * c + b[2] * sn) * ra];
+      };
+      // NPC tier: one slimmer chevron (the veteran kit carries the rank at range; this keeps the team sleeve's cells)
+      const w = lite ? 0.6 : 1.0, hw = lite ? 0.009 : 0.014;
+      const path = [at(w, 0.036), at(0, -0.014), at(-w, 0.036)];
+      // flat ribbon on the sleeve: thin along the surface normal, wide across (3 sides, open ends)
+      mb.add(sweep(path, [[0.004, hw], [0.004, hw + 0.001], [0.004, hw]], 3, { up: o, capStart: 0, capEnd: 0 }), rank, { rigid: `upperArm.${s}` });
+    }
+  }
+}
+
 /** Coarse dark mottling for soft fabrics and leather (sweat, rain, mud): a warped-sine threshold in model space. */
-function mottled(x: number, y: number, z: number): boolean {
+export function mottled(x: number, y: number, z: number): boolean {
   return Math.sin(x * 23 + Math.sin(y * 17) * 2 + z * 19) > 0.72;
 }
 
@@ -506,6 +560,7 @@ export function buildGearGlow(g: MeshBuilder, plan: BodyPlan, cls: ClassId, hero
     case 'assault': {
       const p = lampHousing(plan);
       g.add(ellipsoid([p[0], p[1], p[2] - 0.02], [0.019, 0.015, 0.008], W, Hh), color, { rigid: 'head' });
+      rearStrobe(g, plan, cls, W, Hh, color);
       break;
     }
     case 'infiltrator': {
@@ -523,6 +578,7 @@ export function buildGearGlow(g: MeshBuilder, plan: BodyPlan, cls: ClassId, hero
     case 'breacher': {
       const v = visorPos(plan);
       g.add(ellipsoid([v[0], v[1] - 0.012, v[2] - 0.028], [0.085, 0.007, 0.006], hero ? 8 : 6, 3, { rot: [-0.55, 0, 0] }), color, { rigid: 'head' });
+      rearStrobe(g, plan, cls, W, Hh, color);
       break;
     }
     case 'warden': {
@@ -531,14 +587,45 @@ export function buildGearGlow(g: MeshBuilder, plan: BodyPlan, cls: ClassId, hero
         const a = 0.62 * k, rr = CONE.f0[0] - 0.014;
         g.add(ellipsoid([hc[0] + Math.sin(a) * rr, hc[1] - 0.01 + Math.cos(a) * rr * CONE.ry, hc[2] - 0.02 + CONE.f0[1] - 0.008], [0.017, 0.017, 0.01], W, Hh), color, { rigid: 'head' });
       }
+      rearStrobe(g, plan, cls, W, Hh, color);
       break;
     }
     case 'skyraider': {
       const [gy, gz] = goggleYZ(plan);
       for (const s of [-1, 1]) g.add(ellipsoid([0.07 * s, gy, gz + 0.004], [0.042, 0.037, 0.012], hero ? 8 : 6, hero ? 4 : 3, { rot: [-0.45, 0, 0] }), color, { rigid: 'head' });
+      rearStrobe(g, plan, cls, W, Hh, color);
       break;
     }
   }
+}
+
+/**
+ * W9 K3 rear team strobe: a team-colour IR marker on the back of the helmet / cap (the warden: on top of the cone's back
+ * rim; the assault: on its bedroll), so a pet seen from behind at dusk carries a lit team signal like the front lamps
+ * do. ~7 cm across, like the Overwatch mast beacon: about 1.5 px at 35 m (720p, 62°), the size that still registers
+ * there. At that range under the dusk rig albedo barely moves the image (the backs sit on the ramp floor); emission does.
+ * The infiltrator (its hood strobe) and the overwatch (its mast beacon) already show one from behind.
+ */
+function rearStrobe(g: MeshBuilder, plan: BodyPlan, cls: ClassId, W: number, Hh: number, color: number): void {
+  const cr = plan.cranium, hc: V3 = [0, plan.headY + cr.c[1], cr.c[2]];
+  if (cls === 'assault') {
+    // on the bedroll, inside the pack's outline: a bump on the helmet's back made the assault's head read closer to the
+    // infiltrator's hood and the breacher's helmet (K1 closest pairs −0.0016)
+    const py2 = plan.chestY - 0.03, [, rz, z] = torsoAt(plan, py2);
+    g.add(ellipsoid([0, py2 + 0.13, z + rz + carrierPad(cls) + 0.05 + 0.04], [0.034, 0.028, 0.014], W, Hh), color, { rigid: 'chest' });
+    return;
+  }
+  if (cls === 'warden') {
+    const top: V3 = [hc[0], hc[1] - 0.01 + CONE.b0[0] * CONE.ry + 0.02, hc[2] - 0.02 + CONE.b0[1] + 0.018];
+    g.add(ellipsoid(top, [0.032, 0.026, 0.022], W, Hh), color, { rigid: 'head' });
+    return;
+  }
+  const hg = HEADGEAR[cls];
+  if (!hg) return;
+  // low on the back of the dome, just above its rim and below the veterans' crest
+  const th = Math.min(hg.cut.back * 0.86, 0.56) * Math.PI;
+  const p = capPoint(th, Math.PI, [cr.r[0] + hg.grow + 0.012, cr.r[1] + hg.grow + 0.012, cr.r[2] + hg.grow + 0.012], hg.p, hc);
+  g.add(ellipsoid(p, [0.034, 0.028, 0.016], W, Hh), color, { rigid: 'head' });
 }
 
 /**
@@ -598,14 +685,14 @@ export function monoclePos(plan: BodyPlan): V3 {
 }
 
 /** Point on a superellipsoid at polar angle th (0 = top) and azimuth ph (0 = front, -Z). */
-function capPoint(th: number, ph: number, r: V3, p: number, c: V3): V3 {
+export function capPoint(th: number, ph: number, r: V3, p: number, c: V3): V3 {
   let dx = Math.sin(th) * Math.sin(ph), dy = Math.cos(th), dz = -Math.sin(th) * Math.cos(ph);
   if (p !== 2) { const k = 1 / Math.pow(Math.abs(dx) ** p + Math.abs(dy) ** p + Math.abs(dz) ** p, 1 / p); dx *= k; dy *= k; dz *= k; }
   return [c[0] + dx * r[0], c[1] + dy * r[1], c[2] + dz * r[2]];
 }
 
 /** Ellipsoid cap from the top pole down to a cut that varies with azimuth. */
-function helmetCap(W: number, H: number, r: V3, front: number, backA: number, p: number, c: V3, side?: number) {
+export function helmetCap(W: number, H: number, r: V3, front: number, backA: number, p: number, c: V3, side?: number) {
   const pos: number[] = [], uv: number[] = [], idx: number[] = [];
   const pt = (th: number, ph: number) => {
     pos.push(...capPoint(th, ph, r, p, c));

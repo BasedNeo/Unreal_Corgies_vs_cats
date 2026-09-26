@@ -73,7 +73,9 @@ triangles.
 - **Class read:** the K1 silhouette distance (Jaccard between class masks). Common armour and global proportion
   changes *shrink* it, so shared armour stays within ~3 cm of the body and each class's signature shape is enlarged.
 
-**Open.** Under dusk, the dark under-suit makes pets read as near-silhouettes at 35 m (W9 K3/P4).
+**Open.** K3 lifted the under-suit's value (luma 35 → 71 up close), but at 35 m under dusk the pets still sit on the toon
+ramp's floor: a 4× lighter suit only moved the lineup from 38 to 41. At range, readability is a lighting job (a rim or
+fill light), not a colour job (P4).
 
 ## 5. Combat feedback that costs almost nothing (X3)
 **Surfaces.** `fx/surfaces.ts` classifies an impact point from WorldData (prop `type` keywords, cylinders, water,

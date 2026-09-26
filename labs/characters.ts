@@ -17,12 +17,21 @@
 //   t=1.5   pre-simulate 1.5 s at 60 Hz, then freeze (deterministic screenshots); live=1 keeps running
 //   webgl   force the WebGL2 backend (headless probe)        labels=0   hide name tags     bare=1   hide the weapons
 //   inkmin=0   P3 A/B: draw every ink hull (default: the renderer's ink LOD skips hulls under 0.3 px, engine/renderer.ts)
+//   W9 K3: view=squads = the alley-cat raider and the tabby heavy (team Cats) from the front and from behind, with a
+//     grunt (assault) and a kitten (infiltrator) for scale; view=pve = the whole PvE cat family in a row (grunt, kitten,
+//     sniper, brute, raider, heavy); squad=alley|heavy puts every character of any view in that squad kit.
+//     anim applies as usual (aimfwd / fire show the heavy's bin lid in the aim pose).
+//   mask=1   readability bench: black background, no ground, every character flat white (a glow material, no ink):
+//            the pixel mask for tools that measure the characters' rendered luma / team hue (same frozen frame).
+//   __lab.boxes: per character { x0, y0, x1, y1 } in CSS px, species, team, cls, squad (measurement tools).
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { createRenderContext } from '../src/client/engine/renderer';
 import { toon } from '../src/client/style/style-webgpu.js';
 import { PALETTE } from '../src/client/style/style-tokens.js';
 import { createCharacter, variantFor, type CharacterAvatar } from '../src/client/procgen/characters';
+import { glow } from '../src/client/style/style-webgpu.js';
+import type { SquadKit } from '../src/sim/ai/archetypes';
 import { Anim, CLASS_IDS, EFlag, Species, Team, type AnimId, type ClassId, type SpeciesId, type TeamId } from '../src/shared/types';
 import type { AvatarFrame } from '../src/client/views/avatar';
 import type { Expression } from '../src/client/anim/face';
@@ -35,7 +44,7 @@ const labelsEl = document.getElementById('labels')!;
 type AnimName = 'idle' | 'walk' | 'run' | 'sprint' | 'jump' | 'fall' | 'glide' | 'aim' | 'aimfwd' | 'fire' | 'hit' | 'kill' | 'death' | 'emote' | 'slide' | 'swim' | 'cycle';
 const CYCLE: AnimName[] = ['idle', 'walk', 'run', 'sprint', 'jump', 'aim', 'fire', 'hit', 'death', 'emote'];
 
-interface Spec { species: SpeciesId; coat?: string; cls: ClassId; team: TeamId; anim: AnimName; expr?: Expression; x: number; z: number; yaw: number; vet?: boolean }
+interface Spec { species: SpeciesId; coat?: string; cls: ClassId; team: TeamId; anim: AnimName; expr?: Expression; x: number; z: number; yaw: number; vet?: boolean; squad?: SquadKit; tag?: string }
 
 /** Smallest seed ≥ 1 whose variant is `coat`. */
 function seedFor(species: SpeciesId, coat: string | undefined, salt = 0): number {
@@ -105,7 +114,7 @@ function layout(): Spec[] {
           const x = LINEUP_CAM[0] + dist * Math.sin(a), z = LINEUP_CAM[2] - dist * Math.cos(a);
           const toCam = Math.atan2(-(LINEUP_CAM[0] - x), -(LINEUP_CAM[2] - z));
           const yaw = f === 'back' ? toCam + Math.PI : f === 'side' ? toCam + Math.PI / 2 : toCam;
-          add({ species: sp, coat: sp === Species.Cat ? catCoats[i] : corgiCoats[i % 3], cls: c, x, z, yaw });
+          add({ species: sp, coat: sp === Species.Cat ? catCoats[i] : corgiCoats[i % 3], cls: c, x, z, yaw, tag: f });
           a += step;
         });
         a += gap;
@@ -134,6 +143,22 @@ function layout(): Spec[] {
       add({ species: only === 'cat' ? Species.Cat : Species.Corgi, coat: P.get('coat') ?? undefined, cls: (clsParam as ClassId) ?? 'assault', yaw: (num('yaw', 20) * Math.PI) / 180 });
       break;
     }
+    case 'squads': {
+      // K3: raider + heavy from the front (left) and from behind (right); a grunt and a kitten beside them for scale.
+      add({ species: Species.Cat, coat: 'tabby', cls: 'assault', x: -2.5, z: 0.4, yaw: 0.2 });
+      add({ species: Species.Cat, coat: 'ginger', cls: 'infiltrator', squad: 'alley', x: -1.45, z: 0, yaw: 0.25 });
+      add({ species: Species.Cat, coat: 'tabby', cls: 'assault', squad: 'heavy', x: -0.3, z: 0, yaw: -0.2 });
+      add({ species: Species.Cat, coat: 'ginger', cls: 'infiltrator', squad: 'alley', x: 0.85, z: 0, yaw: Math.PI - 0.3 });
+      add({ species: Species.Cat, coat: 'tabby', cls: 'assault', squad: 'heavy', x: 2.0, z: 0, yaw: Math.PI + 0.3 });
+      add({ species: Species.Cat, coat: 'tuxedo', cls: 'infiltrator', x: 3.0, z: 0.4, yaw: -0.2 });
+      break;
+    }
+    case 'pve': {
+      // K3: the PvE cat family as the waves field it (archetype class kits + the two squad kits).
+      const fam: [ClassId, SquadKit | undefined][] = [['assault', undefined], ['infiltrator', undefined], ['overwatch', undefined], ['warden', undefined], ['infiltrator', 'alley'], ['assault', 'heavy']];
+      fam.forEach(([c, sq], i) => add({ species: Species.Cat, coat: catCoats[i], cls: c, squad: sq, x: -3.3 + i * 1.32, z: 0, yaw: 0 }));
+      break;
+    }
     case 'ots':
     case 'portrait':
     case 'turntable': {
@@ -148,8 +173,10 @@ function layout(): Spec[] {
   let list = out;
   if (view !== 'face' && view !== 'closeup' && only === 'corgi') list = list.filter((s) => s.species === Species.Corgi);
   if (view !== 'face' && view !== 'closeup' && only === 'cat') list = list.filter((s) => s.species === Species.Cat);
-  if (clsParam && view !== 'turntable' && view !== 'roster') list = list.map((s) => ({ ...s, cls: clsParam as ClassId }));
+  if (clsParam && view !== 'turntable' && view !== 'roster' && view !== 'squads' && view !== 'pve') list = list.map((s) => ({ ...s, cls: clsParam as ClassId }));
   if (P.get('vet') === '1') list = list.map((s) => ({ ...s, vet: true }));
+  const sq = P.get('squad');
+  if (sq === 'alley' || sq === 'heavy') list = list.map((s) => ({ ...s, squad: sq as SquadKit }));
   if (P.get('swap') === '1') list = list.map((s) => ({ ...s, team: (s.team === Team.Cats ? Team.Corgis : Team.Cats) as TeamId }));
   if (P.has('team')) list = list.map((s) => ({ ...s, team: Number(P.get('team')) as TeamId }));
   if (forcedAnim) list = list.map((s) => ({ ...s, anim: forcedAnim }));
@@ -242,17 +269,27 @@ async function main(): Promise<void> {
 
   let silMat: THREE.Material | null = null;
   if (view === 'lineup') scene.fog = new THREE.FogExp2(0xbfe3f4, 0.003); // same haze as the game sky
+  const mask = P.get('mask') === '1';
+  let maskMat: THREE.Material | null = null;
+  if (mask) {
+    // K3 readability bench: characters flat white on black, nothing else (a style glow material: unlit, not inked).
+    scene.background = new THREE.Color(0x000000);
+    scene.fog = null;
+    ground.visible = false; pad.visible = false;
+    maskMat = glow(0xffffff, 1);
+  }
   const specs = layout();
   const drivers: Driver[] = [];
   const tags: { el: HTMLDivElement; av: CharacterAvatar }[] = [];
   const npc = P.has('npc');
   specs.forEach((s, i) => {
     const seed = seedFor(s.species, s.coat, i);
-    const av = createCharacter({ species: s.species, cls: s.cls, team: s.team, seed, isLocal: !npc, veteran: !!s.vet });
+    const av = createCharacter({ species: s.species, cls: s.cls, team: s.team, seed, isLocal: !npc, veteran: !!s.vet, squad: s.squad ?? null });
     av.root.position.set(s.x, 0, s.z);
     av.root.rotation.y = s.yaw;
     if (s.expr) av.setExpression(s.expr);
     if (P.get('bare') === '1') av.root.traverse((o) => { if (o.name.startsWith('weapon')) o.visible = false; }); // inspect the armour
+    if (maskMat) av.root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && !o.userData.styleInk) m.material = maskMat!; if (o.userData.styleInk) o.visible = false; });
     if (P.get('sil') === '1') {
       // Flat ink silhouettes (style-system material): judge class shapes without color or face detail.
       silMat ??= toon({ color: PALETTE.ink });
@@ -260,10 +297,10 @@ async function main(): Promise<void> {
     }
     scene.add(av.root);
     drivers.push(new Driver(av, s.anim, i * 0.9));
-    if (P.get('labels') !== '0' && (view === 'grid' || view === 'face' || view === 'action' || view === 'roster' || view === 'vets')) {
+    if (P.get('labels') !== '0' && (view === 'grid' || view === 'face' || view === 'action' || view === 'roster' || view === 'vets' || view === 'squads' || view === 'pve')) {
       const el = document.createElement('div');
       el.className = 'lbl';
-      el.textContent = `${s.vet ? (s.species === Species.Cat ? 'commander ' : 'sergeant ') : ''}${av.stats.variant} ${s.cls}${s.expr ? ' · ' + s.expr : s.anim !== 'idle' ? ' · ' + s.anim : ''}`;
+      el.textContent = `${s.vet ? (s.species === Species.Cat ? 'commander ' : 'sergeant ') : ''}${s.squad === 'alley' ? 'raider ' : s.squad === 'heavy' ? 'heavy ' : ''}${av.stats.variant} ${s.cls}${s.expr ? ' · ' + s.expr : s.anim !== 'idle' ? ' · ' + s.anim : ''}`;
       labelsEl.appendChild(el);
       tags.push({ el, av });
     }
@@ -284,6 +321,8 @@ async function main(): Promise<void> {
     // K2: the roster at ~5 m from a standing eye height (read as veterans at 5 m), the veterans, a head + chest close-up.
     case 'roster': if (only) setCam(0.25, 1.5, only === 'cat' ? -3.4 : -5.6, 0.25, 0.62, only === 'cat' ? 2.2 : -0.7, 52); else setCam(0.25, 4.2, -6.4, 0.25, 0.3, 0.9, 50); break;
     case 'vets': setCam(0, 1.2, -4.3, 0, 0.62, 0, 34); break;
+    case 'squads': setCam(0.25, 1.25, -5.6, 0.25, 0.62, 0, 38); break;
+    case 'pve': setCam(0, 1.3, -6.6, 0, 0.62, 0, 42); break;
     case 'closeup': setCam(-0.35, 1.02, -1.75, 0, 0.84, 0, 32); break;
     // Over-the-shoulder aim camera (third-person.ts: pivot +1.25 m, shoulder 0.75 m, 2.3 m back, fov 48).
     case 'ots': setCam(0.75, 1.3, 2.3, 0.75, 1.1, -20, 48); break;
@@ -305,6 +344,19 @@ async function main(): Promise<void> {
   let last = performance.now(), frames = 0, fpsT = last, fps = 0, rendered = 0;
   const v = new THREE.Vector3();
   const totalTris = drivers.reduce((a, d) => a + d.av.stats.triangles, 0);
+  // K3: screen boxes per character (CSS px) for the readability tools; the frame is frozen, so they are computed once.
+  camera.updateMatrixWorld();
+  const boxes = drivers.map((d, i) => {
+    const s = specs[i], r = d.av.root, h = d.av.height;
+    r.updateMatrixWorld(true);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [px, py, pz] of [[-0.55, -0.05, -0.55], [0.55, -0.05, 0.55], [-0.55, h + 0.25, 0.55], [0.55, h + 0.25, -0.55], [-0.55, h + 0.25, -0.55], [0.55, h + 0.25, 0.55], [-0.55, -0.05, 0.55], [0.55, -0.05, -0.55]]) {
+      v.set(px, py, pz).applyMatrix4(r.matrixWorld).project(camera);
+      const sx = ((v.x + 1) / 2) * innerWidth, sy = ((1 - v.y) / 2) * innerHeight;
+      x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+    }
+    return { x0, y0, x1, y1, species: s.species, team: s.team, cls: s.cls, squad: s.squad ?? null, vet: !!s.vet, tag: s.tag ?? '' };
+  });
   const maxDraws = Math.max(...drivers.map((d) => d.av.stats.drawCalls));
   renderer.setAnimationLoop(() => {
     const now = performance.now();
@@ -325,7 +377,7 @@ async function main(): Promise<void> {
     info.textContent = `character lab · view=${view} · ${ctx.backend} · ${fps.toFixed(0)} fps\n` +
       `${drivers.length} characters · ${npc ? 'NPC' : 'hero'} tier · ${totalTris} tris (≤ ${Math.max(...drivers.map((d) => d.av.stats.triangles))} each) · ≤ ${maxDraws} draws each\n` +
       `frame: ${inf.drawCalls ?? inf.calls ?? '?'} draw calls (incl. ink + shadow passes)` + (freeze ? ` · frozen at t=${P.get('t')}s` : '');
-    (globalThis as unknown as { __lab: unknown }).__lab = { ready: true, frames: rendered, characters: drivers.length, fps, scene, THREE, TSL };
+    (globalThis as unknown as { __lab: unknown }).__lab = { ready: true, frames: rendered, characters: drivers.length, fps, scene, THREE, TSL, boxes };
   });
 }
 

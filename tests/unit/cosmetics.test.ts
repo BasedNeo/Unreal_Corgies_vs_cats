@@ -18,7 +18,7 @@ describe('cosmetics content', () => {
     for (const c of COSMETICS) {
       expect(c.id).toMatch(/^[a-z0-9][a-z0-9_-]*$/); // the profile's id rule (P2)
       expect(c.id.length).toBeLessThanOrEqual(MAX_LOOK_ID_LEN);
-      expect(['coat', 'neck', 'taunt']).toContain(c.slot);
+      expect(['coat', 'neck', 'taunt', 'rank']).toContain(c.slot); // W9 K3: the rank slot
       expect(['corgi', 'cat', 'both']).toContain(c.species);
       expect(c.name.length).toBeGreaterThan(2);
       expect(unlockHint(c.unlock).length).toBeGreaterThan(4);
@@ -31,13 +31,13 @@ describe('cosmetics content', () => {
     for (const sp of SPECIES) {
       expect(cosmeticsFor(sp, 'neck').map((c) => c.id).sort()).toEqual(['neck_bandana', 'neck_bowtie', 'neck_nametag', 'neck_none', 'neck_spiked']);
       expect(cosmeticsFor(sp, 'taunt')).toHaveLength(5); // 4 per species + Base Assault's shared 'Fetch This!' (W9)
-      for (const slot of ['coat', 'neck', 'taunt'] as const) {
+      for (const slot of ['coat', 'neck', 'taunt', 'rank'] as const) {
         const defaults = cosmeticsFor(sp, slot).filter((c) => c.unlock.kind === 'default');
         expect(defaults.map((d) => d.id)).toEqual([defaultLook(sp)[slot]]);
       }
     }
-    expect(defaultLook(Species.Corgi)).toEqual({ coat: 'corgi_red', neck: 'neck_none', taunt: 'taunt_corgi_classic' });
-    expect(defaultLook(Species.Cat)).toEqual({ coat: 'cat_tabby', neck: 'neck_none', taunt: 'taunt_cat_classic' });
+    expect(defaultLook(Species.Corgi)).toEqual({ coat: 'corgi_red', neck: 'neck_none', taunt: 'taunt_corgi_classic', rank: 'rank_none' });
+    expect(defaultLook(Species.Cat)).toEqual({ coat: 'cat_tabby', neck: 'neck_none', taunt: 'taunt_cat_classic', rank: 'rank_none' });
   });
 
   it('spreads unlocks: a few levels 2–10, the gold paw of every chapter, the first win of every room mode', () => {
@@ -139,7 +139,7 @@ describe('sanitizeLook: untrusted input', () => {
   });
 
   it('resolveLook fills every slot with the species default', () => {
-    expect(resolveLook({ neck: 'neck_spiked', coat: 'nope' }, Species.Cat)).toEqual({ coat: 'cat_tabby', neck: 'neck_spiked', taunt: 'taunt_cat_classic' });
+    expect(resolveLook({ neck: 'neck_spiked', coat: 'nope' }, Species.Cat)).toEqual({ coat: 'cat_tabby', neck: 'neck_spiked', taunt: 'taunt_cat_classic', rank: 'rank_none' });
     expect(resolveLook('garbage', Species.Corgi)).toEqual(defaultLook(Species.Corgi));
   });
 });

@@ -1,10 +1,25 @@
-// Bot archetypes as data. PvE cat archetypes (grunt/sniper/brute/kitten) are spawned by the
-// yard-skirmish waves; team-fill bots (both species) get a profile from their class kit.
+// Bot archetypes as data. PvE cat archetypes (grunt/sniper/brute/kitten, and the W9 K3 squads alley_raider and
+// tabby_heavy) are spawned by the yard-skirmish waves; team-fill bots (both species) get a profile from their class kit.
 // Theme names only appear in `label` (used for bot names); behaviour is keyed by `id`.
+//
+// K3 squads (docs/handoff/K3.md): two enemy families that read at a glance and ask for different answers, with no new
+// player power.
+//   alley_raider  light, fast, flanking scrappers with low hp: they circle in close and strafe hard, so a player who
+//                 tunnels on the front line gets hit from the side (answer: turn, hold a corner, cover each other).
+//   tabby_heavy   slow, tanky shield-bearers that plant and suppress: a frontal guard (a bin-lid shield) takes part of
+//                 every hit from the front, and they turn slowly (answer: flank them, crossfire, explosives).
+// Their kits are drawn by the client from `kit` (squadKitFor: class + max hp, both already in every snapshot, so no
+// protocol field is needed); `guard` is read by one guarded line in combat/damage.ts (guardFactor).
 import type { ClassId } from '../../shared/types';
 import type { WeaponId } from '../../shared/content/weapons';
 
-export type ArchetypeId = 'grunt' | 'sniper' | 'brute' | 'kitten' | 'rifleman' | 'skirmisher' | 'marksman' | 'bomber' | 'guard' | 'raider';
+export type ArchetypeId =
+  | 'grunt' | 'sniper' | 'brute' | 'kitten' | 'alley_raider' | 'tabby_heavy'
+  | 'rifleman' | 'skirmisher' | 'marksman' | 'bomber' | 'guard' | 'raider';
+
+/** K3: squad kits the client draws for PvE archetypes (presentation only: a kit variant on the shared rig). */
+export type SquadKit = 'alley' | 'heavy';
+export const SQUAD_KITS: readonly SquadKit[] = ['alley', 'heavy'];
 
 export interface Archetype {
   id: ArchetypeId;
@@ -48,6 +63,13 @@ export interface Archetype {
   adsBeyond: number;
   /** 0..1 scale on the tactical rolls for the class ability (src/sim/ai/tactics.ts); PvE fodder uses less. */
   abilityUse: number;
+  /** K3: the squad kit the client draws (presentation only; needs a unique `hp` for its class, see squadKitFor). */
+  kit?: SquadKit;
+  /**
+   * K3 frontal guard (a shield): a hit from an attacker within `arc` (radians) of the facing deals `1 - reduce` of its
+   * damage (guardFactor, read by combat/damage.ts for PvE bots only).
+   */
+  guard?: { reduce: number; arc: number };
 }
 
 const DEG = Math.PI / 180;
@@ -85,6 +107,23 @@ export const ARCHETYPES: Record<ArchetypeId, Archetype> = {
     sightRange: 35, preferRange: [0, 1.2], burst: [3, 6], burstPause: [0.15, 0.3], strafe: 0.5, jumpRate: 0.6,
     retreatHp: 0, adsBeyond: Infinity, abilityUse: 0.35,
   },
+  // K3 alley-cat raiders: fast, fragile flankers with a sidearm. They close to pistol range and circle (full strafe,
+  // hops) rather than trade from the front; loose aim and short bursts with long pauses, so the threat is the angle,
+  // not the damage (up close a pistol lands far more often than a kitten's claw: qa-difficulty tuned). No cloak.
+  alley_raider: {
+    ...BASE, id: 'alley_raider', label: 'Alley Cat', cls: 'infiltrator', weapon: 'snap_pistol', hp: 60, speedMult: 1.15,
+    reaction: [0.45, 0.7], aimErr: 11 * DEG, aimErrMin: 3.4 * DEG, aimSettle: 1.3, turnRate: 7.5, aimLambda: 12,
+    sightRange: 40, fovHalf: 65 * DEG, preferRange: [5, 12], burst: [1, 2], burstPause: [0.6, 1.0], strafe: 1, jumpRate: 0.4,
+    retreatHp: 0, headChance: 0.03, adsBeyond: Infinity, abilityUse: 0, kit: 'alley',
+  },
+  // K3 tabby heavies: slow shield-bearers that plant and suppress with a repeater. The frontal guard takes 40 % of hits
+  // from within 55° of where they face; they turn slowly, so a flank or a crossfire gets full damage in.
+  tabby_heavy: {
+    ...BASE, id: 'tabby_heavy', label: 'Heavy', cls: 'assault', weapon: 'squeaker_rifle', hp: 180, speedMult: 0.78,
+    reaction: [0.5, 0.75], aimErr: 8 * DEG, aimErrMin: 2.4 * DEG, aimSettle: 1.2, turnRate: 3.2, aimLambda: 6,
+    sightRange: 45, preferRange: [9, 20], burst: [4, 8], burstPause: [0.5, 0.9], strafe: 0.12, jumpRate: 0,
+    retreatHp: 0, headChance: 0.05, adsBeyond: Infinity, abilityUse: 0.3, kit: 'heavy', guard: { reduce: 0.4, arc: 55 * DEG },
+  },
   // --- team-fill profiles (per class kit, either species; weapon = class primary) ---
   rifleman: { ...BASE, id: 'rifleman', label: 'Rifle', cls: 'assault' },
   skirmisher: { ...BASE, id: 'skirmisher', label: 'Scout', cls: 'infiltrator', jumpRate: 0.25, headChance: 0.2 },
@@ -101,4 +140,30 @@ const BY_CLASS: Record<ClassId, ArchetypeId> = {
 /** Behaviour profile for a team-fill bot carrying a class kit. */
 export function archetypeForClass(cls: ClassId | null): Archetype {
   return ARCHETYPES[BY_CLASS[cls ?? 'assault']];
+}
+
+/** PvE archetypes that carry a squad kit. */
+const SQUADS: readonly Archetype[] = Object.values(ARCHETYPES).filter((a) => a.kit && a.hp);
+
+/**
+ * K3: the squad kit to draw for a bot, from what every snapshot already carries (its class and max hp): a squad
+ * archetype's hp is unique for its class (no class, Upgrade Core or other archetype has it; tested), and PvE bots never
+ * take pickups or swap kits, so the kit never changes during a life. Null for everything else. Presentation only.
+ */
+export function squadKitFor(cls: ClassId | null | undefined, maxHp: number): SquadKit | null {
+  for (const a of SQUADS) if (a.cls === cls && a.hp === maxHp) return a.kit!;
+  return null;
+}
+
+/**
+ * K3 frontal guard: the damage multiplier for a hit on a bot of archetype `arch` at (x, z) facing `yaw` (0 = -Z) from an
+ * attacker at (ax, az): `1 - guard.reduce` when the attacker is within the guard arc of the facing, else 1 (and 1 for
+ * archetypes without a guard, unknown ids, or an attacker on top of it). Pure.
+ */
+export function guardFactor(arch: string | undefined, yaw: number, x: number, z: number, ax: number, az: number): number {
+  const g = arch && Object.prototype.hasOwnProperty.call(ARCHETYPES, arch) ? ARCHETYPES[arch as ArchetypeId].guard : undefined;
+  if (!g) return 1;
+  const dx = ax - x, dz = az - z, d = Math.hypot(dx, dz);
+  if (d < 1e-3) return 1;
+  return (-Math.sin(yaw) * dx - Math.cos(yaw) * dz) / d >= Math.cos(g.arc) ? 1 - g.reduce : 1;
 }
