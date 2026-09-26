@@ -115,7 +115,7 @@ describe('base-assault: bases', () => {
     }
   });
 
-  it('WorldData.bases wins over the E4 layout; The Lot (no bases yet) falls back to its spawn centroids', async () => {
+  it('WorldData.bases wins over the E4 layout; The Lot without bases falls back to its spawn centroids', async () => {
     const w = createWorldData(9, 'west_yard');
     w.bases = [{ team: 1, flag: [40, w.height(40, 60), 60], ballStand: [36, 0, 58] }, { team: 0, flag: [-30, w.height(-30, -60), -60], ballStand: [-26, 0, -58] }];
     const sim = await liveSim({}, { world: w });
@@ -123,7 +123,10 @@ describe('base-assault: bases', () => {
     expect([spot(sim, 0).flag.x, spot(sim, 0).stand.x, spot(sim, 1).flag.z, spot(sim, 1).stand.z]).toEqual([-30, -26, 60, 58]);
     expect(spot(sim, 1).stand.y).toBeCloseTo(surfaceAt(w, 36, 58, 1.5).y, 6); // settled on what is under the point
 
-    const lot = await liveSim({}, { map: 'the_lot' });
+    // (W9 L3 gives The Lot its own WorldData.bases: the fallback is tested on The Lot with them taken out)
+    const lw = createWorldData(9, 'the_lot');
+    delete lw.bases;
+    const lot = await liveSim({}, { world: lw });
     const g = navGridFor(lot);
     for (const t of [0, 1] as const) {
       const s = spot(lot, t);

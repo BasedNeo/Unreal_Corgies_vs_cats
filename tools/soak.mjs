@@ -7,7 +7,8 @@
 //
 //   npx tsx tools/soak.mjs                      # 60 s per mode, soak match config (a full match fits in 60 s)
 //   npx tsx tools/soak.mjs --seconds 300 --full # shipping match config, longer
-//   options: --modes yard-skirmish,team-deathmatch,core-rush (+ boss-rush,adventure: completion not required)  --seed 1  --no-netbot  --repeat 3  --json artifacts/soak.json
+//   options: --modes yard-skirmish,team-deathmatch,core-rush,base-assault (+ boss-rush,adventure: completion not required)  --seed 1  --no-netbot  --repeat 3  --json artifacts/soak.json
+//            --map the_lot (default: the West Yard)
 // Adventure always runs bot-only (a squad of four pups): with a "human" in the squad the reach steps wait for that
 // human, and the net-bot is a combat brain that never walks to one (Q2 P2-8).
 // Snapshot bandwidth is measured at wire size (the server's delta SnapEncoder, JSON text); raw JSON is reported too.
@@ -39,7 +40,8 @@ const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 const SECONDS = Number(opt('seconds', 60));
 const SEED = Number(opt('seed', 1));
-const MODES = opt('modes', 'yard-skirmish,team-deathmatch,core-rush').split(',');
+const MODES = opt('modes', 'yard-skirmish,team-deathmatch,core-rush,base-assault').split(',');
+const MAP = opt('map', '');
 const FULL = argv.includes('--full');
 const NETBOT = !argv.includes('--no-netbot');
 const OUT = opt('json', 'artifacts/soak.json');
@@ -57,6 +59,8 @@ const SOAK_CONFIG = {
   } },
   'team-deathmatch': { tdm: { warmup: 3, killLimit: 12, timeLimit: 45, endedHold: 5 } },
   'core-rush': { coreRush: { warmup: 3, scoreLimit: 40, timeLimit: 45, endedHold: 5 } },
+  // G4b: a capture takes a bot squad 40-120 s on the West Yard, so a 60 s soak ends its match at the horn
+  'base-assault': { baseAssault: { warmup: 3, timeLimit: 45, endedHold: 5 } },
 };
 /** Bot lineups (after the net-bot, which plays an assault corgi): every class kit and both species. */
 const LINEUP = {
@@ -66,6 +70,8 @@ const LINEUP = {
     [Team.Cats, 'assault'], [Team.Cats, 'overwatch'], [Team.Cats, 'breacher'], [Team.Cats, 'warden']],
   'core-rush': [[Team.Corgis, 'skyraider'], [Team.Corgis, 'breacher'], [Team.Corgis, 'warden'],
     [Team.Cats, 'assault'], [Team.Cats, 'skyraider'], [Team.Cats, 'breacher'], [Team.Cats, 'warden']],
+  'base-assault': [[Team.Corgis, 'infiltrator'], [Team.Corgis, 'overwatch'], [Team.Corgis, 'assault'],
+    [Team.Cats, 'assault'], [Team.Cats, 'infiltrator'], [Team.Cats, 'overwatch'], [Team.Cats, 'assault']],
   // the squad of four pups (plus the bot that stands in for the net-bot); the chapter re-kits them and brings the cats
   adventure: [[Team.Corgis, 'assault'], [Team.Corgis, 'assault'], [Team.Corgis, 'assault']],
 };
@@ -91,7 +97,7 @@ function heapTrend(h) {
 }
 
 async function soakMode(mode) {
-  const sim = await Sim.create({ seed: SEED });
+  const sim = await Sim.create({ seed: SEED, ...(MAP ? { map: MAP } : {}) });
   const room = new Room(sim, { mode, botsPerTeam: [0, 0] });
   if (!FULL) sim.state.matchConfig = SOAK_CONFIG[mode];
   // per-system CPU cost (diagnostic: reaches into the Sim's system list at runtime)
@@ -128,7 +134,7 @@ async function soakMode(mode) {
       else if (e.e === 'explode') T.explosions++;
       else if (e.e === 'ability') T.abilities++;
       else if (e.e === 'reload') T.reloads++;
-      else if (e.e === 'score' && (e.reason === 'wave' || e.reason === 'win')) T.drama.push(sim.tick);
+      else if (e.e === 'score' && (e.reason === 'wave' || e.reason === 'win' || e.reason === 'captured' || e.reason === 'ball taken')) T.drama.push(sim.tick);
       for (const k in e) if (typeof e[k] === 'number' && !Number.isFinite(e[k])) T.errors.push(`non-finite ${k} in ${e.e} event`);
     }
     return evs;
@@ -310,7 +316,7 @@ for (const s of sessions) {
   if (!FULL && !s.completed && !OPEN_ENDED.has(s.mode)) fails.push(`${s.mode}: no match completed in ${s.durationSec}s`);
 }
 mkdirSync(dirname(OUT), { recursive: true });
-writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), seed: SEED, seconds: SECONDS, full: FULL, netbot: NETBOT, machine: { cores, load: [r2(load0), r2(load1)] }, sessions }, null, 2));
+writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), seed: SEED, map: MAP || 'west_yard', seconds: SECONDS, full: FULL, netbot: NETBOT, machine: { cores, load: [r2(load0), r2(load1)] }, sessions }, null, 2));
 
 for (const s of sessions) {
   const sc = s.score;

@@ -1,9 +1,9 @@
 // W9 G4a acceptance 2: Base Assault is playable end to end offline. An in-process Room (the same Room + Sim the worker
 // runs for ?mode=base-assault) with a human against bots (4 v 4 with the human): the scripted human sends real input
-// messages, runs to the cat base, steals the ball, carries it home (slowed), captures, three times, and wins. The bots
-// fight as in a deathmatch but don't play the objective yet (G4b). The human is kept on its feet: this test is about the
-// objective pipeline (inputs → movement → pickup → carry → capture → score → win → restart), not the gunfight; the
-// knockout drop has its own tests (base-assault.test.ts).
+// messages, runs to the cat base, steals the ball, carries it home (slowed), captures, three times, and wins. Since G4b
+// the bots play the objective too, so a corgi bot may make one of the captures: the human must make at least two. The
+// human is kept on its feet: this test is about the objective pipeline (inputs → movement → pickup → carry → capture →
+// score → win → restart), not the gunfight; the knockout drop has its own tests (base-assault.test.ts).
 import { describe, it, expect } from 'vitest';
 import { Sim } from '../../src/sim/sim';
 import { Room } from '../../src/host/room';
@@ -29,7 +29,7 @@ describe('base-assault in a Room: a human vs bots, steal → carry → capture �
     const g = navGridFor(sim);
     const path: number[] = [];
     let seq = 0, replanAt = 0, goalKey = '', lastPos = { x: 0, z: 0 }, stuckTicks = 0;
-    let carryTicks = 0, carryDist = 0, runTicks = 0, runDist = 0;
+    let carryTicks = 0, carryDist = 0, runTicks = 0, runDist = 0, humanCaps = 0;
     const match = (): MatchState => room.match;
     for (let k = 0; k < TICK_HZ * 400 && match().phase !== 'ended'; k++) {
       const h = sim.entities.get(slot.entity)!;
@@ -63,7 +63,9 @@ describe('base-assault in a Room: a human vs bots, steal → carry → capture �
       }
       lastPos = { x: h.pos.x, z: h.pos.z };
       room.handle(slot.pid, { t: 'input', cmds: [{ seq: ++seq, mx, mz, yaw, pitch: 0, buttons, rt: Math.max(0, sim.tick - 6) }] });
+      const scored = match().score[Team.Corgis];
       room.tick();
+      if (carrying && match().score[Team.Corgis] > scored) humanCaps++; // G4b: this capture was the human's own
       const bad = checkBallInvariants(sim);
       if (bad.length) throw new Error(`tick ${sim.tick}: ${bad.join('; ')}`);
     }
@@ -80,7 +82,8 @@ describe('base-assault in a Room: a human vs bots, steal → carry → capture �
     expect(reasons.filter((e) => e.reason === BA_REASON.taken && e.team === Team.Corgis).length).toBeGreaterThanOrEqual(3);
     expect(events.some((e) => e.e === 'pickup' && e.id === slot.entity)).toBe(true);
     // the roster credits the capturer; the snapshot carried the balls to the client
-    expect(slot.score).toBeGreaterThanOrEqual(30);
+    expect(humanCaps).toBeGreaterThanOrEqual(2);
+    expect(slot.score).toBeGreaterThanOrEqual(10 * humanCaps);
     const last = snaps[snaps.length - 1];
     expect(last.ents.filter((a) => a[1] === EntityKind.Prop && a[5] === BA_BALL_SEED)).toHaveLength(2);
     // carrying was slower on the same kind of ground (per-tick sprint speed, grounded)

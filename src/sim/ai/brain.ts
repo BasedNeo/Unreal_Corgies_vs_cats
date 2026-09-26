@@ -49,6 +49,9 @@ import {
   abilityIntent, buddyInTrouble, createTactics, objectiveInteract, pushBand, raiderAir, skipGoal, updateObjectiveGoal, type TacticsState,
   vehicleThink,
 } from './tactics';
+import { CARRIER_FOCUS, ballRunIgnores } from './base-assault-ai';
+import { createOrdnanceBot, makeIntent, ordnanceBotThink, type OrdnanceBot, type OrdnanceIntent } from './ordnance-ai'; // W9 X4 hook
+import { ordnanceArcWorld } from '../combat/ordnance'; // W9 X4 hook
 
 export type AiMode = 'patrol' | 'alert' | 'engage' | 'cover' | 'regroup';
 
@@ -111,6 +114,8 @@ export interface AiState {
   perch: PerchGoal | null;
   /** Next tick a marksman room bot looks for a perch. */
   perchNext: number;
+  /** W9 X4 hook: the throw sequencer (ordnance-ai.ts), its per-tick intent, and the enemies perceived this pass. */
+  ord: OrdnanceBot; ordIntent: OrdnanceIntent; seen: SimEntity[];
 }
 
 /** N1: a spot a bot climbs to and holds (feet position, facing yaw). */
@@ -156,6 +161,7 @@ export function createBrain(arch: ArchetypeId, yaw: number): AiState {
     out: { seq: 0, mx: 0, mz: 0, yaw, pitch: 0, buttons: 0, rt: 0 },
     tac: createTactics(),
     pathGrid: null, nav: createNavBot(), perch: null, perchNext: 0,
+    ord: createOrdnanceBot(0), ordIntent: makeIntent(), seen: [], // W9 X4 hook
   };
 }
 
@@ -173,6 +179,7 @@ export function applyArchetype(e: SimEntity, id: ArchetypeId, opts: { external?:
     e.char.move = { ...m, walkSpeed: m.walkSpeed * a.speedMult, runSpeed: m.runSpeed * a.speedMult, sprintSpeed: m.sprintSpeed * a.speedMult };
   }
   e.ai = createBrain(id, e.yaw);
+  e.ai.ord = createOrdnanceBot(e.id); // W9 X4 hook: re-plans staggered by id
   e.ai.lastX = e.pos.x; e.ai.lastZ = e.pos.z;
   e.ai.external = !!opts.external;
 }
@@ -205,6 +212,7 @@ function perceive(sim: Sim, e: SimEntity, ai: AiState, a: Archetype, ctx: AiCont
   const attacker = e.health && sim.tick - e.health.lastDamageTick < 120 ? e.health.lastAttacker : -1;
   let best: SimEntity | null = null, bestScore = Infinity;
   const sight = a.sightRange * weatherSightMult(sim);
+  ai.seen.length = 0; // W9 X4 hook
   for (const t of ctx.chars) {
     if (t.team === e.team || t === e) continue;
     const dx = t.pos.x - ex, dz = t.pos.z - ez;
@@ -219,7 +227,8 @@ function perceive(sim: Sim, e: SimEntity, ai: AiState, a: Archetype, ctx: AiCont
     const h = characterHeight(t);
     const pass = friendlyShotPass(sim, e.team); // bots see (and so shoot) through their own team's barriers
     if (!worldLineClear(sim, ex, ey, ez, t.pos.x, t.pos.y + h * 0.55, t.pos.z, pass) && !worldLineClear(sim, ex, ey, ez, t.pos.x, t.pos.y + h * 0.9, t.pos.z, pass)) continue;
-    const score = dist - (tracking ? 10 : 0) - (t.id === attacker ? 8 : 0);
+    ai.seen.push(t); // W9 X4 hook: every enemy it perceives (throws only at pets it can see)
+    const score = dist - (tracking ? 10 : 0) - (t.id === attacker ? 8 : 0) - (t.flags & EFlag.Carrier ? CARRIER_FOCUS : 0); // G4b
     if (score < bestScore) { bestScore = score; best = t; }
   }
   if (best) {
@@ -683,14 +692,17 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   /** On its way to a perch it holds (not paused): it keeps going instead of chasing or investigating. */
   const perchBound = !perched && !!ai.perch && sim.tick >= ai.perch.pauseUntil && !ai.tac.goal;
   const hg = hereGrid(sim, e, ai, g);   // the grid under the bot (a deck while up on one) for strafe/back-off checks
-  switch (ai.mode) {
+  // G4b: a ball run (a carrier going home, a push for the enemy ball, a return) keeps running through fights and noises
+  const ballRun = ai.mode !== 'patrol' && ai.tac.goal === 'ball' && !!ai.tac.ba?.rush;
+  if (ballRun) { steerTo(sim, e, ai, ctx, ai.tac.gx, ai.tac.gz, true, ai.tac.gy); mv.sprint = true; if (mv.x || mv.z) lookYaw = Math.atan2(-mv.x, -mv.z); }
+  else switch (ai.mode) {
     case 'patrol': {
       const t = ai.tac;
       if (t.goal) {
         // objective / Upgrade Core: walk there (straight in over the last few meters to a core), interact, hold
         // (N1: t.gy on a deck — a roof zone, the Rooftop Hangar — climbs there; with no route it walks below, as before)
         const d = steerTo(sim, e, ai, ctx, t.gx, t.gz, false, t.goal === 'post' ? NaN : t.gy);
-        if (t.goal === 'core' && d < 4.5 && d > 0.2) { mv.x = (t.gx - e.pos.x) / d; mv.z = (t.gz - e.pos.z) / d; }
+        if ((t.goal === 'core' || t.goal === 'ball') && d < 4.5 && d > 0.2) { mv.x = (t.gx - e.pos.x) / d; mv.z = (t.gz - e.pos.z) / d; }
         if (t.goal === 'step' && t.interact && d < 1.5) {
           // from the closest walkable cell, straight in until the point is in reach
           const dc = Math.hypot(t.cx - e.pos.x, t.cz - e.pos.z);
@@ -917,9 +929,9 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   }
 
   // ---- aim + trigger
-  if (target && (ai.visible || sim.tick - ai.lastSeenTick < 20) && ai.mode !== 'cover') {
+  if (target && (ai.visible || sim.tick - ai.lastSeenTick < 20) && ai.mode !== 'cover' && !ballRunIgnores(e, ai.tac, target, mv.x, mv.z)) {
     const tdist = Math.hypot(target.pos.x - e.pos.x, target.pos.z - e.pos.z);
-    aiming = (tdist > a.adsBeyond || a.telegraph > 0) && !pushBand(sim, ai.tac) && !onLink; // a push runs in, hip-firing; a hop runs at run speed
+    aiming = (tdist > a.adsBeyond || a.telegraph > 0) && !pushBand(sim, ai.tac) && !onLink && !ballRun; // a push (or G4b ball run) runs in, hip-firing; a hop runs at run speed
     const shoulder = e.ownerPid === null ? 0 : aiming ? AIM_RAY.shoulderAim : AIM_RAY.shoulderHip;
     const ia = idealAim(e, target, def, a, ai.aimHead, shoulder);
     ai.errTimer -= dt;
@@ -956,6 +968,18 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   }
   if (aiming && a.telegraph === 0) mv.sprint = false;
   if (aiming) buttons |= Btn.Aim;
+
+  // ---- W9 X4 hook: throwables at clusters (ordnance-ai.ts). Room bots only: never wave or chapter cats, never in
+  //      adventure, never a player stand-in. A ball carrier never stops to throw (G4b): its wind-up is dropped.
+  if (e.flags & EFlag.Carrier) ai.ord.phase = 'idle';
+  else if (e.kind === EntityKind.Bot && !e.combat?.pve && (sim.state.room as { mode?: string } | undefined)?.mode !== 'adventure') {
+    const oi = ordnanceBotThink(ai.ord, e, sim.tick, ai.yaw, ai.pitch, ai.seen, ctx.chars, ordnanceArcWorld(sim), ai.ordIntent);
+    if (oi.active) {
+      if (oi.buttons) turnToward(ai, a, oi.yaw, oi.pitch, dt, 1.5); // the wind-up: turn to the throw, Throw held
+      else { ai.yaw = oi.yaw; ai.pitch = oi.pitch; }                   // the release: exactly the solved angles
+      buttons = (buttons & ~(Btn.Fire | Btn.Aim)) | oi.buttons;
+    }
+  }
 
   // ---- write the input (camera frame: mx right, mz forward relative to the aim yaw)
   const sy = Math.sin(ai.yaw), cy = Math.cos(ai.yaw);
@@ -1082,7 +1106,7 @@ function propShot(sim: Sim, e: SimEntity, ai: AiState, a: Archetype, def: Weapon
  * drifted out, and drop any move component that would carry it out.
  */
 function holdZone(e: SimEntity, t: TacticsState): void {
-  if (t.goal !== 'step' || !t.hold) return;
+  if ((t.goal !== 'step' && t.goal !== 'ball') || !t.hold) return;
   const ox = e.pos.x - t.cx, oz = e.pos.z - t.cz;
   const d = Math.hypot(ox, oz);
   if (d > t.gr + 14) return; // far away (just respawned): fight normally on the way

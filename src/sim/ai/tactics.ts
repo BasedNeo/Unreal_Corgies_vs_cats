@@ -74,6 +74,7 @@ import {
 import type { Archetype } from './archetypes';
 import { type NavGrid, cellX, cellZ, findPath, isWalkable, lineWalkable, nearestWalkable, randomCell } from './nav';
 import { canReach } from './nav-links';
+import { BALL_HELP, ballTrip, baseAssaultGoal, isCarrier, type BaBot } from './base-assault-ai';
 
 export interface TacticsState {
   /** No ability press before this tick (after a press, refused or not). */
@@ -94,7 +95,7 @@ export interface TacticsState {
   /** Skyraider: next deliberate hop; the tick the current hop started. */
   hopAt: number;
   /** Objective/core goal (kind '' = none; 'post' = an adventure sentry's waypoint), re-evaluated every ~0.5 s. */
-  goal: '' | 'core' | 'step' | 'post';
+  goal: '' | 'core' | 'step' | 'post' | 'ball'; // G4b: 'ball' = a base-assault role goal (base-assault-ai.ts)
   gx: number; gz: number; gy: number; gr: number;
   /** Objective step: the zone/point center (gx/gz is the bot's own spot in a hold zone). */
   cx: number; cz: number;
@@ -130,6 +131,8 @@ export interface TacticsState {
   glide: boolean;
   /** B2a: boarding and driving vehicles (vehicleThink). */
   ride: RideState;
+  /** G4b: the bot's base-assault role and ball run (base-assault-ai.ts); unset outside that mode. */
+  ba?: BaBot;
 }
 
 /** B2a: a bot's trip by vehicle (see vehicleThink). Plain data. */
@@ -433,7 +436,7 @@ export function buddyInTrouble(sim: Sim, e: SimEntity, chars: SimEntity[]): SimE
   for (const c of chars) {
     if (c.team !== e.team || c === e || c.kind !== EntityKind.Player || c.dead || !c.health) continue;
     if (sim.tick - c.health.lastDamageTick > 180) continue;
-    if (Math.hypot(c.pos.x - e.pos.x, c.pos.z - e.pos.z) < 90) return c;
+    if (Math.hypot(c.pos.x - e.pos.x, c.pos.z - e.pos.z) < (e.ai?.tac.goal === 'ball' ? BALL_HELP : 90)) return c; // G4b: roles first
   }
   return null;
 }
@@ -486,6 +489,7 @@ export function updateObjectiveGoal(sim: Sim, e: SimEntity, t: TacticsState, g: 
   t.kiosk = false; t.destroy = false; t.walk = false; t.prop = -1; t.vehicle = false; t.plane = false; t.glide = false;
   if (isAdventureMode(sim)) { adventureGoal(sim, e, t, g, chars, prev, prevId); return; }
   if (e.combat?.pve || e.kind !== EntityKind.Bot) return;
+  if (roomModeOf(sim) === 'base-assault') { baseAssaultGoal(sim, e, t, g, chars, prev, prevId); return; } // G4b: roles + ball runs
   const hpFrac = e.health ? e.health.hp / e.health.max : 1;
   const buddy = buddyInTrouble(sim, e, chars) !== null;
   if (!buddy && planeGoal(sim, e, t, chars, prev, prevId)) return; // B2b: the team's pilot heads for the Rooftop Hangar
@@ -832,6 +836,7 @@ function objectiveTrip(sim: Sim, t: TacticsState): Trip | null {
     return trip;
   }
   if (t.goal === 'core') { trip.x = t.gx; trip.z = t.gz; trip.r = 6; trip.stay = false; trip.calm = false; return trip; }
+  if (t.goal === 'ball') return ballTrip(t, trip) ? trip : null; // G4b: to the enemy ball, a far post (never carriers, escorts)
   return null;
 }
 
@@ -1297,6 +1302,7 @@ export function vehicleThink(sim: Sim, e: SimEntity, ai: VehicleBrain, ctx: Vehi
     r.phase = 'leap'; r.leap = 0; r.since = sim.tick; // B2b: at the launch spot: off the edge into a glide
   }
   if (r.phase === 'leap') return leapTick(sim, e, ai, inp);
+  if (isCarrier(e)) { if (r.phase === 'board') endRide(sim, e, ai, 1); return false; } // G4b: carriers can't mount
   // Q3 P2-2: no ride or sortie in the result hold (the restart would clear it, or it lands in the next match)
   if (matchEnded(sim)) { if (r.phase === 'board') endRide(sim, e, ai, 1); return false; }
   if (r.phase === 'idle' && sim.tick >= r.evalAt && !hangarBoard(sim, e, ai, ctx.chars)) considerBoarding(sim, e, ai, ctx.grid, ctx.chars);

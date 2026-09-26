@@ -46,7 +46,10 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
   combat/ordnance.ts               W9 X4 throwables (order 455 flight + blast, 805 lifecycle): one carried (EFlag.Ordnance),
                                    launched from the sim's own aim on the Throw release; one integrator step shared with the
                                    client preview (shared/content/ordnance.ts); interact/ordnance-kiosk.ts restock;
-                                   ai/ordnance-ai.ts a pure bot throw planner (wired into brain.ts after G4b)
+                                   ai/ordnance-ai.ts a pure bot throw planner (brain.ts think: room bots, never carriers)
+  ai/base-assault-ai.ts            W9 G4b base-assault roles per team (attack via a rally point, carry, escort, defend,
+                                   return, chase), re-planned every 0.5 s with hysteresis; goal kind 'ball' in tactics.ts;
+                                   the ball-run override in brain.ts sits above the HFSM modes
   match/core-rush.ts               core-rush: fair Core Pad placement, capture, hold scoring (EntityKind.Zone)
   match/base-assault.ts            W9 G4a base-assault: a ball, stand and capture ring per team (props in the snapshot),
                                    steal / carry (EFlag.Carrier: 0.75× speed, no glide, no rides) / drop / return /
