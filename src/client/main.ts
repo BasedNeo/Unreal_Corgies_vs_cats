@@ -25,6 +25,7 @@ import { createThirdPersonCamera } from './camera/third-person';
 import { createHud } from './ui/hud';
 import { createFx } from './fx';
 import { createAudio } from './audio';
+import { createHitFeedback } from './ui/hit-feedback'; // X3
 import { createWeatherAudio } from './audio/weather';
 import { Nameplates } from './views/nameplates';
 import { BossBar } from './views/boss-bar';
@@ -139,7 +140,9 @@ async function main(): Promise<void> {
   const nameplates = new Nameplates(ui);
   const audio = createAudio();
   const weatherAudio = createWeatherAudio(audio.engine, worldData);
-  const fx = createFx(ctx.scene, ctx.camera, views, { heightAt: (x, z) => worldData.height(x, z) });
+  // X3: FX + audio know the world, so impacts classify by surface (metal, wood, water…) and mark props, not just terrain
+  const fx = createFx(ctx.scene, ctx.camera, views, { heightAt: (x, z) => worldData.height(x, z), world: worldData });
+  audio.setWorld(worldData);
   const applySettings = (st: Settings) => {
     input.sensitivity = 0.0022 * st.sensitivity;
     input.invertY = st.invertY;
@@ -187,6 +190,7 @@ async function main(): Promise<void> {
     // U2/N2: a LOCKER equip mid-session reaches the authority; worn from that species' next spawn
     setLook: (species, look) => { net?.transport.send({ t: 'look', species, look }); },
   }, { match: mode, map: mapId });
+  const hitFx = createHitFeedback(ui); // X3: one hitmarker (white hit, gold crit, red kill)
   hud.setUiSound((k) => audio.ui(k));
   const prompts = createInteractPrompts(ui, { send: (msg) => net?.transport.send(msg), sound: (k) => audio.ui(k) });
   const planeHud = createPlaneHud(ui);
@@ -258,8 +262,11 @@ async function main(): Promise<void> {
     prompts.onGameEvent(ev, net?.localEntity ?? -1);
     const r = fx.onGameEvent(ev);
     if (r.shake > 0) cam.shake(r.shake);
+    if (r.kickPitch !== 0 || r.kickYaw !== 0) cam.kick(r.kickPitch, r.kickYaw, r.kickRecover); // X3: visual recoil (view only)
+    if (r.fovPunch > 0) cam.punch(r.fovPunch); // X3: kill / crit confirm
     audio.onGameEvent(ev);
     hud.onGameEvent(ev);
+    hitFx.onGameEvent(ev, net?.localEntity ?? -1); // X3: the hitmarker
     tally.onEvent(ev, net?.localEntity ?? -1); // P2
   });
 
@@ -373,6 +380,7 @@ async function main(): Promise<void> {
     debug.ready = !!local && debug.frames > 5;
     if ((local || !net) && debug.frames > 2) hideLoading();
     hud.update({ cueUp, local, match: net?.match ?? null, roster: net?.roster ?? [], fps: debug.fps, rttMs: net?.stats.rttMs ?? 0, locked: input.locked || params.has('autoplay') || !net, backend: ctx.backend, transport: transport?.kind ?? 'none', states });
+    hitFx.update();
   });
 }
 

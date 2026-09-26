@@ -17,7 +17,9 @@ import { Music } from './music';
 import { speak } from './gibberish';
 import * as S from './presets';
 import { VehicleLoops } from './vehicle-loops';
-import { WeaponTable, type WeaponFxId } from '../fx/weapon-fx';
+import { WeaponTable, WEAPON_FX, type WeaponFxId } from '../fx/weapon-fx';
+import { SurfaceMap, makeSurfaceHit, type SurfaceWorld } from '../fx/surfaces';
+import { impactDelay } from '../fx/delays';
 
 /** Class ability → recipe (bark blast also barks; see the 'ability' case). */
 const ABILITY_SFX: Record<string, S.Recipe> = {
@@ -95,15 +97,27 @@ export interface GameAudio {
   setWeaponIds(ids: readonly string[]): void;
   /** 'low' switches spatialization to equal-power panning (cheaper than HRTF). */
   setQuality(q: 'low' | 'medium' | 'high'): void;
+  /** X3: the world, so bullet impacts sound like what they hit (ricochet off metal, thock on wood, splash). */
+  setWorld(world: SurfaceWorld | null): void;
   /** Current combat intensity (0..1). */
   readonly intensity: number;
   dispose(): void;
 }
 
+/** X3: HARDENED reports per weapon (the L5 toy voices — squeakPew, snap, laserZap... — stay exported for labs). */
 const FIRE: Record<WeaponFxId, S.Recipe> = {
-  squeaker_rifle: S.squeakPew, snap_pistol: S.snap, laser_longshot: S.laserZap, tennis_mortar: S.mortarThunk,
-  sprinkler_cannon: S.sprinkler, frisbee_launcher: S.whoosh, unknown: S.squeakPew,
+  squeaker_rifle: S.rifleShot, snap_pistol: S.pistolShot, laser_longshot: S.sniperShot, tennis_mortar: S.mortarShot,
+  sprinkler_cannon: S.shotgunBlast, frisbee_launcher: S.discLaunch, claw_swipe: S.whoosh, unknown: S.rifleShot,
 };
+/** Play gains (local, remote), set from offline renders (docs/handoff/X3.md §5): rifle ≈ −19 dB (100 ms RMS), level
+ *  with a thwack; sniper, shotgun, mortar 3–5 dB over it; the suppressed pistol 3 dB under; an explosion stays loudest. */
+const FIRE_GAIN: Record<WeaponFxId, [number, number]> = {
+  squeaker_rifle: [0.6, 0.8], snap_pistol: [0.45, 0.6], laser_longshot: [0.7, 1], tennis_mortar: [0.52, 0.7],
+  sprinkler_cannon: [0.62, 0.85], frisbee_launcher: [1, 1], claw_swipe: [0.5, 0.6], unknown: [0.6, 0.8],
+};
+/** Bullet impacts are texture: only near the listener, and at most one every 45 ms. */
+const IMPACT_RANGE = 26;
+const IMPACT_GAP = 0.045;
 
 export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; music?: boolean } = {}): GameAudio {
   const engine = new AudioEngine(opts.maxVoices ?? 28);
@@ -117,6 +131,9 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
   const stepPhase = new Map<number, number>();
   let clock = 0;
   let loops: VehicleLoops | null = null;
+  const surfaces = new SurfaceMap(null);
+  const sHit = makeSurfaceHit();
+  let impactAt = -1;
   // Adventure stingers: the last step of a chapter lands on the same tick as 'chapter' (+ 'win'), so the step
   // jingle waits one frame (it is dropped if the fanfare comes), and the fanfare mutes the team sting while it plays.
   let pendingStep = false;
@@ -208,19 +225,38 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
       switch (ev.e) {
         case 'fire': {
           const w = weapons.id(ev.wpn);
-          engine.play(FIRE[w], ev.id === localId ? { gain: 0.75, priority: 2, category: 'fire' } : { x: ev.x, y: ev.y, z: ev.z, gain: 0.9, priority: 1, category: 'fire', maxDist: 70, refDist: 4 });
+          const g = FIRE_GAIN[w];
+          const mine = ev.id === localId;
+          engine.play(FIRE[w], mine ? { gain: g[0], priority: 2, category: 'fire' } : { x: ev.x, y: ev.y, z: ev.z, gain: g[1], priority: 1, category: 'fire', maxDist: 80, refDist: 4 });
+          const fx = WEAPON_FX[w];
+          // brass on the ground: your own gun only (everyone's would be noise)
+          if (mine && fx.casing !== 'none') engine.play(S.brassTinkle, { k: fx.casing === 'shell' ? 1 : 0, gain: 0.5, priority: 0, category: 'foot' });
+          // the bullet's impact, by surface (hitscan misses that land near you)
+          if (ev.hit === -1 && (fx.tracer === 'bullet' || fx.tracer === 'laser' || fx.tracer === 'water') && clock - impactAt >= IMPACT_GAP
+            && engine.distanceTo(ev.hx, ev.hy, ev.hz) < IMPACT_RANGE) {
+            impactAt = clock;
+            surfaces.classify(ev.hx, ev.hy, ev.hz, ev.dx, ev.dy, ev.dz, sHit);
+            // lands with the visible impact (fx impactDelay: the tracer's flight / the spray's arc)
+            const ddx = ev.hx - ev.x, ddy = ev.hy - ev.y, ddz = ev.hz - ev.z;
+            const delay = impactDelay(fx.tracer, Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz));
+            engine.play(S.impactSfx, { x: ev.hx, y: ev.hy, z: ev.hz, k: sHit.kind, gain: fx.klass === 'sniper' ? 0.9 : 0.55, priority: 0, category: 'impact', maxDist: IMPACT_RANGE, refDist: 2.5, delay });
+          }
           break;
         }
         case 'hit': {
           engine.play(S.thwack, ev.dst === localId ? { k: ev.crit ? 1 : 0, gain: 0.9, priority: 3, category: 'hit' } : { x: ev.x, y: ev.y, z: ev.z, k: ev.crit ? 1 : 0, priority: 1, category: 'hit' });
-          if (ev.src === localId && ev.dst !== localId) engine.play(S.hitTick, { bus: 'ui', k: ev.crit ? 1 : 0, gain: 0.8, priority: 3, category: 'ui' });
+          // X3: the shooter's confirmation is a body thud under the tick (same frame as the hitmarker)
+          if (ev.src === localId && ev.dst !== localId) engine.play(S.hitThud, { bus: 'ui', k: ev.crit ? 1 : 0, gain: 0.75, priority: 3, category: 'ui' });
           break;
         }
         case 'death': {
           const cat = speciesOf(ev.id) === Species.Cat;
           engine.play(S.poof, at(ev.id, { priority: 2, category: 'impact' }));
           engine.play(cat ? S.meow : S.yelp, at(ev.id, { k: 2, gain: 0.7, priority: 1, category: 'voice' }));
-          if (ev.by === localId && ev.id !== localId) engine.play(S.sting, { bus: 'ui', k: 0, priority: 3, category: 'ui' });
+          if (ev.by === localId && ev.id !== localId) {
+            engine.play(S.hitThud, { bus: 'ui', k: 2, gain: 0.8, priority: 3, category: 'ui' }); // X3: the kill thump
+            engine.play(S.sting, { bus: 'ui', k: 0, priority: 3, category: 'ui' });
+          }
           if (ev.id === localId) engine.play(S.sting, { bus: 'ui', k: 3, gain: 0.8, priority: 3, category: 'ui' });
           break;
         }
@@ -293,6 +329,7 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
     },
     setWeaponIds(ids) { weapons.set(ids); },
     setQuality(q) { engine.panningModel = q === 'low' ? 'equalpower' : 'HRTF'; },
+    setWorld(world) { surfaces.setWorld(world); },
     dispose() { music?.stop(); loops?.dispose(); loops = null; engine.dispose(); },
   };
   return audio;

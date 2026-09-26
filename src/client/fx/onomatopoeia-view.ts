@@ -35,12 +35,14 @@ const STYLE: Record<Word, WordStyle> = {
   'CRASH!': { top: '#fff2c0', bottom: '#e0823a', burst: '#ffd04a' },
   'CLANG!': { top: '#eef6ff', bottom: '#6fa8d8', burst: '#ffd04a' },
   'CRUNCH!': { top: '#ffe9b8', bottom: '#b9803e' },
+  // X3: the pet hit read (gritty: warm paper over oxblood)
+  'THWACK!': { top: '#fff0d8', bottom: '#d8374a' },
 };
 
 const COLS = 4, ROWS = 8, CW = 256, CH = 128;
 
 /** 3 = headline moments, 2 = hit/death beats, 1 = flavor (dropped when ≥ 3 words are on screen). */
-const PRIORITY: Partial<Record<Word, number>> = { 'KO!': 3, 'KA-BOOM!': 3, 'CRASH!': 3, 'CLANG!': 2, 'CRUNCH!': 2, 'POW!': 2, 'BONK!': 2, 'POOF!': 2, 'SPLAT!': 2, 'BARK!': 2, 'HISS!': 2, 'YOINK!': 2 };
+const PRIORITY: Partial<Record<Word, number>> = { 'THWACK!': 2, 'KO!': 3, 'KA-BOOM!': 3, 'CRASH!': 3, 'CLANG!': 2, 'CRUNCH!': 2, 'POW!': 2, 'BONK!': 2, 'POOF!': 2, 'SPLAT!': 2, 'BARK!': 2, 'HISS!': 2, 'YOINK!': 2 };
 
 /** Draws every word into its atlas cell. Exported for the lab page. */
 export function drawWordAtlas(canvas: HTMLCanvasElement, fontReady: boolean): void {

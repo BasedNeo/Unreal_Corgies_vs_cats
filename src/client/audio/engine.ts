@@ -23,6 +23,8 @@ export interface PlayOptions {
   maxDist?: number;
   /** Panner reference distance (m): full volume inside. */
   refDist?: number;
+  /** X3: start this many seconds later on the audio clock (an impact waits for its tracer). */
+  delay?: number;
 }
 
 export interface Volumes { master: number; music: number; sfx: number }
@@ -160,9 +162,10 @@ export class AudioEngine {
       tail = p;
     }
     tail.connect(this.buses[o.bus ?? 'sfx']);
-    const voice: Voice = { ctx, out, t: now + 0.005, rand: this.rand };
+    const delay = Math.max(0, Math.min(1, o.delay ?? 0));
+    const voice: Voice = { ctx, out, t: now + 0.005 + delay, rand: this.rand };
     let dur = 0.5;
-    try { dur = recipe(voice, o.k ?? 0); } catch (e) { console.warn('[audio] recipe failed', e); }
+    try { dur = recipe(voice, o.k ?? 0) + delay; } catch (e) { console.warn('[audio] recipe failed', e); }
     const info = this.limiter.list().find((v) => v.id === acq.id);
     if (info) info.end = now + dur + 0.1;
     const live: Live = { info: info ?? { id: acq.id, category: '', priority: 0, start: now, end: now + dur }, out, nodes };

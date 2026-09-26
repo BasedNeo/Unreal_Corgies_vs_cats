@@ -11,6 +11,7 @@ import * as THREE from 'three/webgpu';
 import {
   vec2, vec3, vec4, float, uv, positionGeometry, cameraViewMatrix, cameraProjectionMatrix,
   instancedDynamicBufferAttribute, cos, sin, length, abs, atan, select, smoothstep, max, min, mix, pow, step,
+  screenCoordinate, fract, sqrt,
 } from 'three/tsl';
 import { PALETTE } from '../style/style-tokens.js';
 import { createInstanceArrays, type InstanceArrays, type ParticlePool } from './particle-pool';
@@ -93,18 +94,39 @@ export function createParticleMesh(capacity: number, flavor: ParticleFlavor): Pa
     const spikes = float(0.58).add(pow(abs(cos(ang.mul(4))), 3).mul(0.4));
     const burst = r.sub(spikes);
     const streak = r.sub(0.95);
-    // Shape ids: 0 Puff · 1 Streak · 2 Ring · 3 Star · 4 Tuft · 5 Chunk · 6 Burst
+    // X3 shapes. Shard: thin diamond sliver (splinters, metal chips). Splat: comic blob with lobes (hit splat,
+    // never blood-real). Casing: rounded capsule 1:2.5 (brass, shells). Petal: flame tongue, wide at −y, point at +y
+    // (muzzle-flash petals and fire, stretched along their axis).
+    const shard = abs(p.x).mul(3.2).add(abs(p.y)).sub(0.95);
+    const lobes = float(0.62).add(sin(ang.mul(5).add(aMisc.x.mul(2))).mul(0.16)).add(sin(ang.mul(9).sub(aMisc.x)).mul(0.08));
+    const splat = r.sub(lobes);
+    const cq = vec2(abs(p.x).sub(0.24), abs(p.y).sub(0.66));
+    const casing = length(max(cq, vec2(0, 0))).add(min(max(cq.x, cq.y), 0)).sub(0.16);
+    const py = p.y.clamp(-1, 1);
+    const petalW = sqrt(max(float(1).sub(py).mul(0.5), 0)).mul(0.9).mul(smoothstep(-1, -0.72, py));
+    const petal = abs(p.x).sub(petalW);
+    // Shape ids: 0 Puff · 1 Streak · 2 Ring · 3 Star · 4 Tuft · 5 Chunk · 6 Burst · 7 Shard · 8 Splat · 9 Casing · 10 Petal
+    // · 11 Glow (a disc; the glow flavor gives it a soft quadratic falloff instead of a hot edge)
     return select(shape.lessThan(0.5), puff,
       select(shape.lessThan(1.5), streak,
         select(shape.lessThan(2.5), ring,
           select(shape.lessThan(3.5), star,
             select(shape.lessThan(4.5), tuft,
-              select(shape.lessThan(5.5), chunk, burst))))));
+              select(shape.lessThan(5.5), chunk,
+                select(shape.lessThan(6.5), burst,
+                  select(shape.lessThan(7.5), shard,
+                    select(shape.lessThan(8.5), splat,
+                      select(shape.lessThan(9.5), casing,
+                        select(shape.lessThan(10.5), petal, r.sub(1))))))))))));
   };
 
   if (flavor === 'solid') {
     const d = sdf();
-    mat.maskNode = d.lessThanEqual(0);
+    // Opacity (aAxis.w) as a comic halftone screen-door: dots on a 5 px grid shrink as it thins (smoke wisps, dust
+    // fading out). Opacity 1 covers every pixel (the dot radius passes the cell corner), so opaque shapes are unchanged.
+    const cell = fract(screenCoordinate.div(5)).sub(0.5);
+    const dots = length(cell).lessThanEqual(aAxis.w.mul(0.72));
+    mat.maskNode = d.lessThanEqual(0).and(dots);
     const p = uv().mul(2).sub(1);
     // 2-tone toon fill: a lower-right crescent in shade (key light from the upper left), like the toon bands.
     const k = p.x.sub(p.y).mul(0.7071).add(length(p).mul(0.25));
@@ -123,9 +145,12 @@ export function createParticleMesh(capacity: number, flavor: ParticleFlavor): Pa
     // Soft core, crisp-ish edge: bright center reads as "hot".
     const edge = float(1).sub(smoothstep(-0.35, 0, d));
     const core = float(1).sub(smoothstep(-1, -0.2, d)).mul(0.6);
-    const alpha = min(1, edge.add(core));
+    // Glow (11): light spill, (1 − r)² all the way out, no edge.
+    const pr = length(uv().mul(2).sub(1));
+    const spill = pow(max(float(1).sub(pr), 0), 2);
+    const alpha = select(aCol.w.greaterThan(10.5), spill, min(1, edge.add(core)));
     mat.maskNode = alpha.greaterThan(0.01);
-    mat.colorNode = aCol.rgb;
+    mat.colorNode = aCol.rgb.mul(aAxis.w);
     mat.opacityNode = alpha;
   }
 

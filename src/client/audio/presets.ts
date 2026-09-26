@@ -693,3 +693,6 @@ export const chapterFanfare: Recipe = (v) => {
   });
   return 2.45;
 };
+
+// X3: HARDENED weapon voices, impacts by surface, hit thud, brass (theme data in its own file).
+export * from './presets-weapons';

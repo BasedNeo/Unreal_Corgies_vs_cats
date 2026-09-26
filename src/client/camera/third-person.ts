@@ -1,4 +1,7 @@
 // Third-person follow camera: spring-damped pivot, over-the-shoulder aim mode, wall avoidance.
+// X3: a visual recoil kick (view pitch/yaw offsets on a critically damped spring) and a short FOV punch on kills.
+// Both move the RENDERED view only, after lookAt: the input yaw/pitch the client sends (and the sim aims with) and the
+// AIM_RAY pivot never change, so prediction parity and the authority's hit test are untouched.
 import * as THREE from 'three/webgpu';
 import { damp } from '../../shared/math';
 import { AIM_RAY } from '../../shared/content/weapons';
@@ -9,6 +12,13 @@ export interface CameraVehicleParams { distance: number; height: number; fov: nu
 export interface CameraRig {
   update(target: THREE.Vector3, yaw: number, pitch: number, aiming: boolean, dt: number, speed: number, vehicle?: CameraVehicleParams | null): void;
   shake(amount: number): void;
+  /**
+   * X3: visual recoil — kick the view up by `pitch` and sideways by `yaw` (radians), settling in about `recover` s.
+   * Stacks for automatic fire but is capped, so a long burst never walks the view away. Scaled by the shake setting.
+   */
+  kick(pitch: number, yaw: number, recover: number): void;
+  /** X3: FOV punch — zoom in by `deg` for a beat, then ease back (kill confirmation). Scaled by the shake setting. */
+  punch(deg: number): void;
   /** Settings: shake strength 0..1 (0 = reduce motion) and the on-foot field of view (degrees; aiming zooms from it). */
   setShakeScale(k: number): void;
   setBaseFov(deg: number): void;
@@ -21,6 +31,37 @@ export interface CameraRig {
 /** Camera collision radius (near-plane clearance) and the closest the boom may get to the pivot. */
 const CAM_RADIUS = 0.22;
 const MIN_BOOM = 0.2;
+/** Visual kick caps (radians): an auto weapon's burst climbs to at most this, then holds. */
+const KICK_MAX_PITCH = 0.05;
+const KICK_MAX_YAW = 0.02;
+
+/**
+ * A critically damped 1D spring pulled back to 0 (view kick / FOV punch). impulse() adds velocity, so the offset
+ * rises smoothly over a frame or two instead of snapping, then settles in ~`recover` seconds. Pure; tested in Node.
+ */
+export class KickSpring {
+  x = 0;
+  v = 0;
+  /** Angular frequency (rad/s); settle time ≈ 4.7 / w. */
+  w = 30;
+  impulse(amount: number, recover: number): void {
+    this.w = 4.7 / Math.max(0.05, recover);
+    // For x(t) = A·t·e^(−wt), the peak A/(w·e) = amount → A = amount·w·e.
+    this.v += amount * this.w * Math.E;
+  }
+  step(dt: number, cap: number): number {
+    if (dt <= 0) return this.x;
+    // exact solution of x'' = −w²x − 2w·x' over dt (critically damped): stable and frame-rate independent
+    const w = this.w, e = Math.exp(-w * dt), c = this.v + w * this.x;
+    this.x = (this.x + c * dt) * e;
+    this.v = (this.v - w * c * dt) * e;
+    if (this.x > cap) { this.x = cap; if (this.v > 0) this.v = 0; }
+    else if (this.x < -cap) { this.x = -cap; if (this.v < 0) this.v = 0; }
+    if (Math.abs(this.x) < 1e-6 && Math.abs(this.v) < 1e-5) { this.x = 0; this.v = 0; }
+    return this.x;
+  }
+  reset(): void { this.x = 0; this.v = 0; }
+}
 
 export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): CameraRig {
   const pivot = new THREE.Vector3();
@@ -34,6 +75,7 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
   const right = new THREE.Vector3(), origin = new THREE.Vector3(), look = new THREE.Vector3();
   const up = new THREE.Vector3(), side = new THREE.Vector3(), start = new THREE.Vector3();
   let veh = 0; // 0 on foot … 1 driving
+  const kickP = new KickSpring(), kickY = new KickSpring(), fovK = new KickSpring();
   const lastVeh: CameraVehicleParams = { distance: 4.4, height: 1.5, fov: 64, shoulder: 0 };
   const rig: CameraRig = {
     setColliders(objects) {
@@ -44,7 +86,15 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
       });
     },
     shake(a) { trauma = Math.min(1, trauma + a * shakeScale); },
-    setShakeScale(k) { shakeScale = Math.max(0, Math.min(1, k)); if (shakeScale === 0) trauma = 0; },
+    kick(pitch, yaw, recover) {
+      if (shakeScale <= 0) return;
+      // a lighter touch in the scope: aiming already magnifies the same angle
+      const k = shakeScale * (1 - aimK * 0.35);
+      kickP.impulse(pitch * k, recover);
+      kickY.impulse(yaw * k, recover);
+    },
+    punch(deg) { if (shakeScale > 0) fovK.impulse(deg * shakeScale, 0.28); },
+    setShakeScale(k) { shakeScale = Math.max(0, Math.min(1, k)); if (shakeScale === 0) { trauma = 0; kickP.reset(); kickY.reset(); fovK.reset(); } },
     setBaseFov(deg) { baseFov = Math.max(55, Math.min(80, deg)); },
     get boom() { return boom; },
     update(target, yaw, pitch, aiming, dt, speed, vehicle) {
@@ -70,7 +120,7 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
       const footFov = (baseFov + speedFov) * (1 - aimK) + (48 + (baseFov - 62) * 0.5) * aimK;
       dist = damp(dist, mix(footDist, lastVeh.distance), 10, dt);
       shoulder = damp(shoulder, mix(footShoulder, lastVeh.shoulder), 18, dt);
-      fov = mix(footFov, lastVeh.fov);
+      fov = mix(footFov, lastVeh.fov) - fovK.step(dt, 8);
       camera.fov = fov; camera.updateProjectionMatrix();
       const cp = Math.cos(pitch), sp = Math.sin(pitch);
       // Direction from pivot to camera (behind and above the view direction).
@@ -106,6 +156,10 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
       camera.position.copy(want);
       look.set(-Math.sin(yaw) * cp, sp, -Math.cos(yaw) * cp);
       camera.lookAt(tmp.copy(origin).addScaledVector(look, 20));
+      // Visual recoil: rotate the rendered view about its own axes (never the input yaw/pitch).
+      const kp = kickP.step(dt, KICK_MAX_PITCH), ky = kickY.step(dt, KICK_MAX_YAW);
+      if (kp !== 0) camera.rotateX(kp);
+      if (ky !== 0) camera.rotateY(ky);
       if (trauma > 0) {
         const s = trauma * trauma * 0.06;
         camera.rotation.x += (Math.random() - 0.5) * s; // presentation-only randomness is fine client-side

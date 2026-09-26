@@ -6,14 +6,16 @@
 // reusable ParticleSpec and calling spawn(spec) — nothing is allocated per spawn or per frame after
 // construction (proved by tests/unit/fx-particles.test.ts).
 
-/** Fragment shape (SDF) drawn by the particle material. */
-export const Shape = { Puff: 0, Streak: 1, Ring: 2, Star: 3, Tuft: 4, Chunk: 5, Burst: 6 } as const;
+/** Fragment shape (SDF) drawn by the particle material. X3 added Shard (splinters, metal chips), Splat (comic hit
+ *  splat), Casing (ejected brass / shells), Petal (muzzle-flash tongues, fire) and Glow (a soft light spill: glow only). */
+export const Shape = { Puff: 0, Streak: 1, Ring: 2, Star: 3, Tuft: 4, Chunk: 5, Burst: 6, Shard: 7, Splat: 8, Casing: 9, Petal: 10, Glow: 11 } as const;
 /** Vertex placement: camera-facing quad, quad stretched along an axis, or flat on the ground (XZ). */
 export const Mode = { Billboard: 0, Stretched: 1, Ground: 2 } as const;
 /** Size over life. Linear s0→s1 · Pop: overshoot to s1 then shrink to 0 · HoldShrink: s0→s1 then shrink out. */
 export const Curve = { Linear: 0, Pop: 1, HoldShrink: 2 } as const;
-/** Color over life. None: constant · Fade: color × (1−t)² (glow systems, additive) · Flash: bright first 25%. */
-export const Fade = { None: 0, Fade: 1, Flash: 2 } as const;
+/** Color over life. None: constant · Fade: color × (1−t)² (glow systems, additive) · Flash: bright first 25% ·
+ *  Soft: opacity × (1−t)^1.5 (solids draw it as a comic halftone screen-door: smoke wisps, dust that thins out). */
+export const Fade = { None: 0, Fade: 1, Flash: 2, Soft: 3 } as const;
 
 export interface ParticleSpec {
   x: number; y: number; z: number;
@@ -37,6 +39,8 @@ export interface ParticleSpec {
   stretch: number;
   /** Ground plane for bouncing debris (−Infinity = none) and restitution. */
   floorY: number; bounce: number;
+  /** Opacity 0..1 (solids: halftone screen-door coverage; glow: scales the color). */
+  alpha: number;
 }
 
 export function makeSpec(): ParticleSpec {
@@ -50,7 +54,7 @@ export function resetSpec(s: ParticleSpec): ParticleSpec {
   s.shape = Shape.Puff; s.mode = Mode.Billboard;
   s.gravity = 0; s.drag = 0; s.rot = 0; s.spin = 0; s.param = 0.2;
   s.len = 0; s.ax = 0; s.ay = 1; s.az = 0; s.stretch = 0;
-  s.floorY = -Infinity; s.bounce = 0.3;
+  s.floorY = -Infinity; s.bounce = 0.3; s.alpha = 1;
   return s;
 }
 
@@ -60,7 +64,7 @@ export interface InstanceArrays {
   pos: Float32Array;
   /** rgb color (may exceed 1 for glow), w shape id. */
   col: Float32Array;
-  /** xyz axis vector (world, length = streak length) for Stretched mode. */
+  /** xyz axis vector (world, length = streak length) for Stretched mode; w = opacity (0..1). */
   axis: Float32Array;
   /** x rotation, y mode, z shape param, w life fraction t. */
   misc: Float32Array;
@@ -74,9 +78,9 @@ export function createInstanceArrays(capacity: number): InstanceArrays {
 const F = {
   x: 0, y: 1, z: 2, vx: 3, vy: 4, vz: 5, age: 6, life: 7, s0: 8, s1: 9, curve: 10, r: 11, g: 12, b: 13, fade: 14,
   shape: 15, mode: 16, grav: 17, drag: 18, rot: 19, spin: 20, param: 21, len: 22, ax: 23, ay: 24, az: 25,
-  stretch: 26, floor: 27, bounce: 28, trav: 29,
+  stretch: 26, floor: 27, bounce: 28, trav: 29, alpha: 30, fresh: 31,
 } as const;
-const NF = 30;
+const NF = 32;
 
 export class ParticlePool {
   readonly capacity: number;
@@ -84,6 +88,11 @@ export class ParticlePool {
   count = 0;
   /** Diagnostics: typed arrays allocated (constant after construction), spawns, steals. */
   readonly stats = { arrays: 0, spawned: 0, stolen: 0 };
+  /**
+   * X3: particles spawned between frames skip their first update(), so the first rendered frame shows them at
+   * t = 0 (a 70 ms muzzle flash is no longer half faded at 30 fps, and it lands on the same frame as its sound).
+   */
+  freshFirstFrame = false;
   private f: Float32Array[];
   private steal = 0;
 
@@ -110,6 +119,7 @@ export class ParticlePool {
     f[F.rot][i] = s.rot; f[F.spin][i] = s.spin; f[F.param][i] = s.param;
     f[F.len][i] = s.len; f[F.ax][i] = s.ax; f[F.ay][i] = s.ay; f[F.az][i] = s.az;
     f[F.stretch][i] = s.stretch; f[F.floor][i] = s.floorY; f[F.bounce][i] = s.bounce; f[F.trav][i] = 0;
+    f[F.alpha][i] = s.alpha; f[F.fresh][i] = this.freshFirstFrame ? 1 : 0;
     this.stats.spawned++;
     return i;
   }
@@ -120,9 +130,10 @@ export class ParticlePool {
     const f = this.f;
     const x = f[F.x], y = f[F.y], z = f[F.z], vx = f[F.vx], vy = f[F.vy], vz = f[F.vz];
     const age = f[F.age], life = f[F.life], grav = f[F.grav], drag = f[F.drag], rot = f[F.rot], spin = f[F.spin];
-    const floor = f[F.floor], bounce = f[F.bounce], trav = f[F.trav];
+    const floor = f[F.floor], bounce = f[F.bounce], trav = f[F.trav], fresh = f[F.fresh];
     let i = 0;
     while (i < this.count) {
+      if (fresh[i] !== 0) { fresh[i] = 0; i++; continue; }
       age[i] += dt;
       if (age[i] >= life[i]) { this.kill(i); continue; }
       vy[i] -= grav[i] * dt;
@@ -152,10 +163,11 @@ export class ParticlePool {
     for (let i = 0; i < n; i++) {
       const t = Math.min(1, f[F.age][i] / f[F.life][i]);
       const size = sizeAt(f[F.curve][i], f[F.s0][i], f[F.s1][i], t);
-      let fade = 1;
+      let fade = 1, alpha = f[F.alpha][i];
       const fm = f[F.fade][i];
       if (fm === Fade.Fade) { const u = 1 - t; fade = u * u; }
       else if (fm === Fade.Flash) fade = t < 0.25 ? 1.6 - t * 2.4 : 1;
+      else if (fm === Fade.Soft) { const u = 1 - t; alpha *= u * Math.sqrt(u); }
       const o = i * 4;
       let cx = x[i], cy = y[i], cz = z[i], axx = 0, axy = 0, axz = 0;
       if (f[F.mode][i] === Mode.Stretched) {
@@ -175,7 +187,7 @@ export class ParticlePool {
       }
       pos[o] = cx; pos[o + 1] = cy; pos[o + 2] = cz; pos[o + 3] = size;
       col[o] = f[F.r][i] * fade; col[o + 1] = f[F.g][i] * fade; col[o + 2] = f[F.b][i] * fade; col[o + 3] = f[F.shape][i];
-      axis[o] = axx; axis[o + 1] = axy; axis[o + 2] = axz; axis[o + 3] = 0;
+      axis[o] = axx; axis[o + 1] = axy; axis[o + 2] = axz; axis[o + 3] = alpha;
       misc[o] = f[F.rot][i]; misc[o + 1] = f[F.mode][i]; misc[o + 2] = f[F.param][i]; misc[o + 3] = t;
     }
     return n;

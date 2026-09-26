@@ -3,14 +3,30 @@
 // (avatar animation / camera), never to the simulation or input.
 import type { GameEvent } from '../../shared/protocol';
 import type { WeaponFxId } from './weapon-fx';
-import { WEAPON_FX } from './weapon-fx';
+import { WEAPON_FX, viewKickOf } from './weapon-fx';
 
 export interface FxReaction {
   /** Trauma to add to the camera (0..1; the rig squares it). */
   shake: number;
   /** Presentation freeze frames at 60 Hz (0 = none). */
   hitStopFrames: number;
+  /**
+   * X3: visual view kick for the LOCAL shooter (radians up / sideways, recover seconds) — feed cam.kick(). It moves
+   * the rendered view only; input yaw/pitch (what the client sends, what the sim aims with) never change.
+   */
+  kickPitch: number;
+  kickYaw: number;
+  kickRecover: number;
+  /** X3: FOV punch (degrees, positive = zoom in briefly) on a local kill / crit — feed cam.punch(). */
+  fovPunch: number;
 }
+
+export function makeReaction(): FxReaction {
+  return { shake: 0, hitStopFrames: 0, kickPitch: 0, kickYaw: 0, kickRecover: 0, fovPunch: 0 };
+}
+
+const _kick = { pitch: 0, yaw: 0, recover: 0 };
+let kickSide = 1;
 
 export interface ReactionContext {
   localId: number;
@@ -26,22 +42,31 @@ export const REACT = {
   explodeMax: 0.7, explodeRangeMul: 3.5,
   landMinImpact: 12, landShake: 0.22,
   deathSelfShake: 0.35,
+  /** X3: FOV punch (deg) when the local player lands a kill / a crit. */
+  killPunch: 3.2, critPunch: 1.2,
 } as const;
 
-export function reactionFor(ev: GameEvent, c: ReactionContext, out: FxReaction = { shake: 0, hitStopFrames: 0 }): FxReaction {
-  out.shake = 0; out.hitStopFrames = 0;
+export function reactionFor(ev: GameEvent, c: ReactionContext, out: FxReaction = makeReaction()): FxReaction {
+  out.shake = 0; out.hitStopFrames = 0; out.kickPitch = 0; out.kickYaw = 0; out.kickRecover = 0; out.fovPunch = 0;
   const me = c.localId;
   switch (ev.e) {
     case 'fire':
-      if (ev.id === me) out.shake = WEAPON_FX[c.weaponOf(ev.wpn)].kick;
+      if (ev.id === me) {
+        const id = c.weaponOf(ev.wpn);
+        out.shake = WEAPON_FX[id].kick;
+        viewKickOf(id, _kick);
+        // The yaw kick alternates with a bias (deterministic: no Math.random in presentation data paths).
+        kickSide = -kickSide;
+        out.kickPitch = _kick.pitch; out.kickYaw = _kick.yaw * kickSide * 0.6; out.kickRecover = _kick.recover;
+      }
       break;
     case 'hit':
       if (ev.dst === me) out.shake = Math.min(REACT.hitTakenMax, REACT.hitTakenBase + ev.dmg * REACT.hitTakenPerDmg);
-      else if (ev.src === me && ev.crit) { out.shake = REACT.critDealtShake; out.hitStopFrames = REACT.critDealtStop; }
+      else if (ev.src === me && ev.crit) { out.shake = REACT.critDealtShake; out.hitStopFrames = REACT.critDealtStop; out.fovPunch = REACT.critPunch; }
       break;
     case 'death':
       if (ev.id === me) out.shake = REACT.deathSelfShake;
-      else if (ev.by === me) { out.shake = REACT.killDealtShake; out.hitStopFrames = REACT.killDealtStop; }
+      else if (ev.by === me) { out.shake = REACT.killDealtShake; out.hitStopFrames = REACT.killDealtStop; out.fovPunch = REACT.killPunch; }
       break;
     case 'explode':
       if (c.hasLocal) {

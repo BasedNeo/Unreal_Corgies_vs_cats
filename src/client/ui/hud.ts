@@ -659,7 +659,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
           break;
         case 'hit':
           lastHitOn.set(ev.dst, { src: ev.src, crit: ev.crit, t: now });
-          if (ev.src === localId && ev.dst !== localId) hud.hitMarker(false, ev.crit);
+          // X3: the hitmarker is ui/hit-feedback.ts now (one marker, not two)
           if (ev.dst === localId) {
             hud.damageFlash(ev.dmg);
             if (ev.src !== localId) {
@@ -683,7 +683,6 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
           const ride = !self && !exploded ? seatedGlyph(states, by) : null; // a kill from a seat: the vehicle, not a stale gun
           const glyph = self ? 'fall' : exploded ? 'boom' : ride ?? (wpn !== undefined ? WEAPON_FX[weapons.id(wpn)].glyph : 'paw');
           feed.push({ killer: self ? null : party(by), victim: party(ev.id), glyph, crit: !!lh && lh.src === by && lh.crit && now - lh.t < 0.5 }, now);
-          if (by === localId && ev.id !== localId) hud.hitMarker(true);
           deathBy.set(ev.id, { by: self ? -1 : by, t: now });
           if (deathBy.size > 64) deathBy.clear();
           break;

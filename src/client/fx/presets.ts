@@ -262,9 +262,10 @@ export function ballTrail(p: FxPools, x: number, y: number, z: number): void {
 export function explosion(p: FxPools, x: number, y: number, z: number, r: number, groundY: number): void {
   const R = p.rng;
   const k = Math.max(0.6, Math.min(2.2, r / 3));
+  // X3: a round, hot core instead of the 3 m 8-lobed flower (the fire tongues in presets-weapons carry the shape)
   resetSpec(S);
-  S.x = x; S.y = y + 0.3; S.z = z; S.life = 0.16; S.size0 = 2.4 * k; S.size1 = 1.2 * k; S.shape = Shape.Burst; S.fade = Fade.Fade;
-  S.rot = R.sym(3); colorHex(S, 0xffe7a0, 3.2);
+  S.x = x; S.y = y + 0.3; S.z = z; S.life = 0.13; S.size0 = 1.5 * k; S.size1 = 0.8 * k; S.shape = Shape.Puff; S.fade = Fade.Fade;
+  S.rot = R.sym(3); colorHex(S, 0xffe7a0, 2.4);
   p.glow.spawn(S);
   resetSpec(S);
   S.x = x; S.y = groundY + 0.06; S.z = z; S.mode = Mode.Ground; S.shape = Shape.Ring; S.param = 0.08;
