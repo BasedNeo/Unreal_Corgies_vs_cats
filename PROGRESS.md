@@ -15,10 +15,31 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 | W2 B1 Vac-Tank boss | ✅ merged + wired | 23 tests; bots beat it in 217 s; boss bar, telegraphs, ?boss=1 |
 | W2 G1 Garden + weather | ✅ merged + wired | concealment, deterministic weather + day/night; `de82d72` |
 | W2 S1 Ordnance kiosk/cores/kibble/mission | ✅ merged + wired | 27 interact tests; 20/20 kibble + 4/4 cores hop-validated; 0.022 ms/tick; artifacts/s1-*.png |
+| W3 C2 abilities + bot play | ⏳ running | — |
+| W3 P1/P2 perf | ⏳ running | — |
+| W3 D3 Rooftops + Garage | ⏳ running | — |
+| W3 U1 chat/rooms/tips | ✅ merged + wired | 39 new tests; `d110c7a` VERIFY PASS incl. e2e; artifacts/u1-*.png |
+| W3 K1 character polish | ⏳ running | — |
+| W3 lead M1 Ear Glide · M2 buff bits | ✅ | prediction parity 0 cm while gliding; Zoomies+ corrections 1182 → ≤ 2 |
+| Deploy prep (not deployed) | ✅ | docs/ops/DEPLOY.md; bundled server runs on an --omit=dev install |
 | **Wave 1 integration** | ⚠️ corrected | first claim was false (did not boot); fixed + verified in `3d2de26` — see log |
 | Q1 verification | ✅ | docs/qa/W1_VERIFICATION.md — 55/100, P0/P1 fixes landed |
 
 ## Log
+### 2026-09-26 — Wave 3 in flight (lead)
+- Plan: `docs/sprints/WAVE3_PLAN.md` (validated, no path collisions). Lanes C2, P, D3, U1 dispatched; K1 after U1.
+- **M1 Ear Glide** (Skyraider): Q in the air caps the fall at 2.5 m/s for 4 s (6 s cooldown); Q again, crouch or
+  landing ends it. In the shared `stepCharacter`, so prediction replays it exactly (test: 0 cm error, identical
+  Gliding flag over 3 glides). Airplane-ear pose (`artifacts/m1-glide.png`), whoosh audio.
+- **M2 buff bits**: `EFlag.Buff*` mirror running Upgrade Cores into snapshots. The predictor applies Zoomies+ from
+  the flag (corrections 1182 → ≤ 2 per 20 s buff); buff chips follow the flags (late joiners see them); the Q ring
+  and the glide cooldown honour Squeaky Clean.
+- **U1 merged**: chat (input suspended while typing, echo-confirmed lines, sender team on the wire), `/rooms` +
+  menu room browser (unlisted `_rooms`), three first-match tips, quality "applies after reload" notice.
+- **Deploy prep**: Dockerfile + DigitalOcean App spec + `npm run build:server` (Vite SSR bundle, plain node at
+  runtime). Owner steps and costs in `docs/ops/DEPLOY.md`. Nothing deployed.
+- Process: `verify` now gates every push on its exit code (a piped `tail` hid a FAIL once — the failure was a
+  load-sensitive 3 s wait in net tests, fixed); human playtest script `docs/qa/PLAYTEST_SCRIPT.md`.
 ### 2026-09-26 — QA quick fixes + S1 integrated (lead)
 - QA W1 quick fixes (`4eaeab8`, VERIFY PASS): skirmish waves 1–2 trickle in (per-wave `maxAlive` 2/4); TDM 4v4;
   aim zoom λ26; class icons on nameplates; `/stats?reset=1` local/token only; ground-pound crouch buffered and the
