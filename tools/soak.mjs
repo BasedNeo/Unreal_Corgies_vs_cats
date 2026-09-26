@@ -7,7 +7,7 @@
 //
 //   npx tsx tools/soak.mjs                      # 60 s per mode, soak match config (a full match fits in 60 s)
 //   npx tsx tools/soak.mjs --seconds 300 --full # shipping match config, longer
-//   options: --modes yard-skirmish,team-deathmatch  --seed 1  --no-netbot  --repeat 3  --json artifacts/soak.json
+//   options: --modes yard-skirmish,team-deathmatch[,core-rush]  --seed 1  --no-netbot  --repeat 3  --json artifacts/soak.json
 //
 // Exit 1 on: any runtime error / non-finite state, a bot stuck (wants to move, doesn't) > 5 s,
 // tick p95 > 3 ms, or (soak config) a mode that never completes a match.
@@ -48,6 +48,7 @@ const SOAK_CONFIG = {
     waves: [{ counts: { grunt: 1 } }, { counts: { kitten: 1, sniper: 1 } }, { counts: { grunt: 1, brute: 1, kitten: 1 }, label: 'FINAL WAVE' }],
   } },
   'team-deathmatch': { tdm: { warmup: 3, killLimit: 12, timeLimit: 45, endedHold: 5 } },
+  'core-rush': { coreRush: { warmup: 3, scoreLimit: 40, timeLimit: 45, endedHold: 5 } },
 };
 /** Bot lineups (after the net-bot, which plays an assault corgi): every class kit and both species. */
 const LINEUP = {
@@ -55,6 +56,8 @@ const LINEUP = {
   // mirrored so fairness numbers mean something (the net-bot is the corgi assault)
   'team-deathmatch': [[Team.Corgis, 'overwatch'], [Team.Corgis, 'breacher'], [Team.Corgis, 'warden'],
     [Team.Cats, 'assault'], [Team.Cats, 'overwatch'], [Team.Cats, 'breacher'], [Team.Cats, 'warden']],
+  'core-rush': [[Team.Corgis, 'skyraider'], [Team.Corgis, 'breacher'], [Team.Corgis, 'warden'],
+    [Team.Cats, 'assault'], [Team.Cats, 'skyraider'], [Team.Cats, 'breacher'], [Team.Cats, 'warden']],
 };
 const L3_SYSTEMS = new Set(['ai', 'weapons', 'abilities', 'projectiles', 'combat-status', 'respawn-regen', 'lag-record', 'match']);
 
