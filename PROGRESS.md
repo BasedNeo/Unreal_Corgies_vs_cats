@@ -148,7 +148,8 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 - Bots don't climb to the Rooftops perches (they fight in the Garage fine) (D3/C2).
 - Ability entities: shotgun damage to drones/barriers is estimated from the first pellet (C2).
 - RC plane (R1):
-  - there is no plane HUD (airspeed, heat, hull) and no engine sound yet;
+  - there is no engine sound yet (the cockpit strip `ui/plane-hud.ts` shows hull, throttle, airspeed, height, boost,
+    gun heat and STALL!);
   - planes are interpolated, not predicted (mouse-aim hides most of the latency);
   - direct tennis-ball and frisbee hits do no plane damage (blasts do);
   - planes pass through characters;

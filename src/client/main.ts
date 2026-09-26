@@ -25,6 +25,7 @@ import { Nameplates } from './views/nameplates';
 import { BossBar } from './views/boss-bar';
 import { createBossTelegraphFx } from './procgen/boss';
 import { createVehicleViews, vehicleCameraFor, mountedVehicle, followYaw } from './vehicles';
+import { createPlaneHud } from './ui/plane-hud';
 import { createInteractViews, createInteractPrompts } from './interact';
 import { createCoreRushView } from './modes/core-rush-view';
 import { createAbilityViews } from './abilities';
@@ -156,6 +157,7 @@ async function main(): Promise<void> {
   }, { match: mode });
   hud.setUiSound((k) => audio.ui(k));
   const prompts = createInteractPrompts(ui, { send: (msg) => net?.transport.send(msg), sound: (k) => audio.ui(k) });
+  const planeHud = createPlaneHud(ui);
   applySettings(hud.settings);
   if (autoStart) await startSession(params.get('name') ?? hud.settings.name ?? 'Rex', urlCls, urlTeam);
   else hud.showMenu(true);
@@ -234,6 +236,7 @@ async function main(): Promise<void> {
     bossBar.update(states, dt);
     const local = states.get(localId) ?? null;
     const kart = local ? mountedVehicle(local, states) : null;
+    planeHud.update(kart, kart ? worldData.height(kart.x, kart.z) : 0); // shows itself only for a plane
     if (kart) {
       const c = vehicleCameraFor(kart);
       if (!input.lookedRecently()) {
