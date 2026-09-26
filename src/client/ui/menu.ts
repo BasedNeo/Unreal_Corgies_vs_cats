@@ -1,15 +1,21 @@
 // OWNER: L5 (juice). Main menu (play offline / join server, name, team, class picker) and the settings panel,
 // with keyboard + gamepad navigation (spatial focus movement over [data-nav] elements).
+// U1 (ux): the Online rooms view (room-browser.ts), the quality "applies after reload" notice and the tips reset.
 import { CLASSES } from '../../shared/content/classes';
 import { CLASS_IDS, type ClassId, type TeamId } from '../../shared/types';
 import { classIcon } from './icons';
-import { cleanName, type Settings, type SettingKey } from './settings';
-import { CLASS_BLURBS, CONTROLS, TITLE } from './strings';
+import { cleanName, type QualitySetting, type Settings, type SettingKey } from './settings';
+import { CLASS_BLURBS, CONTROLS, QUALITY_STRINGS, ROOM_STRINGS, TEAM_NAMES, TIP_STRINGS, TITLE } from './strings';
+import { qualityNote } from './quality-note';
+import { createRoomBrowser, type RoomBrowser } from './room-browser';
+import { serverBase, type RoomPoller } from './rooms';
 
 export interface PlayOptions {
   mode: 'offline' | 'online';
   /** WebSocket URL when mode = 'online'. */
   server?: string;
+  /** Online room to join or create (U1 room browser). Absent = the server's default room. */
+  room?: string;
   name: string;
   team: TeamId | -1;
   cls: ClassId;
@@ -24,6 +30,21 @@ export interface MenuDeps {
   onTeam(team: TeamId | -1): void;
   onSetting<K extends SettingKey>(key: K, value: Settings[K]): void;
   sound?(kind: UiSoundKind): void;
+  // ---- U1 additions (all optional) ----
+  /** The server this page itself plays on (serverUrlForPage()); prefills the server field and the room browser. */
+  pageServer?: string | null;
+  /** The quality tier the world was built with (see quality-note.ts). Default: the saved setting. */
+  appliedQuality?: QualitySetting;
+  /** True once a quality change fully applies without a reload (hides the notice). */
+  qualityLive?: boolean;
+  /** Whether a match is running (the reload notice warns that reloading leaves it). */
+  inSession?(): boolean;
+  /** Reload button under the quality notice. */
+  onReload?(): void;
+  /** Settings › First-match tips › Show again. */
+  onResetTips?(): void;
+  /** Room list poller (tests/labs inject one with a fake fetch). */
+  roomPoller?: RoomPoller;
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -51,6 +72,8 @@ export function createSettingsPanel(deps: MenuDeps, onBack: () => void, backLabe
     <div class="st-row"><span class="st-name">INVERT LOOK Y</span><button class="tog" data-nav data-k="invertY" role="switch" aria-label="Invert look Y"></button><span></span></div>
     <div class="st-row"><span class="st-name">QUALITY</span>
       <div class="seg" role="radiogroup" aria-label="Quality">${(['low', 'medium', 'high'] as const).map((q) => `<button data-nav data-q="${q}" role="radio" class="auto">${q === 'medium' ? 'MED' : q.toUpperCase()}</button>`).join('')}</div><span></span></div>
+    <div class="st-qn hidden" role="status" aria-live="polite"><span class="st-qn-i" aria-hidden="true">⟳</span><span class="st-qn-t"></span><button class="btn small" data-nav data-reload>${QUALITY_STRINGS.reloadButton}</button></div>
+    ${deps.onResetTips ? `<div class="st-row"><span class="st-name">${TIP_STRINGS.resetLabel}</span><button class="btn small st-tips" data-nav data-tips>${TIP_STRINGS.resetButton}</button><span></span></div>` : ''}
     <div class="st-actions"><span class="st-note">Keyboard: arrows · Enter · Esc — Gamepad: D-pad · A · B</span><button class="btn small" data-nav data-back>${backLabel}</button></div>`;
   const sliders = [...el.querySelectorAll<HTMLInputElement>('input[type=range]')];
   const paint = (inp: HTMLInputElement) => {
@@ -71,17 +94,35 @@ export function createSettingsPanel(deps: MenuDeps, onBack: () => void, backLabe
   const tog = el.querySelector<HTMLButtonElement>('.tog')!;
   tog.addEventListener('click', () => { s.invertY = !s.invertY; tog.setAttribute('aria-checked', String(s.invertY)); deps.onSetting('invertY', s.invertY); deps.sound?.('click'); });
   const qs = [...el.querySelectorAll<HTMLButtonElement>('[data-q]')];
+  const qn = el.querySelector<HTMLElement>('.st-qn')!, qnText = el.querySelector<HTMLElement>('.st-qn-t')!;
+  const applied = deps.appliedQuality ?? s.quality;
+  const paintQualityNote = () => {
+    const note = qualityNote(applied, s.quality, !!deps.qualityLive, deps.inSession?.() ?? false);
+    qn.classList.toggle('hidden', !note);
+    qnText.textContent = note ?? '';
+  };
   for (const b of qs) b.addEventListener('click', () => {
     s.quality = b.dataset.q as Settings['quality'];
     for (const x of qs) x.setAttribute('aria-checked', String(x === b));
     deps.onSetting('quality', s.quality);
     deps.sound?.('click');
+    paintQualityNote();
+  });
+  el.querySelector('[data-reload]')!.addEventListener('click', () => { deps.sound?.('click'); deps.onReload?.(); });
+  const tipsBtn = el.querySelector<HTMLButtonElement>('[data-tips]');
+  tipsBtn?.addEventListener('click', () => {
+    deps.onResetTips?.();
+    deps.sound?.('click');
+    tipsBtn.textContent = TIP_STRINGS.resetDone;
+    tipsBtn.title = TIP_STRINGS.resetNote;
   });
   el.querySelector('[data-back]')!.addEventListener('click', () => { deps.sound?.('back'); onBack(); });
   const refresh = () => {
     for (const inp of sliders) { inp.value = String(s[inp.dataset.k as (typeof SLIDERS)[number]['key']]); paint(inp); }
     tog.setAttribute('aria-checked', String(s.invertY));
     for (const b of qs) b.setAttribute('aria-checked', String(b.dataset.q === s.quality));
+    paintQualityNote();
+    if (tipsBtn) { tipsBtn.textContent = TIP_STRINGS.resetButton; tipsBtn.title = TIP_STRINGS.resetNote; }
   };
   refresh();
   return { el, refresh };
@@ -159,10 +200,12 @@ export class PadNav {
 }
 
 // ---------------------------------------------------------------- main menu
+export type MenuView = 'main' | 'settings' | 'rooms';
+
 export interface Menu {
   el: HTMLElement;
   readonly isOpen: boolean;
-  open(view?: 'main' | 'settings'): void;
+  open(view?: MenuView): void;
   close(): void;
   poll(now: number): void;
   refresh(): void;
@@ -191,7 +234,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
         <div class="mm-play">
           <button class="btn primary" data-nav data-play>PLAY OFFLINE ▸</button>
           <div class="mm-join"><input type="text" data-nav data-server spellcheck="false" autocomplete="off" aria-label="Server URL"><button class="btn small" data-nav data-join>JOIN</button></div>
-          <button class="btn small" data-nav data-settings>⚙ SETTINGS</button>
+          <div class="mm-row"><button class="btn small" data-nav data-rooms>${ROOM_STRINGS.browse}</button><button class="btn small" data-nav data-settings>⚙ SETTINGS</button></div>
         </div>
       </div>
       <div class="panel halftone mm-card mm-right">
@@ -209,6 +252,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
           </div>
         </div>
         <div class="mm-settings hidden"></div>
+        <div class="mm-rooms hidden"></div>
       </div>
     </div>
     <div class="mm-foot">${CONTROLS.map(([k, v]) => `<span><kbd>${k}</kbd> ${v}</span>`).join('')}</div>`;
@@ -220,16 +264,29 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
   const clsBtns = [...el.querySelectorAll<HTMLButtonElement>('[data-cls]')];
   const classesView = el.querySelector<HTMLElement>('.mm-classes')!;
   const settingsView = el.querySelector<HTMLElement>('.mm-settings')!;
+  const roomsView = el.querySelector<HTMLElement>('.mm-rooms')!;
   const right = el.querySelector<HTMLElement>('.mm-right')!;
   let open = false;
-  let view: 'main' | 'settings' = 'main';
+  let view: MenuView = 'main';
 
   const settingsPanel = createSettingsPanel(deps, () => showView('main'));
   settingsView.appendChild(settingsPanel.el);
+  const pageServer = deps.pageServer ? serverBase(deps.pageServer) : null;
+  /** The server the room browser and JOIN use: what the field holds (prefilled with the page's own server). */
+  const currentServer = () => serverIn.value.trim() || pageServer || s.server;
+  const rooms: RoomBrowser = createRoomBrowser({
+    server: currentServer,
+    join: (room) => play('online', room),
+    back: () => showView('main'),
+    joinAs: () => `Joining as ${CLASSES[s.cls].displayName.toUpperCase()} · ${s.team === -1 ? 'AUTO TEAM' : TEAM_NAMES[s.team]} · ${s.name}`,
+    poller: deps.roomPoller,
+    sound: deps.sound,
+  });
+  roomsView.appendChild(rooms.el);
 
   const paint = () => {
     nameIn.value = s.name;
-    serverIn.value = s.server;
+    if (document.activeElement !== serverIn) serverIn.value = pageServer ?? s.server;
     for (const b of teamBtns) b.setAttribute('aria-checked', String(Number(b.dataset.team) === s.team));
     for (const b of clsBtns) b.setAttribute('aria-checked', String(b.dataset.cls === s.cls));
     // Class icons take the chosen team's colors (auto → corgis).
@@ -237,12 +294,14 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
     right.classList.toggle('t0', s.team !== 1);
     settingsPanel.refresh();
   };
-  const showView = (v: 'main' | 'settings') => {
+  const showView = (v: MenuView) => {
     view = v;
     classesView.classList.toggle('hidden', v !== 'main');
     settingsView.classList.toggle('hidden', v !== 'settings');
-    const first = (v === 'settings' ? settingsView : el.querySelector('[data-play]')) as HTMLElement | null;
-    (v === 'settings' ? first?.querySelector<HTMLElement>('[data-nav]') : first)?.focus();
+    roomsView.classList.toggle('hidden', v !== 'rooms');
+    if (v === 'rooms' && open) rooms.open(); else rooms.close();
+    const first = (v === 'settings' ? settingsView : v === 'rooms' ? roomsView : el.querySelector('[data-play]')) as HTMLElement | null;
+    (v === 'main' ? first : first?.querySelector<HTMLElement>('[data-nav]'))?.focus();
   };
 
   const commitName = () => {
@@ -252,21 +311,34 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
   };
   nameIn.addEventListener('change', commitName);
   nameIn.addEventListener('blur', commitName);
-  serverIn.addEventListener('change', () => { const v = serverIn.value.trim(); if (/^wss?:\/\/\S+$/.test(v)) { s.server = v; deps.onSetting('server', v); } else serverIn.value = s.server; });
+  serverIn.addEventListener('change', () => {
+    const v = serverIn.value.trim();
+    if (/^wss?:\/\/\S+$/.test(v)) { if (v !== pageServer) { s.server = v; deps.onSetting('server', v); } } else serverIn.value = pageServer ?? s.server;
+    rooms.serverChanged();
+  });
   for (const b of teamBtns) b.addEventListener('click', () => { s.team = Number(b.dataset.team) as -1 | 0 | 1; deps.onSetting('team', s.team); deps.onTeam(s.team); deps.sound?.('click'); paint(); });
   for (const b of clsBtns) b.addEventListener('click', () => { s.cls = b.dataset.cls as ClassId; deps.onSetting('cls', s.cls); deps.onClass(s.cls); deps.sound?.('click'); paint(); });
-  const play = (mode: 'offline' | 'online') => {
+  const play = (mode: 'offline' | 'online', room?: string) => {
     commitName();
-    if (mode === 'online') { const v = serverIn.value.trim(); if (!/^wss?:\/\/\S+$/.test(v)) { serverIn.focus(); serverIn.select(); return; } s.server = v; deps.onSetting('server', v); }
+    let server: string | undefined;
+    if (mode === 'online') {
+      const v = currentServer();
+      if (!/^wss?:\/\/\S+$/.test(v)) { serverIn.focus(); serverIn.select(); return; }
+      if (v !== pageServer) { s.server = v; deps.onSetting('server', v); }
+      server = serverBase(v);
+      // a room typed into the URL itself (ws://host/?room=abc) still counts when no room was picked
+      if (room === undefined) { try { room = new URL(v).searchParams.get('room') ?? undefined; } catch { /* not a URL */ } }
+    }
     deps.sound?.('open');
-    deps.onPlay({ mode, server: mode === 'online' ? s.server : undefined, name: s.name, team: s.team, cls: s.cls });
+    deps.onPlay({ mode, server, room: mode === 'online' ? room : undefined, name: s.name, team: s.team, cls: s.cls });
   };
   el.querySelector('[data-play]')!.addEventListener('click', () => play('offline'));
   el.querySelector('[data-join]')!.addEventListener('click', () => play('online'));
   el.querySelector('[data-settings]')!.addEventListener('click', () => { deps.sound?.('click'); showView('settings'); });
+  el.querySelector('[data-rooms]')!.addEventListener('click', () => { deps.sound?.('click'); showView('rooms'); });
   for (const b of el.querySelectorAll<HTMLElement>('[data-nav]')) b.addEventListener('mouseenter', () => deps.sound?.('hover'));
 
-  const back = () => { if (view === 'settings') { deps.sound?.('back'); showView('main'); } };
+  const back = () => { if (view !== 'main') { deps.sound?.('back'); showView('main'); } };
   // Keys never leak to the game's window-level input while the menu is up (typing a name must not walk the
   // corgi, and Tab must move focus instead of opening the scoreboard).
   el.addEventListener('keydown', (e) => {
@@ -291,7 +363,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
     el,
     get isOpen() { return open; },
     open(v = 'main') { open = true; el.classList.remove('hidden'); paint(); showView(v); },
-    close() { open = false; el.classList.add('hidden'); (document.activeElement as HTMLElement | null)?.blur?.(); },
+    close() { open = false; rooms.close(); el.classList.add('hidden'); (document.activeElement as HTMLElement | null)?.blur?.(); },
     poll(now) { if (open) pad.poll(now, el, back, () => { if (view === 'main') play('offline'); }); },
     refresh: paint,
   };

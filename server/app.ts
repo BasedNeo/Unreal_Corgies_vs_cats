@@ -1,5 +1,11 @@
-// The online authority: one HTTP server that answers /health and /stats, optionally serves the
+// The online authority: one HTTP server that answers /health, /stats and /rooms, optionally serves the
 // production build (staticDir), and upgrades WebSockets (on wsPath, or any path) into rooms.
+//
+// GET /rooms (U1 room browser): `[{ name, mode, players, humans, bots, maxPlayers, phase }]` for live public rooms,
+// busiest first, capped at roomsListMax rows. Room names only: no addresses, connection ids or player names;
+// unlisted rooms (`_name`) never appear. CORS-readable (the dev client runs on another port). /rooms and /stats
+// share a per-IP token bucket (httpRate/httpBurst → 429 + Retry-After); /health is exempt.
+// Presence: joins and leaves are announced to the rest of the room as `notice` lines ("Rex joined the yard").
 //
 // Per connection: strict frame validation (src/host/guard.ts), message + byte token buckets, an
 // abuse score that kicks with close code 1008, hello and idle timeouts, ws-level heartbeat (also
@@ -16,7 +22,7 @@ import { parseClientFrame, sanitizeRoomName, TokenBucket, AbuseMeter } from '../
 import { SnapEncoder, encodeServerMsg, type WireEncoding } from '../src/host/wire';
 import type { Conn } from '../src/host/room';
 import type { ClientMsg, ServerMsg } from '../src/shared/protocol';
-import { RoomManager, type ManagedRoom } from './rooms';
+import { RoomManager, isUnlistedRoom, type ManagedRoom } from './rooms';
 import { createStaticHandler } from './static';
 import type { ServerConfig } from './config';
 
@@ -65,7 +71,8 @@ export interface GameServer {
   /** Base URLs: http://host:port and ws://host:port<wsPath>. */
   readonly httpUrl: string;
   readonly wsUrl: string;
-  stats(resetMax?: boolean): Record<string, unknown>;
+  /** Server stats. In-process callers see every room name; public HTTP callers get unlisted names redacted. */
+  stats(resetMax?: boolean, redactUnlisted?: boolean): Record<string, unknown>;
   connections(): ConnStats[];
   /** Graceful shutdown: notify + close every socket (1001), stop rooms, close the HTTP server. */
   close(reason?: string): Promise<void>;
@@ -98,30 +105,82 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
     })
     : null;
 
-  const stats = (resetMax = false) => ({
+  const stats = (resetMax = false, redactUnlisted = false) => ({
     ok: !shuttingDown,
     uptimeSec: Math.round((Date.now() - startedAt) / 1000),
     connections: clients.size,
     players: [...clients.values()].filter((c) => c.joined).length,
-    rooms: rooms.stats(resetMax),
+    rooms: rooms.stats(resetMax).map((r) => (redactUnlisted && isUnlistedRoom(r.name) ? { ...r, name: '(unlisted)' } : r)),
     memoryMB: Math.round(process.memoryUsage().rss / 1048576),
   });
 
+  const clientIp = (req: http.IncomingMessage): string => {
+    if (cfg.trustProxy) {
+      const xff = req.headers['x-forwarded-for'];
+      const first = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim();
+      if (first) return first;
+    }
+    return req.socket.remoteAddress ?? 'unknown';
+  };
+
   const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-  const mayResetStats = (req: http.IncomingMessage, query: string): boolean => {
+  /** Operator access: `&token=<statsToken>`, or a direct local peer (not a same-host reverse proxy, which sets XFF). */
+  const privileged = (req: http.IncomingMessage, query: string): boolean => {
     const token = new URLSearchParams(query).get('token');
     if (cfg.statsToken && token === cfg.statsToken) return true;
-    // a direct local peer only: behind a same-host reverse proxy every request arrives from loopback
     return LOOPBACK.has(req.socket.remoteAddress ?? '') && req.headers['x-forwarded-for'] === undefined;
   };
 
+  // Per-IP token buckets for the public JSON endpoints. Idle entries are swept when the table grows large.
+  const HTTP_BUCKETS_MAX = 4096;
+  const httpBuckets = new Map<string, { bucket: TokenBucket; at: number }>();
+  const httpAllowed = (req: http.IncomingMessage): boolean => {
+    const ip = clientIp(req);
+    const now = performance.now();
+    let e = httpBuckets.get(ip);
+    if (!e) {
+      if (httpBuckets.size >= HTTP_BUCKETS_MAX) {
+        for (const [k, v] of httpBuckets) if (now - v.at > 60_000) httpBuckets.delete(k);
+        if (httpBuckets.size >= HTTP_BUCKETS_MAX) httpBuckets.clear();
+      }
+      e = { bucket: new TokenBucket(cfg.httpBurst, cfg.httpRate, now), at: now };
+      httpBuckets.set(ip, e);
+    }
+    e.at = now;
+    return e.bucket.take(now);
+  };
+  /** /rooms is read cross-origin by the dev client: public data, so any origin unless ALLOWED_ORIGINS is set. */
+  const corsHeaders = (req: http.IncomingMessage): Record<string, string> => {
+    if (!cfg.allowedOrigins) return { 'Access-Control-Allow-Origin': '*' };
+    const origin = req.headers.origin;
+    return origin && cfg.allowedOrigins.includes(origin) ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : { Vary: 'Origin' };
+  };
+  const sendJson = (res: http.ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}) => {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...extra });
+    res.end(JSON.stringify(body));
+  };
+  const tooMany = (res: http.ServerResponse, extra: Record<string, string> = {}) =>
+    sendJson(res, 429, { error: 'too many requests' }, { 'Retry-After': String(Math.max(1, Math.ceil(1 / cfg.httpRate))), ...extra });
+
   const httpServer = http.createServer((req, res) => {
     const [url, query = ''] = (req.url ?? '/').split('?');
-    if (url === '/health' || url === '/stats') {
+    if (url === '/health') {
+      sendJson(res, shuttingDown ? 503 : 200, { ok: !shuttingDown, rooms: rooms.size, connections: clients.size });
+      return;
+    }
+    if (url === '/stats') {
+      if (!httpAllowed(req)) { tooMany(res); return; }
       // /stats?reset=1 starts a new tick-max/overrun window (soak tools skip warm-up that way) — local or token only.
-      const body = JSON.stringify(url === '/health' ? { ok: !shuttingDown, rooms: rooms.size, connections: clients.size } : stats(/(^|&)reset=1(&|$)/.test(query) && mayResetStats(req, query)));
-      res.writeHead(shuttingDown ? 503 : 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-      res.end(body);
+      const op = privileged(req, query);
+      sendJson(res, shuttingDown ? 503 : 200, stats(/(^|&)reset=1(&|$)/.test(query) && op, !op));
+      return;
+    }
+    if (url === '/rooms') {
+      const cors = corsHeaders(req);
+      if (!cfg.listRooms) { sendJson(res, 404, { error: 'room list disabled' }, cors); return; }
+      if (req.method !== 'GET' && req.method !== 'HEAD') { sendJson(res, 405, { error: 'method not allowed' }, { Allow: 'GET, HEAD', ...cors }); return; }
+      if (!httpAllowed(req)) { tooMany(res, cors); return; }
+      sendJson(res, shuttingDown ? 503 : 200, shuttingDown ? [] : rooms.list(cfg.roomsListMax), cors);
       return;
     }
     if (serveStatic) {
@@ -137,15 +196,6 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
   httpServer.on('clientError', (_err, socket) => { if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'); else socket.destroy(); });
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: cfg.maxPayload, perMessageDeflate: false, clientTracking: false });
-
-  const clientIp = (req: http.IncomingMessage): string => {
-    if (cfg.trustProxy) {
-      const xff = req.headers['x-forwarded-for'];
-      const first = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim();
-      if (first) return first;
-    }
-    return req.socket.remoteAddress ?? 'unknown';
-  };
 
   const refuseUpgrade = (socket: Duplex, code: number, text: string) => {
     socket.on('error', () => {});
@@ -165,6 +215,12 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
     if ((perIp.get(ip) ?? 0) >= cfg.maxConnectionsPerIp) return refuseUpgrade(socket, 429, 'Too Many Requests');
     wss.handleUpgrade(req, socket, head, (ws) => onConnection(ws, ip, url));
   });
+
+  /** Presence line for everyone else in the room (clients show `notice` in the chat feed). */
+  function announce(mr: ManagedRoom, text: string, exceptPid: string): void {
+    if (mr.destroyed) return;
+    for (const p of mr.room.players.values()) if (p.conn && p.pid !== exceptPid) p.conn.send({ t: 'notice', text });
+  }
 
   function kick(c: Client, code: number, reason: string, notify = true): void {
     if (c.closed || c.closing) return;
@@ -262,6 +318,7 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
       if (!slot) { rooms.release(mr, id); kick(c, 1013, 'join refused', false); return; }
       c.room = mr;
       c.joined = true;
+      announce(mr, `${slot.name} joined the yard`, id);
       log(`[cvc] ${id} joined room '${mr.name}' as ${slot.name} from ${ip} (${mr.room.humanCount} players)`);
     }
 
@@ -279,7 +336,11 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
       const n = (perIp.get(ip) ?? 1) - 1;
       if (n <= 0) perIp.delete(ip); else perIp.set(ip, n);
       if (c.room) {
-        if (c.joined && !c.room.destroyed) c.room.room.leave(id);
+        if (c.joined && !c.room.destroyed) {
+          const name = c.room.room.players.get(id)?.name;
+          c.room.room.leave(id);
+          if (name) announce(c.room, `${name} left the yard`, id);
+        }
         rooms.release(c.room, id);
         log(`[cvc] ${id} left room '${c.room.name}'`);
       }

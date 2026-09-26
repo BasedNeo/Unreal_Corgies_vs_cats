@@ -108,7 +108,8 @@ async function main(): Promise<void> {
       void audio.unlock();
       ctx.renderer.domElement.requestPointerLock?.();
       if (o.mode === 'online' && o.server) {
-        location.search = `?server=${encodeURIComponent(o.server)}&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}`;
+        const room = o.room ? `&room=${encodeURIComponent(o.room)}` : '';
+        location.search = `?server=${encodeURIComponent(o.server)}&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}${room}`;
         return;
       }
       if (!net) { void startSession(o.name, o.cls, o.team); return; }
@@ -118,6 +119,9 @@ async function main(): Promise<void> {
     chooseClass: (c) => net?.transport.send({ t: 'class', cls: c }),
     chooseTeam: (team) => { if (team !== -1) net?.transport.send({ t: 'team', team }); },
     setSetting: () => applySettings(hud.settings),
+    // U1 chat: the authority echoes every line (rate-limited); the game sees no keys while chat is open
+    sendChat: (text) => { if (!net?.connected) return false; net.transport.send({ t: 'chat', text }); return true; },
+    chatOpenChanged: (open) => { input.suspended = open; },
   });
   hud.setUiSound((k) => audio.ui(k));
   const prompts = createInteractPrompts(ui, { send: (msg) => net?.transport.send(msg), sound: (k) => audio.ui(k) });
@@ -140,7 +144,8 @@ async function main(): Promise<void> {
     ui.appendChild(btn);
   });
   bus.on('roster', (r) => nameplates.setRoster(r));
-  bus.on('notice', (t) => hud.notice(t));
+  bus.on('notice', (t) => hud.serverNotice(t));
+  bus.on('chat', (m) => hud.chat(m.from, m.text));
   bus.on('game', (ev) => {
     if (ev.e === 'jump') views.trigger(ev.id, 'jump');
     if (ev.e === 'land') views.trigger(ev.id, 'land', ev.impact);

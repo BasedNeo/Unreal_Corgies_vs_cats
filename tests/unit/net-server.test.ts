@@ -288,3 +288,70 @@ describe('production server (static dist + /ws on one port)', () => {
     expect(s.rooms.get('prod')).toBeTruthy();
   });
 });
+
+// U1: the room browser's public room list.
+describe('room list (GET /rooms)', () => {
+  const KEYS = ['bots', 'humans', 'maxPlayers', 'mode', 'name', 'phase', 'players'];
+
+  it('lists live public rooms with head counts only: no addresses, ids or player names; unlisted rooms hidden', async () => {
+    const s = await start({ bots: [2, 1], roomTtlMs: 5000 });
+    await player(`${s.wsUrl}/?room=alpha`, 'Ann');
+    await player(`${s.wsUrl}/?room=alpha`, 'Bob');
+    await player(`${s.wsUrl}/?room=bravo`, 'Cy');
+    await player(`${s.wsUrl}/?room=_secret`, 'Dee');
+    const res = await get(`${s.httpUrl}/rooms`, { Origin: 'http://localhost:5173' });
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/application\/json/);
+    expect(res.headers['access-control-allow-origin']).toBe('*');
+    expect(res.headers['cache-control']).toBe('no-store');
+    const text = res.body.toString();
+    const list = JSON.parse(text) as Array<Record<string, unknown>>;
+    expect(list.map((r) => r.name)).toEqual(['alpha', 'bravo']); // busiest first; `_secret` is unlisted
+    for (const r of list) expect(Object.keys(r).sort()).toEqual(KEYS);
+    const botsIn = (room: string) => [...s.rooms.get(room)!.room.players.values()].filter((p) => p.bot).length;
+    expect(botsIn('alpha')).toBeGreaterThan(0);
+    expect(list[0]).toEqual({ name: 'alpha', mode: 'yard-skirmish', players: 2 + botsIn('alpha'), humans: 2, bots: botsIn('alpha'), maxPlayers: 12, phase: expect.stringMatching(/^(warmup|live|ended)$/) });
+    expect(list[1]).toMatchObject({ name: 'bravo', humans: 1, bots: botsIn('bravo'), players: 1 + botsIn('bravo') });
+    // Nothing that identifies who is connected, from where.
+    for (const leak of ['127.0.0.1', '::1', 'Ann', 'Bob', 'Cy', 'Dee', 'secret', '"c1"', 'ip', 'pid']) expect(text).not.toContain(leak);
+    // Public /stats (behind a proxy = not a direct local peer) redacts unlisted names; operators still see them.
+    const pub = JSON.parse((await get(`${s.httpUrl}/stats`, { 'X-Forwarded-For': '203.0.113.9' })).body.toString());
+    expect(pub.rooms.map((r: { name: string }) => r.name).sort()).toEqual(['(unlisted)', 'alpha', 'bravo']);
+    const op = JSON.parse((await get(`${s.httpUrl}/stats`)).body.toString());
+    expect(op.rooms.map((r: { name: string }) => r.name).sort()).toEqual(['_secret', 'alpha', 'bravo']);
+  });
+
+  it('caps the response at roomsListMax rows, drops emptied rooms and can be switched off', async () => {
+    const s = await start({ roomsListMax: 2, roomTtlMs: 5000 });
+    for (const r of ['r1', 'r2', 'r3']) await player(`${s.wsUrl}/?room=${r}`, r);
+    const list = JSON.parse((await get(`${s.httpUrl}/rooms`)).body.toString());
+    expect(list).toHaveLength(2);
+    expect(s.rooms.list(99)).toHaveLength(3);
+    // A room whose last player left waits out its TTL but is no longer offered.
+    nets.find((n) => n.roster.some((r) => r.name === 'r1'))!.transport.close();
+    await until(() => s.rooms.list(99).length === 2, 3000, 'emptied room unlisted');
+    expect(s.rooms.get('r1')).toBeTruthy();
+    const off = await start({ listRooms: false });
+    expect((await get(`${off.httpUrl}/rooms`)).status).toBe(404);
+    expect((await get(`${s.httpUrl}/rooms`, {}, 'POST')).status).toBe(405);
+  });
+
+  it('rate-limits /rooms and /stats per address (429 + Retry-After), never /health', async () => {
+    const s = await start({ httpRate: 1, httpBurst: 3 });
+    const codes: number[] = [];
+    for (let i = 0; i < 5; i++) codes.push((await get(`${s.httpUrl}/rooms`)).status);
+    expect(codes).toEqual([200, 200, 200, 429, 429]);
+    const limited = await get(`${s.httpUrl}/stats`);
+    expect(limited.status).toBe(429); // one bucket for both public JSON endpoints
+    expect(limited.headers['retry-after']).toBe('1');
+    for (let i = 0; i < 5; i++) expect((await get(`${s.httpUrl}/health`)).status).toBe(200);
+    await sleep(1100); // refills at httpRate
+    expect((await get(`${s.httpUrl}/rooms`)).status).toBe(200);
+  });
+
+  it('honours ALLOWED_ORIGINS for cross-origin reads', async () => {
+    const s = await start({ allowedOrigins: ['https://play.example'] });
+    expect((await get(`${s.httpUrl}/rooms`, { Origin: 'https://play.example' })).headers['access-control-allow-origin']).toBe('https://play.example');
+    expect((await get(`${s.httpUrl}/rooms`, { Origin: 'https://evil.example' })).headers['access-control-allow-origin']).toBeUndefined();
+  });
+});

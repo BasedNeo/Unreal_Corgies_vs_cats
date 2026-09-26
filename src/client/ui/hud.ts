@@ -5,9 +5,13 @@
 // Wiring (see docs/handoff/L5.md): createHud(ui, actions) · hud.update(model) every frame ·
 // bus 'game' → hud.onGameEvent(ev) · bus 'notice' → hud.notice(text). HudModel stays backward compatible:
 // every L5 addition is optional.
+// U1 (ux, docs/handoff/U1.md): text chat (Enter/T; bus 'chat' → hud.chat, bus 'notice' → hud.serverNotice,
+// actions.sendChat, actions.chatOpenChanged → input.suspended), first-match tips, the room browser in the menu and
+// the quality "applies after reload" notice. All optional: the old wiring still compiles and runs.
 import type { EntityState, GameEvent, MatchState, RosterEntry } from '../../shared/protocol';
 import { CLASS_IDS, EFlag, EntityKind, Species, type ClassId, type TeamId } from '../../shared/types';
 import { CLASSES } from '../../shared/content/classes';
+import { PICKUPS } from '../../shared/content/pickups';
 import { WEAPON_FX, WeaponTable } from '../fx/weapon-fx';
 import { ensureFonts } from './fonts';
 import { injectHudStyle } from './hud-style';
@@ -16,8 +20,15 @@ import { KillFeed, type FeedParty } from './kill-feed';
 import { createMenu, createSettingsPanel, firstPad, PadNav, type Menu, type MenuDeps, type PlayOptions, type UiSoundKind } from './menu';
 import { buildScoreboard, renderScoreboardHtml } from './scoreboard';
 import { objectiveForTeam } from './objective';
-import { loadSettings, saveSettings, type Settings, type SettingKey } from './settings';
+import { loadSettings, saveSettings, safeStorage, type KV, type QualitySetting, type Settings, type SettingKey } from './settings';
 import { ABILITY_COOLDOWN_ESTIMATE, CONTROLS, DEATH_QUIPS, RELOAD_ESTIMATE, RESPAWN_ESTIMATE, TEAM_NAMES } from './strings';
+import { createChat } from './chat';
+import { isPresenceNotice } from './chat-model';
+import { TipScheduler, createTipView } from './tips';
+import { bootQuality, reloadUrl } from './quality-note';
+import type { RoomPoller } from './rooms';
+import { findInteractTarget } from '../interact/targets';
+import { serverUrlForPage } from '../net/server-url';
 
 export type { PlayOptions } from './menu';
 export type { Settings, SettingKey } from './settings';
@@ -53,6 +64,13 @@ export interface HudActions {
   chooseTeam(team: TeamId | -1): void;
   /** Called after the HUD has persisted the change; apply it (input sensitivity, audio volumes, quality). */
   setSetting<K extends SettingKey>(key: K, value: Settings[K]): void;
+  // ---- U1 additions ----
+  /** Send a chat line (already cleaned, ≤ 120 chars) to the authority. Return false when not connected. */
+  sendChat(text: string): boolean;
+  /** Chat opened/closed: suspend game input while it is open (`input.suspended = open`). */
+  chatOpenChanged(open: boolean): void;
+  /** Settings › Quality › Reload now. Default: reload this page without ?quality=. */
+  reload(): void;
 }
 
 export interface Hud {
@@ -74,6 +92,15 @@ export interface Hud {
   setWeaponIds(ids: readonly string[]): void;
   /** Optional UI sound hook (e.g. audio.ui). */
   setUiSound(fn: (kind: UiSoundKind) => void): void;
+  // ---- U1 additions ----
+  /** A chat line from the authority (bus 'chat'). */
+  chat(from: string, text: string): void;
+  /** A server notice (bus 'notice'): goes to the chat feed; also toasts unless it is a join/leave line. */
+  serverNotice(text: string): void;
+  /** True while the chat input is open (game input should be suspended). */
+  readonly chatOpen: boolean;
+  /** Forget which first-match tips were seen (Settings › Show again does this too). */
+  resetTips(): void;
   dispose(): void;
 }
 
@@ -89,6 +116,18 @@ const HM_ANGLES = [45, 135, 225, 315];
 export interface HudOptions {
   /** Seconds clock for HUD animations (labs/tests inject a pausable one). Default performance.now()/1000. */
   clock?: () => number;
+  // ---- U1 additions ----
+  /** The quality tier the world view was built with. Default: ?quality= or the saved setting (as main.ts does). */
+  appliedQuality?: QualitySetting;
+  /** Set true once changing quality fully applies live (hides the "applies after reload" notice). */
+  qualityLive?: boolean;
+  /** The server this page plays on (room browser + server field). Default serverUrlForPage(). */
+  pageServer?: string | null;
+  /** First-match tips on/off (labs pass false) and their storage (tests pass a double). */
+  tips?: boolean;
+  tipsStorage?: KV | null;
+  /** Room list poller for the menu's room browser (tests/labs inject a fake fetch). */
+  roomPoller?: RoomPoller;
 }
 
 export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts: HudOptions = {}): Hud {
@@ -142,6 +181,8 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
         </div>
       </div>
       <div class="bn hidden"><div class="bn-burst"><div class="bn-text"></div></div></div>
+      <div class="u1-slot" data-tip-slot></div>
+      <div class="u1-slot" data-chat-slot></div>
       <div class="sb panel hidden"><div class="sb-head"><span class="sb-title">SCOREBOARD</span><span class="sb-meta"></span></div><div class="sb-cols"></div></div>
     </div>
     <div class="lk interactive hidden">
@@ -185,6 +226,9 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
     saveSettings(settings);
     actions?.setSetting?.(key, value);
   };
+  // U1: first-match tips + session flag (the quality notice warns that a reload leaves the match).
+  const tips = opts.tips === false ? null : new TipScheduler(opts.tipsStorage === undefined ? safeStorage() : opts.tipsStorage);
+  let session = false;
   const deps: MenuDeps = {
     settings,
     onPlay: (opts) => { menu.close(); actions?.play?.(opts); },
@@ -192,6 +236,13 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
     onTeam: (t) => actions?.chooseTeam?.(t),
     onSetting: persist,
     sound,
+    pageServer: opts.pageServer !== undefined ? opts.pageServer : safePageServer(),
+    appliedQuality: opts.appliedQuality ?? bootQuality(typeof location !== 'undefined' ? location.search : '', settings.quality),
+    qualityLive: opts.qualityLive,
+    inSession: () => session,
+    onReload: () => { if (actions?.reload) actions.reload(); else location.replace(reloadUrl(location.href)); },
+    onResetTips: tips ? () => tips.reset() : undefined,
+    roomPoller: opts.roomPoller,
   };
   const menu: Menu = createMenu(el, deps);
   const pauseSettings = createSettingsPanel(deps, () => { lkSettings.classList.add('hidden'); lkMain.classList.remove('hidden'); }, 'RESUME ▸');
@@ -238,7 +289,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
   let ddNext = 0;
   // ammo/reload/ability
   let lastWeapon = -99, maxAmmoSeen = 0, lastAmmo = -1, lastMag = -1, reloadAt = -10;
-  let abilityAt = -100, abilityId = '', lastCls = '', lastCdText = '';
+  let abilityAt = -100, abilityId = '', abilityScale = 1, lastCls = '', lastCdText = '';
   // death
   let deathAt = -100, killerId = -1, deathCount = 0, lastDsNum = -1;
   // scoreboard
@@ -247,6 +298,17 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
   let bannerUntil = 0;
   let lastLocked: boolean | null = null, lastDbg = '';
   const clock = opts.clock ?? (() => performance.now() / 1000);
+
+  // U1: chat (right column, under the kill feed) and first-match tips (bottom centre, under the character).
+  // Created after `clock`: the chat renders once while it is built.
+  const chat = createChat(q('[data-chat-slot]'), {
+    send: (text) => actions?.sendChat?.(text) ?? false,
+    clock,
+    onOpenChange: (open) => actions?.chatOpenChanged?.(open),
+    sound: (k) => sound(k),
+  });
+  const tipView = createTipView(q('[data-tip-slot]'));
+  let tipsLast = -1, kioskAt = -1, nearKiosk = false;
 
   const onKey = (e: KeyboardEvent) => {
     if (e.code !== 'Tab' || menu.isOpen) return;
@@ -320,8 +382,12 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
         if (t !== lastDbg) { lastDbg = t; dbg.textContent = t; }
       } else if (lastDbg) { lastDbg = ''; dbg.textContent = ''; }
 
-      // ---- pause overlay
-      const wantLock = !m.locked && !inMenu;
+      // ---- chat + session (U1)
+      session = !!m.match || !!m.local;
+      chat.update({ roster: m.roster, localEntity: localId, canOpen: session && !inMenu });
+
+      // ---- pause overlay (hidden while chatting: typing is not "paused", and Esc there cancels the chat)
+      const wantLock = !m.locked && !inMenu && !chat.isOpen;
       if (wantLock !== lastLocked) {
         lastLocked = wantLock;
         show(lk, wantLock);
@@ -397,7 +463,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
         const abil = CLASSES[cls].ability;
         let left = 0, total = 1;
         if (m.ability) { left = m.ability.cooldownLeft; total = Math.max(0.01, m.ability.cooldownTotal); }
-        else if (abilityId) { total = ABILITY_COOLDOWN_ESTIMATE[abilityId] ?? 8; left = Math.max(0, abilityAt + total - now); }
+        else if (abilityId) { total = (ABILITY_COOLDOWN_ESTIMATE[abilityId] ?? 8) * abilityScale; left = Math.max(0, abilityAt + total - now); }
         const cd = left > 0.05;
         toggle(ab, 'cooling', cd);
         toggle(ab, 'ready', !cd && alive);
@@ -520,6 +586,19 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
       }
       if (!dead && localDead) { localDead = false; killerId = -1; deathBy.delete(localId); }
       show(ds, dead);
+
+      // ---- first-match tips (U1): only while actually playing; never over the crosshair, never modal
+      if (tips) {
+        const tdt = tipsLast < 0 ? 0 : now - tipsLast;
+        tipsLast = now;
+        if (L && alive && now - kioskAt > 0.2) { kioskAt = now; nearKiosk = findInteractTarget(states, L)?.kind === 'ordnance'; }
+        const f = L?.flags ?? 0;
+        const playing = alive && !inMenu && !chat.isOpen && m.locked && !!M && M.phase !== 'ended';
+        tipView.show(tips.update(tdt, {
+          active: playing, phase: M?.phase ?? null, nearKiosk: alive && nearKiosk,
+          moving: !!L && Math.hypot(L.vx, L.vz) > 1, firing: (f & EFlag.Firing) !== 0, aiming: (f & EFlag.Aiming) !== 0,
+        }));
+      }
       if (dead) {
         const left = m.respawnIn ?? Math.max(0, deathAt + RESPAWN_ESTIMATE - now);
         const n = Math.ceil(left);
@@ -597,7 +676,12 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
           break;
         case 'ability':
           // Only class abilities start the Q ring (slide, ground pound, vehicle and boss events also use 'ability').
-          if (ev.id === localId && ev.ability in ABILITY_COOLDOWN_ESTIMATE) { abilityAt = now; abilityId = ev.ability; }
+          if (ev.id === localId && ev.ability in ABILITY_COOLDOWN_ESTIMATE) {
+            abilityAt = now; abilityId = ev.ability;
+            // Squeaky Clean (Upgrade Core, a snapshot flag) drains ability cooldowns faster: shorten the ring's estimate
+            abilityScale = (states.get(localId)?.flags ?? 0) & EFlag.BuffSqueaky ? (PICKUPS.squeaky_clean.buff.abilityCooldown ?? 1) : 1;
+          }
+          if (ev.id === localId) tips?.onAction(ev.ability);
           break;
         case 'pickup':
           if (ev.id === localId) hud.notice(`Picked up ${ev.item.replace(/_/g, ' ')}`);
@@ -619,14 +703,28 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
       setTimeout(() => t.remove(), 3300);
     },
 
-    showMenu(open, view = 'main') { if (open) menu.open(view); else menu.close(); },
+    chat(from, text) { chat.receive(from, text); },
+    serverNotice(text) {
+      chat.system(text);
+      if (!isPresenceNotice(text)) hud.notice(text);
+    },
+    get chatOpen() { return chat.isOpen; },
+    resetTips() { tips?.reset(); },
+
+    showMenu(open, view = 'main') { if (open) { chat.close(true); menu.open(view); } else menu.close(); },
     setScoreboard(open) { sbForced = open; },
     setWeaponIds(ids) { weapons.set(ids); lastWeapon = -99; },
     setUiSound(fn) { uiSound = fn; },
     dispose() {
       removeEventListener('keydown', onKey); removeEventListener('keyup', onKey); removeEventListener('blur', onBlur); removeEventListener('resize', measure);
+      chat.dispose();
       el.remove();
     },
   };
   return hud;
+}
+
+/** serverUrlForPage() without throwing outside a browser page (labs/tests). */
+function safePageServer(): string | null {
+  try { return typeof location !== 'undefined' ? serverUrlForPage() : null; } catch { return null; }
 }

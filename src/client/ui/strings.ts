@@ -43,3 +43,53 @@ export const CONTROLS: Array<[string, string]> = [
   ['WASD', 'Move'], ['SPACE ×2', 'Double jump'], ['SHIFT', 'Zoomies'], ['MOUSE', 'Aim · fire'],
   ['RMB', 'Aim down'], ['Q', 'Ability'], ['R', 'Reload'], ['TAB', 'Scoreboard'],
 ];
+
+// ---- U1 (ux): chat, room browser, first-match tips, quality notice ----
+
+export const CHAT_STRINGS = {
+  channel: 'ALL',
+  logLabel: 'Chat',
+  inputLabel: 'Chat message',
+  hint: 'ENTER send · ESC cancel',
+  tooFast: 'Easy, pup: one message a second',
+  sending: 'sending…',
+  failed: 'not delivered',
+  you: 'You',
+};
+
+/** Keycap markup for tips: `[E]` renders as a key. Text only, no HTML. */
+export const TIP_TEXT = {
+  basics: '[WASD] move · [MOUSE] aim · [LMB] fire · hold [RMB] to aim down',
+  kiosk: 'Press [E] at the Ordnance Kiosk to change kit',
+  moves: 'Crouch [C] while sprinting [SHIFT] to slide · crouch in the air to ground-pound',
+} as const;
+
+export const TIP_STRINGS = { tag: 'TIP', resetLabel: 'FIRST-MATCH TIPS', resetButton: 'SHOW AGAIN', resetDone: 'RESET ✓', resetNote: 'Tips show again in your next match' };
+
+export const ROOM_STRINGS = {
+  title: 'ONLINE ROOMS',
+  loading: 'Sniffing out rooms…',
+  empty: 'No rooms yet. Start one below and share its name.',
+  error: 'Can’t reach that server. Is it running?',
+  busy: 'The server is busy. Trying again shortly.',
+  offline: 'You’re offline. Reconnect to see rooms.',
+  badUrl: 'Enter a server address that starts with ws:// or wss://',
+  join: 'JOIN',
+  full: 'FULL',
+  create: 'CREATE ▸',
+  createLabel: 'NEW ROOM',
+  unlisted: 'Unlisted',
+  unlistedHint: 'Unlisted rooms never show here: share the name to invite',
+  back: '‹ CLASSES',
+  retry: 'RETRY',
+  browse: 'ROOMS ▸',
+  quickJoin: 'QUICK JOIN',
+  headRoom: 'ROOM', headMode: 'MODE', headPlayers: 'PLAYERS', headPhase: 'STATUS',
+};
+
+export const QUALITY_STRINGS = {
+  /** World detail is built once at load: foliage, shadow map, clouds, ground shading, rain. */
+  reload: 'Grass, shadows and sky change after a reload. Effects and sound switched already.',
+  reloadInMatch: 'Reloading leaves this match.',
+  reloadButton: 'RELOAD NOW',
+};

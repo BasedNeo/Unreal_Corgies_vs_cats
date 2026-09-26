@@ -25,6 +25,19 @@ export interface ServerConfig {
   statsToken: string | null;
   /** Empty rooms are destroyed after this long (ms). */
   roomTtlMs: number;
+  /**
+   * Public JSON endpoints (`/rooms`, `/stats`): per-IP token bucket, requests per second and burst. Over it the
+   * server answers 429 + Retry-After. `/health` is exempt (load-balancer probes).
+   */
+  httpRate: number;
+  httpBurst: number;
+  /**
+   * `GET /rooms` lists live public rooms for the menu's room browser (env LIST_ROOMS=0 turns it off: 404). Room
+   * names that start with `_` are unlisted: joinable by name, never listed (see server/rooms.ts UNLISTED_PREFIX).
+   */
+  listRooms: boolean;
+  /** Most rooms one `/rooms` response carries (busiest first), which caps the response size. */
+  roomsListMax: number;
   /** A connection must send 'hello' within this long (ms). */
   helloTimeoutMs: number;
   /** No message at all for this long closes the connection (ms). */
@@ -83,7 +96,7 @@ export function loadConfig(env: Env = process.env, defaults: Partial<ServerConfi
   const d: ServerConfig = {
     host: '0.0.0.0', port: 8787, mode: 'yard-skirmish', bots: [3, 0], seed: 1,
     maxRooms: 32, maxConnections: 256, maxConnectionsPerIp: 16, maxRoomsPerIp: 3, trustProxy: false, statsToken: null,
-    roomTtlMs: 10_000, helloTimeoutMs: 10_000, idleTimeoutMs: 30_000, heartbeatMs: 5_000, peerTimeoutMs: 20_000,
+    roomTtlMs: 10_000, httpRate: 5, httpBurst: 20, listRooms: true, roomsListMax: 50, helloTimeoutMs: 10_000, idleTimeoutMs: 30_000, heartbeatMs: 5_000, peerTimeoutMs: 20_000,
     maxPayload: 16 * 1024, msgRate: 120, msgBurst: 240, byteRate: 64 * 1024, byteBurst: 128 * 1024,
     kickScore: 20, maxBufferedBytes: 512 * 1024, congestionKickMs: 15_000,
     allowedOrigins: null, staticDir: null, wsPath: null, encoding: 'delta', log: true,
@@ -106,6 +119,10 @@ export function loadConfig(env: Env = process.env, defaults: Partial<ServerConfi
     trustProxy: env.TRUST_PROXY ? env.TRUST_PROXY === '1' || env.TRUST_PROXY === 'true' : d.trustProxy,
     statsToken: env.STATS_TOKEN || d.statsToken,
     roomTtlMs: num(env, 'ROOM_TTL_MS', d.roomTtlMs, 0),
+    httpRate: num(env, 'HTTP_RATE', d.httpRate, 0.1),
+    httpBurst: num(env, 'HTTP_BURST', d.httpBurst, 1),
+    listRooms: env.LIST_ROOMS ? env.LIST_ROOMS !== '0' && env.LIST_ROOMS !== 'false' : d.listRooms,
+    roomsListMax: num(env, 'ROOMS_LIST_MAX', d.roomsListMax, 1, 500),
     helloTimeoutMs: num(env, 'HELLO_TIMEOUT_MS', d.helloTimeoutMs, 100),
     idleTimeoutMs: num(env, 'IDLE_TIMEOUT_MS', d.idleTimeoutMs, 1000),
     heartbeatMs: num(env, 'HEARTBEAT_MS', d.heartbeatMs, 100),

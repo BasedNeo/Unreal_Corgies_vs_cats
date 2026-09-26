@@ -2,10 +2,31 @@
 // first player joins and destroyed once it has been empty for `roomTtlMs`. One shared fixed-rate
 // loop drives every room; each tick is timed so /stats and the bot soak tool can judge tick health.
 // A room whose tick keeps throwing is shut down instead of taking the whole server with it.
+// list() feeds the public room browser (GET /rooms): names, mode, head counts and phase only — never who is
+// connected from where.
 import { Sim } from '../src/sim/sim';
 import { Room } from '../src/host/room';
-import { TICK_HZ } from '../src/shared/constants';
+import { MAX_PLAYERS_PER_ROOM, TICK_HZ } from '../src/shared/constants';
+import type { MatchPhase } from '../src/shared/protocol';
 import type { ServerConfig } from './config';
+
+/**
+ * Room names starting with this are unlisted: anyone with the name can join (`?room=_porch`), but the room browser
+ * never lists them and public `/stats` redacts their names. (QA W1: room names act as private-room keys.)
+ */
+export const UNLISTED_PREFIX = '_';
+export const isUnlistedRoom = (name: string): boolean => name.startsWith(UNLISTED_PREFIX);
+
+/** One row of GET /rooms. `players` = everyone in the match (humans + bots); `maxPlayers` caps humans. */
+export interface RoomListing {
+  name: string;
+  mode: string;
+  players: number;
+  humans: number;
+  bots: number;
+  maxPlayers: number;
+  phase: MatchPhase;
+}
 
 const TICK_MS = 1000 / TICK_HZ;
 const MAX_TICKS_PER_WAKE = 8;
@@ -135,6 +156,23 @@ export class RoomManager {
       }
       if (n === MAX_TICKS_PER_WAKE) { mr.acc = 0; mr.overruns++; } // fell far behind: drop time instead of spiraling
     }
+  }
+
+  /**
+   * Live public rooms for the room browser: at least one human, not unlisted, busiest first (then by name), at most
+   * `max` rows. Carries no connection ids, addresses or player names.
+   */
+  list(max: number): RoomListing[] {
+    const out: RoomListing[] = [];
+    for (const mr of this.rooms.values()) {
+      if (mr.destroyed || isUnlistedRoom(mr.name)) continue;
+      let humans = 0, bots = 0;
+      for (const p of mr.room.players.values()) { if (p.bot) bots++; else humans++; }
+      if (humans === 0) continue; // emptied, waiting out its TTL: not a room anyone is playing in
+      out.push({ name: mr.name, mode: mr.room.opts.mode, players: humans + bots, humans, bots, maxPlayers: MAX_PLAYERS_PER_ROOM, phase: mr.room.match.phase });
+    }
+    out.sort((a, b) => b.humans - a.humans || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return out.slice(0, Math.max(0, Math.floor(max)));
   }
 
   stats(resetMax = false): RoomStats[] {
