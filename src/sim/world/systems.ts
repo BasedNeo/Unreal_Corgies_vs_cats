@@ -171,7 +171,7 @@ export const worldEffectsSystem: SimSystem = {
     const data = sim.worldData;
     const emit = (ev: GameEvent) => sim.emit(ev);
     for (const e of sim.entities.values()) {
-      if (e.dead || !e.char) continue;
+      if (e.dead || !e.char || e.moveFrozen) continue; // frozen (late inputs): map effects replay with its movement
       e.data.worldTick = sim.tick;
       const res = stepWorldEffects(data, e, dt, emit, sim.tick);
       if (res.outOfBounds) {

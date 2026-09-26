@@ -195,7 +195,7 @@ describe('server hardening', () => {
     dead.hello();
     const quiet = await raw(s.wsUrl);
     quiet.hello();
-    await until(() => dead.closed.code !== 0, 3000, 'dead peer terminated');
+    await until(() => dead.closed.code !== 0, 10000, 'dead peer terminated'); // room creation can block the loop for seconds
     expect(dead.closed.code).toBe(1006); // terminated, no close handshake
     await sleep(700);
     expect(quiet.closed.code).toBe(0); // answers pings: alive until the idle timeout

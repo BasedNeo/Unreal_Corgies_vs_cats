@@ -238,7 +238,7 @@ export const movementSystem: SimSystem = {
   update(sim, dt) {
     const ctx: MoveContext = { world: sim.world, kcc: sim.kcc, emit: (ev) => sim.emit(ev) };
     for (const e of sim.entities.values()) {
-      if (e.dead || !e.char || e.flags & EFlag.Mounted) continue; // mounted riders are moved by their vehicle
+      if (e.dead || !e.char || e.flags & EFlag.Mounted || e.moveFrozen) continue; // riders move with their vehicle; frozen = inputs late
       stepCharacter(ctx, e, dt);
     }
   },

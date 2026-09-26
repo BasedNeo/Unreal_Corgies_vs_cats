@@ -119,7 +119,10 @@ describe('negative cases: input pipeline', () => {
     expect(room.handle('a', { t: 'input', cmds: [cmd(1 + MAX_SEQ_AHEAD + 10)] })).toBe('abuse');
     expect(p.queue.length).toBe(0);
     expect(p.net.refused).toBe(1);
-    room.handle('a', { t: 'input', cmds: Array.from({ length: 30 }, (_, i) => cmd(i + 2)) });
+    // more than MAX_QUEUE inputs at once (in legal-size messages): the oldest are dropped, the queue stays bounded
+    for (let k = 0, seq = 2; k < Math.ceil((MAX_QUEUE + 10) / 30); k++) {
+      room.handle('a', { t: 'input', cmds: Array.from({ length: 30 }, () => cmd(seq++)) });
+    }
     expect(p.queue.length).toBeLessThanOrEqual(MAX_QUEUE);
     expect(p.net.drops).toBeGreaterThan(0);
     room.dispose();

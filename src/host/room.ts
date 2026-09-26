@@ -18,7 +18,7 @@ import { stepCharacter, type MoveContext } from '../sim/systems/movement';
 import { stepWorldEffects } from '../sim/world/systems';
 import type { ClientMsg, MatchState, RosterEntry, ServerMsg, GameEvent } from '../shared/protocol';
 import { packEntity } from '../shared/protocol';
-import { sanitizeInput, emptyInput, type InputCmd } from '../shared/input';
+import { Btn, sanitizeInput, emptyInput, type InputCmd } from '../shared/input';
 import { type ClassId, type TeamId, type EntityId, CLASS_IDS, EFlag, EntityKind, Species, Team } from '../shared/types';
 import { SNAPSHOT_EVERY, MAX_PLAYERS_PER_ROOM, PROTOCOL_VERSION, TICK_HZ, TICK_DT } from '../shared/constants';
 import { MAX_CMDS_PER_MSG, cleanText } from './guard';
@@ -54,6 +54,8 @@ export interface SlotNet {
   lastSwitchTick: number;
   lastTeamTick: number;
   lastChatTick: number;
+  /** Ticks the player was frozen for (late inputs) and has not caught up yet. */
+  owed: number;
 }
 
 export interface PlayerSlot {
@@ -91,14 +93,22 @@ export interface RoomOptions {
 export type HandleResult = 'ok' | 'ignored' | 'abuse';
 
 /**
- * Max inputs buffered per player; beyond this the oldest are dropped. Sized for a slow client frame
- * (a 250 ms frame samples 15 ticks at once); steady-state depth is trimmed by catch-up ticks.
+ * Max inputs buffered per player; beyond this the oldest are dropped. Sized for the longest freeze (a TCP
+ * retransmission stall releases every held input at once); steady-state depth is trimmed by catch-up ticks.
  */
-export const MAX_QUEUE = 16;
+export const MAX_QUEUE = 48;
 /** An input seq more than this far beyond the last applied one is refused (10 s of inputs). */
 export const MAX_SEQ_AHEAD = TICK_HZ * 10;
 /** After this many starved ticks the repeated input is replaced by a neutral (stopping) one. */
 export const STARVE_NEUTRAL_TICKS = 15;
+/**
+ * Freeze + catch-up: while a player's inputs are late, the authority does not move them (for up to this many
+ * ticks); when the held inputs arrive they replay in order, up to CATCHUP_MAX_PER_TICK per tick, so the player
+ * ends exactly where their client predicted. Repeating the last input instead (the old way) moved the player on
+ * inputs the client never sent: on a 150 ms link with TCP stalls that meant corrections of up to 4 m.
+ */
+export const FREEZE_MAX_TICKS = 36;
+export const CATCHUP_MAX_PER_TICK = 4;
 /** Buffer-trim window (ticks) and the minimum depth over a window that triggers a catch-up tick. */
 export const CATCHUP_WINDOW = TICK_HZ;
 export const CATCHUP_MIN_DEPTH = 3;
@@ -107,14 +117,16 @@ export const CATCHUP_MIN_DEPTH = 3;
  * inputs in one tick) is only allowed when the player is owed ticks from earlier starvation (late/bursty packets),
  * so a client that sends inputs faster than real time can never move faster than real time (QA W1: +14 % speed).
  */
-export const INPUT_CREDIT_CAP = 12;
+export const INPUT_CREDIT_CAP = FREEZE_MAX_TICKS; // a whole freeze can be caught up; never faster than real time
+/** Buttons whose presses only count in a regular tick (combat systems don't run for catch-up inputs). */
+const COMBAT_BUTTONS = Btn.Fire | Btn.Ability | Btn.Interact | Btn.Reload | Btn.Melee | Btn.NextWeapon;
 
 export function defaultMatchState(mode: string): MatchState {
   return { mode, phase: 'live', timeLeft: 0, score: [0, 0], objective: 'Explore West Yard', wave: 0, winner: -1 };
 }
 
 function newSlotNet(): SlotNet {
-  return { starves: 0, catchups: 0, drops: 0, refused: 0, applied: 0, starveRun: 0, minDepth: Infinity, windowTicks: 0, lastMinDepth: 0, credit: 0, inputsSeen: false, lastSwitchTick: -1e9, lastTeamTick: -1e9, lastChatTick: -1e9 };
+  return { starves: 0, catchups: 0, drops: 0, refused: 0, applied: 0, starveRun: 0, minDepth: Infinity, windowTicks: 0, lastMinDepth: 0, credit: 0, inputsSeen: false, lastSwitchTick: -1e9, lastTeamTick: -1e9, lastChatTick: -1e9, owed: 0 };
 }
 
 export class Room {
@@ -301,22 +313,35 @@ export class Room {
     if (++net.windowTicks >= CATCHUP_WINDOW) { net.lastMinDepth = net.minDepth; net.minDepth = Infinity; net.windowTicks = 0; }
     if (net.inputsSeen) net.credit = Math.min(INPUT_CREDIT_CAP, net.credit + 1); // no credit before the first input
     let cmd = p.queue.shift();
+    const e = this.sim.entities.get(p.entity);
     if (!cmd) {
       if (net.inputsSeen) { net.starves++; net.starveRun++; }
       const hold = net.starveRun > STARVE_NEUTRAL_TICKS ? { ...p.lastCmd, mx: 0, mz: 0, buttons: 0 } : p.lastCmd;
-      this.sim.setInput(p.entity, hold);
+      this.sim.setInput(p.entity, hold); // vehicles and combat still read the held input
+      // On foot: don't move on inputs the client never sent. Freeze, and replay the real ones when they arrive.
+      // A long silence (AFK, dead connection) falls back to simulating the held/neutral input.
+      if (e && net.inputsSeen && net.starveRun <= FREEZE_MAX_TICKS) { e.moveFrozen = true; net.owed++; }
+      else if (e) e.moveFrozen = false;
       return;
     }
+    if (e) e.moveFrozen = false;
     net.starveRun = 0;
-    const e = this.sim.entities.get(p.entity);
-    if (e && !e.dead && e.char && !(e.flags & EFlag.Mounted) && p.queue.length && net.credit >= 2 && net.lastMinDepth >= CATCHUP_MIN_DEPTH && p.queue[0].buttons === cmd.buttons) {
+    // Catch-up (bounded by the real-time credit): owed frozen ticks replay right away, up to CATCHUP_MAX_PER_TICK
+    // inputs per tick; otherwise a persistently deep queue is trimmed by one extra input per tick. Extra inputs run
+    // movement only, so they stop at a change in combat buttons (a fire/ability press must reach its own tick).
+    let extras = 0;
+    while (e && !e.dead && e.char && !(e.flags & EFlag.Mounted) && p.queue.length && net.credit >= 2 && extras < CATCHUP_MAX_PER_TICK - 1
+      && ((p.queue[0].buttons ^ cmd.buttons) & COMBAT_BUTTONS) === 0
+      && (net.owed > 0 || (extras === 0 && net.lastMinDepth >= CATCHUP_MIN_DEPTH))) {
       this.stepExtra(e, cmd);
       net.credit--;
       net.applied++;
       net.catchups++;
-      net.lastMinDepth--;
+      extras++;
+      if (net.owed > 0) net.owed--; else net.lastMinDepth--;
       cmd = p.queue.shift()!;
     }
+    if (!p.queue.length) net.owed = 0; // nothing left to replay: whatever is still owed was never sent
     p.lastCmd = cmd;
     net.credit--;
     net.applied++;

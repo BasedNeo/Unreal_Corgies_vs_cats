@@ -71,6 +71,21 @@ export interface LinkEmulation {
   jitterMs: number;
   /** Loss percent for input (up) and snapshot (down) frames. */
   lossPct: number;
+  /**
+   * TCP head-of-line stalls (what loss really looks like on a WebSocket): with this probability per frame the
+   * frame waits for a retransmission (`rtoMs`) and every later frame in that direction queues behind it, then
+   * all arrive in a burst. Nothing is dropped. QA W1: the matrix modelled loss as dropped frames only.
+   */
+  stallPct?: number;
+  /** Retransmission delay for a stalled frame (ms). Default max(200, 4 × lagMs). */
+  rtoMs?: number;
+}
+
+/** Delivery time for the next frame on an ordered link (jitter, then an optional head-of-line stall). */
+function dueAt(now: number, last: number, e: LinkEmulation, rng: () => number, stats: { stalls: number }): number {
+  let due = Math.max(now + e.lagMs + rng() * e.jitterMs, last);
+  if (e.stallPct && rng() * 100 < e.stallPct) { due += e.rtoMs ?? Math.max(200, 4 * e.lagMs); stats.stalls++; }
+  return due;
 }
 
 export interface LoopbackOptions {
@@ -88,13 +103,15 @@ export interface LoopbackOptions {
 export interface LinkStats {
   upBytes: number; downBytes: number; snapBytes: number; snaps: number;
   upFrames: number; downFrames: number; upLost: number; downLost: number;
+  /** Head-of-line stalls injected (both directions). */
+  stalls: number;
   /** Frames the authority refused or flagged as abuse. */
   refused: number;
 }
 
 export class LoopbackLink {
   readonly transport: Transport;
-  readonly stats: LinkStats = { upBytes: 0, downBytes: 0, snapBytes: 0, snaps: 0, upFrames: 0, downFrames: 0, upLost: 0, downLost: 0, refused: 0 };
+  readonly stats: LinkStats = { upBytes: 0, downBytes: 0, snapBytes: 0, snaps: 0, upFrames: 0, downFrames: 0, upLost: 0, downLost: 0, stalls: 0, refused: 0 };
   readonly conn: Conn;
   joined = false;
   open = true;
@@ -130,7 +147,7 @@ export class LoopbackLink {
     this.tstats.bytesOut += text.length; this.tstats.msgsOut++;
     const { loop, up } = this.opts;
     if (droppable && this.rng() * 100 < up.lossPct) { this.stats.upLost++; return; }
-    const due = Math.max(loop.now + up.lagMs + this.rng() * up.jitterMs, this.lastUp);
+    const due = dueAt(loop.now, this.lastUp, up, this.rng, this.stats);
     this.lastUp = due;
     loop.schedule(due, () => this.deliverUp(text));
   }
@@ -163,7 +180,7 @@ export class LoopbackLink {
     this.stats.downBytes += text.length; this.stats.downFrames++;
     if (m.t === 'snap') { this.stats.snapBytes += text.length; this.stats.snaps++; }
     const { loop, down } = this.opts;
-    const due = Math.max(loop.now + down.lagMs + this.rng() * down.jitterMs, this.lastDown);
+    const due = dueAt(loop.now, this.lastDown, down, this.rng, this.stats);
     this.lastDown = due;
     loop.schedule(due, () => {
       if (!this.open) return;

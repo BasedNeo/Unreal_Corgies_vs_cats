@@ -58,12 +58,12 @@ interface CellResult {
   starves: number; catchups: number; drops: number; snapKBs: number; upKBs: number;
 }
 
-async function runCell(rtt: number, loss: number, seed: number, jitterOverride?: number): Promise<CellResult & { sane: boolean; moved: number }> {
+async function runCell(rtt: number, loss: number, seed: number, jitterOverride?: number, stallPct = 0): Promise<CellResult & { sane: boolean; moved: number; stalls: number }> {
   const sim = await Sim.create({ seed: 1 });
   // Neutral mode: no match rules/cat waves, so the numbers measure netcode, not combat balance.
   const room = new Room(sim, { mode: 'net-matrix', botsPerTeam: [0, 0] });
   const jitter = jitterOverride ?? Math.max(2, Math.round(rtt * 0.1));
-  const link: LinkEmulation = { lagMs: rtt / 2, jitterMs: jitter, lossPct: loss };
+  const link: LinkEmulation = { lagMs: rtt / 2, jitterMs: jitter, lossPct: loss, stallPct };
   const truth = new Map<number, [number, number, number]>();
   let watched = -1;
   const session = new LoopbackSession(room, () => {
@@ -107,8 +107,8 @@ async function runCell(rtt: number, loss: number, seed: number, jitterOverride?:
   const endPos = sim.entities.get(slot.entity)!.pos;
   const h = sim.worldData.halfExtent + 5;
   const sane = [endPos.x, endPos.y, endPos.z].every(Number.isFinite) && Math.abs(endPos.x) < h && Math.abs(endPos.z) < h && endPos.y > sim.worldData.killY;
-  const res: CellResult & { sane: boolean; moved: number } = {
-    sane, moved: Math.hypot(endPos.x - startPos.x, endPos.z - startPos.z),
+  const res: CellResult & { sane: boolean; moved: number; stalls: number } = {
+    sane, moved: Math.hypot(endPos.x - startPos.x, endPos.z - startPos.z), stalls: c0.link.stats.stalls,
     rtt, loss, jitter,
     errMean: mean(errors), errP95: q(errors, 0.95), errMax: Math.max(0, ...errors), samples: errors.length,
     maxCorrection: Math.max(0, ...corrections), snapsAfterSpawn: snaps, corrections: corrections.length,
@@ -154,4 +154,24 @@ describe('network matrix (20/80/150 ms RTT x 0/1/3 % loss)', () => {
       expect(r.remoteP95, `remote p95 @${r.rtt}/${r.loss}`).toBeLessThan(0.25);
     }
   }, 180_000);
+
+  it('rides out TCP head-of-line stalls (how loss really arrives on a WebSocket)', async () => {
+    const cells = [await runCell(80, 0, 21, undefined, 1), await runCell(150, 0, 22, undefined, 2)];
+    for (const r of cells) {
+      console.log(`stall cell rtt ${r.rtt} stalls ${r.stalls}: pred err mean ${cm(r.errMean)} p95 ${cm(r.errP95)} max ${cm(r.errMax)} cm · corrections ${r.corrections} (max ${cm(r.maxCorrection)} cm) · snaps ${r.snapsAfterSpawn} · remote p95 ${cm(r.remoteP95)} cm · extrap ${r.extrapPct.toFixed(1)} % · interp delay ${r.interpDelayMs.toFixed(0)} ms · starves ${r.starves} catch-ups ${r.catchups} drops ${r.drops} · moved ${r.moved.toFixed(1)} m`);
+      expect(r.sane).toBe(true);
+      expect(r.stalls).toBeGreaterThan(5);
+      expect(r.snapsAfterSpawn, `no teleports @${r.rtt}`).toBe(0);
+    }
+    // Freeze + catch-up (host/room.ts): late inputs replay in order instead of the authority improvising.
+    // Before it: 80 ms/1 % stalls gave a 21 cm correction; 150 ms/2 % gave 82 corrections (max 1.65 m), a 4.2 m
+    // prediction error, a teleport and 103 dropped inputs.
+    const [a, b] = cells;
+    expect(a.errMax, 'pred err max @80/1% stalls').toBeLessThan(0.05);
+    expect(a.remoteP95, 'remote p95 @80/1% stalls').toBeLessThan(0.15);
+    expect(b.errMean, 'pred err mean @150/2% stalls').toBeLessThan(0.03);
+    expect(b.errMax, 'pred err max @150/2% stalls').toBeLessThan(1.2);
+    expect(b.remoteP95, 'remote p95 @150/2% stalls').toBeLessThan(0.5);
+    expect(b.drops, 'dropped inputs @150/2% stalls').toBeLessThanOrEqual(20);
+  }, 120_000);
 });

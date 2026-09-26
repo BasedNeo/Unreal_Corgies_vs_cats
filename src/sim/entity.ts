@@ -60,6 +60,11 @@ export interface SimEntity {
   yaw: number;
   pitch: number;
   collider: Collider | null;
+  /**
+   * Set by the Room for a player whose inputs are late (starved tick): movement and map effects skip the entity
+   * this tick, and the queued inputs replay in order when they arrive (host/room.ts freeze + catch-up).
+   */
+  moveFrozen?: boolean;
   input: InputCmd;
   /** Previous tick's buttons, for edge detection. */
   prevButtons: number;
