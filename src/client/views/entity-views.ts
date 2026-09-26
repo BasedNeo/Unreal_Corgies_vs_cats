@@ -9,7 +9,7 @@ import { angleDelta, damp, lerpAngle } from '../../shared/math';
 import { createAvatar } from '../procgen/characters';
 import { createBossAvatar } from '../procgen/boss';
 import type { Avatar } from './avatar';
-import { mountedBodyYaw } from '../vehicles';
+import { mountedBodyTilt, mountedBodyYaw } from '../vehicles';
 
 interface View {
   id: number;
@@ -93,7 +93,8 @@ export class EntityViews {
       if (mountedYaw !== null) targetYaw = mountedYaw;
       v.bodyYaw = lerpAngle(v.bodyYaw, targetYaw, 1 - Math.exp(-(isBoss ? 5 : 14) * dt)); // bosses turn heavily
       v.avatar.root.position.set(s.x, s.y, s.z);
-      v.avatar.root.rotation.y = v.bodyYaw;
+      const tilt = mountedBodyTilt(s, states); // R1: plane pilots pitch and bank with their plane (null otherwise)
+      v.avatar.root.rotation.set(tilt?.pitch ?? 0, v.bodyYaw, tilt?.roll ?? 0, 'YXZ');
       v.avatar.update({
         speed, vy: s.vy, grounded: (s.flags & EFlag.Grounded) !== 0, anim: s.anim, flags: s.flags,
         aimPitch: s.pitch, aimYawOffset: angleDelta(v.bodyYaw, s.yaw), hpFrac: s.maxHp ? s.hp / s.maxHp : 1,

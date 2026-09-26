@@ -12,6 +12,7 @@ import { Team, Species, EFlag } from '../../src/shared/types';
 import { TICK_HZ } from '../../src/shared/constants';
 import type { EntityState } from '../../src/shared/protocol';
 import { grantBuff, stepBuffs } from '../../src/sim/interact';
+import { stunCharacter } from '../../src/sim/vehicles/common';
 
 const TICK_MS = 1000 / TICK_HZ;
 
@@ -134,6 +135,40 @@ describe('client prediction (LocalPredictor)', () => {
     expect(e.flags & EFlag.BuffZoomies).toBe(0); // expired
     expect(corrections.length).toBeGreaterThan(0);
     expect(corrections.length).toBeLessThanOrEqual(2);
+    pred.dispose();
+    sim.dispose();
+  });
+
+  it('follows a crash stun from snapshot flags: the player holds W through it with no stream of corrections', async () => {
+    const sim = await Sim.create({ seed: 3 });
+    const e = sim.spawnCharacter({ team: Team.Corgis, species: Species.Corgi, cls: 'assault', name: 'A' });
+    for (let i = 0; i < 30; i++) sim.step();
+    quantizeMotion(e);
+    const pred = await LocalPredictor.create(3);
+    pred.reconcile(sim.toState(e), 0, []);
+    const LAG = 6, inputs: InputCmd[] = [], snaps: EntityState[] = [];
+    const corrections: number[] = [];
+    let stunTicks = 0;
+    for (let k = 1; k <= 60 * 4; k++) {
+      const raw: InputCmd = { seq: k, rt: 0, mx: 0, mz: 1, yaw: 0, pitch: 0, buttons: 0 };
+      inputs.push(raw);
+      pred.step(raw, k * TICK_MS);
+      if (k === 60) stunCharacter(sim, e, 0.8); // R1: thrown out of a crashing plane
+      sim.setInput(e.id, sanitizeInput(raw)!);
+      sim.step();
+      quantizeMotion(e);
+      snaps.push(sim.toState(e));
+      if (e.flags & EFlag.Stunned) stunTicks++;
+      if (k > LAG) {
+        const a = k - LAG;
+        const r = pred.reconcile(snaps[a - 1], a, inputs.filter((i) => i.seq > a));
+        if (r.correction > 1e-6) corrections.push(k);
+      }
+    }
+    expect(stunTicks).toBeGreaterThan(40);
+    expect(e.flags & EFlag.Stunned).toBe(0); // cleared
+    expect(corrections.length).toBeGreaterThan(0); // the stun itself can't be foreseen
+    expect(corrections.length).toBeLessThanOrEqual(3); // its start and its end, not every snapshot of it
     pred.dispose();
     sim.dispose();
   });

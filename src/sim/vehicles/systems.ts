@@ -1,12 +1,15 @@
-// Vehicle systems: terminals (vend karts), mount/dismount, the authoritative kart step, rams, and
-// kart damage/destruction. Everything competitive about vehicles is decided here, server-side.
+// Vehicle systems: terminals (vend karts and planes), mount/dismount, the authoritative kart step, rams, and
+// kart damage/destruction. Everything competitive about vehicles is decided here, server-side. The RC plane
+// (R1) lives in ./plane-systems.ts and plugs into the same three slots.
 //
 //   150 vehicle-interact  terminal placement (tick 0) and cooldowns · Interact: dismount > mount > vend ·
 //                         rider validation (dead / removed / teleported riders are unseated) ·
-//                         riders' combat buttons are masked (hands on the wheel; Fire/Ability = horn)
+//                         riders' combat buttons are masked (hands on the wheel; Fire/Ability = horn,
+//                         a plane pilot's Fire = the plane's gun) · crash stuns
 //   190 kart-step         stepKart() per kart (rider input → handling) · shove/ram characters ·
 //                         kart-vs-kart and crash/landing damage · seat the rider · snapshot fields
-//   560 vehicle-damage    hitscan shots and explosions against kart bodies (tapped from sim.emit
+//   191 plane-step        stepPlane() per plane · the plane gun · crashes → `explode` + ejection
+//   560 vehicle-damage    hitscan shots and explosions against kart bodies and planes (tapped from sim.emit
 //                         during weapons 400 / projectiles 500), destruction → `explode` + ejection
 //
 // Damage to characters goes through the combat lane's applyDamage()/knockback()/explode(); kart
@@ -14,40 +17,45 @@
 import type { Sim, SimSystem } from '../sim';
 import type { SimEntity } from '../entity';
 import { pressed } from '../entity';
-import { Anim, EFlag, EntityKind, Team, type EntityId, type TeamId } from '../../shared/types';
-import { Btn, emptyInput } from '../../shared/input';
-import { TICK_HZ } from '../../shared/constants';
+import { Anim, CLASS_IDS, EFlag, EntityKind, Team, type EntityId, type TeamId } from '../../shared/types';
+import { Btn } from '../../shared/input';
 import type { GameEvent } from '../../shared/protocol';
-import { hash2 } from '../../shared/rng';
 import { quatYXZ, surfaceAt } from '../../shared/world/queries';
 import { COMBAT_RULES, WEAPONS, weaponByIndex, type ProjectileDef } from '../../shared/content/weapons';
-import { TERMINALS, VEHICLES, type KartExplosionDef, type TerminalId, type VehicleId } from '../../shared/content/vehicles';
+import { TERMINALS, VEHICLES, terminalIndex, type KartExplosionDef, type KartId, type TerminalId } from '../../shared/content/vehicles';
 import { applyDamage, knockback, explode, combatLive, capsuleOf } from '../combat';
 import { falloff } from '../combat/weapon-system';
 import { reportNoiseAt } from '../combat/state';
 import { groups, Layer } from '../rapier';
 import {
-  CAPSULE_CLEAR_FILTER, SHOVE_FILTER, STATIC_RAY_FILTER, TERMINAL_GROUPS, VEHICLE_GROUPS,
-  capsuleShape, kartDef, kartHullPoints, kartTeam, vehicleRuntime, KART_MOVE_FILTER,
+  SHOVE_FILTER, TERMINAL_GROUPS, VEHICLE_GROUPS,
+  kartDef, kartHullPoints, kartTeam, vehicleRuntime, vehicleTeam, KART_MOVE_FILTER, type PendingBlast,
 } from './state';
 import { kartInputFrom, newKartState, newKartStepResult, stepKart, NO_KART_INPUT, type KartContext, type KartInput } from './kart';
-import { findTerminalSite, type TerminalSite } from './sites';
+import { findTerminalSite, hangarSite, type TerminalSite } from './sites';
+import { blankEntity, tagCollider, capsuleClear, staticBlocked, unseat, seatCharacterAt, applyStuns, ticks, blastDef, blastDamageOf } from './common';
+import {
+  planeStepSystem, spawnPlane, mountPlane, dismountPlane, validPlaneRider, nearestPlane, resolvePlaneShots, resolvePlaneBlasts,
+  isPlaneShot, planeGunDamage,
+} from './plane-systems';
+
+export { capsuleClear } from './common';
 
 /** Buttons a seated driver cannot use for combat (hands on the wheel). Interact/Jump/Sprint stay live. */
 const RIDER_MASK = Btn.Fire | Btn.Aim | Btn.Ability | Btn.Reload | Btn.Melee | Btn.NextWeapon | Btn.Crouch;
 const HORN_BUTTONS = Btn.Fire | Btn.Ability;
 /** A rider further than this from the seat was moved by someone else (respawn, restart): unseat. */
-const TELEPORT_TOLERANCE = 1.5;
+export const TELEPORT_TOLERANCE = 1.5;
 /** Clearance test for a kart body being vended: world, karts and characters standing there. */
 const KART_CLEAR_FILTER = groups(Layer.Vehicle, Layer.World | Layer.Vehicle | Layer.Character);
-const ticks = (s: number) => Math.round(s * TICK_HZ);
 
 /**
- * Test/lab knobs, read on the first tick: `sim.state.vehicleConfig = { autoTerminals: true | false }`.
+ * Test/lab/chapter knobs, read on the first tick: `sim.state.vehicleConfig = { autoTerminals, hangar }`.
  * Default: terminals are placed when the Room's match mode lists them (TerminalDef.modes), so bare
- * unit-test sims of other systems never get surprise kiosks in their arenas.
+ * unit-test sims of other systems never get surprise kiosks in their arenas. `hangar` forces the Rooftop
+ * Hangar on or off independently of the kart terminals (an adventure chapter can turn it off).
  */
-export interface VehicleConfig { autoTerminals?: boolean }
+export interface VehicleConfig { autoTerminals?: boolean; hangar?: boolean }
 
 /** Should this sim place its terminals from the world data? */
 export function autoTerminalsFor(sim: Sim): boolean {
@@ -57,21 +65,12 @@ export function autoTerminalsFor(sim: Sim): boolean {
   return mode !== undefined && TERMINALS.kart_terminal.modes.includes(mode);
 }
 
-function blankEntity(sim: Sim, kind: typeof EntityKind.Vehicle | typeof EntityKind.Terminal, team: TeamId, name: string): SimEntity {
-  const id = sim.allocId();
-  return {
-    id, kind, team, species: 0, cls: null, seed: Math.floor(hash2(id, sim.tick, sim.seed) * 1e9), name,
-    pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, collider: null,
-    input: emptyInput(0), prevButtons: 0, lastInputSeq: 0, char: null, health: null,
-    anim: Anim.Idle, flags: 0, dead: false, respawnTick: 0, weapon: -1, ammo: 0,
-    ownerPid: null, removed: false, data: {},
-  };
-}
-
-function tagCollider(sim: Sim, e: SimEntity): void {
-  if (!e.collider) return;
-  (e.collider as unknown as { __entityId: number }).__entityId = e.id;
-  vehicleRuntime(sim).byHandle.set(e.collider.handle, e.id);
+/** Should this sim place the Rooftop Hangar (when its world has The Rooftops)? */
+export function autoHangarFor(sim: Sim): boolean {
+  const cfg = sim.state.vehicleConfig as VehicleConfig | undefined;
+  if (cfg?.hangar !== undefined) return cfg.hangar;
+  const mode = (sim.state.room as { mode?: string } | undefined)?.mode;
+  return mode !== undefined && TERMINALS.plane_hangar.modes.includes(mode);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -81,7 +80,10 @@ function tagCollider(sim: Sim, e: SimEntity): void {
 /** Place a vehicle terminal (solid kiosk) at a site. Terminals are world fixtures: never removed. */
 export function spawnTerminal(sim: Sim, site: TerminalSite, id: TerminalId = 'kart_terminal'): SimEntity {
   const td = TERMINALS[id];
-  const e = blankEntity(sim, EntityKind.Terminal, site.team, td.name);
+  const e = blankEntity(sim, EntityKind.Terminal, td.neutral ? Team.Neutral : site.team, td.name);
+  // Sim.toState() writes CLASS_IDS.indexOf(cls) into EntityState.cls: this makes it the TERMINAL_IDS index.
+  // The kart terminal keeps V1's wire value (-1); the hangar needs its index so clients can tell them apart.
+  if (id !== 'kart_terminal') e.cls = CLASS_IDS[terminalIndex(id)] ?? null;
   e.pos.x = site.x; e.pos.y = site.y; e.pos.z = site.z; e.yaw = site.yaw;
   e.health = { hp: td.cooldown, max: td.cooldown, lastDamageTick: -9999, lastAttacker: -1 };
   e.terminal = { id, kart: -1, cooldown: 0, cooldownTotal: td.cooldown, padX: site.padX, padY: site.padY, padZ: site.padZ, padYaw: site.padYaw };
@@ -95,7 +97,7 @@ export function spawnTerminal(sim: Sim, site: TerminalSite, id: TerminalId = 'ka
 }
 
 /** Spawn a kart with its ground point at (x, y, z). Used by terminals, tests and labs. */
-export function spawnKart(sim: Sim, vehicle: VehicleId, team: TeamId, x: number, y: number, z: number, yaw: number, terminal: EntityId = -1): SimEntity {
+export function spawnKart(sim: Sim, vehicle: KartId, team: TeamId, x: number, y: number, z: number, yaw: number, terminal: EntityId = -1): SimEntity {
   const d = VEHICLES[vehicle];
   const e = blankEntity(sim, EntityKind.Vehicle, team, d.name);
   e.pos.x = x; e.pos.y = y; e.pos.z = z; e.yaw = yaw;
@@ -121,6 +123,12 @@ export function placeTerminals(sim: Sim): SimEntity[] {
   return out;
 }
 
+/** Place the Rooftop Hangar at its fixed site when this world has The Rooftops (null otherwise). */
+export function placeHangar(sim: Sim): SimEntity | null {
+  const site = hangarSite(sim.worldData);
+  return site ? spawnTerminal(sim, site, 'plane_hangar') : null;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Seats
 // ---------------------------------------------------------------------------------------------
@@ -140,15 +148,7 @@ export function seatPosition(kart: SimEntity, out = { x: 0, y: 0, z: 0 }): { x: 
 const seatTmp = { x: 0, y: 0, z: 0 };
 function seatRider(sim: Sim, kart: SimEntity, rider: SimEntity): void {
   const p = seatPosition(kart, seatTmp);
-  sim.placeCharacter(rider, p.x, p.y, p.z);
-  rider.vel.x = kart.vel.x; rider.vel.y = kart.vel.y; rider.vel.z = kart.vel.z;
-  rider.yaw = rider.input.yaw;
-  rider.pitch = rider.input.pitch;
-  rider.anim = Anim.Drive;
-  rider.flags = (rider.flags & ~(EFlag.Grounded | EFlag.Sprinting | EFlag.Aiming | EFlag.Crouching | EFlag.Firing))
-    | EFlag.Mounted | (kart.kart!.grounded ? EFlag.Grounded : 0);
-  const c = rider.char;
-  if (c) { c.grounded = false; c.airTime = 0; c.jumpBuffer = 0; c.crouchBuffer = 0; c.glideTime = 0; c.jumpsUsed = 0; c.sprinting = false; c.slideTime = 0; c.pounding = false; }
+  seatCharacterAt(sim, rider, p.x, p.y, p.z, kart.vel, kart.kart!.grounded);
 }
 
 export function mountKart(sim: Sim, kart: SimEntity, rider: SimEntity): boolean {
@@ -163,37 +163,9 @@ export function mountKart(sim: Sim, kart: SimEntity, rider: SimEntity): boolean 
   return true;
 }
 
-/** Clear the seat on both sides (no placement). */
-function unseat(kart: SimEntity | undefined, rider: SimEntity | undefined): void {
-  if (kart?.kart && (!rider || kart.kart.rider === rider.id)) { kart.kart.rider = -1; kart.flags &= ~EFlag.Busy; kart.kart.idle = 0; }
-  if (rider) {
-    rider.seat = undefined;
-    rider.flags &= ~(EFlag.Mounted | EFlag.Grounded);
-    if (!rider.dead && rider.anim === Anim.Drive) rider.anim = Anim.Fall;
-    if (rider.char) rider.char.grounded = false;
-  }
-}
-
 const exitTmp = { x: 0, y: 0, z: 0 };
 const EXIT_ANGLES = [Math.PI / 2, -Math.PI / 2, Math.PI, (3 * Math.PI) / 4, (-3 * Math.PI) / 4, Math.PI / 4, -Math.PI / 4, 0];
 const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
-
-/** Is a character capsule with its feet at (x, y, z) free of world, terminal and kart geometry? */
-export function capsuleClear(sim: Sim, rider: SimEntity, x: number, y: number, z: number): boolean {
-  const m = rider.char!.move;
-  const center = { x, y: y + m.capsuleHalfHeight + m.capsuleRadius, z };
-  return sim.world.intersectionWithShape(center, IDENTITY, capsuleShape(sim, rider), undefined, CAPSULE_CLEAR_FILTER, rider.collider ?? undefined) === null;
-}
-
-/** Static geometry (no karts) between two points? */
-function staticBlocked(sim: Sim, ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
-  const dx = bx - ax, dy = by - ay, dz = bz - az;
-  const len = Math.hypot(dx, dy, dz);
-  if (len < 1e-4) return false;
-  const ray = new sim.R.Ray({ x: ax, y: ay, z: az }, { x: dx / len, y: dy / len, z: dz / len });
-  const hit = sim.world.castRay(ray, len, true, undefined, STATIC_RAY_FILTER);
-  return !!hit && hit.timeOfImpact < len - 0.02;
-}
 
 /**
  * A safe spot beside the kart for a rider to step out: on solid ground (never under the terrain or
@@ -272,19 +244,30 @@ function validRider(sim: Sim, kart: SimEntity): SimEntity | undefined {
 // Terminals
 // ---------------------------------------------------------------------------------------------
 
-function kartShapeClear(sim: Sim, vehicle: VehicleId, x: number, y: number, z: number): boolean {
+function kartShapeClear(sim: Sim, vehicle: KartId, x: number, y: number, z: number): boolean {
   const d = VEHICLES[vehicle];
   const shape = new sim.R.ConvexPolyhedron(kartHullPoints(d), null);
   return sim.world.intersectionWithShape({ x, y: y + d.halfHeight + 0.06, z }, IDENTITY, shape, undefined, KART_CLEAR_FILTER) === null;
 }
 
-/** Vend a kart from a terminal for a character. Server-side checks: team, availability, clear pad. */
+/**
+ * Vend a vehicle from a terminal for a character. Server-side checks: team (neutral terminals serve everyone),
+ * availability, a clear pad. Karts pop out beside the kiosk; planes on the hangar's runway pad.
+ */
 export function useTerminal(sim: Sim, term: SimEntity, user: SimEntity): SimEntity | null {
   const t = term.terminal;
-  if (!t || user.dead || !user.char || user.team !== term.team) return null;
-  if (t.kart >= 0 || t.cooldown > 0) return null;
+  if (!t || user.dead || !user.char || user.seat) return null;
   const td = TERMINALS[t.id];
+  if (!td.neutral && user.team !== term.team) return null;
+  if (t.kart >= 0 || t.cooldown > 0) return null;
   const vehicle = td.vehicle;
+  if (vehicle === 'rc_plane') {
+    const plane = spawnPlane(sim, vehicle, user.team, t.padX, t.padY, t.padZ, t.padYaw, term.id);
+    if (!plane) return null;
+    t.kart = plane.id;
+    sim.emit({ e: 'spawn', id: plane.id });
+    return plane;
+  }
   // The pad, else the first clear spot on a ring around it (someone may be standing on the pad).
   const tries: [number, number][] = [[t.padX, t.padZ]];
   for (let i = 0; i < 8; i++) {
@@ -329,14 +312,6 @@ export function damageKart(sim: Sim, kart: SimEntity, amount: number, src: KartD
   sim.emit({ e: 'hit', src: src.id, dst: kart.id, dmg, x, y, z, crit: false });
   if (h.hp <= 0) destroyKart(sim, kart);
   return dmg;
-}
-
-function blastDef(x: KartExplosionDef): ProjectileDef {
-  return {
-    speed: 0, gravity: 0, radius: 0, lifetime: 0, bounces: 0, restitution: 0, bounceBonus: 0,
-    explodeRadius: x.radius, explodeDamage: x.damage, explodeInner: x.inner, explodeEdgeFrac: x.edgeFrac,
-    selfDamageMult: 0.5, knockback: x.knockback, fuse: false,
-  };
 }
 
 /**
@@ -396,59 +371,62 @@ function resolveShots(sim: Sim): void {
   const rt = vehicleRuntime(sim);
   for (const ev of rt.shots) {
     if (ev.hit !== -1) continue;
-    const def = weaponByIndex(ev.wpn);
-    if (!def || def.kind !== 'hitscan') continue;
+    // Plane guns resolve characters and planes themselves (plane-systems.ts); karts they hit are armor here.
+    const planeGun = isPlaneShot(ev);
+    const def = planeGun ? null : weaponByIndex(ev.wpn);
+    if (!planeGun && (!def || def.kind !== 'hitscan')) continue;
     const shooter = sim.entities.get(ev.id);
     for (const kart of sim.entities.values()) {
       if (!kart.kart || kart.removed) continue;
       if (kartBodyDistance(kart, ev.hx, ev.hy, ev.hz) > 0.14) continue;
       const team = kartTeam(sim, kart);
-      const shooterTeam = shooter?.team ?? -1;
+      const shooterTeam = shooter ? (shooter.plane ? vehicleTeam(sim, shooter) : shooter.team) : -1;
       if (!COMBAT_RULES.friendlyFire && shooterTeam === team) break;
       if (shooter && shooter.seat?.vehicle === kart.id) break;
-      // The event carries only the first pellet; spread weapons put most pellets into a kart-sized target.
-      const pellets = def.pellets > 1 ? def.pellets * 0.6 : 1;
       const dist = Math.hypot(ev.hx - ev.x, ev.hy - ev.y, ev.hz - ev.z);
-      const dmg = def.damage * pellets * falloff(def, dist) * kartDef(kart).bulletDamageMult;
-      damageKart(sim, kart, dmg, { id: ev.id, team: shooterTeam as TeamId | -1, weapon: ev.wpn }, ev.hx, ev.hy, ev.hz);
+      let dmg: number;
+      if (def) {
+        // The event carries only the first pellet; spread weapons put most pellets into a kart-sized target.
+        const pellets = def.pellets > 1 ? def.pellets * 0.6 : 1;
+        dmg = def.damage * pellets * falloff(def, dist);
+      } else dmg = planeGunDamage(VEHICLES.rc_plane, dist);
+      const credit = shooter?.plane && shooter.plane.rider >= 0 ? shooter.plane.rider : ev.id;
+      damageKart(sim, kart, dmg * kartDef(kart).bulletDamageMult, { id: credit, team: shooterTeam as TeamId | -1, weapon: ev.wpn }, ev.hx, ev.hy, ev.hz);
       break;
     }
   }
   rt.shots.length = 0;
 }
 
-function blastDamageOf(sim: Sim, ev: Extract<GameEvent, { e: 'explode' }>, own: KartExplosionDef | null): { damage: number; inner: number; edge: number; self: number } {
-  if (own) return { damage: own.damage, inner: own.inner, edge: own.edgeFrac, self: 0.5 };
-  const owner = sim.entities.get(ev.by);
-  const p = owner?.wpn ? WEAPONS[owner.wpn.id].projectile : undefined;
-  if (p && p.explodeRadius > 0) return { damage: p.explodeDamage, inner: p.explodeInner, edge: p.explodeEdgeFrac, self: p.selfDamageMult };
-  return { damage: 60, inner: 0.7, edge: 0.2, self: 0.35 };
+function resolveKartBlasts(sim: Sim, list: readonly PendingBlast[]): void {
+  for (const { ev, def } of list) {
+    const b = blastDamageOf(sim, ev, def);
+    const owner = sim.entities.get(ev.by);
+    const ownerTeam: TeamId | -1 = owner ? owner.team : -1;
+    for (const kart of sim.entities.values()) {
+      if (!kart.kart || kart.removed || kart.id === ev.by) continue;
+      const dist = kartBodyDistance(kart, ev.x, ev.y, ev.z);
+      if (dist > ev.r) continue;
+      const team = kartTeam(sim, kart);
+      const self = owner !== undefined && (owner.id === kart.kart.rider);
+      if (!self && !COMBAT_RULES.friendlyFire && ownerTeam === team) continue;
+      const cy = kart.pos.y + kartDef(kart).halfHeight;
+      const cd = Math.hypot(kart.pos.x - ev.x, cy - ev.y, kart.pos.z - ev.z);
+      if (cd > 1e-3 && staticBlocked(sim, ev.x, ev.y, ev.z, ev.x + (kart.pos.x - ev.x) * (1 - kartDef(kart).radius / cd), ev.y + (cy - ev.y) * (1 - kartDef(kart).radius / cd), ev.z + (kart.pos.z - ev.z) * (1 - kartDef(kart).radius / cd))) continue;
+      const frac = dist <= b.inner ? 1 : 1 + (b.edge - 1) * ((dist - b.inner) / Math.max(1e-3, ev.r - b.inner));
+      const dmg = b.damage * frac * kartDef(kart).blastDamageMult * (self ? b.self : 1);
+      damageKart(sim, kart, dmg, { id: ev.by, team: ownerTeam, weapon: -1 }, kart.pos.x, cy, kart.pos.z);
+    }
+  }
 }
 
+/** Explosions this tick against karts and planes. Vehicle explosions can chain: keep draining (bounded). */
 function resolveBlasts(sim: Sim): void {
   const rt = vehicleRuntime(sim);
-  // Kart explosions can chain into other karts: keep draining (bounded) while new blasts appear.
   for (let guard = 0; rt.blasts.length && guard < 16; guard++) {
     const list = rt.blasts.splice(0, rt.blasts.length);
-    for (const { ev, def } of list) {
-      const b = blastDamageOf(sim, ev, def);
-      const owner = sim.entities.get(ev.by);
-      const ownerTeam: TeamId | -1 = owner ? owner.team : -1;
-      for (const kart of sim.entities.values()) {
-        if (!kart.kart || kart.removed || kart.id === ev.by) continue;
-        const dist = kartBodyDistance(kart, ev.x, ev.y, ev.z);
-        if (dist > ev.r) continue;
-        const team = kartTeam(sim, kart);
-        const self = owner !== undefined && (owner.id === kart.kart.rider);
-        if (!self && !COMBAT_RULES.friendlyFire && ownerTeam === team) continue;
-        const cy = kart.pos.y + kartDef(kart).halfHeight;
-        const cd = Math.hypot(kart.pos.x - ev.x, cy - ev.y, kart.pos.z - ev.z);
-        if (cd > 1e-3 && staticBlocked(sim, ev.x, ev.y, ev.z, ev.x + (kart.pos.x - ev.x) * (1 - kartDef(kart).radius / cd), ev.y + (cy - ev.y) * (1 - kartDef(kart).radius / cd), ev.z + (kart.pos.z - ev.z) * (1 - kartDef(kart).radius / cd))) continue;
-        const frac = dist <= b.inner ? 1 : 1 + (b.edge - 1) * ((dist - b.inner) / Math.max(1e-3, ev.r - b.inner));
-        const dmg = b.damage * frac * kartDef(kart).blastDamageMult * (self ? b.self : 1);
-        damageKart(sim, kart, dmg, { id: ev.by, team: ownerTeam, weapon: -1 }, kart.pos.x, cy, kart.pos.z);
-      }
-    }
+    resolvePlaneBlasts(sim, list);
+    resolveKartBlasts(sim, list);
   }
   rt.blasts.length = 0;
 }
@@ -577,22 +555,35 @@ export const vehicleInteractSystem: SimSystem = {
     if (!rt.sitesPlaced) {
       rt.sitesPlaced = true;
       if (autoTerminalsFor(sim)) placeTerminals(sim);
+      if (autoHangarFor(sim)) placeHangar(sim);
     }
+    // Riders thrown out of a crashing plane are stunned for a moment: no movement, no buttons (not even E).
+    applyStuns(sim);
     // Riders that died, left or were teleported since the last tick.
-    for (const e of sim.entities.values()) if (e.kart) validRider(sim, e);
     for (const e of sim.entities.values()) {
-      if (e.seat && !sim.entities.get(e.seat.vehicle)?.kart) unseat(undefined, e); // kart vanished under them
+      if (e.kart) validRider(sim, e);
+      else if (e.plane) validPlaneRider(sim, e);
     }
-    // Interact: dismount > mount > vend.
+    for (const e of sim.entities.values()) {
+      if (!e.seat) continue;
+      const v = sim.entities.get(e.seat.vehicle);
+      if (!v?.kart && !v?.plane) unseat(undefined, e); // vehicle vanished under them
+    }
+    // Interact: dismount > mount (the nearest empty kart or plane) > vend.
     for (const c of sim.entities.values()) {
       if (!c.char || c.dead || !pressed(c, Btn.Interact)) continue;
       if (c.seat) {
-        const kart = sim.entities.get(c.seat.vehicle);
-        if (kart) dismountKart(sim, kart, c);
+        const v = sim.entities.get(c.seat.vehicle);
+        if (v?.kart) dismountKart(sim, v, c);
+        else if (v?.plane) dismountPlane(sim, v, c);
         continue;
       }
       const kart = nearestKart(sim, c);
-      if (kart) { mountKart(sim, kart, c); continue; }
+      const plane = nearestPlane(sim, c);
+      const kd = kart ? Math.hypot(c.pos.x - kart.pos.x, c.pos.z - kart.pos.z) : Infinity;
+      const pd = plane ? Math.hypot(c.pos.x - plane.pos.x, c.pos.z - plane.pos.z) : Infinity;
+      if (kart && kd <= pd) { mountKart(sim, kart, c); continue; }
+      if (plane) { mountPlane(sim, plane, c); continue; }
       const term = nearestTerminal(sim, c);
       if (term) useTerminal(sim, term, c);
     }
@@ -688,13 +679,17 @@ export const vehicleDamageSystem: SimSystem = {
   name: 'vehicle-damage',
   order: 560,
   update(sim) {
+    resolvePlaneShots(sim, vehicleRuntime(sim).shots);
     resolveShots(sim);
     resolveBlasts(sim);
     // Riders killed this tick flop out of the seat before corpse physics (600) runs.
-    for (const e of sim.entities.values()) if (e.kart) validRider(sim, e);
+    for (const e of sim.entities.values()) {
+      if (e.kart) validRider(sim, e);
+      else if (e.plane) validPlaneRider(sim, e);
+    }
   },
 };
 
 export function vehicleSystems(): SimSystem[] {
-  return [vehicleInteractSystem, kartStepSystem, vehicleDamageSystem];
+  return [vehicleInteractSystem, kartStepSystem, planeStepSystem, vehicleDamageSystem];
 }

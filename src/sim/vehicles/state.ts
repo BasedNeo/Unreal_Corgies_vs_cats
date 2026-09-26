@@ -6,11 +6,13 @@ import type { SimEntity } from '../entity';
 import type { EntityId, TeamId } from '../../shared/types';
 import type { GameEvent } from '../../shared/protocol';
 import { groups, Layer } from '../rapier';
-import { VEHICLES, type KartExplosionDef, type TerminalId, type VehicleDef, type VehicleId } from '../../shared/content/vehicles';
+import { VEHICLES, type KartExplosionDef, type KartId, type TerminalId, type VehicleDef, type PlaneDef } from '../../shared/content/vehicles';
+import type { PlaneState } from './plane';
+import { planeHullPoints } from './plane';
 
 /** Kart runtime state. Plain data (the kart's pose/velocity live on the entity: pos, vel, yaw, pitch). */
 export interface KartState {
-  id: VehicleId;
+  id: KartId;
   /** Terminal that vended this kart (-1 = none, e.g. placed by a test). */
   terminal: EntityId;
   /** Seated driver (-1 = empty). */
@@ -43,7 +45,7 @@ export interface KartState {
 
 export interface TerminalState {
   id: TerminalId;
-  /** Kart currently out (-1 = none). */
+  /** Vehicle (kart or plane) currently out (-1 = none). The field keeps its V1 name. */
   kart: EntityId;
   /** Seconds until the terminal can vend again. */
   cooldown: number;
@@ -65,6 +67,8 @@ export interface SeatState {
 declare module '../entity' {
   interface SimEntity {
     kart?: KartState;
+    /** R1: the RC plane (see ./plane.ts). */
+    plane?: PlaneState;
     terminal?: TerminalState;
     seat?: SeatState;
   }
@@ -78,6 +82,10 @@ export const KART_MOVE_FILTER = groups(Layer.Vehicle, Layer.World | Layer.Vehicl
 export const TERMINAL_GROUPS = groups(Layer.World, 0xffff);
 /** Clearance test for a character capsule (dismount / spawn): world + vehicles + other characters. */
 export const CAPSULE_CLEAR_FILTER = groups(Layer.Character, Layer.World | Layer.Vehicle);
+/** Plane body membership: like a kart's (hit by world rays and projectiles, solid to characters and karts). */
+export const PLANE_GROUPS = groups(Layer.Vehicle, Layer.World | Layer.Character | Layer.Projectile | Layer.Vehicle);
+/** What a plane's flight sweeps collide with: world geometry and other vehicles (characters never stop a plane). */
+export const PLANE_MOVE_FILTER = groups(Layer.Vehicle, Layer.World | Layer.Vehicle);
 /** Static-geometry-only rays (no vehicles) for line-of-exit checks. */
 export const STATIC_RAY_FILTER = groups(Layer.Projectile, Layer.World);
 /** Character shove movement: world only (the kart doing the shoving must not block its own push). */
@@ -95,6 +103,8 @@ export interface VehicleRuntime {
   ownBlast: KartExplosionDef | null;
   capsules: Map<string, Shape>;
   sitesPlaced: boolean;
+  /** Plane sweep shapes by radius (convex hulls, see planeHullPoints). */
+  planeShapes: Map<number, Shape>;
 }
 
 const runtimes = new WeakMap<Sim, VehicleRuntime>();
@@ -115,7 +125,7 @@ export function createKartController(world: World): KinematicCharacterController
 export function vehicleRuntime(sim: Sim): VehicleRuntime {
   let rt = runtimes.get(sim);
   if (!rt) {
-    rt = { kcc: createKartController(sim.world), byHandle: new Map(), shots: [], blasts: [], ownBlast: null, capsules: new Map(), sitesPlaced: false };
+    rt = { kcc: createKartController(sim.world), byHandle: new Map(), shots: [], blasts: [], ownBlast: null, capsules: new Map(), sitesPlaced: false, planeShapes: new Map() };
     runtimes.set(sim, rt);
   }
   return rt;
@@ -161,4 +171,23 @@ export function kartHullPoints(def: VehicleDef, sides = 16): Float32Array {
 
 export function kartDef(kart: SimEntity): VehicleDef {
   return VEHICLES[kart.kart!.id];
+}
+
+export function planeDef(plane: SimEntity): PlaneDef {
+  return VEHICLES[plane.plane!.id];
+}
+
+/** The plane sweep shape (a convex icosphere of the def's radius), cached per Sim. */
+export function planeShape(sim: Sim, def: PlaneDef): Shape {
+  const rt = vehicleRuntime(sim);
+  let s = rt.planeShapes.get(def.radius);
+  if (!s) { s = new sim.R.ConvexPolyhedron(planeHullPoints(def.radius), null)!; rt.planeShapes.set(def.radius, s); }
+  return s;
+}
+
+/** The team a vehicle currently fights for: its pilot's/driver's, else the team it was vended for. */
+export function vehicleTeam(sim: Sim, v: SimEntity): TeamId {
+  const rid = v.kart?.rider ?? v.plane?.rider ?? -1;
+  const r = rid >= 0 ? sim.entities.get(rid) : undefined;
+  return r ? r.team : v.team;
 }

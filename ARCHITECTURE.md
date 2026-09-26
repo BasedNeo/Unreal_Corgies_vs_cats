@@ -27,6 +27,8 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
   ai/                              brain (HFSM, perception, aim), archetypes, nav (1 m grid A*)
   match/                           yard-skirmish (waves) · team-deathmatch
   vehicles/  boss/                 Wave 2 lanes (Mower Kart + terminals; Vac-Tank boss)
+  vehicles/plane*.ts pilot.ts      R1 RC plane: pure flight step (plane.ts), order 191 seats/gun/damage/crashes
+                                   (plane-systems.ts), scripted pilot (pilot.ts); common.ts = kart+plane helpers, stun
   interact/                        order 150: Ordnance kiosk kit swaps, Upgrade Cores + buffs, Golden Kibble,
                                    Squeaker mission chain (folded into MatchState by match/)
   combat/ability-*.ts              Spotter Drone / Dig Charge / Squeak Barrier entities (EntityKind.Ability)
@@ -50,7 +52,7 @@ src/client/
                                    (Garden, Garage + Rooftops districts; quality tiers apply live where possible)
   ui/  audio/  fx/                 comic HUD + menus (MATCH selector, room browser) + chat + tips + settings ·
                                    procedural audio + music · pooled FX + words
-  vehicles/                        kart + terminal views (Wave 2)
+  vehicles/                        kart + terminal views (Wave 2) · RC plane + Rooftop Hangar views (R1)
   interact/                        kiosk/core/kibble/beacon views · E prompt, kit picker, buff chips, mission card
   abilities/                       drone, charge, barrier views + spotted markers
   modes/core-rush-view.ts          Core Pads, A·B·C markers and strip

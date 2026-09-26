@@ -69,6 +69,8 @@ export class LocalPredictor {
   private barriers = new Map<number, Collider>();
   /** Class move speeds before buffs (Zoomies+ scales walk/run/sprint exactly as the authority's buff does). */
   private baseMove = { walkSpeed: 0, runSpeed: 0, sprintSpeed: 0 };
+  /** The last snapshot said Stunned (R1 crash ejection): inputs are applied with no movement and no buttons. */
+  private stunned = false;
   private hist: Hist[] = [];
   private readonly ctx: MoveContext;
   private readonly quiet: MoveContext;
@@ -123,6 +125,7 @@ export class LocalPredictor {
    */
   reconcile(s: EntityState, ack: number, pending: readonly InputCmd[]): ReconcileResult {
     const key = `${s.id}:${s.species}:${s.cls}:${s.team}`;
+    this.stunned = (s.flags & EFlag.Stunned) !== 0;
     if (!this.e || key !== this.key) {
       this.spawn(s, key);
       this.syncBuffs(s.flags);
@@ -257,6 +260,7 @@ export class LocalPredictor {
 
   private apply(cmd: InputCmd, ctx: MoveContext): void {
     const e = this.e!;
+    if (this.stunned && (cmd.mx || cmd.mz || cmd.buttons)) cmd = { ...cmd, mx: 0, mz: 0, buttons: 0 }; // as the authority's applyStuns
     e.input = cmd;
     e.lastInputSeq = cmd.seq;
     // Same per-character order as the authority tick: movement (200), then map effects (250:

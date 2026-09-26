@@ -50,6 +50,8 @@ export const EFlag = {
   BuffThickFur: 1 << 15,
   BuffZoomies: 1 << 16,
   BuffSqueaky: 1 << 17,
+  /** Stunned (thrown out of a crashing RC plane, R1): no movement or buttons until it clears; predicted too. */
+  Stunned: 1 << 18,
 } as const;
 export const BUFF_FLAGS = EFlag.BuffOverclock | EFlag.BuffThickFur | EFlag.BuffZoomies | EFlag.BuffSqueaky;
 

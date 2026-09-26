@@ -3,8 +3,8 @@
 // `pickup` events. Presentation only — the authority decides every outcome.
 import type { EntityState, GameEvent } from '../../shared/protocol';
 import { EFlag, EntityKind, type TeamId } from '../../shared/types';
-import { TERMINALS, terminalKindAt } from '../../shared/content/terminals';
-import { VEHICLES, vehicleByIndex } from '../../shared/content/vehicles';
+import { TERMINALS, terminalByIndex, terminalKindAt } from '../../shared/content/terminals';
+import { VEHICLES, planeByIndex, vehicleByIndex } from '../../shared/content/vehicles';
 import { CORE_FLAGS, CORE_IDS, PICKUPS, isCore, type CoreId } from '../../shared/content/pickups';
 import { objectiveChainByIndex, type ObjectiveChain } from '../../shared/content/objectives';
 
@@ -42,7 +42,10 @@ export function findInteractTarget(states: ReadonlyMap<number, EntityState>, loc
   if (!local || (local.flags & EFlag.Dead) || (local.kind !== EntityKind.Player && local.kind !== EntityKind.Bot)) return null;
   if (local.flags & EFlag.Mounted) {
     for (const s of states.values()) {
-      if (s.kind === EntityKind.Vehicle && s.weapon === local.id) return { kind: 'dismount', id: s.id, verb: 'hop out', ready: true, dist: 0, x: s.x, y: s.y, z: s.z };
+      if (s.kind === EntityKind.Vehicle && s.weapon === local.id) {
+        const verb = planeByIndex(s.cls) && !(s.flags & EFlag.Grounded) ? 'bail out' : 'hop out'; // R1: in the air it's a bail-out
+        return { kind: 'dismount', id: s.id, verb, ready: true, dist: 0, x: s.x, y: s.y, z: s.z };
+      }
     }
     return null;
   }
@@ -66,14 +69,16 @@ export function findInteractTarget(states: ReadonlyMap<number, EntityState>, loc
       if (dist > t.params.radius || local.y < s.y - 2 || local.y > s.y + 9) continue;
       offer({ kind: 'objective', id: s.id, verb: t.params.prompt, ready: true, dist, x: s.x, y: s.y, z: s.z }, 1);
     } else if (s.kind === EntityKind.Terminal) {
-      if (s.team !== local.team) continue;
+      const vt = terminalByIndex(s.cls); // a vehicle terminal with a content index (R1's neutral hangar), else null
+      if (s.team !== local.team && !vt?.neutral) continue;
       if (terminalKindAt(s.cls) === 'ordnance') {
         if (dist > ORD.useRange || dy > ORD.maxDy) continue;
         offer({ kind: 'ordnance', id: s.id, verb: 'change kit', ready: true, dist, x: s.x, y: s.y, z: s.z }, 2);
       } else {
-        if (dist > KART_T.useRange || dy > 2) continue;
+        const def = vt ?? KART_T;
+        if (dist > def.useRange || dy > 2) continue;
         const busy = (s.flags & EFlag.Busy) !== 0;
-        const verb = !busy ? 'vend a kart' : s.weapon >= 0 ? 'kart is out' : `cooling ${Math.max(1, s.ammo)} s`;
+        const verb = !busy ? def.verb : s.weapon >= 0 ? `${def.vehicle === 'rc_plane' ? 'plane' : 'kart'} is out` : `cooling ${Math.max(1, s.ammo)} s`;
         offer({ kind: 'kart_terminal', id: s.id, verb, ready: !busy, dist, x: s.x, y: s.y, z: s.z }, 2);
       }
     }

@@ -31,7 +31,7 @@ import { createAbilityViews } from './abilities';
 import { loadSettings, type Settings } from './ui/settings';
 import { bus } from './core/events';
 import { TICK_DT } from '../shared/constants';
-import { lerpAngle } from '../shared/math';
+import { damp, lerpAngle } from '../shared/math';
 import { CLASS_IDS, EFlag, type ClassId, type TeamId } from '../shared/types';
 import type { EntityState } from '../shared/protocol';
 
@@ -236,7 +236,10 @@ async function main(): Promise<void> {
     const kart = local ? mountedVehicle(local, states) : null;
     if (kart) {
       const c = vehicleCameraFor(kart);
-      if (!input.lookedRecently()) input.yaw = followYaw(input.yaw, c.yaw, c.followRate, dt); // swing behind the kart
+      if (!input.lookedRecently()) {
+        input.yaw = followYaw(input.yaw, c.yaw, c.followRate, dt); // swing behind the vehicle
+        if (c.pitchFollow > 0) input.pitch = damp(input.pitch, c.pitch, c.pitchFollow, dt); // R1: planes settle behind the nose
+      }
       focus.set(kart.x, kart.y, kart.z);
       cam.update(focus, input.yaw, input.pitch, false, dt, Math.hypot(kart.vx, kart.vz), c);
     } else if (local && (local.flags & EFlag.Dead) && killCam.by >= 0 && states.get(killCam.by)) {

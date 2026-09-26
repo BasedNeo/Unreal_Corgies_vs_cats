@@ -4,7 +4,7 @@
 // jump pads and spawn points. Pure function of WorldData (deterministic; no physics needed).
 import type { WorldData } from '../../shared/world/world-data';
 import { jumpPadAt, nearestPropDist, surfaceAt, waterAt, yawToward } from '../../shared/world/queries';
-import type { TeamId } from '../../shared/types';
+import { Team, type TeamId } from '../../shared/types';
 import { TERMINALS, VEHICLES, type TerminalId } from '../../shared/content/vehicles';
 
 export interface TerminalSite {
@@ -94,4 +94,18 @@ export function findTerminalSite(data: WorldData, team: TeamId, terminal: Termin
     if (best && r >= 13) break; // good enough: do not wander far from the base once something fits
   }
   return best;
+}
+
+/**
+ * The Rooftop Hangar's site (R1): a fixed spot on The Rooftops (TERMINALS.plane_hangar.site), used only when
+ * this world has that district and the roof is where the data says (kiosk and pad on a surface at the site's
+ * height). Null otherwise — e.g. the flat unit-test yards, or a future map without the garage.
+ */
+export function hangarSite(data: WorldData): TerminalSite | null {
+  const td = TERMINALS.plane_hangar, s = td.site;
+  if (!s || !data.districts?.some((d) => d.id === s.district)) return null;
+  for (const [x, y, z] of [[s.x, s.y, s.z], [s.padX, s.padY, s.padZ]] as const) {
+    if (Math.abs(surfaceAt(data, x, z, y + 0.5).y - y) > 0.05) return null;
+  }
+  return { team: Team.Neutral, x: s.x, y: s.y, z: s.z, yaw: s.yaw, padX: s.padX, padY: s.padY, padZ: s.padZ, padYaw: s.padYaw };
 }
