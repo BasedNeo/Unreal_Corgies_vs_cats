@@ -174,7 +174,8 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
           engine.play(S.reloadClicks, at(ev.id, { gain: ev.id === localId ? 0.7 : 0.5, priority: ev.id === localId ? 2 : 0, category: 'fx', maxDist: 20 }));
           break;
         case 'ability':
-          engine.play(S.whoomp, { x: ev.x, y: ev.y, z: ev.z, priority: 2, category: 'impact', refDist: 5 });
+          // movement abilities swish (air), the rest land with a whoomp
+          engine.play(ev.ability === 'ear_glide' ? S.whoosh : S.whoomp, { x: ev.x, y: ev.y, z: ev.z, priority: 2, category: 'impact', refDist: 5 });
           if (ev.ability === 'bark_blast') engine.play(S.bark, { x: ev.x, y: ev.y + 1, z: ev.z, k: 0.8, gain: 1, priority: 2, category: 'voice', refDist: 6 });
           break;
         default:
