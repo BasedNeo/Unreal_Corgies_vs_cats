@@ -31,6 +31,7 @@ import { createAbilityViews } from './abilities';
 import { loadSettings, type Settings } from './ui/settings';
 import { bus } from './core/events';
 import { TICK_DT } from '../shared/constants';
+import { lerpAngle } from '../shared/math';
 import { CLASS_IDS, EFlag, type ClassId, type TeamId } from '../shared/types';
 import type { EntityState } from '../shared/protocol';
 
@@ -176,6 +177,8 @@ async function main(): Promise<void> {
   bus.on('roster', (r) => nameplates.setRoster(r));
   bus.on('notice', (t) => hud.serverNotice(t));
   bus.on('chat', (m) => hud.chat(m.from, m.text, m.team));
+  // Kill cam state: who knocked the local player out (from the death event) and the swinging view.
+  const killCam = { by: -1, yaw: 0, pitch: -0.12, fresh: true };
   bus.on('game', (ev) => {
     if (ev.e === 'jump') views.trigger(ev.id, 'jump');
     if (ev.e === 'land') views.trigger(ev.id, 'land', ev.impact);
@@ -183,6 +186,7 @@ async function main(): Promise<void> {
     if (ev.e === 'fire') views.trigger(ev.id, 'fire');
     if (ev.e === 'death') {
       views.trigger(ev.id, 'death');
+      if (ev.id === net?.localEntity) killCam.by = ev.by !== ev.id ? ev.by : -1;
       if (ev.by !== ev.id && ev.by >= 0) views.trigger(ev.by, 'kill'); // K1: the killer's smug grin
     }
     if (ev.e === 'spawn') views.trigger(ev.id, 'spawn');
@@ -235,7 +239,18 @@ async function main(): Promise<void> {
       if (!input.lookedRecently()) input.yaw = followYaw(input.yaw, c.yaw, c.followRate, dt); // swing behind the kart
       focus.set(kart.x, kart.y, kart.z);
       cam.update(focus, input.yaw, input.pitch, false, dt, Math.hypot(kart.vx, kart.vz), c);
+    } else if (local && (local.flags & EFlag.Dead) && killCam.by >= 0 && states.get(killCam.by)) {
+      // Kill cam: while you wait to respawn, the camera swings around to face whoever knocked you out.
+      const k = states.get(killCam.by)!;
+      const want = Math.atan2(-(k.x - local.x), -(k.z - local.z));
+      killCam.yaw = killCam.fresh ? input.yaw : lerpAngle(killCam.yaw, want, 1 - Math.exp(-3 * dt));
+      killCam.fresh = false;
+      const pitchWant = Math.max(-0.5, Math.min(0.25, -Math.atan2(k.y - local.y, Math.hypot(k.x - local.x, k.z - local.z)) - 0.12));
+      killCam.pitch += (pitchWant - killCam.pitch) * (1 - Math.exp(-3 * dt));
+      focus.set(local.x, local.y, local.z);
+      cam.update(focus, killCam.yaw, killCam.pitch, false, dt, 0);
     } else if (local) {
+      killCam.fresh = true;
       focus.set(local.x, local.y, local.z);
       cam.update(focus, input.yaw, input.pitch, (local.flags & EFlag.Aiming) !== 0, dt, Math.hypot(local.vx, local.vz));
     } else if (!net) {
