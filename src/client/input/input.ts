@@ -7,6 +7,12 @@ const KEYMAP: Record<string, number> = {
   ControlLeft: Btn.Crouch, KeyQ: Btn.Ability, KeyR: Btn.Reload, KeyV: Btn.Melee, KeyF: Btn.Melee, Tab: 0,
 };
 
+/** Keyboard focus is in a text field: those keys are text, not game input. */
+function isTyping(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true);
+}
+
 export class InputState {
   yaw = 0;
   pitch = -0.12;
@@ -14,6 +20,7 @@ export class InputState {
   invertY = false;
   locked = false;
   private lastLook = 0;
+  private suspendedFlag = false;
   private keys = new Set<string>();
   private mouse = 0; // bit0 LMB, bit1 RMB
   private wheelNext = false;
@@ -24,6 +31,7 @@ export class InputState {
   bind(el: HTMLElement): void {
     this.el = el;
     window.addEventListener('keydown', (e) => {
+      if (this.suspendedFlag || isTyping(e.target)) return; // chat / name fields keep their keys
       if (e.code === 'Tab') e.preventDefault();
       this.keys.add(e.code);
       const b = KEYMAP[e.code];
@@ -53,6 +61,13 @@ export class InputState {
   }
 
   isDown(code: string): boolean { return this.keys.has(code); }
+
+  /** While suspended (chat open, modal UI) the game sees no keys: held keys are released, presses ignored. */
+  get suspended(): boolean { return this.suspendedFlag; }
+  set suspended(v: boolean) {
+    this.suspendedFlag = v;
+    if (v) { this.keys.clear(); this.latched = 0; this.mouse = 0; }
+  }
 
   /** True if the player moved the view in the last `ms` (auto-follow cameras should back off). */
   lookedRecently(ms = 900): boolean { return performance.now() - this.lastLook < ms; }
