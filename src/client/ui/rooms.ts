@@ -6,6 +6,8 @@
 //   [{ name, mode, players, humans, bots, maxPlayers, phase }]   (live public rooms, busiest first)
 import { sanitizeRoomName } from '../../host/guard';
 import type { MatchPhase } from '../../shared/protocol';
+import type { ClassId } from '../../shared/types';
+import { chapterById } from '../../shared/content/chapters';
 
 export interface RoomInfo {
   name: string;
@@ -95,6 +97,15 @@ export const chapterLabel = (id: string): string => id.replace(/_/g, ' ').replac
 export const modeLabel = (mode: string): string => MODE_LABELS[mode] ?? mode.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 export const PHASE_LABELS: Record<MatchPhase, string> = { warmup: 'WARMUP', live: 'IN PLAY', ended: 'POST-MATCH' };
 export const isFull = (r: RoomInfo): boolean => r.humans >= r.maxPlayers;
+/**
+ * Joining an adventure room from the list: play that chapter's featured kit on the corgi side (a step can need it,
+ * e.g. chapter 6's Ear Glide), like the chapter picker does. Null for other rooms (your own kit and team apply).
+ */
+export function adventureJoinKit(r: Pick<RoomInfo, 'mode' | 'chapter'>): { chapter: string; cls: ClassId } | null {
+  if (r.mode !== 'adventure' || !r.chapter) return null;
+  const def = chapterById(r.chapter);
+  return def ? { chapter: def.id, cls: def.cls } : null;
+}
 
 export type RoomsState =
   | { kind: 'idle' }

@@ -11,7 +11,7 @@ import { cleanName, type QualitySetting, type Settings, type SettingKey } from '
 import { CLASS_BLURBS, CONTROLS, QUALITY_STRINGS, ROOM_STRINGS, TEAM_NAMES, TIP_STRINGS, TITLE } from './strings';
 import { qualityNote } from './quality-note';
 import { createRoomBrowser, type RoomBrowser } from './room-browser';
-import { serverBase, type RoomPoller } from './rooms';
+import { adventureJoinKit, serverBase, type RoomInfo, type RoomPoller } from './rooms';
 import { ADVENTURE_STRINGS } from './strings';
 import { FONT_BODY, FONT_DISPLAY } from './fonts';
 import { CHAPTER_PLAN, chapterById, type ChapterDef } from '../../shared/content/chapters';
@@ -372,7 +372,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
   const currentServer = () => serverIn.value.trim() || pageServer || s.server;
   const rooms: RoomBrowser = createRoomBrowser({
     server: currentServer,
-    join: (room) => play('online', room),
+    join: (room, info) => play('online', room, info),
     back: () => showView('main'),
     joinAs: () => `Joining as ${CLASSES[s.cls].displayName.toUpperCase()} · ${s.team === -1 ? 'AUTO TEAM' : TEAM_NAMES[s.team]} · ${s.name}`,
     poller: deps.roomPoller,
@@ -443,7 +443,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
     deps.sound?.('click');
     paint();
   });
-  const play = (mode: 'offline' | 'online', room?: string) => {
+  const play = (mode: 'offline' | 'online', room?: string, listing?: RoomInfo) => {
     commitName();
     let server: string | undefined;
     if (mode === 'online') {
@@ -455,6 +455,12 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
       if (room === undefined) { try { room = new URL(v).searchParams.get('room') ?? undefined; } catch { /* not a URL */ } }
     }
     deps.sound?.('open');
+    const kit = listing ? adventureJoinKit(listing) : null;
+    if (kit) {
+      // joining a listed adventure room: its chapter's featured kit, corgi side (whatever the menu had picked)
+      deps.onPlay({ mode, server, room, match: 'adventure', chapter: kit.chapter, name: s.name, team: 0, cls: kit.cls });
+      return;
+    }
     if (match === 'adventure') {
       // a chapter plays its featured kit on the corgi side (the kiosk swaps kits in play)
       deps.onPlay({ mode, server, room: mode === 'online' ? room : undefined, match: 'adventure', chapter: chapter.id, name: s.name, team: 0, cls: chapter.cls });

@@ -1,7 +1,7 @@
 // U1: room browser logic — endpoint from the server URL, validation of the untrusted list, room-name cleaning,
 // and the poller's loading / ready / empty / error / busy / offline / bad-url states with a 5 s refresh.
 import { describe, expect, it } from 'vitest';
-import { RoomPoller, chapterLabel, cleanRoomName, isFull, modeLabel, parseRooms, roomsEndpoint, serverBase, type FetchLike, type RoomsState } from '../../src/client/ui/rooms';
+import { RoomPoller, adventureJoinKit, chapterLabel, cleanRoomName, isFull, modeLabel, parseRooms, roomsEndpoint, serverBase, type FetchLike, type RoomsState } from '../../src/client/ui/rooms';
 
 const ROOM = { name: 'porch', mode: 'yard-skirmish', players: 5, humans: 2, bots: 3, maxPlayers: 12, phase: 'live' };
 
@@ -52,6 +52,14 @@ describe('room list helpers', () => {
     expect(isFull({ ...ROOM, humans: 12 } as never)).toBe(true);
     expect(modeLabel('adventure')).toBe('Adventure');
     expect(chapterLabel('yard_day')).toBe('Yard Day');
+  });
+
+  it('joining a listed adventure room takes its chapter\'s featured kit; other rooms keep yours', () => {
+    expect(adventureJoinKit({ mode: 'adventure', chapter: 'last_ball' })).toEqual({ chapter: 'last_ball', cls: 'skyraider' });
+    expect(adventureJoinKit({ mode: 'adventure', chapter: 'garage_job' })).toEqual({ chapter: 'garage_job', cls: 'breacher' });
+    expect(adventureJoinKit({ mode: 'adventure', chapter: 'no_such_chapter' })).toBeNull();
+    expect(adventureJoinKit({ mode: 'adventure' })).toBeNull();
+    expect(adventureJoinKit({ mode: 'core-rush', chapter: 'last_ball' })).toBeNull();
   });
 
   it('keeps an adventure room\'s chapter only when it is a plain chapter id', () => {

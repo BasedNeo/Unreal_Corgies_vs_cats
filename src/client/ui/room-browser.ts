@@ -9,8 +9,8 @@ import { RoomPoller, chapterLabel, cleanRoomName, isFull, modeLabel, PHASE_LABEL
 export interface RoomBrowserDeps {
   /** The server whose rooms to list (the DEPLOY card's field, or the page's own server). */
   server(): string;
-  /** Join (or create) this room with the DEPLOY card's name/team/class. */
-  join(room: string): void;
+  /** Join (or create) this room with the DEPLOY card's name/team/class (`info`: the listing, when picked from the list). */
+  join(room: string, info?: RoomInfo): void;
   /** Back to the class picker. */
   back(): void;
   /** "Joining as …" line for the footer. */
@@ -87,7 +87,7 @@ export function createRoomBrowser(deps: RoomBrowserDeps): RoomBrowser {
     b.dataset.nav = '';
     b.disabled = full;
     b.setAttribute('aria-label', `${full ? 'Full' : 'Join'} room ${r.name}`);
-    b.addEventListener('click', () => { deps.sound?.('open'); deps.join(r.name); });
+    b.addEventListener('click', () => { deps.sound?.('open'); deps.join(r.name, r); });
     b.addEventListener('mouseenter', () => deps.sound?.('hover'));
     d.appendChild(b);
     return d;
