@@ -201,6 +201,22 @@ describe('server hardening', () => {
     expect(quiet.closed.code).toBe(0); // answers pings: alive until the idle timeout
   });
 
+  it('a stalled server loop does not drop live peers: time it could not listen does not count against them', async () => {
+    const s = await start({ heartbeatMs: 100, peerTimeoutMs: 500, idleTimeoutMs: 10_000 });
+    const live = await raw(s.wsUrl);
+    live.hello();
+    await until(() => live.msgs.some((m) => m.t === 'welcome'), 15000, 'welcome'); // the room exists: no build stall ahead
+    await sleep(300); // a few ping/pong rounds
+    const t0 = performance.now();
+    while (performance.now() - t0 < 1500) { /* a 1.5 s stall (a big world build, GC, an overloaded host) */ }
+    await sleep(700);
+    expect(live.closed.code).toBe(0); // its pongs were waiting in the socket: still connected
+    const dead = await raw(s.wsUrl, { autoPong: false });
+    dead.hello();
+    await until(() => dead.closed.code !== 0, 10000, 'dead peer terminated'); // real silence is still caught
+    expect(dead.closed.code).toBe(1006);
+  });
+
   it('shuts down gracefully (notice + 1001)', async () => {
     const s = await start();
     const c = await raw(s.wsUrl);

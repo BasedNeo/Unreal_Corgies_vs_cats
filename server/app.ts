@@ -363,10 +363,18 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
   };
 
   // Heartbeat + timeouts for every connection.
+  const beatMs = Math.max(50, Math.min(cfg.heartbeatMs, cfg.helloTimeoutMs / 2, cfg.idleTimeoutMs / 2, cfg.peerTimeoutMs / 2));
+  let lastBeat = performance.now();
   const heartbeat = setInterval(() => {
     const now = performance.now();
+    // A stalled event loop (a room building its world, GC, an overloaded host) reads no frames: a live peer's pong can
+    // sit unread in its socket while this timer fires first. Time the server could not listen never counts against a
+    // peer, so a stall does not drop every player at once.
+    const stalled = Math.max(0, now - lastBeat - 2 * beatMs);
+    lastBeat = now;
     for (const c of clients.values()) {
       if (c.closed) continue;
+      if (stalled > 0) { c.lastSeenAt = Math.min(now, c.lastSeenAt + stalled); c.lastMsgAt = Math.min(now, c.lastMsgAt + stalled); }
       if (!c.joined && now - c.connectedAt > cfg.helloTimeoutMs) { kick(c, 4001, 'no hello received'); continue; }
       if (now - c.lastMsgAt > cfg.idleTimeoutMs) { kick(c, 4000, 'idle timeout'); continue; }
       if (now - c.lastSeenAt > cfg.peerTimeoutMs) { log(`[cvc] ${c.id} peer timeout (no message or pong)`); c.ws.terminate(); continue; }
@@ -375,7 +383,7 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
         try { c.ws.ping(); } catch { c.ws.terminate(); }
       }
     }
-  }, Math.max(50, Math.min(cfg.heartbeatMs, cfg.helloTimeoutMs / 2, cfg.idleTimeoutMs / 2, cfg.peerTimeoutMs / 2)));
+  }, beatMs);
 
   rooms.start();
   await new Promise<void>((resolve, reject) => {
