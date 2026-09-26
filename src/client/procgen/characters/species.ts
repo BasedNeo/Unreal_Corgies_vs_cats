@@ -2,7 +2,7 @@
 // One anthropomorphic biped body plan; corgi and cat differ only in these numbers and colors.
 // Units: meters, character space: feet at y = 0, facing -Z, +X = the character's right.
 import { PALETTE } from '../../style/style-tokens.js';
-import { Species, type SpeciesId } from '../../../shared/types';
+import { Species, type ClassId, type SpeciesId } from '../../../shared/types';
 import { mixHex } from './colors';
 
 export type CoatPattern = 'plain' | 'sable' | 'tri' | 'tabby' | 'points' | 'tux' | 'sphynx';
@@ -95,7 +95,7 @@ export function corgiPlan(): BodyPlan {
     muzzle: { base: [0, 0.125, -0.12], tip: [0, 0.1, -0.3], rBase: [0.1, 0.078], rTip: [0.055, 0.045] },
     pads: null,
     nose: { c: [0, 0.122, -0.325], r: [0.042, 0.031, 0.031] },
-    jaw: { pivot: [0, 0.075, -0.09], a: [0, 0.06, -0.11], b: [0, 0.07, -0.255], r: [0.068, 0.032] },
+    jaw: { pivot: [0, 0.075, -0.09], a: [0, 0.05, -0.11], b: [0, 0.056, -0.262], r: [0.07, 0.031] },
     eye: { c: [0.094, 0.2, 0], r: 0.058, scale: [1, 1.12, 0.78], tilt: 0.0, look: 0.1, protrude: 0.5 },
     brow: { c: [0.092, 0.3, 0], r: [0.05, 0.017, 0.018] },
     ear: { base: [0.12, 0.31, 0.01], tip: [0.22, 0.62, 0.03], w: 0.08, d: 0.03, mid: 0.45 },
@@ -126,7 +126,7 @@ export function catPlan(chonk = false): BodyPlan {
     muzzle: null,
     pads: { c: [0.037, 0.09, -0.19], r: 0.048 },
     nose: { c: [0, 0.13, -0.217], r: [0.028, 0.019, 0.019] },
-    jaw: { pivot: [0, 0.075, -0.11], a: [0, 0.056, -0.13], b: [0, 0.056, -0.185], r: [0.045, 0.026] },
+    jaw: { pivot: [0, 0.075, -0.11], a: [0, 0.05, -0.13], b: [0, 0.05, -0.19], r: [0.046, 0.026] },
     eye: { c: [0.1, 0.2, 0], r: 0.066, scale: [1.02, 1.0, 0.72], tilt: 0.1, look: 0.08, protrude: 0.52 },
     brow: { c: [0.1, 0.3, 0], r: [0.046, 0.015, 0.016] },
     ear: { base: [0.13, 0.28, 0.0], tip: [0.2, 0.5, 0.005], w: 0.09, d: 0.026, mid: 0.4 },
@@ -147,8 +147,29 @@ function seatFace(p: BodyPlan): BodyPlan {
   return p;
 }
 
-export function planFor(species: SpeciesId, coat: Coat): BodyPlan {
-  return seatFace(planForRaw(species, coat));
+/**
+ * Class body builds (K1 readability at range): the silhouette carries the role before any gear does.
+ * Breacher is broad and heavy-limbed, Infiltrator lean. Widths scale the torso, shoulders and limbs.
+ */
+export const CLASS_BUILD: Partial<Record<ClassId, { width: number; depth: number; limb: number; shoulder: number }>> = {
+  breacher: { width: 1.14, depth: 1.08, limb: 1.16, shoulder: 0.024 },
+  infiltrator: { width: 0.88, depth: 0.9, limb: 0.9, shoulder: -0.014 },
+};
+
+function applyBuild(p: BodyPlan, cls: ClassId | undefined): BodyPlan {
+  const b = cls ? CLASS_BUILD[cls] : undefined;
+  if (!b) return p;
+  p.torso = { ...p.torso, rx: p.torso.rx.map((r) => r * b.width), rz: p.torso.rz.map((r) => r * b.depth) };
+  if (p.butt) p.butt = { ...p.butt, x: p.butt.x * b.width, r: p.butt.r * (1 + (b.width - 1) * 0.6) };
+  p.shoulder = [p.shoulder[0] + b.shoulder, p.shoulder[1], p.shoulder[2]];
+  p.armR = [p.armR[0] * b.limb, p.armR[1] * b.limb];
+  p.thighR *= b.limb; p.shinR *= b.limb;
+  p.hipX *= 1 + (b.width - 1) * 0.5;
+  return p;
+}
+
+export function planFor(species: SpeciesId, coat: Coat, cls?: ClassId): BodyPlan {
+  return seatFace(applyBuild(planForRaw(species, coat), cls));
 }
 
 function planForRaw(species: SpeciesId, coat: Coat): BodyPlan {

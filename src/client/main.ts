@@ -168,7 +168,10 @@ async function main(): Promise<void> {
     if (ev.e === 'land') views.trigger(ev.id, 'land', ev.impact);
     if (ev.e === 'hit') views.trigger(ev.dst, 'hit', ev.dmg);
     if (ev.e === 'fire') views.trigger(ev.id, 'fire');
-    if (ev.e === 'death') views.trigger(ev.id, 'death');
+    if (ev.e === 'death') {
+      views.trigger(ev.id, 'death');
+      if (ev.by !== ev.id && ev.by >= 0) views.trigger(ev.by, 'kill'); // K1: the killer's smug grin
+    }
     if (ev.e === 'spawn') views.trigger(ev.id, 'spawn');
     if (ev.e === 'ability') views.trigger(ev.id, ev.ability);
     bossFx.onGameEvent(ev);

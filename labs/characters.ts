@@ -2,8 +2,13 @@
 // rendered through the real comic pipeline (toon bands, ink outline pass, bloom, grade).
 //
 // URL params
-//   view=grid|front|side|back|action|face|portrait|turntable|ots   camera + layout preset (default grid)
-//   anim=idle|walk|run|sprint|jump|fall|aim|aimfwd|fire|hit|death|emote|slide|swim|cycle   (default: per view)
+//   view=grid|front|side|back|action|face|portrait|turntable|ots|lineup   camera + layout preset (default grid)
+//   anim=idle|walk|run|sprint|jump|fall|glide|aim|aimfwd|fire|hit|kill|death|emote|slide|swim|cycle   (default: per view)
+//   lineup: every class x both species at `dist` m (default 35) from a gameplay camera (`fov`, default 62 =
+//     hip-fire), groups facing the camera / away (`facing=front,back,side`). sil=1 renders flat ink silhouettes.
+//   camera overrides (any view): cam=x,y,z  at=x,y,z  fov=deg
+//   inkfar=8   EXPERIMENT (lab only): cap the ink hull's screen-constant width beyond 8 m, so distant ink
+//              thins like world-space lines (the proposal for the style lane, see docs/handoff/K1.md)
 //   species=corgi|cat  cls=assault  coat=red|tabby|…  team=0|1  expr=smug|…  npc (NPC tier)
 //   t=1.5   pre-simulate 1.5 s at 60 Hz, then freeze (deterministic screenshots); live=1 keeps running
 //   webgl   force the WebGL2 backend (headless probe)        labels=0   hide name tags
@@ -22,7 +27,7 @@ const view = P.get('view') ?? 'grid';
 const info = document.getElementById('info')!;
 const labelsEl = document.getElementById('labels')!;
 
-type AnimName = 'idle' | 'walk' | 'run' | 'sprint' | 'jump' | 'fall' | 'glide' | 'aim' | 'aimfwd' | 'fire' | 'hit' | 'death' | 'emote' | 'slide' | 'swim' | 'cycle';
+type AnimName = 'idle' | 'walk' | 'run' | 'sprint' | 'jump' | 'fall' | 'glide' | 'aim' | 'aimfwd' | 'fire' | 'hit' | 'kill' | 'death' | 'emote' | 'slide' | 'swim' | 'cycle';
 const CYCLE: AnimName[] = ['idle', 'walk', 'run', 'sprint', 'jump', 'aim', 'fire', 'hit', 'death', 'emote'];
 
 interface Spec { species: SpeciesId; coat?: string; cls: ClassId; team: TeamId; anim: AnimName; expr?: Expression; x: number; z: number; yaw: number }
@@ -40,6 +45,10 @@ const forcedAnim = P.get('anim') as AnimName | null;
 const forcedExpr = P.get('expr') as Expression | null;
 const only = P.get('species');
 const clsParam = P.get('cls');
+const num = (k: string, d: number) => (P.has(k) ? Number(P.get(k)) : d);
+const vec = (k: string): number[] | null => (P.has(k) ? P.get(k)!.split(',').map(Number) : null);
+/** Lineup camera (third-person height, looking along -Z at the row). */
+const LINEUP_CAM = [0, 1.7, 17.5] as const;
 
 function layout(): Spec[] {
   const out: Spec[] = [];
@@ -77,6 +86,27 @@ function layout(): Spec[] {
       });
       break;
     }
+    case 'lineup': {
+      // Arc of characters `dist` m from the camera: one group per (facing, species), all six classes each.
+      const dist = num('dist', 35);
+      const facings = (P.get('facing') ?? 'front,back').split(',');
+      const groups: [SpeciesId, string][] = [];
+      for (const f of facings) for (const sp of [Species.Corgi, Species.Cat]) groups.push([sp, f]);
+      const step = 1.9 / dist, gap = 1.6 / dist;
+      const span = groups.length * CLASS_IDS.length * step + (groups.length - 1) * gap - step;
+      let a = -span / 2;
+      groups.forEach(([sp, f]) => {
+        CLASS_IDS.forEach((c, i) => {
+          const x = LINEUP_CAM[0] + dist * Math.sin(a), z = LINEUP_CAM[2] - dist * Math.cos(a);
+          const toCam = Math.atan2(-(LINEUP_CAM[0] - x), -(LINEUP_CAM[2] - z));
+          const yaw = f === 'back' ? toCam + Math.PI : f === 'side' ? toCam + Math.PI / 2 : toCam;
+          add({ species: sp, coat: sp === Species.Cat ? catCoats[i] : corgiCoats[i % 3], cls: c, x, z, yaw });
+          a += step;
+        });
+        a += gap;
+      });
+      break;
+    }
     case 'ots':
     case 'portrait':
     case 'turntable': {
@@ -104,6 +134,7 @@ class Driver {
   private nextFire = 0;
   private nextHit = 0.3;
   private nextEmote = 0.1;
+  private nextKill = 0.2;
   private deathSent = false;
   constructor(readonly av: CharacterAvatar, readonly anim: AnimName, readonly phase: number) {}
   current(): AnimName {
@@ -127,6 +158,7 @@ class Driver {
         f.aiming = true; f.firing = true; f.aimPitch = 0.12;
         if (this.t >= this.nextFire) { this.av.trigger('fire', 1); this.nextFire = this.t + 0.14; }
         break;
+      case 'kill': if (this.t >= this.nextKill) { this.av.trigger('kill'); this.nextKill = this.t + 3; } break;
       case 'hit': if (this.t >= this.nextHit) { this.av.trigger('hit', 1); this.nextHit = this.t + 1.1; } f.hpFrac = 0.6; break;
       case 'death': f.dead = true; f.anim = Anim.Dead; f.hpFrac = 0; if (!this.deathSent) { this.av.trigger('death'); this.deathSent = true; } break;
       case 'emote': if (this.t >= this.nextEmote) { this.av.trigger('emote'); this.nextEmote = this.t + 2.6; } break;
@@ -138,7 +170,24 @@ class Driver {
   }
 }
 
+/** Lab-only experiment: ink width constant in screen space up to `d` m, then constant in world space. */
+function capInkDistance(d: number): void {
+  type OutlinePass = { thicknessNode: unknown; _createMaterial(): THREE.NodeMaterial };
+  const proto = (THREE as unknown as { ToonOutlinePassNode: { prototype: OutlinePass } }).ToonOutlinePassNode.prototype;
+  const orig = proto._createMaterial;
+  proto._createMaterial = function (this: OutlinePass) {
+    const m = orig.call(this);
+    const mvp = TSL.cameraProjectionMatrix.mul(TSL.modelViewMatrix);
+    const pos = mvp.mul(TSL.vec4(TSL.positionLocal, 1));
+    const pos2 = mvp.mul(TSL.vec4(TSL.positionLocal.add(TSL.normalLocal.negate()), 1));
+    const thickness = this.thicknessNode as ReturnType<typeof TSL.float>;
+    m.vertexNode = pos.add(TSL.normalize(pos.sub(pos2)).mul(thickness).mul(TSL.min(pos.w, TSL.float(d))));
+    return m;
+  };
+}
+
 async function main(): Promise<void> {
+  if (P.has('inkfar')) capInkDistance(Number(P.get('inkfar')));
   const app = document.getElementById('app')!;
   const ctx = await createRenderContext(app, { forceWebGL: P.has('webgl') });
   const { scene, camera, renderer } = ctx;
@@ -162,6 +211,8 @@ async function main(): Promise<void> {
     }
   });
 
+  let silMat: THREE.Material | null = null;
+  if (view === 'lineup') scene.fog = new THREE.FogExp2(0xbfe3f4, 0.003); // same haze as the game sky
   const specs = layout();
   const drivers: Driver[] = [];
   const tags: { el: HTMLDivElement; av: CharacterAvatar }[] = [];
@@ -172,6 +223,11 @@ async function main(): Promise<void> {
     av.root.position.set(s.x, 0, s.z);
     av.root.rotation.y = s.yaw;
     if (s.expr) av.setExpression(s.expr);
+    if (P.get('sil') === '1') {
+      // Flat ink silhouettes (style-system material): judge class shapes without color or face detail.
+      silMat ??= toon({ color: PALETTE.ink });
+      av.root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && !o.userData.styleInk) m.material = silMat!; });
+    }
     scene.add(av.root);
     drivers.push(new Driver(av, s.anim, i * 0.9));
     if (P.get('labels') !== '0' && (view === 'grid' || view === 'face' || view === 'action')) {
@@ -197,8 +253,13 @@ async function main(): Promise<void> {
     case 'turntable': setCam(-1.1, 1.05, -2.9, 0, 0.66, 0, 34); break;
     // Over-the-shoulder aim camera (third-person.ts: pivot +1.25 m, shoulder 0.75 m, 2.3 m back, fov 48).
     case 'ots': setCam(0.75, 1.3, 2.3, 0.75, 1.1, -20, 48); break;
+    case 'lineup': setCam(LINEUP_CAM[0], LINEUP_CAM[1], LINEUP_CAM[2], 0, 0.6, LINEUP_CAM[2] - num('dist', 35), 62); break;
     case 'portrait': if (forcedAnim === 'death') setCam(-0.6, 1.7, -0.9, 0, 0.1, 0.55, 40); else setCam(-0.4, Number(P.get('camy') ?? 0.99), -1.6, 0, 0.95, 0, 30); break;
     default: setCam(-2.5, 3.1, -8.4, 0, 0.55, 0.3, 44);
+  }
+  {
+    const c = vec('cam'), at = vec('at');
+    if (c || at || P.has('fov')) setCam(...((c ?? camera.position.toArray()) as [number, number, number]), ...((at ?? target.toArray()) as [number, number, number]), num('fov', camera.fov));
   }
 
   const freeze = P.has('t') && !P.has('live');

@@ -1,4 +1,4 @@
-// One shared skeleton template (45 bones ≤ 48) for every species. Species/variants only move rest
+// One shared skeleton template (47 bones ≤ 48) for every species. Species/variants only move rest
 // positions and scales, so every procedural animation retargets across corgis and cats for free.
 import type { RigTemplate } from '../../anim/rig';
 import type { BodyPlan } from './species';
@@ -16,6 +16,8 @@ export const BONE_NAMES = [
   'thigh.L', 'shin.L', 'foot.L',
   'thigh.R', 'shin.R', 'foot.R',
   'weapon', 'butt',
+  // K1: mouth corners (smirk, grin, snarl) — they bend the ink mouth line drawn on the muzzle / pads.
+  'mouth.L', 'mouth.R',
 ] as const;
 export type BoneName = (typeof BONE_NAMES)[number];
 
@@ -32,6 +34,7 @@ const PARENT: Record<BoneName, BoneName | null> = {
   'thigh.L': 'hips', 'shin.L': 'thigh.L', 'foot.L': 'shin.L',
   'thigh.R': 'hips', 'shin.R': 'thigh.R', 'foot.R': 'shin.R',
   weapon: 'chest', butt: 'hips',
+  'mouth.L': 'head', 'mouth.R': 'head',
 };
 
 export type P3 = [number, number, number];
@@ -85,6 +88,48 @@ export function computeJoints(p: BodyPlan): Joints {
   return j;
 }
 
+/** Right mouth corner (head-local, +X side): where the lip line tucks under the cheek. */
+export function mouthCorner(p: BodyPlan): P3 {
+  return p.muzzle ? muzzlePoint(p, 1.15, p.muzzle.base[2] - 0.055, 0.6) : padPoint(p, -0.4, 0.6);
+}
+
+/**
+ * Point on the lower edge of the right cat whisker pad (head-local): `a` is the angle around the pad
+ * seen from the front (-π/2 = bottom, 0 = outer side); `out` pushes it off the surface.
+ */
+export function padPoint(p: BodyPlan, a: number, out = 0): P3 {
+  const pd = p.pads!, rx = pd.r, ry = pd.r * 0.82, rz = pd.r * 0.85, e = 0.93;
+  return [pd.c[0] + rx * e * Math.cos(a), pd.c[1] + ry * e * Math.sin(a), pd.c[2] - rz * Math.sqrt(1 - e * e) - 0.0055 * out];
+}
+
+/**
+ * Point on the corgi muzzle surface (head-local): angle `th` from the bottom (0) toward the +X side
+ * (π/2), at depth z, pushed out by `out` × the lip-line radius. Follows the sweep in body.ts: linear
+ * between the base / mid / tip rings, then the rounded end cap.
+ */
+export function muzzlePoint(p: BodyPlan, th: number, z: number, out = 0): P3 {
+  const m = p.muzzle!;
+  const mid = lerp3(m.base, m.tip, 0.55);
+  const rings: [number, number, number, number][] = [ // z, cy, rVert, rHoriz
+    [m.base[2], m.base[1], m.rBase[1], m.rBase[0]],
+    [mid[2], mid[1], ((m.rBase[1] + m.rTip[1]) / 2) * 1.02, ((m.rBase[0] + m.rTip[0]) / 2) * 1.05],
+    [m.tip[2], m.tip[1], m.rTip[1], m.rTip[0]],
+  ];
+  let cy: number, rv: number, rh: number;
+  if (z <= m.tip[2]) {
+    const L = Math.max(m.rTip[0], m.rTip[1]) * 0.8;
+    const k = Math.sqrt(Math.max(0, 1 - Math.min(1, (m.tip[2] - z) / L) ** 2));
+    cy = m.tip[1]; rv = m.rTip[1] * k; rh = m.rTip[0] * k;
+  } else {
+    const i = z >= rings[1][0] ? 0 : 1;
+    const a = rings[i], b = rings[i + 1];
+    const t = Math.min(1, Math.max(0, (z - a[0]) / (b[0] - a[0])));
+    cy = a[1] + (b[1] - a[1]) * t; rv = a[2] + (b[2] - a[2]) * t; rh = a[3] + (b[3] - a[3]) * t;
+  }
+  const lip = 0.0055 * out;
+  return [(rh + lip) * Math.sin(th), cy - (rv + lip) * Math.cos(th), z];
+}
+
 export function norm(v: P3): P3 { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
 export function scale(v: P3, s: number): P3 { return [v[0] * s, v[1] * s, v[2] * s]; }
 
@@ -131,6 +176,7 @@ export function buildRigTemplate(p: BodyPlan): RigTemplate {
   set('weapon', [0.12, p.chestY, -0.25], [0.12, p.chestY, -0.55]);
   const butt: P3 = p.butt ? [0, p.butt.y, p.butt.z] : [0, p.hipsY - 0.04, 0.1];
   set('butt', butt, add(butt, [0, 0, 0.06]));
+  for (const s of SIDES) { const c = add(hd, mx(mouthCorner(p), SX[s])); set(`mouth.${s}`, c, c); }
 
   const parent = new Int16Array(n);
   const modelRest = new Float32Array(n * 3), restLocal = new Float32Array(n * 3), restScale = new Float32Array(n * 3), tail = new Float32Array(n * 3);

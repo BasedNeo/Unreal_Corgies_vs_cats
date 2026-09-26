@@ -14,14 +14,24 @@ export interface Prim {
   pos: number[];
   uv: number[];
   idx: number[];
+  /**
+   * Optional positions of the same topology used only for normals: fur tufts displace `pos` for a
+   * jagged silhouette while the toon bands shade the smooth base shape (no faceted zig-zag).
+   */
+  nrmPos?: number[];
 }
+
+/** Alternating tuft mask per column: 0/1, seam-safe (column W duplicates column 0). */
+export const tuftCol = (u: number, W: number) => (Math.round(u * W) % W) % 2;
 
 export type ColorFn = (x: number, y: number, z: number, u: number, v: number) => number;
 
 export type SkinSpec =
   | { rigid: string }
   | { auto: string[]; power?: number }
-  | { blend: [string, number][] };
+  | { blend: [string, number][] }
+  /** Per-vertex weights from position and the primitive's (u, v) (e.g. a mouth line bending at its corners). */
+  | { fn: (x: number, y: number, z: number, u: number, v: number) => [string, number][] };
 
 // ---------------------------------------------------------------------------------------------
 // Primitives
@@ -68,8 +78,10 @@ export function blob(W: number, H: number, f: (dx: number, dy: number, dz: numbe
 export interface EllipsoidOpts {
   /** Superellipsoid exponent (2 = ellipsoid, 3–5 = rounded box). */
   p?: number;
-  /** Radius multiplier by (u, v, dir) — tufts, taper, bulges. */
+  /** Radius multiplier by (u, v, dir) — taper, bulges (shapes the normals too). */
   mod?: (u: number, v: number, dx: number, dy: number, dz: number) => number;
+  /** Extra radius multiplier for fur tufts: silhouette only, normals come from the untufted shape. */
+  tuft?: (u: number, v: number, dx: number, dy: number, dz: number) => number;
   /** Clamp y (model space) from below (flat soles). */
   floorY?: number;
   /** Rotation applied to the shape (Euler XYZ radians, order YXZ) before translation. */
@@ -84,15 +96,18 @@ const _vec = new THREE.Vector3();
 export function ellipsoid(c: V3, r: V3, W: number, H: number, o: EllipsoidOpts = {}): Prim {
   const p = o.p ?? 2;
   const rot = o.rot ? _mat.makeRotationFromEuler(_eul.set(o.rot[0], o.rot[1], o.rot[2], 'YXZ')).clone() : null;
-  return blob(W, H, (dx, dy, dz, u, v, out) => {
+  const shape = (tufted: boolean) => blob(W, H, (dx, dy, dz, u, v, out) => {
     let k = 1;
     if (p !== 2) k = 1 / Math.pow(Math.abs(dx) ** p + Math.abs(dy) ** p + Math.abs(dz) ** p, 1 / p);
-    const m = o.mod ? o.mod(u, v, dx, dy, dz) : 1;
+    const m = (o.mod ? o.mod(u, v, dx, dy, dz) : 1) * (tufted && o.tuft ? o.tuft(u, v, dx, dy, dz) : 1);
     _vec.set(dx * k * r[0] * m, dy * k * r[1] * m, dz * k * r[2] * m);
     if (rot) _vec.applyMatrix4(rot);
     out[0] = c[0] + _vec.x; out[1] = c[1] + _vec.y; out[2] = c[2] + _vec.z;
     if (o.floorY !== undefined && out[1] < o.floorY) out[1] = o.floorY;
   }, o.vMax ?? 1);
+  const prim = shape(true);
+  if (o.tuft) prim.nrmPos = shape(false).pos;
+  return prim;
 }
 
 export interface SweepOpts {
@@ -106,6 +121,8 @@ export interface SweepOpts {
   capEndLen?: number;
   /** Radius multiplier per (ring t in [0,1], angle u in [0,1)). */
   mod?: (t: number, u: number) => number;
+  /** Fur-tuft radius multiplier (silhouette only; normals come from the untufted tube). */
+  tuft?: (t: number, u: number) => number;
 }
 
 /**
@@ -113,6 +130,11 @@ export interface SweepOpts {
  * axis, rB along the binormal). Ends are closed with rounded caps ending in a single pole vertex.
  */
 export function sweep(path: V3[], radii: [number, number][], N: number, o: SweepOpts = {}): Prim {
+  if (o.tuft) {
+    const prim = sweep(path, radii, N, { ...o, mod: (t, u) => (o.mod ? o.mod(t, u) : 1) * o.tuft!(t, u), tuft: undefined });
+    prim.nrmPos = sweep(path, radii, N, { ...o, tuft: undefined }).pos;
+    return prim;
+  }
   const pos: number[] = [], uv: number[] = [], idx: number[] = [];
   const up = new THREE.Vector3(...(o.up ?? [0, 0, 1]));
   const P = path.map((p) => new THREE.Vector3(...p));
@@ -238,20 +260,47 @@ export function ellipseLoop(c: V3, ax: V3, bx: V3, n: number, f?: (t: number) =>
 export function xform(p: Prim, t: V3, rot: V3 = [0, 0, 0], s: V3 = [1, 1, 1]): Prim {
   const m = new THREE.Matrix4().compose(new THREE.Vector3(...t), new THREE.Quaternion().setFromEuler(new THREE.Euler(rot[0], rot[1], rot[2], 'YXZ')), new THREE.Vector3(...s));
   const v = new THREE.Vector3();
-  for (let i = 0; i < p.pos.length; i += 3) {
-    v.set(p.pos[i], p.pos[i + 1], p.pos[i + 2]).applyMatrix4(m);
-    p.pos[i] = v.x; p.pos[i + 1] = v.y; p.pos[i + 2] = v.z;
+  for (const arr of p.nrmPos ? [p.pos, p.nrmPos] : [p.pos]) {
+    for (let i = 0; i < arr.length; i += 3) {
+      v.set(arr[i], arr[i + 1], arr[i + 2]).applyMatrix4(m);
+      arr[i] = v.x; arr[i + 1] = v.y; arr[i + 2] = v.z;
+    }
   }
   return p;
 }
 
 /** Mirror a primitive across x = 0 (flips winding). */
 export function mirrorX(p: Prim): Prim {
-  const pos = p.pos.slice();
-  for (let i = 0; i < pos.length; i += 3) pos[i] = -pos[i];
+  const flip = (a: number[]) => { const o = a.slice(); for (let i = 0; i < o.length; i += 3) o[i] = -o[i]; return o; };
   const idx: number[] = [];
   for (let i = 0; i < p.idx.length; i += 3) idx.push(p.idx[i], p.idx[i + 2], p.idx[i + 1]);
-  return { pos, uv: p.uv.slice(), idx };
+  return { pos: flip(p.pos), uv: p.uv.slice(), idx, nrmPos: p.nrmPos ? flip(p.nrmPos) : undefined };
+}
+
+/**
+ * Surface of revolution around the +Z axis (then placed with `xform`): `profile` is a closed loop of
+ * (radius, z) points, revolved in N steps. Makes thin-walled shells (cone collars, brims) that stay
+ * closed, so the ink hull and back-face culling work from inside and outside.
+ */
+export function lathe(profile: [number, number][], N: number, rx = 1, ry = 1): Prim {
+  const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+  const n = profile.length;
+  for (let k = 0; k < n; k++) {
+    const [r, z] = profile[k];
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      pos.push(Math.sin(a) * r * rx, Math.cos(a) * r * ry, z);
+      uv.push(i / N, k / n);
+    }
+  }
+  for (let k = 0; k < n; k++) {
+    const k2 = (k + 1) % n;
+    for (let i = 0; i < N; i++) {
+      const i2 = (i + 1) % N;
+      idx.push(k * N + i, k * N + i2, k2 * N + i2, k * N + i, k2 * N + i2, k2 * N + i);
+    }
+  }
+  return orientOutward({ pos, uv, idx });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -262,6 +311,15 @@ export function linear(hex: number): THREE.Color {
   let c = colorCache.get(hex);
   if (!c) { c = new THREE.Color(hex); colorCache.set(hex, c); }
   return c;
+}
+
+export interface AddOpts {
+  /**
+   * Shade this primitive partly as if it were a smooth proxy ellipsoid (center c, radii r, weight w):
+   * cheeks and pads blend into the cranium's toon bands instead of showing a faceted seam where the
+   * blobs intersect. Positions (and so the silhouette and ink) are unchanged.
+   */
+  proxy?: { c: V3; r: V3; w: number };
 }
 
 /** Accumulates primitives into one geometry with colors (and skin attributes when a rig is given). */
@@ -282,23 +340,33 @@ export class MeshBuilder {
   /** Name the section subsequent primitives are counted under. */
   begin(name: string): this { this.section = name; return this; }
 
-  add(p: Prim, color: number | ColorFn, skin?: SkinSpec): this {
+  add(p: Prim, color: number | ColorFn, skin?: SkinSpec, opts: AddOpts = {}): this {
     // Outline-safe normals per primitive (welds seams/poles, averages by position).
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(p.pos, 3));
+    g.setAttribute('position', new THREE.Float32BufferAttribute(p.nrmPos ?? p.pos, 3));
     g.setIndex(p.idx);
     smoothNormalsByPosition(THREE, g);
     const nAttr = g.getAttribute('normal');
     const base = this.pos.length / 3;
     const vc = p.pos.length / 3;
+    const px = opts.proxy;
     for (let i = 0; i < vc; i++) {
       const x = p.pos[3 * i], y = p.pos[3 * i + 1], z = p.pos[3 * i + 2];
       this.pos.push(x, y, z);
-      this.nrm.push(nAttr.getX(i), nAttr.getY(i), nAttr.getZ(i));
+      let nx = nAttr.getX(i), ny = nAttr.getY(i), nz = nAttr.getZ(i);
+      if (px) {
+        // Normal transfer: lean toward the proxy ellipsoid's normal at this point (smooth field).
+        const qx = (x - px.c[0]) / (px.r[0] * px.r[0]), qy = (y - px.c[1]) / (px.r[1] * px.r[1]), qz = (z - px.c[2]) / (px.r[2] * px.r[2]);
+        const ql = Math.hypot(qx, qy, qz) || 1;
+        nx += (qx / ql - nx) * px.w; ny += (qy / ql - ny) * px.w; nz += (qz / ql - nz) * px.w;
+        const nl = Math.hypot(nx, ny, nz) || 1;
+        nx /= nl; ny /= nl; nz /= nl;
+      }
+      this.nrm.push(nx, ny, nz);
       const hex = typeof color === 'number' ? color : color(x, y, z, p.uv[2 * i], p.uv[2 * i + 1]);
       const c = linear(hex);
       this.col.push(c.r, c.g, c.b);
-      if (this.rig) this.pushSkin(x, y, z, skin);
+      if (this.rig) this.pushSkin(x, y, z, skin, p.uv[2 * i], p.uv[2 * i + 1]);
     }
     g.dispose();
     for (const i of p.idx) this.idx.push(base + i);
@@ -313,11 +381,12 @@ export class MeshBuilder {
     return i;
   }
 
-  private pushSkin(x: number, y: number, z: number, skin?: SkinSpec): void {
+  private pushSkin(x: number, y: number, z: number, skin: SkinSpec | undefined, u: number, v: number): void {
     const s = skin ?? { rigid: 'root' };
     if ('rigid' in s) { this.si.push(this.boneIdx(s.rigid), 0, 0, 0); this.sw.push(1, 0, 0, 0); return; }
     let cand: [number, number][];
     if ('blend' in s) cand = s.blend.map(([n, w]) => [this.boneIdx(n), w]);
+    else if ('fn' in s) cand = s.fn(x, y, z, u, v).filter(([, w]) => w > 0).map(([n, w]) => [this.boneIdx(n), w]);
     else {
       const pw = s.power ?? 4;
       const t = this.rig!;

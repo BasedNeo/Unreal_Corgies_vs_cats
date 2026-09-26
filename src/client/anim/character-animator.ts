@@ -58,6 +58,8 @@ export class CharacterAnimator {
   // One-shots.
   private recoil = new Spring(700, 0.42);
   private hit = new Spring(260, 0.38);
+  /** Smug head toss after a kill (chin up + a little roll). */
+  private toss = new Spring(150, 0.32);
   private hitSide = 1;
   private squash = new Spring(260, 0.3);
   private flipT = -1;
@@ -109,7 +111,9 @@ export class CharacterAnimator {
   trigger(action: string, strength = 1): void {
     switch (action) {
       case 'fire': this.lastFireTrig = this.t; this.recoil.impulse(-9 * Math.min(2, strength)); break;
-      case 'hit': this.lastHitTrig = this.t; this.hitSide = this.rng() < 0.5 ? -1 : 1; this.hit.impulse(11 * Math.min(2, Math.max(0.4, strength))); this.earImpulse(-4, 3); break;
+      case 'hit': this.lastHitTrig = this.t; this.hitSide = this.rng() < 0.5 ? -1 : 1; this.hit.impulse(11 * Math.min(2, Math.max(0.4, strength))); this.earImpulse(-4, 3); this.face.hurt(); break;
+      // Scored a kill (host: GameEvent death with by = this entity): smug grin + head toss + ear flick.
+      case 'kill': this.face.kill(); this.toss.impulse(4.5); this.earImpulse(2, -2); break;
       case 'jump':
         this.lastJumpTrig = this.t;
         if (!this.prev.grounded && this.airTime > 0.05) this.flipT = 0; // double jump → forward flip
@@ -247,7 +251,9 @@ export class CharacterAnimator {
 
     // ---------------- face ----------------
     const hitAmt = Math.min(1, Math.abs(hv) / 0.4 + (this.t - this.lastHitTrig < 0.18 ? 0.8 : 0));
-    const fp = this.face.update({ dead, firing: f.firing, hpFrac: f.hpFrac, zoomies: W.zoom > 0.5, emote: this.emoteT >= 0, hit: hitAmt, falling: !grounded && f.vy < -9 && this.airTime > 0.5, speed }, dt);
+    const fp = this.face.update({ dead, firing: f.firing, aiming: f.aiming, hpFrac: f.hpFrac, zoomies: W.zoom > 0.5, emote: this.emoteT >= 0, hit: hitAmt, falling: !grounded && f.vy < -9 && this.airTime > 0.5, speed }, dt);
+    const ts = this.toss.step(0, dt);
+    if (!dead) pose.r(b.head, ts * 0.22, 0, ts * 0.12);
     this.applyFace(pose, fp, dead);
 
     // ---------------- secondary motion ----------------
@@ -494,9 +500,16 @@ export class CharacterAnimator {
       p.r(b[`lidUp.${s}`], LID_UP_OPEN + (LID_UP_CLOSED - LID_UP_OPEN) * up, 0, fp.slant * 0.5 * k);
       p.r(b[`lidLo.${s}`], LID_LO_OPEN + (LID_LO_CLOSED - LID_LO_OPEN) * fp.lidLo, 0, -fp.slant * 0.2 * k);
       const asym = fp.browAsym * (s === 'L' ? 1 : -1);
-      p.o(b[`brow.${s}`], 0, (fp.browY * 0.03 + asym * 0.016), 0);
+      // Lowered brows also come forward: below the brow line the cranium (and the lids) bulge out,
+      // so a brow that only slid down would sink out of sight. Knitting pulls them toward the nose.
+      const browY = fp.browY * 0.03 + asym * 0.016;
+      const down = Math.max(0, -browY) / 0.03;
+      p.o(b[`brow.${s}`], -k * fp.browIn * 0.011, browY, -down * 0.024 - fp.browIn * 0.004);
       p.r(b[`brow.${s}`], 0, 0, (-fp.browTilt * 0.5 - asym * 0.12) * k);
-      p.r(b[`eye.${s}`], fp.lookY * 0.3, fp.lookX * 0.35 * -1 + fp.cross * 0.32 * k, 0);
+      p.r(b[`eye.${s}`], fp.lookY * 0.3 + fp.chin * 0.9, fp.lookX * 0.35 * -1 + fp.cross * 0.32 * k, 0);
+      // Mouth corners bend the lip line: grin up, frown down, smirk one-sided, snarl back and out.
+      const side = s === 'L' ? 1 : -0.45;
+      p.o(b[`mouth.${s}`], k * (fp.snarl * 0.005 + Math.max(0, fp.smile) * 0.004), fp.smile * 0.015 + fp.smirk * side * 0.013 + fp.snarl * 0.004 - fp.jaw * 0.014, fp.snarl * 0.01);
       const ps = dead ? 0.0001 : fp.pupil;
       p.s(b[`pupil.${s}`], ps * (cat ? 0.35 + 0.9 * fp.slit : 1), ps, 1);
       if (dead) p.s(b[`eye.${s}`], 0.0001);
@@ -508,7 +521,7 @@ export class CharacterAnimator {
     p.o(b.tongue, 0, -0.03 * tg, -0.075 * tg);
     p.r(b.tongue, -0.55 * tg, 0, 0);
     p.s(b.tongue, 1 + 0.15 * tg, 1 + 0.3 * tg, 1 + 0.75 * tg);
-    p.r(b.head, 0, 0, fp.tilt);
+    p.r(b.head, -fp.chin, 0, fp.tilt);
   }
 
   // ======================= secondary motion =======================

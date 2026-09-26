@@ -3,7 +3,7 @@
 // armor + class kit, and code-authored animation (src/client/anim).
 //
 // Draw calls per character: 1 skinned body (fur + face + gear, vertex colors) + 1 rigid weapon
-// (+ its crease ink) + 1 weapon glow (+ 1 visor glow for Overwatch) ≤ 5.
+// (+ its crease ink) + 1 weapon glow (+ 1 skinned kit glow for Overwatch: monocle + mast beacon) ≤ 5.
 // Geometry is cached per (species, variant, class, team, tier) and shared; every avatar gets its own
 // skeleton and animator. Seeds also drive per-instance proportions (bone scales), blink timing,
 // idle moods and ear twitches, so two bots with the same kit still look and act differently.
@@ -18,15 +18,20 @@ import { CharacterAnimator } from '../../anim/character-animator';
 import type { Expression } from '../../anim/face';
 import { MeshBuilder, ellipsoid } from './mesh-builder';
 import { buildBody } from './body';
-import { buildGear, monoclePos } from './gear';
+import { buildGear, monoclePos, mastPath } from './gear';
 import { buildWeapon, type WeaponGeo } from './weapons';
-import { buildRigTemplate, computeJoints } from './skeleton';
+import { buildRigTemplate } from './skeleton';
 import { coatsFor, planFor, type BodyPlan, type Coat } from './species';
 
 export const HERO_TRI_BUDGET = 6000;
 export const NPC_TRI_BUDGET = 3500;
-/** Segment-count multipliers per tier (tuned so every species × class fits its budget). */
-export const DETAIL = { hero: 0.93, npc: 0.66 } as const;
+/**
+ * Segment-count multipliers per tier (tuned so every species × class fits its budget). The face
+ * (cranium, cheeks, muzzle, lids) and headgear get their own, higher hero multiplier: close-ups show
+ * polygon edges in the toon bands there first, while the body reads the same at 0.86.
+ */
+export const DETAIL = { hero: 0.86, npc: 0.66 } as const;
+export const FACE_DETAIL = { hero: 1.12, npc: 0.66 } as const;
 /** Bump when existing seeds change appearance (seeds are save data). */
 export const CHARACTER_VERSION = 1;
 
@@ -37,7 +42,8 @@ interface CharacterAsset {
   body: THREE.BufferGeometry;
   weapon: WeaponGeo;
   weaponInk: THREE.Object3D | null;
-  visorGlow: THREE.BufferGeometry | null;
+  /** Skinned glow parts on the shared skeleton (Overwatch monocle lens + mast beacon). */
+  kitGlow: THREE.BufferGeometry | null;
   plan: BodyPlan;
   coat: Coat;
   headTop: number;
@@ -78,11 +84,12 @@ function getAsset(species: SpeciesId, coat: Coat, cls: ClassId, team: TeamId, he
   let a = cache.get(key);
   if (a) { a.refs++; return a; }
   const q = hero ? DETAIL.hero : DETAIL.npc;
-  const plan = planFor(species, coat);
+  const qf = hero ? FACE_DETAIL.hero : FACE_DETAIL.npc;
+  const plan = planFor(species, coat, cls);
   const template = buildRigTemplate(plan);
   const mb = new MeshBuilder(template);
-  const face = buildBody(mb, plan, coat, q);
-  buildGear(mb, plan, cls, team, q);
+  const face = buildBody(mb, plan, coat, q, qf);
+  buildGear(mb, plan, cls, team, q, qf);
   const body = mb.build();
   const weapon = buildWeapon(cls, team, q);
   // Crease ink for the rigid weapon, made once by the style system and cloned per instance.
@@ -92,17 +99,17 @@ function getAsset(species: SpeciesId, coat: Coat, cls: ClassId, team: TeamId, he
     weaponInk = addCreaseInk(tmp, { thresholdDeg: 40 }) as THREE.Object3D | null;
     if (weaponInk) tmp.remove(weaponInk);
   }
-  let visorGlow: THREE.BufferGeometry | null = null;
+  let kitGlow: THREE.BufferGeometry | null = null;
   if (cls === 'overwatch') {
-    const j = computeJoints(plan);
-    const m = monoclePos(plan);
-    const g = new MeshBuilder(null);
-    g.add(ellipsoid([m[0] - j.head[0], m[1] - j.head[1], m[2] - j.head[2]], [0.03, 0.03, 0.008], 10, 4), 0);
-    visorGlow = g.build();
+    const g = new MeshBuilder(template);
+    if (hero) g.add(ellipsoid(monoclePos(plan), [0.03, 0.03, 0.008], 10, 4), 0, { rigid: 'head' });
+    const tip = mastPath(plan)[3];
+    g.add(ellipsoid([tip[0], tip[1] + 0.03, tip[2]], [0.036, 0.036, 0.036], hero ? 8 : 6, hero ? 6 : 4), 0, { rigid: 'chest' });
+    kitGlow = g.build();
   }
   const boneInverses = RigInstance.bindMatrices(template).map((m) => m.invert());
-  const triangles = mb.triangles + weapon.triangles + (visorGlow ? (visorGlow.index!.count / 3) : 0);
-  a = { key, template, boneInverses, body, weapon, weaponInk, visorGlow, plan, coat, headTop: face.headTop, snoutTip: face.snoutTip, triangles, refs: 1 };
+  const triangles = mb.triangles + weapon.triangles + (kitGlow ? (kitGlow.index!.count / 3) : 0);
+  a = { key, template, boneInverses, body, weapon, weaponInk, kitGlow, plan, coat, headTop: face.headTop, snoutTip: face.snoutTip, triangles, refs: 1 };
   cache.set(key, a);
   return a;
 }
@@ -113,7 +120,7 @@ function releaseAsset(a: CharacterAsset): void {
   a.body.dispose();
   a.weapon.geometry.dispose();
   a.weapon.glow?.dispose();
-  a.visorGlow?.dispose();
+  a.kitGlow?.dispose();
   if (a.weaponInk) {
     const ink = a.weaponInk as THREE.Mesh;
     ink.geometry?.dispose();
@@ -155,6 +162,9 @@ export function createCharacter(o: AvatarOptions): CharacterAvatar {
   skinned.boundingBox = new THREE.Box3(new THREE.Vector3(-1.2, -0.2, -1.2), new THREE.Vector3(1.2, 1.9, 1.2));
   skinned.castShadow = true;
   let drawCalls = 1;
+  const root = new THREE.Group();
+  root.name = `character_${o.species === Species.Cat ? 'cat' : 'corgi'}_${coat.name}_${o.cls}`;
+  root.add(skinned);
 
   // Per-instance proportions (seeded bone scales; geometry stays shared).
   const bi = asset.template.index;
@@ -181,10 +191,14 @@ export function createCharacter(o: AvatarOptions): CharacterAvatar {
     weapon.add(g);
     drawCalls++;
   }
-  if (asset.visorGlow) {
-    const g = new THREE.Mesh(asset.visorGlow, glow(PALETTE.laserRed, 2.2));
-    g.name = 'visor_glow';
-    rig.bones[bi.head].add(g);
+  if (asset.kitGlow) {
+    // Shares the body's skeleton: one draw for glow parts riding different bones.
+    const g = new THREE.SkinnedMesh(asset.kitGlow, glow(PALETTE.laserRed, 2.2));
+    g.name = 'kit_glow';
+    g.bind(skinned.skeleton, new THREE.Matrix4());
+    g.boundingSphere = skinned.boundingSphere;
+    g.boundingBox = skinned.boundingBox;
+    root.add(g);
     drawCalls++;
   }
   const muzzle = new THREE.Object3D();
@@ -192,9 +206,6 @@ export function createCharacter(o: AvatarOptions): CharacterAvatar {
   muzzle.position.fromArray(asset.weapon.muzzle);
   weapon.add(muzzle);
 
-  const root = new THREE.Group();
-  root.name = `character_${o.species === Species.Cat ? 'cat' : 'corgi'}_${coat.name}_${o.cls}`;
-  root.add(skinned);
 
   const animator = new CharacterAnimator(rig, {
     species: asset.plan.species,
