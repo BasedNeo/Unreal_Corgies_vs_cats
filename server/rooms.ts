@@ -12,6 +12,7 @@ import { botsForMode, type ServerConfig } from './config';
 import type { RoomMode } from '../src/host/guard';
 import { adventureState } from '../src/sim/adventure';
 import { DEFAULT_MAP } from '../src/shared/world/maps';
+import { BOSS_IDS } from '../src/shared/content/bosses';
 
 /** The chapter an adventure room is playing now: online rooms advance after each result, so the chapter it was created
  *  for goes stale (Q3 P2-1). Other modes list none. */
@@ -43,6 +44,8 @@ export interface RoomListing {
   map: string;
   /** Adventure rooms: the chapter the room is playing now (online rooms move on after each result). */
   chapter?: string;
+  /** Boss-rush rooms: the boss the room fights (Q3 P2-6: Madame Pointillé and the Vac-Tank read differently). */
+  boss?: string;
 }
 
 const TICK_MS = 1000 / TICK_HZ;
@@ -190,6 +193,7 @@ export class RoomManager {
         name: mr.name, mode: mr.room.opts.mode, players: humans + bots, humans, bots, maxPlayers: MAX_PLAYERS_PER_ROOM, phase: mr.room.match.phase,
         map: mr.room.sim.worldData.map ?? DEFAULT_MAP,
         ...(listedChapter(mr.room) ? { chapter: listedChapter(mr.room) } : {}),
+        ...(mr.room.opts.mode === 'boss-rush' ? { boss: mr.room.opts.boss ?? BOSS_IDS[0] } : {}),
       });
     }
     out.sort((a, b) => b.humans - a.humans || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));

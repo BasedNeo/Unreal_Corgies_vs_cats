@@ -4,6 +4,8 @@
 // See docs/handoff/V1.md and docs/handoff/R1.md for the snapshot conventions, events and client wiring.
 import type { Sim } from '../sim';
 import type { SimEntity } from '../entity';
+import { unseat } from './common';
+import { vehicleRuntime } from './state';
 
 export { vehicleSystems, vehicleInteractSystem, kartStepSystem, vehicleDamageSystem } from './systems';
 export {
@@ -29,6 +31,27 @@ export {
 } from './plane-systems';
 export { isStunned, stunCharacter, stunnedUntil } from './common';
 export { planeAutopilot, type AutopilotGoal, type AutopilotState } from './pilot';
+
+/**
+ * Match restart (Q3 P2-2): every kart and plane leaves quietly (no blast, no credit), riders are unseated where they
+ * sit (the restart respawns them), and every terminal is ready at once, so a fresh match starts with a clear yard and
+ * nothing from the last one can fly or blow up into it.
+ */
+export function clearVehicles(sim: Sim): void {
+  const rt = vehicleRuntime(sim);
+  const gone: SimEntity[] = [];
+  for (const v of sim.entities.values()) {
+    if (v.terminal) { v.terminal.kart = -1; v.terminal.cooldown = 0; v.terminal.cooldownTotal = 0; }
+    if ((v.kart || v.plane) && !v.removed) gone.push(v);
+  }
+  for (const v of gone) {
+    const slot = v.kart ?? v.plane!;
+    const rider = slot.rider >= 0 ? sim.entities.get(slot.rider) : undefined;
+    unseat(v, rider, sim.tick);
+    if (v.collider) rt.byHandle.delete(v.collider.handle);
+    sim.removeEntity(v.id);
+  }
+}
 
 /**
  * The vehicle a character is riding (kart or plane), or null. For objective triggers, e.g. the adventure's

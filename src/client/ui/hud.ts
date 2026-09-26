@@ -626,7 +626,9 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
         let waveCats = 0;
         for (const s of states.values()) if (s.team === 1 && s.kind === EntityKind.Bot && !(s.flags & EFlag.Dead)) waveCats++;
         const pve = !!M && /skirmish|boss/i.test(M.mode);
-        const catEmpty = pve ? (waveCats ? `${waveCats} wave ${waveCats === 1 ? 'cat' : 'cats'} in the yard` : 'The next wave is on its way') : 'No one here yet';
+        // adventure cats are the chapter's own (Q3 P2-6: not "No one here yet" with cats in the yard)
+        const catEmpty = M?.mode === 'adventure' ? (waveCats ? `${waveCats} ${waveCats === 1 ? 'cat' : 'cats'} on the prowl` : 'No cats in sight')
+          : pve ? (waveCats ? `${waveCats} wave ${waveCats === 1 ? 'cat' : 'cats'} in the yard` : 'The next wave is on its way') : 'No one here yet';
         sbCols.innerHTML = renderScoreboardHtml(model, M ? M.score : null, classIcon, (c) => CLASSES[c].displayName, ['No one here yet', catEmpty]);
         setText(sbMeta, M ? scoreboardMeta(M) : '');
       }

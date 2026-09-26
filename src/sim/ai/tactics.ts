@@ -958,6 +958,7 @@ function considerBoarding(sim: Sim, e: SimEntity, ai: VehicleBrain, g: NavGrid, 
  */
 function boardToRam(sim: Sim, e: SimEntity, ai: VehicleBrain, g: NavGrid, chars: SimEntity[]): void {
   const r = ai.tac.ride;
+  if (e.health && e.health.hp < e.health.max * RIDER_BAIL) return; // Q3 P2-4: hurt, it would bail at once (driveTick's 'hurt')
   const t = ai.target >= 0 && ai.visible ? sim.entities.get(ai.target) : undefined;
   if (!t || t.dead || !t.char || t.team === e.team || (ai.tac.goal === 'step' && ai.tac.vehicle)) return;
   for (const v of sim.entities.values()) {
@@ -972,6 +973,11 @@ function boardToRam(sim: Sim, e: SimEntity, ai: VehicleBrain, g: NavGrid, chars:
     setTrip(r, trip);
     return;
   }
+}
+
+/** The match is in its result hold (TDM / core-rush / skirmish 'ended'); the adventure runs its own phases. */
+function matchEnded(sim: Sim): boolean {
+  return (sim.state.match as { phase?: string } | undefined)?.phase === 'ended';
 }
 
 /** Leave the ride state (hopped out, thrown out, died, gave up boarding); no new boarding for `cooldown` s. */
@@ -1291,6 +1297,8 @@ export function vehicleThink(sim: Sim, e: SimEntity, ai: VehicleBrain, ctx: Vehi
     r.phase = 'leap'; r.leap = 0; r.since = sim.tick; // B2b: at the launch spot: off the edge into a glide
   }
   if (r.phase === 'leap') return leapTick(sim, e, ai, inp);
+  // Q3 P2-2: no ride or sortie in the result hold (the restart would clear it, or it lands in the next match)
+  if (matchEnded(sim)) { if (r.phase === 'board') endRide(sim, e, ai, 1); return false; }
   if (r.phase === 'idle' && sim.tick >= r.evalAt && !hangarBoard(sim, e, ai, ctx.chars)) considerBoarding(sim, e, ai, ctx.grid, ctx.chars);
   if (r.phase === 'board') return boardTick(sim, e, ai, ctx, inp, dt);
   return false;
@@ -1340,7 +1348,7 @@ function isPilotClass(e: SimEntity): boolean {
 
 /** PvP: is `e` its team's pilot right now? Sets the hangar goal (on the roof: the brain climbs) and returns true. */
 function planeGoal(sim: Sim, e: SimEntity, t: TacticsState, chars: SimEntity[], prev: string, prevId: EntityId): boolean {
-  if (!isPilotClass(e) || !PLANE_MODES.has(roomModeOf(sim))) return false;
+  if (!isPilotClass(e) || !PLANE_MODES.has(roomModeOf(sim)) || matchEnded(sim)) return false;
   if ((sim.state.aiConfig as { vehicles?: boolean } | undefined)?.vehicles === false) return false;
   const h = hangarOf(sim);
   if (!h?.terminal) return false;

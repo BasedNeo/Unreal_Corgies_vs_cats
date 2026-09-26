@@ -23,6 +23,7 @@ import { spawnBoss, bossWaveStatus, bossRushConfig } from '../boss'; // B1 hook:
 import { objectiveState, takeObjectiveScore, foldObjectiveText } from '../interact'; // S1: mission chain
 import { coreRushConfig, setupCorePads, stepCorePads } from './core-rush';
 import { CORE_PAD_LABELS } from '../../shared/content/modes';
+import { clearVehicles } from '../vehicles';
 
 export { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type WaveDef, type MatchConfigOverrides } from './config';
 
@@ -98,11 +99,12 @@ function characters(sim: Sim): SimEntity[] {
   return out;
 }
 
-/** Restart: clear wave enemies, bring every player/bot back at a spawn, reset scores. */
+/** Restart: clear wave enemies and vehicles, bring every player/bot back at a spawn, reset scores. */
 function restart(sim: Sim, rt: MatchRuntime): void {
   const remove: EntityId[] = [];
   for (const e of sim.entities.values()) if (e.char && e.combat?.pve) remove.push(e.id);
   for (const id of remove) sim.removeEntity(id);
+  clearVehicles(sim); // Q3 P2-2: no pilotless plane from the last match crashing into this one
   for (const e of characters(sim)) respawnNow(sim, e, undefined, true);
   const ms = stateOf(sim);
   ms.score[0] = 0; ms.score[1] = 0;

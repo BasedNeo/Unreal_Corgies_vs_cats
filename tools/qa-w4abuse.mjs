@@ -43,8 +43,8 @@ const listed = async (name) => (await rooms()).find((r) => r.name === name);
 
 const cases = [
   { room: 'q2m1', q: 'mode=%3Cscript%3E', want: (r) => r?.mode === 'yard-skirmish' && !r.chapter, what: 'unknown mode → server default, no chapter' },
-  { room: 'q2m2', q: 'mode=adventure&chapter=..%2F..%2Fetc', want: (r) => r?.mode === 'adventure' && !r.chapter, what: 'path-like chapter dropped' },
-  { room: 'q2m3', q: `mode=adventure&chapter=${'x'.repeat(200)}`, want: (r) => r?.mode === 'adventure' && !r.chapter, what: '200-char chapter dropped' },
+  { room: 'q2m2', q: 'mode=adventure&chapter=..%2F..%2Fetc', want: (r) => r?.mode === 'adventure' && r.chapter === 'yard_day', what: 'path-like chapter → the first chapter (what runs; Q2 P2-3)' },
+  { room: 'q2m3', q: `mode=adventure&chapter=${'x'.repeat(200)}`, want: (r) => r?.mode === 'adventure' && r.chapter === 'yard_day', what: '200-char chapter → the first chapter (what runs; Q2 P2-3)' },
   { room: 'q2m4', q: 'mode=adventure&chapter=nonexistent', want: (r) => r?.mode === 'adventure' && (!r.chapter || r.chapter === 'yard_day'), what: 'unknown (well-formed) chapter: listing should match what runs' },
   { room: 'q2m5', q: 'mode=boss-rush&boss=..%2Fx', want: (r) => r?.mode === 'boss-rush', what: 'path-like boss dropped' },
   { room: 'q2m6', q: 'mode=team-deathmatch&chapter=yard_day&boss=vac_tank', want: (r) => r?.mode === 'team-deathmatch' && !r.chapter, what: 'chapter/boss ignored outside their modes' },

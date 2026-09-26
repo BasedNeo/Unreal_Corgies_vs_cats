@@ -4,7 +4,7 @@
 // last good list on screen, dimmed, instead of blanking it. Joining uses the normal PLAY flow with `room` set.
 // All server-provided text goes through textContent; row buttons keep keyboard/gamepad focus across refreshes.
 import { ROOM_STRINGS } from './strings';
-import { RoomPoller, chapterLabel, chapterLongLabel, cleanRoomName, isFull, modeLabel, PHASE_LABELS, type RoomInfo, type RoomsState } from './rooms';
+import { RoomPoller, bossLabel, chapterLabel, chapterLongLabel, cleanRoomName, isFull, mapLabel, modeLabel, PHASE_LABELS, type RoomInfo, type RoomsState } from './rooms';
 
 export interface RoomBrowserDeps {
   /** The server whose rooms to list (the DEPLOY card's field, or the page's own server). */
@@ -78,10 +78,13 @@ export function createRoomBrowser(deps: RoomBrowserDeps): RoomBrowser {
     d.dataset.room = r.name;
     d.appendChild(mk('span', 'rb-name', r.name)).title = r.name;
     const mode = mk('span', 'rb-mode', modeLabel(r.mode));
-    if (r.chapter) {
-      // the chapter gets its own line: at 1280×720 "Adventure · Laser Pointer at Dawn" can't fit one cell (Q2 P2-3)
-      mode.appendChild(mk('small', '', chapterLabel(r.chapter)));
-      mode.title = `${modeLabel(r.mode)} · ${chapterLongLabel(r.chapter)}`;
+    // the detail gets its own line: at 1280×720 "Adventure · Laser Pointer at Dawn" can't fit one cell (Q2 P2-3)
+    const detail = r.chapter ? chapterLabel(r.chapter) : r.boss ? bossLabel(r.boss) : null;
+    const where = mapLabel(r.map);
+    const line = [detail, where].filter(Boolean).join(' · ');
+    if (line) {
+      mode.appendChild(mk('small', '', line));
+      mode.title = [modeLabel(r.mode), r.chapter ? chapterLongLabel(r.chapter) : detail, where].filter(Boolean).join(' · ');
     }
     d.appendChild(mode);
     const pl = mk('span', 'rb-pl');

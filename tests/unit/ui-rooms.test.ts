@@ -1,7 +1,7 @@
 // U1: room browser logic — endpoint from the server URL, validation of the untrusted list, room-name cleaning,
 // and the poller's loading / ready / empty / error / busy / offline / bad-url states with a 5 s refresh.
 import { describe, expect, it } from 'vitest';
-import { RoomPoller, adventureJoinKit, chapterLabel, chapterLongLabel, cleanRoomName, isFull, modeLabel, parseRooms, roomsEndpoint, serverBase, type FetchLike, type RoomsState } from '../../src/client/ui/rooms';
+import { RoomPoller, adventureJoinKit, bossLabel, mapLabel, chapterLabel, chapterLongLabel, cleanRoomName, isFull, modeLabel, parseRooms, roomsEndpoint, serverBase, type FetchLike, type RoomsState } from '../../src/client/ui/rooms';
 
 const ROOM = { name: 'porch', mode: 'yard-skirmish', players: 5, humans: 2, bots: 3, maxPlayers: 12, phase: 'live' };
 
@@ -73,6 +73,21 @@ describe('room list helpers', () => {
     ]);
     expect(rows.map((r) => r.chapter)).toEqual(['the_tall_grass', undefined, undefined]);
     expect(rows[1]).not.toHaveProperty('chapter');
+  });
+
+  it('keeps a boss-rush room\'s boss (plain id) and a known map; labels them; the default map needs no line (Q3 P2-6, W8)', () => {
+    const rows = parseRooms([
+      { ...ROOM, name: 'a', mode: 'boss-rush', boss: 'madame_pointille', map: 'west_yard' },
+      { ...ROOM, name: 'b', mode: 'boss-rush', boss: '<img onerror=x>', map: 'no_such_map' },
+      { ...ROOM, name: 'c', mode: 'team-deathmatch', map: { evil: 1 } },
+    ]);
+    expect(rows.map((r) => [r.boss, r.map])).toEqual([['madame_pointille', 'west_yard'], [undefined, undefined], [undefined, undefined]]);
+    expect(bossLabel('madame_pointille')).toBe('Madame Pointillé');
+    expect(bossLabel('vac_tank')).toBe('The Vac-Tank');
+    expect(bossLabel('mega_boss')).toBe('Mega Boss');
+    expect(mapLabel('west_yard')).toBeNull();
+    expect(mapLabel(undefined)).toBeNull();
+    expect(mapLabel('no_such_map')).toBeNull();
   });
 });
 

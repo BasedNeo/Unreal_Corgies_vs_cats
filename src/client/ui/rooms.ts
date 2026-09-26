@@ -3,11 +3,13 @@
 // injected fetch and timers, so tests/unit/ui-rooms.test.ts drives it with fakes.
 //
 // The server (server/app.ts) answers GET /rooms at the root of its HTTP port with
-//   [{ name, mode, players, humans, bots, maxPlayers, phase }]   (live public rooms, busiest first)
+//   [{ name, mode, players, humans, bots, maxPlayers, phase, map, chapter?, boss? }]   (live public rooms, busiest first)
 import { sanitizeRoomName } from '../../host/guard';
 import type { MatchPhase } from '../../shared/protocol';
 import type { ClassId } from '../../shared/types';
 import { chapterById } from '../../shared/content/chapters';
+import { BOSSES } from '../../shared/content/bosses';
+import { DEFAULT_MAP, MAPS, isMapId } from '../../shared/world/maps';
 
 export interface RoomInfo {
   name: string;
@@ -21,6 +23,10 @@ export interface RoomInfo {
   phase: MatchPhase;
   /** Adventure rooms: the chapter being played. */
   chapter?: string;
+  /** Boss-rush rooms: the boss (an id). */
+  boss?: string;
+  /** The room's map, when it is a map this client knows (unknown ids are dropped: the room still lists). */
+  map?: string;
 }
 
 /** Rows the browser shows at most (the server caps its response too). */
@@ -72,7 +78,9 @@ export function parseRooms(body: unknown, max = ROOMS_MAX): RoomInfo[] {
     const phase = PHASES.includes(o.phase as MatchPhase) ? (o.phase as MatchPhase) : null;
     if (!name || name.startsWith(UNLISTED_PREFIX) || !mode || humans === null || bots === null || maxPlayers === null || players === null || !phase) continue;
     const chapter = typeof o.chapter === 'string' && /^[a-z0-9_]{1,32}$/.test(o.chapter) ? o.chapter : undefined;
-    out.push({ name, mode, players, humans, bots, maxPlayers, phase, ...(chapter ? { chapter } : {}) });
+    const boss = typeof o.boss === 'string' && /^[a-z0-9_]{1,32}$/.test(o.boss) ? o.boss : undefined;
+    const map = isMapId(o.map) ? o.map : undefined;
+    out.push({ name, mode, players, humans, bots, maxPlayers, phase, ...(chapter ? { chapter } : {}), ...(boss ? { boss } : {}), ...(map ? { map } : {}) });
   }
   return out;
 }
@@ -92,6 +100,12 @@ export const MODE_LABELS: Record<string, string> = {
   'core-rush': 'Core Rush',
   adventure: 'Adventure',
 };
+/** A listed boss id → its name ("madame_pointille" → "Madame Pointillé"); an unknown id is title-cased. */
+export const bossLabel = (id: string): string => BOSSES.find((b) => b.id === id)?.name ?? id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+/** The map line of a room row: only for a map other than the default (the West Yard is every room's home). */
+export const mapLabel = (id: string | undefined): string | null => (id && id !== DEFAULT_MAP && isMapId(id) ? MAPS[id].title : null);
+
 /** A listed chapter id → its real title ("laser_dawn" → "Laser Pointer at Dawn"); an unknown id is title-cased. */
 export const chapterLabel = (id: string): string => chapterById(id)?.title ?? id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 /** The long form for a tooltip: "Chapter 4: Laser Pointer at Dawn". */

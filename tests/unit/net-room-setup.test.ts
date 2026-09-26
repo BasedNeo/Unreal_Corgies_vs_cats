@@ -109,6 +109,18 @@ describe('room setup from the creator', () => {
     expect(s.rooms.list(10).find((r) => r.name === 'coop')).toMatchObject({ chapter: 'garage_job' });
   }, 60_000);
 
+  it('a boss-rush room lists its boss (the default boss when none was asked) (Q3 P2-6)', async () => {
+    const s = await startGameServer(loadConfig({}, { host: '127.0.0.1', port: 0, log: false }));
+    servers.push(s);
+    await welcome(`${s.wsUrl}/?room=duel&mode=boss-rush&boss=madame_pointille`, 'Ann');
+    await welcome(`${s.wsUrl}/?room=vac&mode=boss-rush`, 'Bob');
+    await welcome(`${s.wsUrl}/?room=tdm&mode=team-deathmatch&boss=madame_pointille`, 'Cy');
+    const list = s.rooms.list(10);
+    expect(list.find((r) => r.name === 'duel')).toMatchObject({ mode: 'boss-rush', boss: 'madame_pointille' });
+    expect(list.find((r) => r.name === 'vac')).toMatchObject({ mode: 'boss-rush', boss: 'vac_tank' });
+    expect(list.find((r) => r.name === 'tdm')).not.toHaveProperty('boss');
+  }, 60_000);
+
   it("the first joiner's ?map= sets the room's map (sanitized); the welcome and the listing name it", async () => {
     const s = await startGameServer(loadConfig({}, { host: '127.0.0.1', port: 0, log: false }));
     servers.push(s);

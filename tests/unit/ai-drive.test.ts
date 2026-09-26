@@ -18,7 +18,7 @@ import { createDefaultSystems } from '../../src/sim/systems';
 import { movementSystem } from '../../src/sim/systems/movement';
 import { physicsStepSystem } from '../../src/sim/systems/core';
 import { worldSystems } from '../../src/sim/world/systems';
-import { vehicleSystems, spawnKart, mountKart, spawnTerminal, findTerminalSite } from '../../src/sim/vehicles';
+import { vehicleSystems, spawnKart, mountKart, spawnTerminal, findTerminalSite, spawnPlane, mountPlane } from '../../src/sim/vehicles';
 import { groups, Layer } from '../../src/sim/rapier';
 import { ensureBrain, isAiControlled, think } from '../../src/sim/ai/brain';
 import { navGridFor, cellX, cellZ, type NavGrid } from '../../src/sim/ai/nav';
@@ -430,4 +430,76 @@ describe('bots fly the RC plane (B2b: tactics.ts planeTick, drive.ts flyPlane)',
     expect(bailed).toBe(true);
     expect(pilot.seat).toBeUndefined();
   }, 120000);
+});
+
+describe('Q3 fixes: rides and the match clock', () => {
+  it('a hurt bot does not hop into a kart to ram (it would bail at once); a healthy one does (P2-4)', async () => {
+    for (const hurt of [false, true]) {
+      const sim = await makeSim(yard(), vehicleOnly());
+      const b = pet(sim, Team.Corgis, -50, 50, { bot: true });
+      const kart = spawnKart(sim, 'mower_kart', Team.Corgis, -47, 0, 50, -Math.PI / 2); // nose toward the cat (+x)
+      const cat = pet(sim, Team.Cats, -30, 50);
+      for (let i = 0; i < 20; i++) { sim.step(); sim.drainEvents(); }
+      cat.health!.hp = 20;                                    // a ram finishes it: worth leaving the fight for
+      if (hurt) b.health!.hp = b.health!.max * 0.5;           // below RIDER_BAIL: driveTick would bail as 'hurt'
+      const ai = ensureBrain(b);
+      ai.mode = 'engage'; ai.target = cat.id; ai.visible = true;
+      vehicleThink(sim, b, ai, { grid: navGridFor(sim), chars: [b, cat], pathBudget: 2 }, b.input, DT);
+      expect(ai.tac.ride.phase).toBe(hurt ? 'idle' : 'board');
+      if (!hurt) expect(ai.tac.ride.kart).toBe(kart.id);
+    }
+  });
+
+  it('no bot starts a ride in the result hold; the same bot boards once the hold is over (P2-2)', async () => {
+    const sim = await makeSim(yard(), withHookedAi());
+    sim.state.room = { mode: 'team-deathmatch' };              // a match with a result hold
+    const b = pet(sim, Team.Corgis, -50, 50, { bot: true });
+    spawnKart(sim, 'mower_kart', Team.Corgis, -48, 0, 50, Math.PI / 2);
+    sim.step();
+    const ms = sim.state.match as { phase: string };
+    const rt = sim.state.matchRt as { clock: number };
+    const was = ms.phase;
+    ms.phase = 'ended'; rt.clock = 60;
+    sendTo(b, 40, -40);                                         // 127 m: a kart trip
+    for (let t = 0; t < 4 * TICK_HZ; t++) { sim.step(); sim.drainEvents(); }
+    expect(b.seat).toBeUndefined();
+    expect(b.ai!.tac.ride.boards).toBe(0);                     // it walked off instead
+    ms.phase = was;
+    sim.placeCharacter(b, -50, 0.02, 50);                       // back by the kart
+    sendTo(b, 40, -40);
+    let mounted = false;
+    for (let t = 0; t < 4 * TICK_HZ && !mounted; t++) { sim.step(); sim.drainEvents(); mounted = !!b.seat; }
+    expect(mounted).toBe(true);
+  });
+
+  it('a match restart clears every kart and plane, riders included: nothing from the last match crashes into the next (P2-2)', async () => {
+    const sim = await Sim.create({ seed: 1, world: createWorldData(1), systems: createDefaultSystems() });
+    sim.state.room = { mode: 'team-deathmatch' };
+    sim.step();
+    const hangar = [...sim.entities.values()].find((e) => e.terminal?.id === 'plane_hangar')!;
+    const kiosk = [...sim.entities.values()].find((e) => e.terminal?.id === 'kart_terminal' && e.team === Team.Corgis)!;
+    const ht = hangar.terminal!, kt = kiosk.terminal!;
+    const pilot = pet(sim, Team.Cats, ht.padX + 3, ht.padZ);
+    const driver = pet(sim, Team.Corgis, kt.padX + 3, kt.padZ);
+    const plane = spawnPlane(sim, 'rc_plane', Team.Cats, ht.padX, ht.padY, ht.padZ, ht.padYaw, hangar.id)!;
+    const kart = spawnKart(sim, 'mower_kart', Team.Corgis, kt.padX, kt.padY, kt.padZ, kt.padYaw, kiosk.id);
+    ht.kart = plane.id; kt.kart = kart.id;                      // as if vended
+    expect(mountPlane(sim, plane, pilot)).toBe(true);
+    expect(mountKart(sim, kart, driver)).toBe(true);
+    sim.step(); sim.drainEvents();
+    (sim.state.match as { phase: string }).phase = 'ended';
+    (sim.state.matchRt as { clock: number }).clock = 1e-3;     // the result hold runs out on the next tick
+    sim.step();
+    expect((sim.state.match as { phase: string }).phase).not.toBe('ended'); // restarted
+    expect([...sim.entities.values()].filter((e) => (e.kart || e.plane) && !e.removed)).toHaveLength(0);
+    for (const r of [pilot, driver]) {
+      expect(r.seat).toBeUndefined();
+      expect(r.flags & EFlag.Mounted).toBe(0);
+      expect(r.health!.hp).toBe(r.health!.max);
+    }
+    expect([ht.kart, ht.cooldown, kt.kart, kt.cooldown]).toEqual([-1, 0, -1, 0]); // the bays are ready for the new match
+    const evs: GameEvent[] = [];
+    for (let t = 0; t < 5 * TICK_HZ; t++) { sim.step(); evs.push(...sim.drainEvents()); }
+    expect(evs.filter((e) => e.e === 'explode')).toHaveLength(0);
+  }, 60000);
 });
