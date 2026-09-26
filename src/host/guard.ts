@@ -4,6 +4,8 @@
 import type { ClientMsg } from '../shared/protocol';
 import { sanitizeInput, type InputCmd } from '../shared/input';
 import { CLASS_IDS, type ClassId, type TeamId } from '../shared/types';
+import { CHAPTERS, chapterById } from '../shared/content/chapters';
+import { BOSS_IDS } from '../shared/content/bosses';
 
 /** Most commands one input message may carry (new + redundant resends). */
 export const MAX_CMDS_PER_MSG = 32;
@@ -130,10 +132,14 @@ export class AbuseMeter {
 export const ROOM_MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'boss-rush', 'adventure'] as const;
 export type RoomMode = (typeof ROOM_MODES)[number];
 
-/** A requested room setup from untrusted query params: known modes only, chapter ids like `yard_day`. */
+/**
+ * A requested room setup from untrusted query params: known modes only. An adventure room always carries the chapter
+ * it will really run (an unknown or missing id → the first chapter, as the sim would), so `/rooms` never lists a
+ * chapter the room isn't playing (Q2 P2-3). A boss id must be a known boss (else the sim's default boss runs).
+ */
 export function sanitizeRoomSetup(mode: string | null, chapter: string | null, boss: string | null = null): { mode: RoomMode; chapter?: string; boss?: string } | null {
   if (!mode || !(ROOM_MODES as readonly string[]).includes(mode)) return null;
-  const id = (v: string | null) => (v && /^[a-z0-9_]{1,32}$/.test(v) ? v : undefined);
-  const ch = id(chapter), b = id(boss);
-  return { mode: mode as RoomMode, ...(mode === 'adventure' && ch ? { chapter: ch } : {}), ...(mode === 'boss-rush' && b ? { boss: b } : {}) };
+  const ch = mode === 'adventure' ? (chapterById(chapter)?.id ?? CHAPTERS[0].id) : undefined;
+  const b = mode === 'boss-rush' && boss && (BOSS_IDS as readonly string[]).includes(boss) ? boss : undefined;
+  return { mode: mode as RoomMode, ...(ch ? { chapter: ch } : {}), ...(b ? { boss: b } : {}) };
 }

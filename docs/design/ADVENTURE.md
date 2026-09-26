@@ -73,7 +73,11 @@ one class kit (§5). The finale is the Vac-Tank.
 - **Progress (client, cosmetic)**: `localStorage` `cvc.adventure` = `{ unlocked: n, medals: {id: 'gold'|'silver'|'bronze'} }`.
   It never gates anything the authority decides.
 - **Menu**: the MATCH selector gains **ADVENTURE**, a chapter picker with lock states. Online co-op uses the same
-  room flow (`?mode=adventure&chapter=…`).
+  room flow (`?mode=adventure&chapter=…`). The server keeps only known chapter ids (unknown or missing → chapter 1),
+  so a room lists the chapter it really runs.
+- **After a chapter** (`afterChapter` / `roomChapterAfter` in chapters.ts): offline, the card offers NEXT CHAPTER and
+  REPLAY; after the finale it reads THE END with MAIN MENU and REPLAY. An online room moves on by itself after the
+  card's countdown, and after the finale it goes back to chapter 1.
 
 ## Design rules (game-design-psychology)
 - **First success inside 60 s** in chapter 1 (reach the kiosk). Every step ≤ 2 min for a new player.

@@ -92,8 +92,13 @@ export const MODE_LABELS: Record<string, string> = {
   'core-rush': 'Core Rush',
   adventure: 'Adventure',
 };
-/** "yard_day" → "Yard Day" (chapter ids are snake_case; titles live in content/chapters.ts). */
-export const chapterLabel = (id: string): string => id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+/** A listed chapter id → its real title ("laser_dawn" → "Laser Pointer at Dawn"); an unknown id is title-cased. */
+export const chapterLabel = (id: string): string => chapterById(id)?.title ?? id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+/** The long form for a tooltip: "Chapter 4: Laser Pointer at Dawn". */
+export const chapterLongLabel = (id: string): string => {
+  const def = chapterById(id);
+  return def ? `Chapter ${def.index}: ${def.title}` : chapterLabel(id);
+};
 export const modeLabel = (mode: string): string => MODE_LABELS[mode] ?? mode.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 export const PHASE_LABELS: Record<MatchPhase, string> = { warmup: 'WARMUP', live: 'IN PLAY', ended: 'POST-MATCH' };
 export const isFull = (r: RoomInfo): boolean => r.humans >= r.maxPlayers;

@@ -4,15 +4,17 @@
 // last good list on screen, dimmed, instead of blanking it. Joining uses the normal PLAY flow with `room` set.
 // All server-provided text goes through textContent; row buttons keep keyboard/gamepad focus across refreshes.
 import { ROOM_STRINGS } from './strings';
-import { RoomPoller, chapterLabel, cleanRoomName, isFull, modeLabel, PHASE_LABELS, type RoomInfo, type RoomsState } from './rooms';
+import { RoomPoller, chapterLabel, chapterLongLabel, cleanRoomName, isFull, modeLabel, PHASE_LABELS, type RoomInfo, type RoomsState } from './rooms';
 
 export interface RoomBrowserDeps {
   /** The server whose rooms to list (the DEPLOY card's field, or the page's own server). */
   server(): string;
   /** Join (or create) this room with the DEPLOY card's name/team/class (`info`: the listing, when picked from the list). */
   join(room: string, info?: RoomInfo): void;
-  /** Back to the class picker. */
+  /** Back to the class (or chapter) picker. */
   back(): void;
+  /** The back button's label (default "‹ CLASSES"); read each time the view opens. */
+  backLabel?(): string;
   /** "Joining as …" line for the footer. */
   joinAs(): string;
   poller?: RoomPoller;
@@ -57,7 +59,7 @@ export function createRoomBrowser(deps: RoomBrowserDeps): RoomBrowser {
   const q = <T extends HTMLElement>(s: string) => el.querySelector(s) as T;
   const srv = q('.rb-srv'), live = q('.rb-live'), rowsEl = q('.rb-rows'), msg = q('.rb-msg'), msgT = q('.rb-msg-t'), retry = q<HTMLButtonElement>('[data-rb-retry]');
   const nameIn = q<HTMLInputElement>('[data-rb-name]'), unl = q<HTMLButtonElement>('[data-rb-unlisted]'), create = q<HTMLButtonElement>('[data-rb-create]');
-  const asEl = q('.rb-as'), box = q('.rb-box'), note = q('.rb-note');
+  const asEl = q('.rb-as'), box = q('.rb-box'), note = q('.rb-note'), backBtn = q('[data-rb-back]');
   let unlisted = false;
   let open = false;
   let known: RoomInfo[] = [];
@@ -74,8 +76,14 @@ export function createRoomBrowser(deps: RoomBrowserDeps): RoomBrowser {
     const d = mk('div', 'rb-row');
     d.setAttribute('role', 'listitem');
     d.dataset.room = r.name;
-    d.appendChild(mk('span', 'rb-name', r.name));
-    d.appendChild(mk('span', 'rb-mode', r.chapter ? `${modeLabel(r.mode)} · ${chapterLabel(r.chapter)}` : modeLabel(r.mode)));
+    d.appendChild(mk('span', 'rb-name', r.name)).title = r.name;
+    const mode = mk('span', 'rb-mode', modeLabel(r.mode));
+    if (r.chapter) {
+      // the chapter gets its own line: at 1280×720 "Adventure · Laser Pointer at Dawn" can't fit one cell (Q2 P2-3)
+      mode.appendChild(mk('small', '', chapterLabel(r.chapter)));
+      mode.title = `${modeLabel(r.mode)} · ${chapterLongLabel(r.chapter)}`;
+    }
+    d.appendChild(mode);
     const pl = mk('span', 'rb-pl');
     pl.appendChild(mk('b', '', String(r.humans)));
     pl.appendChild(document.createTextNode(`/${r.maxPlayers}`));
@@ -142,6 +150,7 @@ export function createRoomBrowser(deps: RoomBrowserDeps): RoomBrowser {
     srv.textContent = s.replace(/^wss?:\/\//i, '');
     srv.title = s;
     asEl.textContent = deps.joinAs();
+    backBtn.textContent = deps.backLabel?.() ?? ROOM_STRINGS.back;
   };
 
   const createRoom = () => {

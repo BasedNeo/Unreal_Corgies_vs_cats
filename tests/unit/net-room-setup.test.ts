@@ -37,7 +37,11 @@ describe('room setup from the creator', () => {
   it('accepts known modes and simple chapter ids only', () => {
     expect(sanitizeRoomSetup('core-rush', null)).toEqual({ mode: 'core-rush' });
     expect(sanitizeRoomSetup('adventure', 'yard_day')).toEqual({ mode: 'adventure', chapter: 'yard_day' });
-    expect(sanitizeRoomSetup('adventure', '../../etc')).toEqual({ mode: 'adventure' });
+    expect(sanitizeRoomSetup('adventure', 'laser_dawn')).toEqual({ mode: 'adventure', chapter: 'laser_dawn' });
+    // an adventure room lists the chapter it really runs: unknown, hostile or missing ids → the first chapter (Q2 P2-3)
+    expect(sanitizeRoomSetup('adventure', '../../etc')).toEqual({ mode: 'adventure', chapter: 'yard_day' });
+    expect(sanitizeRoomSetup('adventure', 'nonexistent')).toEqual({ mode: 'adventure', chapter: 'yard_day' });
+    expect(sanitizeRoomSetup('adventure', null)).toEqual({ mode: 'adventure', chapter: 'yard_day' });
     expect(sanitizeRoomSetup('team-deathmatch', 'yard_day')).toEqual({ mode: 'team-deathmatch' }); // chapter only for adventure
     expect(sanitizeRoomSetup('god-mode', null)).toBeNull();
     expect(sanitizeRoomSetup(null, 'yard_day')).toBeNull();
@@ -46,6 +50,8 @@ describe('room setup from the creator', () => {
   it('boss-rush rooms take a boss id (E1), only in boss-rush and only a plain id', () => {
     expect(sanitizeRoomSetup('boss-rush', null, 'madame_pointille')).toEqual({ mode: 'boss-rush', boss: 'madame_pointille' });
     expect(sanitizeRoomSetup('boss-rush', null, '<b>')).toEqual({ mode: 'boss-rush' });
+    expect(sanitizeRoomSetup('boss-rush', null, 'mega_boss')).toEqual({ mode: 'boss-rush' }); // well-formed but unknown
+    expect(sanitizeRoomSetup('boss-rush', null, 'vac_tank')).toEqual({ mode: 'boss-rush', boss: 'vac_tank' });
     expect(sanitizeRoomSetup('yard-skirmish', null, 'madame_pointille')).toEqual({ mode: 'yard-skirmish' });
     const u = new URL(resolveServerUrl({ protocol: 'http:', host: 'lan:8787', search: '?online&room=duel&boss=madame_pointille' }, '/ws')!);
     expect(u.searchParams.get('mode')).toBe('boss-rush'); // ?boss= alone implies boss-rush, as offline

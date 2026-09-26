@@ -7,7 +7,7 @@
 //                      (Enter) / REPLAY (Backspace); progress is saved to localStorage `cvc.adventure` (progress.ts)
 // Reads only the adventure beacon (model.ts), MatchState.timeLeft and game events. Nothing here decides an outcome.
 import type { EntityState, GameEvent, MatchState } from '../../shared/protocol';
-import { ALARM_BARKS, CHAPTER_PLAN, REGROUP_BARK, chapterByIndex, type ChapterDef } from '../../shared/content/chapters';
+import { ALARM_BARKS, REGROUP_BARK, afterChapter, chapterByIndex, type ChapterDef } from '../../shared/content/chapters';
 import { CLASSES } from '../../shared/content/classes';
 import { PALETTE } from '../style/style-tokens.js';
 import { classIcon } from '../ui/icons';
@@ -20,6 +20,8 @@ export interface AdventureHudOptions {
   /** NEXT CHAPTER / REPLAY on the chapter-complete card (chapter id to play; the page decides how). */
   onNext?(chapter: string): void;
   onReplay?(chapter: string): void;
+  /** MAIN MENU on the finale's THE END card (offline). */
+  onMenu?(): void;
   /** The running chapter changed (e.g. apply its time of day: `def.t`). */
   onChapter?(def: ChapterDef): void;
   /** True when the authority moves the room on by itself (online): the card shows the countdown instead of buttons. */
@@ -111,6 +113,7 @@ const CSS = `
 .cvc-adv .av-stat b{font-size:${u(28)};letter-spacing:.02em}
 .cvc-adv .av-stat.beat b{color:#2f8a2f}
 .cvc-adv .av-btns{display:flex;gap:${u(12)};margin-top:${u(14)}}
+.cvc-adv .av-end{margin-top:${u(10)};text-align:center;font:800 ${u(14)} ${FONT_BODY};letter-spacing:.03em}
 .cvc-adv .av-btn{flex:1;font:${u(19)} ${FONT_DISPLAY};letter-spacing:.05em;border:${u(3.5)} solid var(--ink);border-radius:${u(12)};padding:${u(9)} ${u(12)};
   background:#fffaf0;color:var(--ink);box-shadow:${u(4)} ${u(5)} 0 var(--ink);cursor:pointer}
 .cvc-adv .av-btn.primary{flex:1.6;background:var(--gold)}
@@ -171,32 +174,42 @@ export function createAdventureHud(uiRoot: HTMLElement, opts: AdventureHudOption
   const nextOf = (def: ChapterDef) => chapterByIndex(def.index + 1);
   const renderCard = (v: AdventureView, match: MatchState | null) => {
     const def = v.chapter;
-    const next = nextOf(def);
-    const soon = !next && def.index < CHAPTER_PLAN.length;
+    const after = afterChapter(def);
+    const end = after === 'end';
     const left = Math.max(0, Math.ceil(match?.timeLeft ?? 0));
     const key = `${def.id}:${v.medal}:${v.time}:${newBest}:${opts.roomAdvances ? left : ''}`;
     if (key === cardKey) return;
     cardKey = key;
     const beat = v.time <= v.par;
     const medal = v.medal ?? 'bronze';
-    const auto = opts.roomAdvances ? `<div class="av-keys">${esc(next || !soon ? S.nextIn(left) : S.replayIn(left))}</div>` : '';
-    card.innerHTML = `<h2>${esc(S.complete)}</h2><div class="sub">${esc(S.chapter)} ${def.index} · ${esc(def.title.toUpperCase())}</div>
+    const auto = opts.roomAdvances ? `<div class="av-keys">${esc(after === 'next' ? S.nextIn(left) : end ? S.fromTopIn(left) : S.replayIn(left))}</div>` : '';
+    // the finale is THE END, with a way out (Q2 P2-6: it used to stop on a disabled NEXT CHAPTER button)
+    const primary = end ? `<button class="av-btn primary" data-menu>${esc(S.toMenu)}</button>`
+      : `<button class="av-btn primary" data-next ${after === 'next' ? '' : 'disabled'}>${esc(after === 'soon' ? S.nextSoon : S.next)}</button>`;
+    card.innerHTML = `<h2>${esc(end ? S.theEnd : S.complete)}</h2><div class="sub">${esc(S.chapter)} ${def.index} · ${esc(def.title.toUpperCase())}</div>
       <div class="av-res"><div class="av-paw">${pawSvg(medal)}</div><div>
         <div class="av-medal">${esc(S.medal[medal])}${newBest ? `<span class="av-best">${esc(S.newBest)}</span>` : ''}</div>
         <div class="av-stats"><div class="av-stat${beat ? ' beat' : ''}"><i>${esc(S.time)}</i><b>${fmtClock(v.time)}</b></div>
           <div class="av-stat"><i>${esc(S.par)}</i><b>${fmtClock(v.par, false)}</b></div></div></div></div>
+      ${end ? `<div class="av-end">${esc(S.theEndLine)}</div>` : ''}
       ${opts.roomAdvances ? auto : `<div class="av-btns"><button class="av-btn" data-replay>${esc(S.replay)}</button>
-        <button class="av-btn primary" data-next ${next ? '' : 'disabled'}>${esc(next ? S.next : soon ? S.nextSoon : S.next)}</button></div>
-        <div class="av-keys">${esc(S.keysHint)}</div>`}`;
+        ${primary}</div>
+        <div class="av-keys">${esc(end ? S.keysHintEnd : S.keysHint)}</div>`}`;
     card.querySelector('[data-next]')?.addEventListener('click', () => doNext());
+    card.querySelector('[data-menu]')?.addEventListener('click', () => doMenu());
     card.querySelector('[data-replay]')?.addEventListener('click', () => doReplay());
   };
   const doNext = () => {
     if (!cardShown || !view || opts.roomAdvances) return;
     const next = nextOf(view.chapter);
-    if (!next) return;
+    if (!next) { if (afterChapter(view.chapter) === 'end') doMenu(); return; } // ENTER on THE END = main menu
     opts.sound?.('click');
     opts.onNext?.(next.id);
+  };
+  const doMenu = () => {
+    if (!cardShown || opts.roomAdvances) return;
+    opts.sound?.('open');
+    opts.onMenu?.();
   };
   const doReplay = () => {
     if (!cardShown || !view || opts.roomAdvances) return;

@@ -22,7 +22,7 @@ import {
   ADVENTURE_CHAIN_INDEX, ADVENTURE_PHASES, ALARM_BARKS, BRIEFING_SECONDS, CHAPTERS, CHAPTER_POINTS, COLLECT_RADIUS,
   BRIEFING_WAIT_SECONDS, COMPLETE_HOLD_SECONDS, FAIL_BEAT_SECONDS, GRACE_BARK, HOLD_DECAY, HOLD_HEIGHT, KIOSK_PROMPT, REACH_HEIGHT, REGROUP_BARK,
   STEP_POINTS, STEP_ROSTER, STRICT_GRACE_SECONDS,
-  chapterById, medalFor, nextChapter, type ChapterDef, type ChapterStep,
+  chapterById, medalFor, roomChapterAfter, type ChapterDef, type ChapterStep,
 } from '../../shared/content/chapters';
 import { occupiedAt, surfaceAt, waterAt, yawToward } from '../../shared/world/queries';
 import type { MatchRules } from '../combat/state';
@@ -708,7 +708,7 @@ function update(sim: Sim, dt: number): void {
     case 'complete': {
       st.timer = Math.max(0, st.timer - dt);
       if (st.timer <= 0) {
-        const next = adventureConfig(sim).advance === false ? def : nextChapter(def.id) ?? def;
+        const next = adventureConfig(sim).advance === false ? def : roomChapterAfter(def);
         sim.emit({ e: 'score', team: Team.Corgis, pts: 0, reason: 'reset' });
         sim.emit({ e: 'score', team: Team.Cats, pts: 0, reason: 'reset' });
         loadChapter(sim, next);

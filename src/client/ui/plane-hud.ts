@@ -79,6 +79,8 @@ let styleEl: HTMLStyleElement | null = null;
 export interface PlaneHud {
   /** `plane` = the local rider's plane snapshot (null when not flying one), `groundY` = terrain height under it. */
   update(plane: EntityState | null, groundY: number): void;
+  /** The strip is on screen (you are flying a plane). */
+  readonly shown: boolean;
   dispose(): void;
 }
 
@@ -125,6 +127,7 @@ export function createPlaneHud(root: HTMLElement): PlaneHud {
       set('stl', r.stall ? '1' : '0', (v) => { stl.classList.toggle('hidden', v !== '1'); });
       set('gnd', r.grounded ? '1' : '0', (v) => { gnd.classList.toggle('hidden', v !== '1'); });
     },
+    get shown() { return shown; },
     dispose() { el.remove(); },
   };
 }

@@ -184,6 +184,7 @@ async function main(): Promise<void> {
     sound: (k) => audio.ui(k),
     onNext: (id) => { location.search = adventureUrl(id); },
     onReplay: (id) => { location.search = adventureUrl(id); },
+    onMenu: () => { document.exitPointerLock?.(); hud.showMenu(true); }, // THE END → the chapter picker (a replay is one click)
     // a new chapter: face its first objective (the start yaw) and use its time of day
     onChapter: (def) => { input.yaw = def.start.yaw; if (def.t !== undefined && !params.has('t')) worldView.setTimeOfDay(def.t); },
   });
@@ -307,6 +308,7 @@ async function main(): Promise<void> {
       for (const s of states.values()) if (s.kind === EntityKind.Boss && sniperPainting(s, local.x, local.y, local.z)) { painted = true; break; }
     }
     dotCue.style.display = painted ? 'block' : 'none';
+    const cueUp = hiddenCue.style.display === 'block' || spottedCue.style.display === 'block' || painted || planeHud.shown;
     if (local && !(local.flags & EFlag.Dead)) {
       const d = districtAt(worldData, local.x, local.z, local.y)?.name ?? '';
       if (d !== districtCur) { districtCur = d; districtSince = now; }
@@ -339,7 +341,7 @@ async function main(): Promise<void> {
     debug.local = local ? { x: local.x, y: local.y, z: local.z, hp: local.hp } : null;
     debug.ready = !!local && debug.frames > 5;
     if ((local || !net) && debug.frames > 2) hideLoading();
-    hud.update({ local, match: net?.match ?? null, roster: net?.roster ?? [], fps: debug.fps, rttMs: net?.stats.rttMs ?? 0, locked: input.locked || params.has('autoplay') || !net, backend: ctx.backend, transport: transport?.kind ?? 'none', states });
+    hud.update({ cueUp, local, match: net?.match ?? null, roster: net?.roster ?? [], fps: debug.fps, rttMs: net?.stats.rttMs ?? 0, locked: input.locked || params.has('autoplay') || !net, backend: ctx.backend, transport: transport?.kind ?? 'none', states });
   });
 }
 

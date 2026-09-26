@@ -376,7 +376,10 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
     server: currentServer,
     join: (room, info) => play('online', room, info),
     back: () => showView('main'),
-    joinAs: () => `Joining as ${CLASSES[s.cls].displayName.toUpperCase()} · ${s.team === -1 ? 'AUTO TEAM' : TEAM_NAMES[s.team]} · ${s.name}`,
+    joinAs: () => match === 'adventure'
+      ? `Joining as ${CLASSES[chapter.cls].displayName.toUpperCase()} · ${TEAM_NAMES[0]} · ${s.name}` // a chapter's featured kit, corgi side
+      : `Joining as ${CLASSES[s.cls].displayName.toUpperCase()} · ${s.team === -1 ? 'AUTO TEAM' : TEAM_NAMES[s.team]} · ${s.name}`,
+    backLabel: () => (match === 'adventure' ? ROOM_STRINGS.backChapters : ROOM_STRINGS.back),
     poller: deps.roomPoller,
     sound: deps.sound,
   });

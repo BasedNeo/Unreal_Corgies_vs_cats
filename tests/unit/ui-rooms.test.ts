@@ -1,7 +1,7 @@
 // U1: room browser logic — endpoint from the server URL, validation of the untrusted list, room-name cleaning,
 // and the poller's loading / ready / empty / error / busy / offline / bad-url states with a 5 s refresh.
 import { describe, expect, it } from 'vitest';
-import { RoomPoller, adventureJoinKit, chapterLabel, cleanRoomName, isFull, modeLabel, parseRooms, roomsEndpoint, serverBase, type FetchLike, type RoomsState } from '../../src/client/ui/rooms';
+import { RoomPoller, adventureJoinKit, chapterLabel, chapterLongLabel, cleanRoomName, isFull, modeLabel, parseRooms, roomsEndpoint, serverBase, type FetchLike, type RoomsState } from '../../src/client/ui/rooms';
 
 const ROOM = { name: 'porch', mode: 'yard-skirmish', players: 5, humans: 2, bots: 3, maxPlayers: 12, phase: 'live' };
 
@@ -52,6 +52,9 @@ describe('room list helpers', () => {
     expect(isFull({ ...ROOM, humans: 12 } as never)).toBe(true);
     expect(modeLabel('adventure')).toBe('Adventure');
     expect(chapterLabel('yard_day')).toBe('Yard Day');
+    expect(chapterLabel('laser_dawn')).toBe('Laser Pointer at Dawn'); // the real title, not the id (Q2 P2-3)
+    expect(chapterLongLabel('laser_dawn')).toBe('Chapter 4: Laser Pointer at Dawn');
+    expect(chapterLabel('old_chapter')).toBe('Old Chapter'); // a newer server's chapter this client doesn't know
   });
 
   it('joining a listed adventure room takes its chapter\'s featured kit; other rooms keep yours', () => {

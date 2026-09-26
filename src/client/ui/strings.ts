@@ -40,9 +40,9 @@ export const DEATH_QUIPS = {
 };
 
 export const CONTROLS: Array<[string, string]> = [
-  ['WASD', 'Move'], ['SPACE ×2', 'Double jump'], ['SHIFT', 'Zoomies'], ['MOUSE', 'Aim · fire'],
-  ['RMB', 'Aim down'], ['Q', 'Ability'], ['R', 'Reload'], ['E', 'Interact'], ['C', 'Slide · pound'], ['B', 'Taunt'],
-  ['ENTER', 'Chat'], ['TAB', 'Scoreboard'],
+  ['WASD', 'Move'], ['SPACE ×2', 'Jump'], ['SHIFT', 'Zoomies'], ['MOUSE', 'Aim · fire'],
+  ['RMB', 'Zoom'], ['Q', 'Ability'], ['R', 'Reload'], ['E', 'Interact'], ['C', 'Slide · pound'], ['B', 'Taunt'],
+  ['ENTER', 'Chat'], ['TAB', 'Scores'], // short labels: the menu footer fits one row at 1280×720 (Q2 P2-7)
 ];
 
 // ---- U1 (ux): chat, room browser, first-match tips, quality notice ----
@@ -60,7 +60,7 @@ export const CHAT_STRINGS = {
 
 /** Keycap markup for tips: `[E]` renders as a key. Text only, no HTML. */
 export const TIP_TEXT = {
-  basics: '[WASD] move · [MOUSE] aim · [LMB] fire · hold [RMB] to aim down',
+  basics: '[WASD] move · [MOUSE] aim · [LMB] fire · hold [RMB] to zoom',
   kiosk: 'Press [E] at the Ordnance Kiosk to change kit',
   moves: 'Crouch [C] while sprinting [SHIFT] to slide · crouch in the air to ground-pound',
 } as const;
@@ -82,6 +82,7 @@ export const ROOM_STRINGS = {
   unlisted: 'Unlisted',
   unlistedHint: 'Unlisted rooms never show here: share the name to invite',
   back: '‹ CLASSES',
+  backChapters: '‹ CHAPTERS',
   retry: 'RETRY',
   browse: 'ROOMS ▸',
   quickJoin: 'QUICK JOIN',
@@ -98,7 +99,7 @@ export const QUALITY_STRINGS = {
 // ---- A1 (adventure): chapter picker, captions, chapter-complete card ----
 export const ADVENTURE_STRINGS = {
   matchLabel: 'ADVENTURE',
-  matchHint: 'Story mode: six chapters, one district each. Solo with pups or co-op.',
+  matchHint: 'Story mode: six chapters, solo with pups or co-op',
   pickerTitle: 'THE LAST TENNIS BALL',
   pickerNote: 'pick a chapter',
   chapter: 'CHAPTER',
@@ -119,6 +120,11 @@ export const ADVENTURE_STRINGS = {
   replay: '↻ REPLAY',
   nextSoon: 'MORE CHAPTERS SOON',
   nextIn: (n: number) => `Next chapter in ${n}s`,
+  theEnd: 'THE END!',
+  theEndLine: 'Every chapter done. The yard is safe… for now.',
+  toMenu: 'MAIN MENU ▸',
+  fromTopIn: (n: number) => `Back to chapter 1 in ${n}s`,
+  keysHintEnd: '[ENTER] main menu · [BACKSPACE] replay',
   replayIn: (n: number) => `Replaying in ${n}s`,
   medal: { gold: 'GOLD PAW', silver: 'SILVER PAW', bronze: 'BRONZE PAW' } as Record<'gold' | 'silver' | 'bronze', string>,
   keysHint: '[ENTER] next · [BACKSPACE] replay',

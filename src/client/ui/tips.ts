@@ -1,7 +1,7 @@
 // OWNER: U1 (ux). First-match tips (FTUE, game-design-psychology §5: teach the core loop in play, not in a modal).
 //
 // Three contextual tips, each shown once, during the player's first match only:
-//   basics  1.5 s after you first spawn        [WASD] move · [MOUSE] aim · [LMB] fire · [RMB] aim down
+//   basics  1.5 s after you first spawn        [WASD] move · [MOUSE] aim · [LMB] fire · [RMB] zoom
 //   kiosk   the first time you stand at your team's Ordnance Kiosk (its "E change kit" prompt is up)
 //   moves   after 60 s of play                 slide (crouch while sprinting) · ground-pound (crouch in the air)
 // A tip ends after its duration, early once you have done what it teaches (never before 3 s), or (kiosk) when you

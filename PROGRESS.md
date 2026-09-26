@@ -25,7 +25,7 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 | W3 lead M1 Ear Glide · M2 buff bits | ✅ | prediction parity 0 cm while gliding; Zoomies+ corrections 1182 → ≤ 2 |
 | Deploy prep (not deployed) | ✅ | docs/ops/DEPLOY.md; bundled server runs on an --omit=dev install |
 | W5 N1 bots climb (nav links) | ✅ merged | 12 tests; perch from base 21–25 s (4 seeds, < 60); 14/15 links valid × 6 profiles, every leg replayed in a real Sim; misses → retry → other route → ground (stuck ≤ 1.5 s); 28-char tick p95 1.43 ms; soak PASS 5 modes (stuck max 1 s, p95 ≤ 1.26 ms) |
-| Q2 Wave 4 verification | ✅ | docs/qa/W4_VERIFICATION.md at `a5177fd`: 76/100 (R 82 · I 70 · F 74), gate PASS; P1-1 fixed `ad28d0f`; P2s queued |
+| Q2 Wave 4 verification | ✅ | docs/qa/W4_VERIFICATION.md at `a5177fd`: 76/100 (R 82 · I 70 · F 74), gate PASS; P1-1 fixed `ad28d0f`; P2-3, P2-4, P2-6, P2-7, P2-9 fixed (lead); P2-1 (design), P2-2, P2-5, P2-8 open |
 | W4 A2 adventure chapters 3–6 | ✅ merged + wired | 24 new tests; bot-only squads, 6 seeds, all complete inside par, deterministic: ch3 42–63 s / 120, ch4 87–97 s / 180, ch5 74–79 s / 160, ch6 165–186 s / 360; runner ≤ 0.027 ms/tick; artifacts/a2-*.png |
 | W4 S2 vehicle + world audio | ✅ merged | 19 new audio tests; kart putt-putt + plane prop loops (≤ 4, nearest first, 0 allocs/update), vehicle and break voices, adventure step jingle + chapter fanfare; nothing clips (peak 0.825), engines 5–6.6 dB under a shot |
 | W4 A1 adventure framework + ch1–2 | ✅ merged + wired | 32 tests; ch1 bots 52 s (first objective 19 s), ch2 bots 80 s, deterministic; runner ~0.03 ms/tick; artifacts/a1-*.png |
@@ -246,6 +246,18 @@ Newest first. Every task appends: what changed, proof (command + result + screen
     and the plane slows and takes a knock (lead);
   - spawn facing: the client holds inputs until its entity is in a snapshot, so a fresh spawn keeps the sim's facing
     in every mode (lead; found by A1).
+  - Q2's Wave 4 polish (lead; `docs/qa/W4_VERIFICATION.md` §P2):
+    - adaptive resolution steps before the frame renders, so a resize can't present a blank frame (P2-9);
+    - the objective line puts its "(n/N)" first; the scoreboard header drops "0:00" when untimed and says STEP in an
+      adventure; the plane's height is measured to the roof under it and reads 0 on its wheels (P2-7);
+    - the menu hint and control labels are shorter, so the cards clear the footer and it fits one row at 1280×720;
+      in adventure the room browser says "‹ CHAPTERS" and "Joining as <featured kit> · CORGIS" (P2-7);
+    - rooms list a chapter by its real title on its own line, and a room always lists the chapter it really runs
+      (an unknown or missing id → Yard Day, as the sim plays it); boss ids must be known bosses (P2-3);
+    - first-match tips wait while HIDDEN / SPOTTED / DOT ON YOU or the plane strip is up; the Tab scoreboard sits
+      above the mission card and the adventure intro, the main menu above both (P2-4);
+    - the finale's card is THE END with MAIN MENU (ENTER) and REPLAY; an online room goes back to chapter 1 after the
+      finale instead of replaying it (P2-6).
 
 ## Human verdicts
 _(none yet — first human session after Wave 1 integration)_

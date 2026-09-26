@@ -151,7 +151,7 @@ export const HUD_CSS = `
 #cvc-hud .ds-back{font-size:${u(15)};letter-spacing:.14em;color:var(--paper);-webkit-text-stroke:${u(1.4)} var(--ink);paint-order:stroke fill;margin-top:${u(-8)}}
 
 /* ---------- scoreboard ---------- */
-#cvc-hud .sb{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) rotate(-.4deg);width:${u(980)};max-width:94vw;padding:${u(14)} ${u(18)} ${u(18)}}
+#cvc-hud .sb{position:absolute;z-index:8;left:50%;top:50%;transform:translate(-50%,-50%) rotate(-.4deg);width:${u(980)};max-width:94vw;padding:${u(14)} ${u(18)} ${u(18)}}
 #cvc-hud .sb-head{display:flex;align-items:baseline;justify-content:space-between;margin:0 ${u(4)} ${u(10)}}
 #cvc-hud .sb-title{font-size:${u(30)};letter-spacing:.04em}
 #cvc-hud .sb-meta{font:700 ${u(13)} ${FONT_BODY};opacity:.7}
@@ -201,7 +201,7 @@ export const HUD_CSS = `
 #cvc-hud .seg button.auto[aria-checked=true]{background:var(--gold);color:var(--ink);-webkit-text-stroke:0}
 
 /* ---------- main menu ---------- */
-#cvc-hud .mm{position:absolute;inset:0;overflow:hidden;color:var(--ink)}
+#cvc-hud .mm{position:absolute;z-index:9;inset:0;overflow:hidden;color:var(--ink)}
 #cvc-hud .mm-bg{position:absolute;inset:0;background:
   radial-gradient(circle,rgba(26,18,12,.25) 26%,transparent 29%) 0 0/${u(10)} ${u(10)},
   linear-gradient(105deg,rgba(47,111,214,.88) 0 47%,rgba(26,18,12,.95) 47% 48.2%,rgba(201,52,74,.88) 48.2% 100%)}
@@ -301,7 +301,7 @@ export const HUD_CSS = `
 #cvc-hud .rb-live.loading{background:var(--gold);animation:cvc-pulse .6s infinite}
 #cvc-hud .rb-live.error,#cvc-hud .rb-live.offline,#cvc-hud .rb-live.bad-url{background:var(--red)} #cvc-hud .rb-live.busy{background:var(--hot)}
 #cvc-hud .rb-box{border:${u(3)} solid var(--ink);border-radius:${u(10)};background:#fffaf0;overflow:hidden}
-#cvc-hud .rb-head,#cvc-hud .rb-row{display:grid;grid-template-columns:1.3fr 1.45fr 1.05fr .85fr ${u(78)};align-items:center;gap:${u(8)};padding:${u(5)} ${u(10)}}
+#cvc-hud .rb-head,#cvc-hud .rb-row{display:grid;grid-template-columns:1.15fr 1.8fr 1fr .85fr ${u(78)};align-items:center;gap:${u(8)};padding:${u(5)} ${u(10)}}
 #cvc-hud .rb-head{font:${u(11)} ${FONT_DISPLAY};letter-spacing:.08em;opacity:.6;border-bottom:${u(2)} solid rgba(26,18,12,.18)}
 #cvc-hud .rb-rows{max-height:${u(186)};overflow-y:auto}
 #cvc-hud .rb-box.norows .rb-head{display:none}
@@ -311,6 +311,7 @@ export const HUD_CSS = `
 #cvc-hud .rb-row:nth-child(even){background:rgba(26,18,12,.035)}
 #cvc-hud .rb-name{font:${u(15)} ${FONT_DISPLAY};letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #cvc-hud .rb-mode{opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#cvc-hud .rb-mode small{display:block;font-size:${u(11)};line-height:1.15;overflow:hidden;text-overflow:ellipsis}
 #cvc-hud .rb-pl{font-variant-numeric:tabular-nums;white-space:nowrap} #cvc-hud .rb-pl b{font:${u(16)} ${FONT_DISPLAY}}
 #cvc-hud .rb-pl i{font-style:normal;font-size:${u(11)};opacity:.6;margin-left:${u(5)}}
 #cvc-hud .rb-ph{justify-self:start;font:${u(10.5)} ${FONT_DISPLAY};letter-spacing:.07em;border:${u(2)} solid var(--ink);border-radius:${u(6)};padding:${u(1)} ${u(6)};background:#e5dccb}

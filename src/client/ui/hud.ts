@@ -47,6 +47,9 @@ export interface HudModel {
   states?: Map<number, EntityState>;
   /** Authoritative seconds until the local player respawns (else a 5 s estimate from the death event). */
   respawnIn?: number;
+  /** A status cue (HIDDEN / SPOTTED / DOT ON YOU) or the plane's cockpit strip holds the bottom centre: first-match
+   *  tips wait (their timers pause) instead of covering it (Q2 P2-4). */
+  cueUp?: boolean;
   /** Authoritative ability cooldown (else estimated from the local `ability` event). */
   ability?: { id: string; cooldownLeft: number; cooldownTotal: number };
   /** Magazine size of the equipped weapon (else the largest ammo count seen since the weapon was equipped). */
@@ -597,7 +600,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
         tipsLast = now;
         if (L && alive && now - kioskAt > 0.2) { kioskAt = now; nearKiosk = findInteractTarget(states, L)?.kind === 'ordnance'; }
         const f = L?.flags ?? 0;
-        const playing = alive && !inMenu && !chat.isOpen && m.locked && !!M && M.phase !== 'ended';
+        const playing = alive && !inMenu && !chat.isOpen && m.locked && !!M && M.phase !== 'ended' && !m.cueUp;
         tipView.show(tips.update(tdt, {
           active: playing, phase: M?.phase ?? null, nearKiosk: alive && nearKiosk,
           moving: !!L && Math.hypot(L.vx, L.vz) > 1, firing: (f & EFlag.Firing) !== 0, aiming: (f & EFlag.Aiming) !== 0,

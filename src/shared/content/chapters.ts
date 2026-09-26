@@ -504,6 +504,18 @@ export function nextChapter(id: string): ChapterDef | null {
   return c ? chapterByIndex(c.index + 1) : null;
 }
 
+/** What follows `def`: a playable next chapter, one that is planned but not built yet ('soon'), or the end. */
+export function afterChapter(def: ChapterDef): 'next' | 'soon' | 'end' {
+  return nextChapter(def.id) ? 'next' : def.index < CHAPTER_PLAN.length ? 'soon' : 'end';
+}
+
+/** The chapter an online room moves on to after `def`: the next one; the same one while the next is still 'soon';
+ *  after the finale, back to chapter 1 (Q2 P2-6: the room used to replay the finale forever). */
+export function roomChapterAfter(def: ChapterDef): ChapterDef {
+  const kind = afterChapter(def);
+  return kind === 'next' ? nextChapter(def.id)! : kind === 'end' ? CHAPTERS[0] : def;
+}
+
 /** Medal for a chapter time (s) against its par: gold ≤ par · silver ≤ 1.5 × par · bronze otherwise. */
 export function medalFor(time: number, par: number): Medal {
   if (time <= par) return 'gold';
