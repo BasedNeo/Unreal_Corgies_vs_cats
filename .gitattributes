@@ -1,0 +1,7 @@
+# Procedural-first project: binary assets are exceptions. If prepared models/textures/audio start landing in
+# public/, enable Git LFS for them (game-dev-github) before committing the first one.
+*.png binary
+*.jpg binary
+*.glb binary
+*.spz binary
+*.wasm binary
