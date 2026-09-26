@@ -24,6 +24,7 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 | W3 K1 character polish | ✅ merged | silhouette distance 0.033 → 0.122; 24/24 kits in budget; `9d8b11f` |
 | W3 lead M1 Ear Glide · M2 buff bits | ✅ | prediction parity 0 cm while gliding; Zoomies+ corrections 1182 → ≤ 2 |
 | Deploy prep (not deployed) | ✅ | docs/ops/DEPLOY.md; bundled server runs on an --omit=dev install |
+| W4 A2 adventure chapters 3–6 | ✅ merged + wired | 24 new tests; bot-only squads, 6 seeds, all complete inside par, deterministic: ch3 42–63 s / 120, ch4 87–97 s / 180, ch5 74–79 s / 160, ch6 165–186 s / 360; runner ≤ 0.027 ms/tick; artifacts/a2-*.png |
 | W4 S2 vehicle + world audio | ✅ merged | 19 new audio tests; kart putt-putt + plane prop loops (≤ 4, nearest first, 0 allocs/update), vehicle and break voices, adventure step jingle + chapter fanfare; nothing clips (peak 0.825), engines 5–6.6 dB under a shot |
 | W4 A1 adventure framework + ch1–2 | ✅ merged + wired | 32 tests; ch1 bots 52 s (first objective 19 s), ch2 bots 80 s, deterministic; runner ~0.03 ms/tick; artifacts/a1-*.png |
 | W4 E1 sniper elite (Madame Pointillé) | ✅ merged + wired | 15 sniper + 6 model/FX tests; marksman duel 151–213 s (sweep 125–242 s), with squad 62–107 s; ?boss=madame_pointille; artifacts/e1-*.png |
@@ -36,6 +37,22 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 ### 2026-09-26 — Wave 4 in flight (lead)
 - Lanes A1 (adventure framework, chapters 1–2), X1 (destructibles), R1 (RC plane), E1 (Siamese sniper elite) are
   building against `docs/design/ADVENTURE.md`; A2 (chapters 3–6) and INT4 follow.
+- **A2 integrated**: all six chapters of "The Last Tennis Ball" are playable.
+  - Ch3 **The Garage Job** (Breacher): blow the boarded wall (explosives only), wreck the 4 tuna stacks, then kart out
+    to the gate.
+  - Ch4 **Laser Pointer at Dawn** (Overwatch): the roof perch (feet really on the roof), the Madame Pointillé duel,
+    then survive 40 s.
+  - Ch5 **The Porch Siege** (Warden): raise the porch barricades (650 hp barrier walls), then hold and survive
+    3 waves.
+  - Ch6 **The Last Tennis Ball** (Skyraider): Ear Glide off the garage roof, fly the RC plane over the shed, beat the
+    Vac-Tank, grab the ball.
+  - Bots:
+    - they shoot a destroy step's props;
+    - Breachers plant where the breach fuse fires (the breach step went from 32 s to 2.7 s);
+    - sentries walk their posts;
+    - pups carry the chapter's kits.
+  - After 120 s on one step, the human-only rules relax, so a player without the kit is never stuck.
+  - Lead: the scoreboard shows a pup's chapter kit.
 - **S2 integrated** (sound): the game had no vehicle audio at all. Now there is a mower-kart putt-putt and a buzzy
   toy-plane prop (throttle, airspeed, boost roar, stall cough, doppler on fly-bys), a seat clunk, bail, boost
   fwoosh, a kart horn, three distinct breaks (wood crash, tin clatter, crate crunch), a step jingle and a chapter
@@ -181,12 +198,17 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 - `EntityState.cls` carries content indexes through `CLASS_IDS`: 6 entries per content table at most (S1, B1).
 - Bots don't climb to the Rooftops perches (they fight in the Garage fine) (D3/C2).
 - Ability entities: shotgun damage to drones/barriers is estimated from the first pellet (C2).
-- Adventure (A1): sentries jog their patrol loops (no walk intent); bots can't shoot destructibles or drive/glide on
-  purpose (A2); one adventure chapter per page on the client; picker locks are cosmetic; sentry cones draw through
-  walls (intended readability).
+- Adventure (A1/A2):
+  - bots shoot adventure props and breach with Dig Charges, but still don't drive, fly or climb (waived for a bot-only
+    squad; humans get a 120 s grace);
+  - ch6 step 1 needs a Skyraider (online joiners bring their own kit and wait out the grace);
+  - ch5's difficulty for humans is unknown (bots never wipe);
+  - one adventure chapter per page on the client; picker locks are cosmetic; sentry cones draw through walls
+    (intended readability).
 - Sniper elite (E1): perches are hard-coded West Yard spots (tests catch lost sightlines, not looks); L3 bots don't
   dodge the dot; a human must confirm the 2–4 minute duel target.
-- Destructibles (X1): bots don't breach on their own yet (A2); a match reset relabels nav regions once (~5–9 ms).
+- Destructibles (X1): outside adventure destroy steps bots ignore props; a match reset relabels nav regions once
+  (~5–9 ms).
 - RC plane (R1):
   - the cockpit strip `ui/plane-hud.ts` shows hull, throttle, airspeed, height, boost, gun heat and STALL!; engines
     are voiced by S2;

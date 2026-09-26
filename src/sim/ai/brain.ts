@@ -14,6 +14,8 @@
 // goes to investigate the nearest spotted enemy (it still needs its own line of sight to shoot); with nothing better
 // to do it shoots down enemy drones in sight. A room bot also goes to help a human teammate under fire nearby.
 // Class abilities and objective play (Upgrade Cores, the objective chain) are decided in tactics.ts.
+// Adventure (A2): with nobody to fight, a bot whose tactics picked a prop target (a tuna stack in a destroy step)
+// holds a standoff spot and shoots it (propShot); sentries walk their posts (tac.walk).
 import type { Sim } from '../sim';
 import type { SimEntity } from '../entity';
 import { Btn, type InputCmd } from '../../shared/input';
@@ -29,6 +31,8 @@ import { type NavGrid, cellX, cellZ, findPath, lineWalkable, nearestWalkable, ra
 import { concealLevel, concealRevealRange, weatherSightMult } from '../world/env';
 import { abilityEntities, friendlyShotPass } from '../combat/ability-core';
 import { DRONE } from '../combat/ability-tuning';
+import { destructDistance } from '../../shared/world/destructibles';
+import type { Destructible } from '../../shared/world/world-types';
 import {
   abilityIntent, buddyInTrouble, createTactics, objectiveInteract, pushBand, raiderAir, skipGoal, updateObjectiveGoal, type TacticsState,
 } from './tactics';
@@ -465,6 +469,19 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
         }
         if (t.hold && d < 1.2) { mv.x = 0; mv.z = 0; }
         mv.sprint = d > 12;
+        if (t.prop >= 0) {
+          // A2: a prop to shoot: back off out of our own splash, else stand where it is in sight and in the band
+          const dp = Math.hypot(t.px - e.pos.x, t.pz - e.pos.z);
+          if (dp < t.propMin && dp > 1e-3) {
+            const ox = (e.pos.x - t.px) / dp, oz = (e.pos.z - t.pz) / dp;
+            if (openAhead(g, e, ox, oz)) { mv.x = ox; mv.z = oz; mv.sprint = false; }
+          } else if (t.propSeen) { mv.x = 0; mv.z = 0; }
+        }
+        if (t.walk) {
+          // A2: pacing a post, not rushing it
+          const m = e.char!.move, k = m.runSpeed > 0 ? m.walkSpeed / m.runSpeed : 1;
+          mv.x *= k; mv.z *= k; mv.sprint = false;
+        }
         if (t.goal === 'core' && sim.tick - t.goalSince > 25 * TICK_HZ) skipGoal(sim, t);
         if (mv.x || mv.z) lookYaw = Math.atan2(-mv.x, -mv.z);
         ai.hasGoal = false;
@@ -660,6 +677,9 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   } else if (droneShot(sim, e, ai, a, def, dt) >= 0) {
     // nobody to fight: shoot down an enemy Spotter Drone in sight (hitscan kits), firing once lined up
     buttons |= trigger(sim, e, ai, a, def, ai.tac.droneLined, dt);
+  } else if (propShot(sim, e, ai, a, def, dt) >= 0) {
+    // A2: nobody to fight: shoot the adventure step's prop (a tuna stack) once lined up
+    buttons |= trigger(sim, e, ai, a, def, ai.tac.propLined, dt);
   } else {
     ai.telegraph = 0; ai.chargeHold = 0;
     turnToward(ai, a, lookYaw, lookPitch, dt, 0.6);
@@ -750,6 +770,41 @@ function droneShot(sim: Sim, e: SimEntity, ai: AiState, a: Archetype, def: Weapo
   const tol = Math.atan2(DRONE.radius * 0.8, Math.hypot(h, dy));
   t.droneLined = Math.abs(angleDelta(ai.yaw, yaw)) < tol && Math.abs(ai.pitch - pitch) < tol;
   return t.droneLined ? 1 : 0;
+}
+
+/**
+ * A2: no character target and the tactics picked a prop (tac.prop): when it is in sight (checked with perception,
+ * every 6 ticks) and inside the standoff band, aim at it (a ballistic lob for projectiles) and report lined up
+ * (tac.propLined, the caller pulls the trigger). Returns -1 (nothing to shoot), 0 (turning to it) or 1 (lined up).
+ * The sight line runs to just short of the prop's nearest face, so the prop's own collider doesn't hide it.
+ */
+function propShot(sim: Sim, e: SimEntity, ai: AiState, a: Archetype, def: WeaponDef, dt: number): number {
+  const t = ai.tac;
+  t.propLined = false;
+  const p = t.prop >= 0 ? sim.entities.get(t.prop) : undefined;
+  const d = (p as { dsx?: { def?: Destructible; broken?: boolean } } | undefined)?.dsx;
+  if (!p || p.removed || !d?.def || d.broken || e.wpn!.reload > 0 || e.wpn!.ammo <= 0) { t.propSeen = false; return -1; }
+  const ex = e.pos.x, ey = e.pos.y + eyeHeight(e), ez = e.pos.z;
+  const h = Math.hypot(t.px - ex, t.pz - ez);
+  if (sim.tick >= ai.nextPerceive - 1) {
+    t.propSeen = false;
+    if (h >= t.propMin && h <= t.propMax) {
+      const near = destructDistance(d.def, ex, ey, ez);
+      const len = Math.hypot(t.px - ex, t.py - ey, t.pz - ez);
+      const k = Math.max(0, near - 0.15) / Math.max(1e-3, len);
+      t.propSeen = worldLineClear(sim, ex, ey, ez, ex + (t.px - ex) * k, ey + (t.py - ey) * k, ez + (t.pz - ez) * k, friendlyShotPass(sim, e.team));
+    }
+  }
+  if (!t.propSeen) return -1;
+  // explosive lobs land at its foot (the blast does the work); hitscan goes for the middle
+  const ty = def.projectile ? p.pos.y + 0.5 : t.py;
+  const dy = ty - ey;
+  const yaw = Math.atan2(-(t.px - ex), -(t.pz - ez));
+  const pitch = def.projectile ? ballisticPitch(def.projectile.speed, def.projectile.gravity, h, dy) : Math.atan2(dy, h);
+  turnToward(ai, a, yaw, pitch, dt);
+  const tol = Math.max(1.2 * DEG, Math.atan2(0.35, Math.hypot(h, dy)));
+  t.propLined = Math.abs(angleDelta(ai.yaw, yaw)) < tol && Math.abs(ai.pitch - pitch) < tol + (def.projectile ? 2 * DEG : 0);
+  return t.propLined ? 1 : 0;
 }
 
 /**

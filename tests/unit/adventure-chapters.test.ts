@@ -65,9 +65,9 @@ function playOut(sim: Sim, room: Room, maxSeconds: number): RunResult {
 }
 
 describe('chapter data', () => {
-  it('chapters 1–2 are playable and match their slots; 6 slots in the plan; captions are 2–3 punchy lines', () => {
+  it('all six chapters are playable and match their slots; captions are 2–3 punchy lines', () => {
     expect(CHAPTER_PLAN.map((s) => s.index)).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(CHAPTERS.map((c) => c.id)).toEqual(['yard_day', 'tall_grass']);
+    expect(CHAPTERS.map((c) => c.id)).toEqual(['yard_day', 'tall_grass', 'garage_job', 'laser_dawn', 'porch_siege', 'last_ball']);
     for (const c of CHAPTERS) {
       const slot = CHAPTER_PLAN[c.index - 1];
       expect([c.id, c.title, c.cls, c.district]).toEqual([slot.id, slot.title, slot.cls, slot.district]);

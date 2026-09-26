@@ -38,7 +38,9 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
   combat/ability-*.ts              Spotter Drone / Dig Charge / Squeak Barrier entities (EntityKind.Ability)
   match/core-rush.ts               core-rush: fair Core Pad placement, capture, hold scoring (EntityKind.Zone)
   adventure/                       A1 mode adventure: setup 95 + runner 790 (chapter steps and triggers, spawns and
-                                   sentries, stealth alarm, checkpoints with fail forward, MatchState/beacon fold)
+                                   sentries, stealth alarm, checkpoints with fail forward, MatchState/beacon fold);
+                                   A2 props.ts: pup kits per chapter, parked karts, barricades (lasting barrier walls)
+  ai/brain.ts propShot · tactics   A2: bots shoot a destroy step's props (propTarget), sentries walk their posts
   destruct/                        X1 breakable props (EntityKind.Destructible), order 505: breaching fuse, hitscan
                                    damage, blasts via explode()'s blast listeners; break/restore toggles colliders and
                                    nav blockers (ai/nav.ts per-sim dynamic blockers); mirrorDestructibles (prediction)

@@ -4,6 +4,9 @@
 //                        squad at the chapter start — before the AI (100) and S1's interaction layer (150)
 //   790 adventure        after combat (600) and respawns (700), before the match system (800, which ignores this
 //                        mode): respawn relocation, triggers, spawns, the stealth alarm, wipes, the MatchState fold
+// A2 adds (chapters.ts header): the pups' chapter kits, minY/maxY and the fail-forward grace for the human-only rules,
+// an interact step's object, vehicles parked for a step, barricades raised by a step, a step's rally point and an
+// elevated start/rally for humans (props.ts holds the world pieces).
 // Everything clients see goes through existing channels: MatchState (objective line, step counter in `wave`, the
 // survive countdown in `timeLeft`), the S1-style beacon (snapshot convention in src/shared/content/chapters.ts),
 // item props, and `score` (reasons `step`, `chapter`, `kill`) / `bark` / `pickup` events. No new message types.
@@ -17,7 +20,8 @@ import { hash2, mulberry32 } from '../../shared/rng';
 import type { GameEvent, MatchState } from '../../shared/protocol';
 import {
   ADVENTURE_CHAIN_INDEX, ADVENTURE_PHASES, ALARM_BARKS, BRIEFING_SECONDS, CHAPTERS, CHAPTER_POINTS, COLLECT_RADIUS,
-  BRIEFING_WAIT_SECONDS, COMPLETE_HOLD_SECONDS, FAIL_BEAT_SECONDS, HOLD_DECAY, HOLD_HEIGHT, KIOSK_PROMPT, REACH_HEIGHT, REGROUP_BARK, STEP_POINTS, STEP_ROSTER,
+  BRIEFING_WAIT_SECONDS, COMPLETE_HOLD_SECONDS, FAIL_BEAT_SECONDS, GRACE_BARK, HOLD_DECAY, HOLD_HEIGHT, KIOSK_PROMPT, REACH_HEIGHT, REGROUP_BARK,
+  STEP_POINTS, STEP_ROSTER, STRICT_GRACE_SECONDS,
   chapterById, medalFor, nextChapter, type ChapterDef, type ChapterStep,
 } from '../../shared/content/chapters';
 import { occupiedAt, surfaceAt, waterAt, yawToward } from '../../shared/world/queries';
@@ -27,10 +31,11 @@ import { creditRoster } from '../interact/state';
 import type { InteractConfig } from '../interact/state';
 import type { ObjectiveState } from '../interact/objectives';
 import {
-  adventureConfig, adventureRuntime, adventureState, checkpointHooks, isAdventureMode, isSquad, readDestructible, setAdventureRuntime, squadOf,
+  adventureConfig, adventureRuntime, adventureState, checkpointHooks, isAdventureMode, isSquad, readDestructible, setAdventureRuntime, squadHasHuman, squadOf,
   type AdventureRuntime, type AdventureState, type CheckpointEnemy,
 } from './state';
 import { spawnChapterCat, spawnItem } from './spawns';
+import { clearBarricades, clearVehicles, kitPup, kitPups, parkStepVehicles, raiseBarricade, reparkVehicles, standingBarricades } from './props';
 import { simNavGrid } from '../ai';
 import { cellX, cellZ, isWalkable, nearestWalkable } from '../ai/nav';
 
@@ -90,20 +95,27 @@ function nearRuntimeSolid(sim: Sim, x: number, z: number): boolean {
   return false;
 }
 
-/** A standing spot for squad member k around (ax, az): open, dry, walkable ground near the anchor's height. */
-function formationSpot(sim: Sim, ax: number, az: number, k: number): { x: number; y: number; z: number } {
+/**
+ * A standing spot for squad member k around (ax, az): open, dry, walkable ground near the anchor's height. With `ay`
+ * (A2: an elevated rally point, e.g. a roof) the spot is on that surface instead: within 1.2 m of its height (not
+ * off its edge or down a hatch), clear of props.
+ */
+function formationSpot(sim: Sim, ax: number, az: number, k: number, ay = -1): { x: number; y: number; z: number } {
   const d = sim.worldData;
   const g = simNavGrid(sim);
-  const top = ground(sim, ax, az) + 3;
+  const up = ay > ground(sim, ax, az) + 1.5;
+  const top = up ? ay + 1 : ground(sim, ax, az) + 3;
   for (let tries = 0; tries < 24; tries++) {
     const ring = 1.6 + 1.3 * Math.floor((k + tries) / 5);
     const a = (k + tries * 0.5) * 2.39996;
     const x = ax + Math.cos(a) * ring, z = az + Math.sin(a) * ring;
     const s = surfaceAt(d, x, z, top);
-    if (occupiedAt(d, x, s.y + 0.7, z) || waterAt(d, x, z) || nearRuntimeSolid(sim, x, z)) continue;
-    if (g && !isWalkable(g, x, z)) continue;
+    if (up && Math.abs(s.y - ay) > 1.2) continue;
+    if (occupiedAt(d, x, s.y + 0.7, z) || (!up && waterAt(d, x, z)) || nearRuntimeSolid(sim, x, z)) continue;
+    if (!up && g && !isWalkable(g, x, z)) continue;
     return { x, y: s.y + 0.05, z };
   }
+  if (up) return { x: ax, y: ay + 0.05, z: az };
   if (g) {
     const c = nearestWalkable(g, ax, az, 8);
     if (c >= 0) return { x: cellX(g, c), y: g.ground[c] + 0.05, z: cellZ(g, c) };
@@ -112,7 +124,8 @@ function formationSpot(sim: Sim, ax: number, az: number, k: number): { x: number
 }
 
 function placeMember(sim: Sim, e: SimEntity, k: number, st: AdventureState, respawn: boolean): void {
-  const p = formationSpot(sim, st.anchorX, st.anchorZ, k);
+  // humans rally up on an elevated rally point (a roof); pups can't climb, so they gather on the ground below it
+  const p = formationSpot(sim, st.anchorX, st.anchorZ, k, e.kind === EntityKind.Player ? st.anchorY : -1);
   const yaw = st.step >= 0 && (st.x !== st.anchorX || st.z !== st.anchorZ) ? yawToward(p.x, p.z, st.x, st.z) : adventureRuntime(sim)!.def!.start.yaw;
   if (respawn) respawnNow(sim, e, { x: p.x, y: p.y, z: p.z, yaw });
   else {
@@ -136,7 +149,7 @@ function freshState(def: ChapterDef, briefing: number): AdventureState {
   return {
     chapter: def.id, step: -1, phase: 'briefing', progress: 0, counters: { kills: 0, alarms: 0, deaths: 0 }, startTick: -1, checkpoint: 0,
     index: def.index, total: def.steps.length, time: 0, medal: '', alarm: false, wipes: 0, timer: briefing,
-    x: def.start.x, y: 0, z: def.start.z, anchorX: def.start.x, anchorZ: def.start.z, contested: false,
+    x: def.start.x, y: 0, z: def.start.z, anchorX: def.start.x, anchorZ: def.start.z, anchorY: def.start.y ?? -1, contested: false,
   };
 }
 
@@ -152,6 +165,7 @@ function newRuntime(sim: Sim): AdventureRuntime {
     def: null, beacon: -1, enemies: new Map(), items: [], destructSeen: new Map(), destructBroken: new Set(), snap: null,
     stepTicks: 0, hold: 0, stepKills: 0, barks: [], barkTurn: 0, ready: new Set(), briefingTicks: 0, placed: new Set(), placedTick: -1, setup: false,
     rng: mulberry32(Math.floor(hash2(sim.seed, 0xad7, 0x3e1) * 0x7fffffff)),
+    vehicles: [], barricades: [], kitted: new Set(),
   };
 }
 
@@ -169,12 +183,13 @@ function spawnBeacon(sim: Sim, rt: AdventureRuntime): void {
   rt.beacon = id;
 }
 
-/** Remove every chapter cat and item (restart, chapter over). */
-function clearChapterEntities(sim: Sim, rt: AdventureRuntime): void {
+/** Remove every chapter cat and item (restart, chapter over); with `world`, the chapter's vehicles and barricades too. */
+function clearChapterEntities(sim: Sim, rt: AdventureRuntime, world = false): void {
   for (const id of rt.enemies.keys()) sim.removeEntity(id);
   rt.enemies.clear();
   for (const id of rt.items) sim.removeEntity(id);
   rt.items.length = 0;
+  if (world) { clearVehicles(sim, rt); clearBarricades(sim, rt); }
 }
 
 /** Load a chapter: fresh state, MatchState and rules, the squad at the start, the briefing running. */
@@ -188,7 +203,7 @@ export function loadChapter(sim: Sim, def: ChapterDef): void {
     // S1's interaction layer (kiosks for kit swaps, Upgrade Cores, Golden Kibble) — not its Squeaker chain.
     sim.state.interactConfig = { auto: true, objectives: false } satisfies InteractConfig;
   }
-  clearChapterEntities(sim, rt);
+  clearChapterEntities(sim, rt, true);
   rt.def = def;
   rt.snap = null;
   rt.stepTicks = 0; rt.hold = 0; rt.stepKills = 0; rt.barks.length = 0; rt.ready.clear(); rt.briefingTicks = 0;
@@ -202,6 +217,7 @@ export function loadChapter(sim: Sim, def: ChapterDef): void {
   sim.state.match = ms; // a new object: S1's layer reads it as a new match (kibble back, cores re-dealt)
   const rules: MatchRules = { combatLive: false, respawn: [true, false, true] };
   sim.state.rules = rules;
+  kitPups(sim, rt, def); // A2: the chapter's pup kits (featured kit first)
   const squad = squadOf(sim, scratch).slice().sort((a, b) => a.id - b.id);
   squad.forEach((e, k) => placeMember(sim, e, k, st, !first || e.dead));
   fold(sim, rt, st);
@@ -246,15 +262,29 @@ function saveCheckpoint(sim: Sim, rt: AdventureRuntime, st: AdventureState): voi
   }
   const extra: Record<string, unknown> = {};
   for (const [name, h] of checkpointHooks()) extra[name] = h.save(sim);
-  rt.snap = { step: st.step, counters: { ...st.counters }, anchorX: st.anchorX, anchorZ: st.anchorZ, enemies, broken: [...rt.destructBroken], extra };
+  rt.snap = {
+    step: st.step, counters: { ...st.counters }, anchorX: st.anchorX, anchorZ: st.anchorZ, anchorY: st.anchorY, enemies,
+    broken: [...rt.destructBroken], extra, barricades: standingBarricades(sim, rt),
+  };
 }
 
 function spawnStepItems(sim: Sim, rt: AdventureRuntime, step: ChapterStep): void {
   for (const id of rt.items) sim.removeEntity(id);
   rt.items.length = 0;
-  if (step.trigger.type !== 'collect') return;
-  const p = step.trigger.params;
+  const t = step.trigger;
+  // A2: an interact step can show its object (the last tennis ball) at the point; E takes it
+  if (t.type === 'interact' && t.params.item) spawnItem(sim, rt, t.params.item, 0, t.params.x, t.params.z, t.params.minY !== undefined ? t.params.minY + 4 : undefined);
+  if (t.type !== 'collect') return;
+  const p = t.params;
   p.spots.forEach((s, i) => spawnItem(sim, rt, p.item, i, s.x, s.z));
+}
+
+/** Beacon height for a step target: its ground, or up on the roof a `minY` asks for (A2). */
+function targetY(sim: Sim, step: ChapterStep, x: number, z: number): number {
+  const t = step.trigger;
+  const minY = t.type === 'reach' || t.type === 'interact' ? t.params.minY : undefined;
+  const g = ground(sim, x, z);
+  return minY !== undefined && minY > g ? surfaceAt(sim.worldData, x, z, minY + 4).y : g;
 }
 
 function enterStep(sim: Sim, rt: AdventureRuntime, st: AdventureState, i: number): void {
@@ -273,10 +303,10 @@ function enterStep(sim: Sim, rt: AdventureRuntime, st: AdventureState, i: number
     spawnChapterCat(sim, rt, { arch: boss, x: 0, z: 0, tag: 'boss', step: i, jitter: 0, auto: true }, rt.enemies.size + 1);
   }
   spawnStepItems(sim, rt, step);
+  parkStepVehicles(sim, rt, i, step.vehicles);
   const t = step.trigger;
-  if (t.type === 'reach' || t.type === 'interact' || t.type === 'hold') { st.x = t.params.x; st.z = t.params.z; }
-  else pointAtNearest(sim, st, squadOf(sim, scratch), stepTargets(sim, rt, step));
-  st.y = ground(sim, st.x, st.z);
+  if (t.type === 'reach' || t.type === 'interact' || t.type === 'hold') { st.x = t.params.x; st.z = t.params.z; st.y = targetY(sim, step, st.x, st.z); }
+  else { pointAtNearest(sim, st, squadOf(sim, scratch), stepTargets(sim, rt, step)); st.y = ground(sim, st.x, st.z); }
   queueBarks(sim, rt, step.barks);
   if (i === 0 || step.checkpoint) saveCheckpoint(sim, rt, st);
 }
@@ -285,10 +315,14 @@ function completeStep(sim: Sim, rt: AdventureRuntime, st: AdventureState, by: Si
   const step = rt.def!.steps[st.step];
   addScore(sim, Team.Corgis, STEP_POINTS, 'step');
   for (const c of by) creditRoster(sim, c.id, STEP_ROSTER, `step:${step.id}`);
-  // the squad rallies (and restarts after a wipe) where it last got something done
+  // the squad rallies (and restarts after a wipe) where it last got something done (A2: or at the step's `rally`)
   const t = step.trigger;
-  if (t.type === 'reach' || t.type === 'interact' || t.type === 'hold') { st.anchorX = t.params.x; st.anchorZ = t.params.z; }
-  else if (by[0]) { st.anchorX = by[0].pos.x; st.anchorZ = by[0].pos.z; }
+  if (step.rally) { st.anchorX = step.rally.x; st.anchorZ = step.rally.z; st.anchorY = step.rally.y ?? -1; }
+  else if (t.type === 'reach' || t.type === 'interact' || t.type === 'hold') { st.anchorX = t.params.x; st.anchorZ = t.params.z; st.anchorY = -1; }
+  else if (by[0]) { st.anchorX = by[0].pos.x; st.anchorZ = by[0].pos.z; st.anchorY = -1; }
+  // A2: the step's barricades go up (owned by whoever finished the step)
+  const owner = by[0] ?? squadOf(sim, scratch)[0];
+  if (owner) for (const spot of step.raise ?? []) raiseBarricade(sim, rt, owner, spot);
   enterStep(sim, rt, st, st.step + 1);
 }
 
@@ -316,13 +350,19 @@ function evalStep(sim: Sim, rt: AdventureRuntime, st: AdventureState, step: Chap
   const squad = squadOf(sim, scratch);
   const human = squad.some((e) => e.kind === EntityKind.Player);
   const t = step.trigger;
+  // A2: the human-only rules (vehicle, airborne, minY) hold for STRICT_GRACE_SECONDS, then fail forward
+  const strictRules = human && rt.stepTicks <= STRICT_GRACE_SECONDS * TICK_HZ;
   switch (t.type) {
     case 'reach': {
       const p = t.params, y = ground(sim, p.x, p.z);
-      const strict = human && (p.vehicle || p.airborne);
+      // A2: maxY lifts the zone's ceiling (a plane over the shed); minY is a floor for humans (bots can't climb)
+      const h = p.maxY !== undefined ? Math.max(REACH_HEIGHT, p.maxY - y) : REACH_HEIGHT;
+      const strict = strictRules && (p.vehicle || p.airborne);
+      const floor = strictRules && p.minY !== undefined ? p.minY : -Infinity;
       for (const c of squad) {
-        if (!alive(c) || !inCylinder(c, p.x, y, p.z, p.radius, REACH_HEIGHT)) continue;
+        if (!alive(c) || !inCylinder(c, p.x, y, p.z, p.radius, h)) continue;
         if (human && c.kind !== EntityKind.Player) continue; // the pups escort; the human gets there (first success is theirs)
+        if (c.pos.y < floor) continue;
         if (strict) {
           if (p.vehicle && !(c.flags & EFlag.Mounted)) continue;
           if (p.airborne && (c.char!.grounded || c.pos.y < ground(sim, c.pos.x, c.pos.z) + 0.3)) continue;
@@ -332,7 +372,7 @@ function evalStep(sim: Sim, rt: AdventureRuntime, st: AdventureState, step: Chap
       if (strict && p.vehicle) {
         // a driven vehicle inside the zone counts for its driver (vehicle snapshot convention: weapon = rider id)
         for (const v of sim.entities.values()) {
-          if (v.kind !== EntityKind.Vehicle || v.weapon < 0 || !inCylinder(v, p.x, y, p.z, p.radius, REACH_HEIGHT)) continue;
+          if (v.kind !== EntityKind.Vehicle || v.weapon < 0 || !inCylinder(v, p.x, y, p.z, p.radius, h) || v.pos.y < floor) continue;
           const d = sim.entities.get(v.weapon);
           if (d && isSquad(d) && !res.by.includes(d)) res.by.push(d);
         }
@@ -343,9 +383,11 @@ function evalStep(sim: Sim, rt: AdventureRuntime, st: AdventureState, step: Chap
     case 'interact': {
       const p = t.params, y = ground(sim, p.x, p.z);
       const kiosk = p.prompt === KIOSK_PROMPT;
+      const floor = strictRules && p.minY !== undefined ? p.minY : -Infinity; // A2: up on the roof (humans)
+      const h = p.minY !== undefined ? Math.max(9, p.minY + 4 - y) : 9;
       for (const c of squad) {
-        if (!alive(c) || (c.flags & EFlag.Mounted) || (human && c.kind !== EntityKind.Player)) continue;
-        if (pressed(c, Btn.Interact) && inCylinder(c, p.x, y, p.z, p.radius, 9)) res.by.push(c);
+        if (!alive(c) || (c.flags & EFlag.Mounted) || (human && c.kind !== EntityKind.Player) || c.pos.y < floor) continue;
+        if (pressed(c, Btn.Interact) && inCylinder(c, p.x, y, p.z, p.radius, h)) res.by.push(c);
       }
       if (kiosk && !res.by.length) {
         // a kit swap at the kiosk counts too (S1 emits `ability kit_swap` with the player's position)
@@ -360,6 +402,7 @@ function evalStep(sim: Sim, rt: AdventureRuntime, st: AdventureState, step: Chap
         }
       }
       res.done = res.by.length > 0;
+      if (res.done && p.item) sim.emit({ e: 'pickup', id: res.by[0].id, item: p.item }); // A2: took the object
       break;
     }
     case 'hold': {
@@ -455,6 +498,13 @@ function evalStep(sim: Sim, rt: AdventureRuntime, st: AdventureState, step: Chap
   return res;
 }
 
+/** Does the step have a human-only rule (vehicle, airborne, minY) that the grace can waive? */
+function strictStep(step: ChapterStep): boolean {
+  const t = step.trigger;
+  if (t.type === 'reach') return !!(t.params.vehicle || t.params.airborne || t.params.minY !== undefined);
+  return t.type === 'interact' && t.params.minY !== undefined;
+}
+
 /** Point the beacon at the target nearest the squad (humans first). */
 function pointAtNearest(sim: Sim, st: AdventureState, squad: SimEntity[], targets: SimEntity[]): void {
   if (!targets.length) return;
@@ -531,6 +581,7 @@ function relocateSpawns(sim: Sim, rt: AdventureRuntime, st: AdventureState): voi
     if (ev.e !== 'spawn' || rt.placed.has(ev.id)) continue;
     const e = sim.entities.get(ev.id);
     if (!e || !isSquad(e) || e.dead) continue;
+    if (rt.def) kitPup(sim, rt, rt.def, e); // A2: a pup that joins mid-chapter gets its kit (once)
     placeMember(sim, e, memberIndex(sim, e), st, false);
   }
 }
@@ -566,12 +617,12 @@ export function restartAtCheckpoint(sim: Sim): void {
   const rt = adventureRuntime(sim), st = adventureState(sim);
   if (!rt?.def || !st || !rt.snap) return;
   const snap = rt.snap;
-  clearChapterEntities(sim, rt);
+  clearChapterEntities(sim, rt, true);
   // other lanes' world state first (X1: props broken after the checkpoint stand back up), then our bookkeeping of it
   for (const [name, h] of checkpointHooks()) if (name in snap.extra) h.restore(sim, snap.extra[name]);
   rt.destructBroken = new Set(snap.broken); // anything still broken beyond these recounts on the next tick
   st.counters = { ...snap.counters };
-  st.anchorX = snap.anchorX; st.anchorZ = snap.anchorZ;
+  st.anchorX = snap.anchorX; st.anchorZ = snap.anchorZ; st.anchorY = snap.anchorY;
   st.step = snap.step;
   st.phase = 'live';
   st.timer = 0;
@@ -589,8 +640,12 @@ export function restartAtCheckpoint(sim: Sim): void {
     spawnChapterCat(sim, rt, { arch: c.arch, x: c.x, z: c.z, y: c.y, yaw: c.yaw, tag: c.tag, step: c.step, jitter: 0, sentry: !!c.route, route: c.route }, ++n);
   }
   spawnStepItems(sim, rt, step);
-  if (t.type !== 'reach' && t.type !== 'interact' && t.type !== 'hold') pointAtNearest(sim, st, squad, stepTargets(sim, rt, step));
-  st.y = ground(sim, st.x, st.z);
+  // A2: the checkpoint's barricades stand again (full health); vehicles of the steps so far are parked again
+  const owner = squad[0];
+  if (owner) for (const spot of snap.barricades) raiseBarricade(sim, rt, owner, spot);
+  for (let i = 0; i <= snap.step; i++) parkStepVehicles(sim, rt, i, rt.def.steps[i].vehicles);
+  if (t.type !== 'reach' && t.type !== 'interact' && t.type !== 'hold') { pointAtNearest(sim, st, squad, stepTargets(sim, rt, step)); st.y = ground(sim, st.x, st.z); }
+  else st.y = targetY(sim, step, st.x, st.z);
   queueBarks(sim, rt, [REGROUP_BARK]);
 }
 
@@ -630,6 +685,8 @@ function update(sim: Sim, dt: number): void {
       }
       const step = def.steps[st.step];
       rt.stepTicks++;
+      if (rt.vehicles.length) reparkVehicles(sim, rt, st);
+      if (rt.stepTicks === STRICT_GRACE_SECONDS * TICK_HZ + 1 && strictStep(step) && squadHasHuman(sim)) queueBarks(sim, rt, [GRACE_BARK]);
       if (step.stealth && !st.alarm) {
         for (const id of rt.enemies.keys()) {
           const e = sim.entities.get(id);

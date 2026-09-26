@@ -19,7 +19,7 @@ npm run dev                 # http://localhost:5173 → main menu → pick a MAT
 - Useful URL params:
   - `?mode=team-deathmatch|core-rush|yard-skirmish`
   - `?boss=1` (boss rush: the Vac-Tank) or `?boss=madame_pointille` (the sniper elite)
-  - `?mode=adventure&chapter=yard_day|tall_grass`
+  - `?mode=adventure&chapter=yard_day|tall_grass|garage_job|laser_dawn|porch_siege|last_ball`
   - `?quality=low|medium|high`
   - `?bots=4,4`
   - `?room=name`
@@ -31,7 +31,7 @@ npm run dev                 # http://localhost:5173 → main menu → pick a MAT
 | **Skirmish** | Co-op vs five waves of cats and the Vac-Tank boss. Your squad is you plus bot pups, or friends. |
 | **Deathmatch** | 4v4, first team to 30 knockouts. Bots fill empty slots. |
 | **Core Rush** | 4v4: hold the three Core Pads (A, B, C) for points; first team to 250 wins. |
-| **Adventure** | "The Last Tennis Ball": six district chapters, one class each (`docs/design/ADVENTURE.md`). Chapters 1–2 are playable; 3–6 are next. |
+| **Adventure** | "The Last Tennis Ball": six district chapters, one class each (`docs/design/ADVENTURE.md`). All six are playable, alone with bot pups or in online co-op. |
 
 ### Controls
 | Key | Action |

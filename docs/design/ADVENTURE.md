@@ -54,6 +54,17 @@ one class kit (§5). The finale is the Vac-Tank.
     barks?: string[];                          // one-liners shown/spoken when the step starts
   }
   ```
+  A2 added optional, backward-compatible fields (documented in the `chapters.ts` header):
+  - `start.y` (an elevated start: humans up there, pups on the ground below) and `pups` (pup kits, featured first);
+  - `reach.params.minY` / `maxY` (feet on the roof, not in the room below) and `interact.params.minY` / `item`;
+  - `ChapterStep.vehicles` (karts parked for a step, re-parked after a wreck), `raise` (barricades raised when the step
+    completes) and `rally` (where the squad regroups);
+  - `ADVENTURE_ITEM_IDS` = catnip, tennis_ball (append only).
+
+  After 120 s on one step, the human-only rules (vehicle, airborne, roof height) relax, so no player is stuck without
+  the kit.
+- **As built** (Wave 4): all six chapters. Row 6's "take the RC plane" is a `reach { vehicle: true }` at the hangar pad:
+  E at the hangar vends the plane and E at the plane boards it.
 - **State** `sim.state.adventure`: `{ chapter, step, phase: 'briefing'|'live'|'complete'|'failed', progress,
   counters, startTick, checkpoint }`. It is folded into `MatchState` (`objective` text; `wave` = step index + 1;
   `timeLeft` = survive countdown).

@@ -23,7 +23,11 @@
 // else the runner uses it (also at the Ordnance Kiosk) · collect: one item each (by rank) · defeat/destroy: walk to
 // the nearest target (breachers mine a destructible) · a stealth step with a human and no alarm yet: they hang back
 // at the rally point so the human leads · briefing / result: they gather at the rally point. Chapter cats spawned
-// as sentries (stealth steps) pace their loop (goal 'post') until the alarm turns them into hunters.
+// as sentries (stealth steps) walk their loop (goal 'post', `walk`) until the alarm turns them into hunters.
+// A2 destroy steps: a destructible their weapon can hurt (hitscan on a prop that takes shots; an explosive lob on one
+// that takes blasts) becomes the bot's prop target (`prop`): with nobody to fight, the brain stops in a standoff band
+// (propMin..propMax: explosives keep 6.5 m off their own splash) and shoots it (brain.ts propShot). Props that only
+// take a Dig Charge (the breach wall) are still walked up to and mined.
 import type { Sim } from '../sim';
 import type { SimEntity } from '../entity';
 import { Btn } from '../../shared/input';
@@ -38,6 +42,9 @@ import { abilityEntities } from '../combat/ability-core';
 import { objectiveState, interactRuntime, interactConfig } from '../interact';
 import { coreRushConfig, coreRushPads, type CorePadInfo } from '../match/core-rush';
 import { KIOSK_PROMPT } from '../../shared/content/chapters';
+import { WEAPONS, type WeaponId } from '../../shared/content/weapons';
+import { BREACH, DESTRUCT_KINDS, destructDistance } from '../../shared/world/destructibles';
+import type { Destructible } from '../../shared/world/world-types';
 import {
   SENTRY_DWELL, adventureChapter, adventureItems, adventureState, adventureStep, adventureTargets, isAdventureMode, squadHasHuman,
 } from '../adventure/state';
@@ -81,12 +88,24 @@ export interface TacticsState {
   droneLined: boolean;
   /** Cores this bot gave up on (unreachable), with the tick to retry. */
   skip: number[];
+  /**
+   * A2 adventure destroy step: the destructible to shoot (-1 = none), its aim point, the standoff band (m) the bot
+   * shoots it from, and (set by the brain) whether it is in sight and in the band, and lined up.
+   */
+  prop: EntityId;
+  px: number; py: number; pz: number;
+  propMin: number; propMax: number;
+  propSeen: boolean;
+  propLined: boolean;
+  /** Walk to the goal instead of running (sentries pacing their posts). */
+  walk: boolean;
 }
 
 export function createTactics(): TacticsState {
   return {
     lock: 0, pushUntil: 0, pushRolled: -1, pushRollAt: 0, rolledFor: -1, wallFrom: -1, wallUntil: 0, holdUntil: 0, chokeAt: 0, hopAt: 0,
     goal: '', gx: 0, gz: 0, gy: 0, gr: 0, cx: 0, cz: 0, interact: false, hold: false, kiosk: false, destroy: false, goalId: -1, goalAt: 0, goalSince: 0, drone: -1, droneLined: false, skip: [],
+    prop: -1, px: 0, py: 0, pz: 0, propMin: 0, propMax: 0, propSeen: false, propLined: false, walk: false,
   };
 }
 
@@ -131,6 +150,22 @@ function ownEntities(sim: Sim, e: SimEntity, kind: 'drone' | 'charge' | 'barrier
   let n = 0;
   for (const x of abilityEntities(sim)) if (x.abx!.owner === e.id && x.abx!.kind === kind) n++;
   return n;
+}
+
+/**
+ * Adventure destroy step: is the bot close enough to its destructible for a Dig Charge at its feet to do the job, and
+ * is none of its own charges already there? A2: measured to the prop's nearest face (X1's breach reach, with margin),
+ * not to its anchor, and a charge the bot left elsewhere no longer blocks this one (the oldest fizzles).
+ */
+function chargeFits(sim: Sim, e: SimEntity, t: TacticsState): boolean {
+  const p = sim.entities.get(t.goalId);
+  const def = (p as { dsx?: { def?: Destructible } } | undefined)?.dsx?.def;
+  if (!def) return Math.hypot(t.cx - e.pos.x, t.cz - e.pos.z) < 3.5 && ownEntities(sim, e, 'charge') === 0;
+  if (destructDistance(def, e.pos.x, e.pos.y + 0.3, e.pos.z) > BREACH.reach - 0.5) return false;
+  for (const x of abilityEntities(sim)) {
+    if (x.abx!.owner === e.id && x.abx!.kind === 'charge' && destructDistance(def, x.pos.x, x.pos.y + 0.3, x.pos.z) < BREACH.reach) return false;
+  }
+  return true;
 }
 
 /** A narrow passage: few open directions, but open on two opposite sides. */
@@ -206,7 +241,7 @@ export function abilityIntent(sim: Sim, e: SimEntity, t: TacticsState, a: Archet
     }
     case 'charge': {
       // adventure destroy step: plant one next to the destructible (its fuse or a passing cat sets it off)
-      if (t.goal === 'step' && t.destroy && Math.hypot(t.cx - e.pos.x, t.cz - e.pos.z) < 3.5 && ownEntities(sim, e, 'charge') === 0) { out.press = true; break; }
+      if (t.goal === 'step' && t.destroy && chargeFits(sim, e, t)) { out.press = true; break; }
       if (k.mode === 'cover' && k.target && k.dist < 18) { out.press = roll(sim, a, 0.05); break; }
       if (k.mode === 'engage' && k.visible && k.target && k.dist < 16) {
         // an enemy closing in, or trading shots up close: mine the ground it has to cross
@@ -353,7 +388,7 @@ export function updateObjectiveGoal(sim: Sim, e: SimEntity, t: TacticsState, g: 
   t.goalAt = sim.tick + 30;
   const prev = t.goal, prevId = t.goalId;
   t.goal = '';
-  t.kiosk = false; t.destroy = false;
+  t.kiosk = false; t.destroy = false; t.walk = false; t.prop = -1;
   if (isAdventureMode(sim)) { adventureGoal(sim, e, t, g, chars, prev, prevId); return; }
   if (e.combat?.pve || e.kind !== EntityKind.Bot) return;
   const hpFrac = e.health ? e.health.hp / e.health.max : 1;
@@ -496,9 +531,41 @@ function sentryPost(sim: Sim, e: SimEntity, t: TacticsState): void {
     if (s.until === 0) s.until = sim.tick + Math.round((SENTRY_DWELL[0] + sim.rng() * (SENTRY_DWELL[1] - SENTRY_DWELL[0])) * 60);
     else if (sim.tick >= s.until && n > 1) { s.i = (s.i + 1) % n; s.until = 0; }
   }
-  t.goal = 'post'; t.interact = false; t.hold = false;
+  t.goal = 'post'; t.interact = false; t.hold = false; t.walk = true;
   t.gx = s.route[s.i * 2]; t.gz = s.route[s.i * 2 + 1]; t.cx = t.gx; t.cz = t.gz; t.gr = 0.6; t.gy = e.pos.y;
   t.goalId = -9;
+}
+
+/**
+ * A2: walk up to a destructible on the bot's own side of it: the walkable cell by its face nearest the bot (a breach
+ * wall is reachable from the alley and from inside; its anchor's nearest cell could be on the far side).
+ */
+function approachProp(t: TacticsState, g: NavGrid, e: SimEntity, p: SimEntity): void {
+  const def = (p as { dsx?: { def?: Destructible } }).dsx?.def;
+  if (!def) return;
+  const d = destructDistance(def, e.pos.x, e.pos.y + 0.5, e.pos.z, near);
+  if (d < 1e-3) return;
+  const k = Math.min(1, 1.1 / d);
+  const c = nearestWalkable(g, near.x + (e.pos.x - near.x) * k, near.z + (e.pos.z - near.z) * k, 2);
+  if (c >= 0) { t.gx = cellX(g, c); t.gz = cellZ(g, c); }
+}
+const near = { x: 0, y: 0, z: 0 };
+
+/**
+ * A2: can this bot's weapon hurt the destructible `p`, and from how far? Hitscan (not charged) on a prop that takes
+ * shots; an explosive lob on a prop that takes full blasts. Sets the prop target (aim point = its center).
+ */
+function propTarget(e: SimEntity, t: TacticsState, p: SimEntity): void {
+  const def = (p as { dsx?: { def?: Destructible } }).dsx?.def;
+  const w = e.wpn ? WEAPONS[e.wpn.id as WeaponId] : null;
+  if (!def || !w) return;
+  const rule = DESTRUCT_KINDS[def.kind];
+  const lob = w.kind === 'projectile' && (w.projectile?.explodeRadius ?? 0) > 0;
+  if (lob ? rule.blastMult < 1 : w.kind !== 'hitscan' || w.chargeTime > 0 || rule.shotMult <= 0) return;
+  t.prop = p.id;
+  t.px = def.cx; t.py = def.cy; t.pz = def.cz;
+  t.propMin = lob ? 6.5 : 0;
+  t.propMax = lob ? 24 : Math.min(18, w.range * 0.8);
 }
 
 /** Adventure goals (see the header). Negative goal ids name zones, positive ones the entity walked to. */
@@ -551,7 +618,7 @@ function adventureGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, char
       for (const x of targets) { const d = Math.hypot(x.pos.x - e.pos.x, x.pos.z - e.pos.z); if (d < bd) { bd = d; best = x; } }
       if (!best) break;
       pointGoal(sim, t, g, best.pos.x, best.pos.z, best.id, prev, prevId);
-      if (tr.type === 'destroy') { t.destroy = true; t.gr = 2.5; }
+      if (tr.type === 'destroy') { t.destroy = true; t.gr = 2.5; propTarget(e, t, best); approachProp(t, g, e, best); }
       return;
     }
     case 'survive':

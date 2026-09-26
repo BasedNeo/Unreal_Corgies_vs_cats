@@ -107,10 +107,13 @@ export function spawnChapterCat(sim: Sim, rt: AdventureRuntime, s: SpawnSpec, n:
   return e;
 }
 
-/** A collect item at a spot (EntityKind.Prop snapshot convention: src/shared/content/chapters.ts). */
-export function spawnItem(sim: Sim, rt: AdventureRuntime, item: string, spot: number, x: number, z: number): SimEntity {
+/**
+ * A collect item at a spot (EntityKind.Prop snapshot convention: src/shared/content/chapters.ts), on the highest
+ * surface up to `top` (default: 2 m over the ground; A2 passes a roof's height for the last tennis ball).
+ */
+export function spawnItem(sim: Sim, rt: AdventureRuntime, item: string, spot: number, x: number, z: number, top?: number): SimEntity {
   const id: EntityId = sim.allocId();
-  const y = surfaceAt(sim.worldData, x, z, sim.worldData.height(x, z) + 2).y + 0.45;
+  const y = surfaceAt(sim.worldData, x, z, top ?? sim.worldData.height(x, z) + 2).y + 0.45;
   const e: SimEntity = {
     id, kind: EntityKind.Prop, team: Team.Neutral, species: 0, cls: null, seed: ADVENTURE_ITEM_SEED, name: item,
     pos: { x, y, z }, vel: { x: 0, y: 0, z: 0 }, yaw: rt.rng() * Math.PI * 2, pitch: 0, collider: null,

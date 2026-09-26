@@ -407,6 +407,21 @@ up by their first joiner's `?mode=adventure&chapter=`).
 - **E1 boss** — the Siamese sniper elite: a laser-pointer duel mini-boss.
 - **Lead** — per-room setup (done), integration, chapter wiring, verification.
 
+**Wave 4 as built ✅**:
+- all six chapters (A1: framework and chapters 1–2; A2: chapters 3–6), bot-completable inside par, deterministic;
+- X1: destructibles (the Garage breach wall, tuna and crate stacks; nav and prediction open on a break);
+- R1: the RC plane from a neutral Rooftop Hangar;
+- E1: Madame Pointillé, the sniper elite;
+- S2: vehicle and world audio.
+
+Lead:
+- `EFlag.Stunned`, the plane HUD, `?boss=<id>`, friendly shots through your own barriers;
+- spawn facing held until the first snapshot;
+- rams (kart vs stacks, plane vs pets) and direct frisbee hits on vehicles and props;
+- Brotli precompression; e2e for core-rush and adventure from the menu.
+
+Q2 (independent verification) is next. See PROGRESS.
+
 ### Quality loop (runs forever after the slice)
 Capture bookmarks → diagnose with `game-worlds-iteration-coach` → change one thing → gate → before/after →
 `LEARNINGS.jsonl` (`game-worlds-knowledge-extractor`). Consistency check of all docs every 3 loops.

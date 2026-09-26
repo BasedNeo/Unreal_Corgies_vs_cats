@@ -4,7 +4,8 @@
 //                    out to CONE_RANGE with a dashed inner arc at CONE_CLOSE (inside it even a still corgi in tall grass
 //                    is seen); a cat that turns alerted flashes red. Gone once the alarm is up (everyone hunts).
 //   · items          collect items (chapters.ts snapshot convention): a burlap catnip sack with a leafy tuft, bobbing
-//                    over a glowing ground ring; unknown kinds draw as a glowing bundle.
+//                    over a glowing ground ring; the last tennis ball (A2: fuzzy yellow-green with its white seam);
+//                    unknown kinds draw as a glowing bundle.
 // Materials only via toon() / glow() / stylize(); every geometry here is owned and disposed by this module.
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -82,6 +83,16 @@ export function createAdventureViews(scene: THREE.Scene): AdventureViews {
   const ringGeo = new THREE.RingGeometry(0.55, 0.72, 28);
   ringGeo.rotateX(-Math.PI / 2);
   const bundleGeo = new THREE.IcosahedronGeometry(0.28, 0);
+  // A2: the last tennis ball (0.34 m: pet scale) and its seam, the classic two-lobe curve wrapped onto the ball
+  const BALL_R = 0.34;
+  const ballGeo = new THREE.SphereGeometry(BALL_R, 20, 14);
+  const seamPts: THREE.Vector3[] = [];
+  for (let i = 0; i < 48; i++) {
+    const u = (i / 48) * Math.PI * 2;
+    const v = new THREE.Vector3(0.7 * Math.cos(u) + 0.3 * Math.cos(3 * u), 0.7 * Math.sin(u) - 0.3 * Math.sin(3 * u), 0.9165 * Math.sin(2 * u));
+    seamPts.push(v.setLength(BALL_R * 1.012));
+  }
+  const seamGeo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(seamPts, true), 96, 0.022, 5, true);
   const items = new Map<number, ItemView>();
 
   const makeItem = (s: EntityState): ItemView => {
@@ -104,6 +115,11 @@ export function createAdventureViews(scene: THREE.Scene): AdventureViews {
         leaf.rotation.set(Math.sin(a) * 0.7, 0, -Math.cos(a) * 0.7);
         body.add(leaf);
       }
+      stylize(body, { creases: false });
+    } else if (kind === 'tennis_ball') {
+      body.add(new THREE.Mesh(ballGeo, toon({ color: PALETTE.tennisBall })));
+      body.add(new THREE.Mesh(seamGeo, toon({ color: PALETTE.catWhite })));
+      body.rotation.z = 0.35;
       stylize(body, { creases: false });
     } else {
       body.add(new THREE.Mesh(bundleGeo, glow(PALETTE.accentHot, 1.8)));
@@ -161,7 +177,7 @@ export function createAdventureViews(scene: THREE.Scene): AdventureViews {
     stats() { return { cones: cones.size, items: items.size }; },
     dispose() {
       group.removeFromParent();
-      for (const g of [coneGeo, sackGeo, neckGeo, twineGeo, leafGeo, patchGeo, ringGeo, bundleGeo]) g.dispose();
+      for (const g of [coneGeo, sackGeo, neckGeo, twineGeo, leafGeo, patchGeo, ringGeo, bundleGeo, ballGeo, seamGeo]) g.dispose();
       calm.dispose(); hot.dispose();
       cones.clear(); items.clear();
     },

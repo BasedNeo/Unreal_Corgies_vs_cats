@@ -4,7 +4,7 @@
 import type { Sim } from '../sim';
 import type { SimEntity } from '../entity';
 import { EntityKind, Team, type EntityId } from '../../shared/types';
-import type { ChapterDef, ChapterStep, AdventurePhase, Medal } from '../../shared/content/chapters';
+import type { ChapterBarricade, ChapterDef, ChapterStep, ChapterVehicle, AdventurePhase, Medal } from '../../shared/content/chapters';
 
 /** sim.state.adventure — plain data, read by the match fold, bots, tools and tests. */
 export interface AdventureState {
@@ -40,6 +40,8 @@ export interface AdventureState {
   x: number; y: number; z: number;
   /** Squad rally point: the chapter start, then the last target the squad reached (checkpoint restarts here). */
   anchorX: number; anchorZ: number;
+  /** A2: the rally point's elevated feet height for humans (a roof), -1 = on the ground. Pups use the ground below. */
+  anchorY: number;
   /** Hold progress is contested (cats in the zone). */
   contested: boolean;
 }
@@ -99,7 +101,9 @@ export interface CheckpointEnemy {
 export interface CheckpointSnap {
   step: number;
   counters: Record<string, number>;
-  anchorX: number; anchorZ: number;
+  anchorX: number; anchorZ: number; anchorY: number;
+  /** A2: barricades standing at the checkpoint (they stand again, at full health, on a restart). */
+  barricades: ChapterBarricade[];
   enemies: CheckpointEnemy[];
   /** Destructibles already counted as broken at the checkpoint. */
   broken: EntityId[];
@@ -146,6 +150,12 @@ export interface AdventureRuntime {
   placedTick: number;
   setup: boolean;
   rng: () => number;
+  /** A2: vehicles the chapter parked (by step), the entity (-1 = none yet) and when it went missing (-1 = present). */
+  vehicles: Array<{ step: number; spec: ChapterVehicle; id: EntityId; goneTick: number }>;
+  /** A2: barricades raised so far (entity per spot). */
+  barricades: Array<{ spot: ChapterBarricade; id: EntityId }>;
+  /** A2: squad bots already given the chapter's pup kit. */
+  kitted: Set<EntityId>;
 }
 
 const runtimes = new WeakMap<Sim, AdventureRuntime>();

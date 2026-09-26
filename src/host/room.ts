@@ -501,7 +501,10 @@ export class Room {
     this.rosterDirty = false;
     this.rosterTimer = 0;
     const players: RosterEntry[] = [...this.players.values()].map((p) => ({
-      pid: p.pid, name: p.name, team: p.team, cls: p.cls, entity: p.entity, bot: p.bot,
+      pid: p.pid, name: p.name, team: p.team,
+      // A2: adventure chapters re-kit their pups in the sim; show the kit the entity has
+      cls: p.bot ? ((this.sim.entities.get(p.entity)?.cls as ClassId | null | undefined) ?? p.cls) : p.cls,
+      entity: p.entity, bot: p.bot,
       kills: p.kills, deaths: p.deaths, score: p.score, ping: p.ping,
     }));
     this.broadcast({ t: 'roster', players });
