@@ -117,6 +117,13 @@ export class NetClient {
   readonly debug: Record<string, unknown> = {};
 
   private snaps: Snapshot[] = [];
+  /**
+   * interpolated() reuses its Map and one state object per entity (no per-frame allocations, QA W1 P2). The result
+   * is valid until the next call; consumers keep scalars (e.g. previous hp), never last frame's objects.
+   */
+  private frameOut = new Map<number, EntityState>();
+  private framePool = new Map<number, EntityState>();
+  private framesSincePrune = 0;
   private outbox: InputCmd[] = [];
   private readonly now: () => number;
   private readonly redundancy: number;
@@ -272,9 +279,16 @@ export class NetClient {
 
   /** Interpolated states of all entities at render time; the local player is predicted when possible. */
   interpolated(nowMs = this.now()): Map<number, EntityState> {
-    const out = new Map<number, EntityState>();
+    const out = this.frameOut;
+    out.clear();
     const n = this.snaps.length;
     if (!n) return out;
+    const pool = this.framePool;
+    const slot = (id: number, src: EntityState): EntityState => {
+      let o = pool.get(id);
+      if (o) Object.assign(o, src); else { o = { ...src }; pool.set(id, o); }
+      return o;
+    };
     const t = this.renderTime(nowMs) * this.tickHz;
     const last = this.snaps[n - 1];
     this.stats.renderedFrames++;
@@ -284,7 +298,11 @@ export class NetClient {
       this.stats.extrapolating = t > last.tick;
       if (this.stats.extrapolating) this.stats.extrapolatedFrames++;
       for (const [id, s] of last.ents) {
-        out.set(id, dt > 0 && !(s.flags & EFlag.Dead) ? { ...s, x: s.x + s.vx * dt, y: s.y + s.vy * dt, z: s.z + s.vz * dt } : s);
+        if (dt > 0 && !(s.flags & EFlag.Dead)) {
+          const o = slot(id, s);
+          o.x = s.x + s.vx * dt; o.y = s.y + s.vy * dt; o.z = s.z + s.vz * dt;
+          out.set(id, o);
+        } else out.set(id, s);
       }
     } else {
       this.stats.extrapolating = false;
@@ -298,18 +316,22 @@ export class NetClient {
         for (const [id, sb] of b.ents) {
           const sa = a.ents.get(id);
           if (!sa || Math.hypot(sb.x - sa.x, sb.y - sa.y, sb.z - sa.z) > TELEPORT_DISTANCE) { out.set(id, sb); continue; }
-          out.set(id, {
-            ...sb,
-            x: lerp(sa.x, sb.x, f), y: lerp(sa.y, sb.y, f), z: lerp(sa.z, sb.z, f),
-            yaw: lerpAngle(sa.yaw, sb.yaw, f), pitch: lerp(sa.pitch, sb.pitch, f),
-            vx: lerp(sa.vx, sb.vx, f), vy: lerp(sa.vy, sb.vy, f), vz: lerp(sa.vz, sb.vz, f),
-          });
+          const o = slot(id, sb);
+          o.x = lerp(sa.x, sb.x, f); o.y = lerp(sa.y, sb.y, f); o.z = lerp(sa.z, sb.z, f);
+          o.yaw = lerpAngle(sa.yaw, sb.yaw, f); o.pitch = lerp(sa.pitch, sb.pitch, f);
+          o.vx = lerp(sa.vx, sb.vx, f); o.vy = lerp(sa.vy, sb.vy, f); o.vz = lerp(sa.vz, sb.vz, f);
+          out.set(id, o);
         }
       }
     }
     if (this.predictor?.active) {
       const base = this.latestState(this.localEntity) ?? out.get(this.localEntity);
       if (base) out.set(this.localEntity, this.predictor.renderState(base, nowMs));
+    }
+    // entity ids churn (projectiles): drop pooled objects for entities that left, every couple of seconds
+    if (++this.framesSincePrune >= 120) {
+      this.framesSincePrune = 0;
+      for (const id of pool.keys()) if (!last.ents.has(id)) pool.delete(id);
     }
     return out;
   }
