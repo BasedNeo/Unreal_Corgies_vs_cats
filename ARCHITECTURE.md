@@ -27,7 +27,7 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
                                    listeners for layers that import combat: addBlastListener (blasts, after characters)
                                    and addProjectileHitListener (non-explosive direct hits on a collider: vehicles,
                                    destructibles); friendlyShotPass lets a team's shots through its own barriers/drones
-  ai/                              brain (HFSM, perception, aim), archetypes, nav (1 m grid A*)
+  ai/                              brain (HFSM, perception, aim), archetypes, nav (1 m grid A* + N1 decks)
   match/                           yard-skirmish (waves) · team-deathmatch
   vehicles/  boss/                 Wave 2 lanes (Mower Kart + terminals; Vac-Tank boss) · boss/ also the sniper elite
                                    (E1: sniper.ts perches/dot/shot/leaps, hairball.ts shared lob); ?boss=<id> → Room
@@ -41,6 +41,11 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
                                    sentries, stealth alarm, checkpoints with fail forward, MatchState/beacon fold);
                                    A2 props.ts: pup kits per chapter, parked karts, barricades (lasting barrier walls)
   ai/brain.ts propShot · tactics   A2: bots shoot a destroy step's props (propTarget), sentries walk their posts
+  ai/nav-links.ts                  N1 bots climb: decks (elevated nav grids: garage roof, crow's nest) + links (ROOF_ROUTES
+                                   climbs/descents, stepping stones, drops), validated per movement profile with the real
+                                   stepCharacter in a cropped scratch world; cross-grid planner; leg controller (legStep)
+  ai/brain.ts steerTo(…, gy)       plans across grids via links, runs a link leg by leg; perch goal (holdPerch, auto for
+                                   marksman room bots in TDM / yard-skirmish)
   destruct/                        X1 breakable props (EntityKind.Destructible), order 505: breaching fuse, hitscan
                                    damage, blasts via explode()'s blast listeners; break/restore toggles colliders and
                                    nav blockers (ai/nav.ts per-sim dynamic blockers); mirrorDestructibles (prediction)

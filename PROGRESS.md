@@ -24,6 +24,8 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 | W3 K1 character polish | ✅ merged | silhouette distance 0.033 → 0.122; 24/24 kits in budget; `9d8b11f` |
 | W3 lead M1 Ear Glide · M2 buff bits | ✅ | prediction parity 0 cm while gliding; Zoomies+ corrections 1182 → ≤ 2 |
 | Deploy prep (not deployed) | ✅ | docs/ops/DEPLOY.md; bundled server runs on an --omit=dev install |
+| W5 N1 bots climb (nav links) | ✅ merged | 12 tests; perch from base 21–25 s (4 seeds, < 60); 14/15 links valid × 6 profiles, every leg replayed in a real Sim; misses → retry → other route → ground (stuck ≤ 1.5 s); 28-char tick p95 1.43 ms; soak PASS 5 modes (stuck max 1 s, p95 ≤ 1.26 ms) |
+| Q2 Wave 4 verification | ✅ | docs/qa/W4_VERIFICATION.md at `a5177fd`: 76/100 (R 82 · I 70 · F 74), gate PASS; P1-1 fixed `ad28d0f`; P2s queued |
 | W4 A2 adventure chapters 3–6 | ✅ merged + wired | 24 new tests; bot-only squads, 6 seeds, all complete inside par, deterministic: ch3 42–63 s / 120, ch4 87–97 s / 180, ch5 74–79 s / 160, ch6 165–186 s / 360; runner ≤ 0.027 ms/tick; artifacts/a2-*.png |
 | W4 S2 vehicle + world audio | ✅ merged | 19 new audio tests; kart putt-putt + plane prop loops (≤ 4, nearest first, 0 allocs/update), vehicle and break voices, adventure step jingle + chapter fanfare; nothing clips (peak 0.825), engines 5–6.6 dB under a shot |
 | W4 A1 adventure framework + ch1–2 | ✅ merged + wired | 32 tests; ch1 bots 52 s (first objective 19 s), ch2 bots 80 s, deterministic; runner ~0.03 ms/tick; artifacts/a1-*.png |
@@ -205,14 +207,17 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 - Combat knockback is not predicted → occasional smoothed corrections > 0.5 m in live soaks (L4).
 - Offline play downloads Rapier twice (worker + prediction chunk), ~3.75 MB gz total (L4).
 - Client world build blocks the main thread ~1.3 s at load (L2).
-- Bots treat decks/roofs as obstacles; Warden bots weak in the open (L3).
+- Warden bots weak in the open (L3); the corgi porch deck and the shed roof have no nav links yet (no goal needs them)
+  (N1).
 - Proposed contract additions (L3): archetype on EntityState, weapon on `death`, `MatchState.enemiesLeft`.
 - `EntityState.cls` carries content indexes through `CLASS_IDS`: 6 entries per content table at most (S1, B1).
-- Bots don't climb to the Rooftops perches (they fight in the Garage fine) (D3/C2).
+- Bots climb to The Rooftops (N1): Overwatch room bots hold perches in TDM and yard-skirmish. Link validation costs
+  45–100 ms once per movement profile, on first need (a start-of-match hitch, not in p95).
 - Ability entities: shotgun damage to drones/barriers is estimated from the first pellet (C2).
 - Adventure (A1/A2):
-  - bots shoot adventure props and breach with Dig Charges, but still don't drive, fly or climb (waived for a bot-only
-    squad; humans get a 120 s grace);
+  - bots shoot adventure props and breach with Dig Charges. They climb when a goal sets a roof height (N1), but the
+    ch4/ch6 roof steps still waive `minY` for bot-only squads until the tactics snippet in `docs/handoff/N1.md` §4.1
+    lands. They don't drive or fly yet (B2). Humans get a 120 s grace;
   - ch6 step 1 needs a Skyraider. Joining a listed adventure room now takes the chapter's kit (`096be58`); a joiner
     who types the room name by hand keeps their kit and waits out the grace.
   - ch5's difficulty for humans is unknown (bots never wipe);

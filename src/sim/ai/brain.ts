@@ -16,6 +16,13 @@
 // Class abilities and objective play (Upgrade Cores, the objective chain) are decided in tactics.ts.
 // Adventure (A2): with nobody to fight, a bot whose tactics picked a prop target (a tuna stack in a destroy step)
 // holds a standoff spot and shoots it (propShot); sentries walk their posts (tac.walk).
+// Climbing (N1, nav-links.ts): a goal on a deck (a roof) or a bot standing on one is planned across grids through
+// validated links (climb routes, stepping stones, drops); the bot runs a link leg by leg (legStep: hops, double jumps,
+// held Jump), retries a missed hop once, then marks the link costly (it takes the other route or gives up); a bot
+// shot on a link abandons it (contested). While on a link nothing else moves it (no strafing, detours, separation,
+// aim-walk or random hops). Perches (N1): a bot told to hold one (holdPerch; marksman room bots in TDM and
+// yard-skirmish pick an unclaimed WorldData perch by themselves) climbs there and holds it: from the perch it snipes
+// without chasing, retreating or regrouping.
 import type { Sim } from '../sim';
 import type { SimEntity } from '../entity';
 import { Btn, type InputCmd } from '../../shared/input';
@@ -27,11 +34,16 @@ import { ABILITIES, abilityDef } from '../../shared/content/abilities';
 import { combatBus, ensureCombat, equipWeapon, eyeHeight, characterHeight, isStealthed } from '../combat/state';
 import { worldLineClear } from '../combat/geometry';
 import { ARCHETYPES, archetypeForClass, type Archetype, type ArchetypeId } from './archetypes';
-import { type NavGrid, cellX, cellZ, findPath, lineWalkable, nearestWalkable, randomCell } from './nav';
+import { type NavGrid, cellIndex, cellX, cellZ, findPath, isWalkable, lineWalkable, nearestWalkable, randomCell } from './nav';
+import {
+  CONTEST_PENALTY, MISS_PENALTY, type LegOut, type NavBot, type NavLinkSet, type NavSpot, type ProfileLinks, clearMiss, countMiss,
+  createNavBot, gridOf, legStep, locate, navLinksFor, penalize, planNav, profileLinks, resetLegRun,
+} from './nav-links';
 import { concealLevel, concealRevealRange, weatherSightMult } from '../world/env';
 import { abilityEntities, friendlyShotPass } from '../combat/ability-core';
 import { DRONE } from '../combat/ability-tuning';
 import { destructDistance } from '../../shared/world/destructibles';
+import { surfaceAt } from '../../shared/world/queries';
 import type { Destructible } from '../../shared/world/world-types';
 import {
   abilityIntent, buddyInTrouble, createTactics, objectiveInteract, pushBand, raiderAir, skipGoal, updateObjectiveGoal, type TacticsState,
@@ -92,6 +104,25 @@ export interface AiState {
   out: InputCmd;
   /** Ability and objective tactics (tactics.ts). */
   tac: TacticsState;
+  /** N1: the grid `path` was planned on (the ground grid or a deck); link runner + plan cache; the perch to hold. */
+  pathGrid: NavGrid | null;
+  nav: NavBot;
+  perch: PerchGoal | null;
+  /** Next tick a marksman room bot looks for a perch. */
+  perchNext: number;
+}
+
+/** N1: a spot a bot climbs to and holds (feet position, facing yaw). */
+export interface PerchGoal {
+  id: string;
+  x: number; y: number; z: number;
+  yaw: number;
+  /** Picked by the bot itself (marksman room bots) rather than told (holdPerch). */
+  auto: boolean;
+  /** Tick it was set / first reached (-1 = not yet); unreachable: plain patrol until pauseUntil, then try again. */
+  since: number;
+  reachedAt: number;
+  pauseUntil: number;
 }
 
 declare module '../entity' {
@@ -123,6 +154,7 @@ export function createBrain(arch: ArchetypeId, yaw: number): AiState {
     detourUntil: 0, detourX: 0, detourZ: 0, coverCooldown: 0, wasDead: false, jumpNext: false, seq: 0, external: false,
     out: { seq: 0, mx: 0, mz: 0, yaw, pitch: 0, buttons: 0, rt: 0 },
     tac: createTactics(),
+    pathGrid: null, nav: createNavBot(), perch: null, perchNext: 0,
   };
 }
 
@@ -250,32 +282,48 @@ function perceive(sim: Sim, e: SimEntity, ai: AiState, a: Archetype, ctx: AiCont
 
 const mv = { x: 0, z: 0, sprint: false };
 
-function requestPath(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, gx: number, gz: number): void {
-  if (!ctx.grid || ctx.pathBudget <= 0 || sim.tick < ai.detourUntil) return;
+function requestPath(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, g: NavGrid, gx: number, gz: number): void {
+  if (ctx.pathBudget <= 0 || sim.tick < ai.detourUntil) return;
   ctx.pathBudget--;
-  findPath(ctx.grid, e.pos.x, e.pos.z, gx, gz, ai.path);
+  findPath(g, e.pos.x, e.pos.z, gx, gz, ai.path);
+  ai.pathGrid = g;
   ai.pathIdx = 0;
   ai.pathGX = gx; ai.pathGZ = gz;
   ai.repathTick = sim.tick + 150 + (e.id % 30);
 }
 
-/** Desired move direction toward (gx, gz) along the nav path. Returns remaining distance. */
-function steerTo(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, gx: number, gz: number, moving: boolean): number {
-  const g = ctx.grid!;
+/**
+ * Desired move direction toward (gx, gz) along the nav path. Returns remaining distance. `gy` (N1): the goal's feet
+ * height when it may stand on a deck (a roof perch); a goal on another grid, or a bot standing on a deck, is steered
+ * through the link layer (linkSteer); everything else takes the ground grid exactly as before.
+ */
+function steerTo(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, gx: number, gz: number, moving: boolean, gy = NaN): number {
+  const d = linkSteer(sim, e, ai, ctx, gx, gy, gz, moving);
+  if (d >= 0) return d;
+  return steerOn(sim, e, ai, ctx, ctx.grid!, gx, gz, moving);
+}
+
+/** Path following on one grid (the ground grid, or the deck the bot stands on). */
+function steerOn(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, g: NavGrid, gx: number, gz: number, moving: boolean): number {
   const dist = Math.hypot(gx - e.pos.x, gz - e.pos.z);
   mv.x = 0; mv.z = 0;
   if (dist < 0.6) return dist;
+  if (ai.pathGrid !== g) { ai.path.length = 0; ai.pathGrid = g; }
   const stale = !ai.path.length || Math.hypot(gx - ai.pathGX, gz - ai.pathGZ) > (moving ? 3 : 1.5) || sim.tick >= ai.repathTick;
   if (stale) {
     if (dist < 25 && lineWalkable(g, e.pos.x, e.pos.z, gx, gz, true)) {
       ai.path.length = 0; ai.path.push(gx, gz); ai.pathIdx = 0; ai.pathGX = gx; ai.pathGZ = gz; ai.repathTick = sim.tick + 45;
-    } else requestPath(sim, e, ai, ctx, gx, gz);
+    } else requestPath(sim, e, ai, ctx, g, gx, gz);
   }
   let tx = gx, tz = gz;
   if (ai.path.length) {
     while (ai.pathIdx < ai.path.length / 2 - 1) {
       const wx = ai.path[ai.pathIdx * 2], wz = ai.path[ai.pathIdx * 2 + 1];
       if (Math.hypot(wx - e.pos.x, wz - e.pos.z) > 0.8) break;
+      // pass a waypoint only once the next one is in a straight walkable line from here: heading for it from up to
+      // 0.8 m off the path clipped round obstacles (the trampoline), where the character controller can deadlock (N1)
+      const n = ai.pathIdx + 1;
+      if (!lineWalkable(g, e.pos.x, e.pos.z, ai.path[n * 2], ai.path[n * 2 + 1])) break;
       ai.pathIdx++;
     }
     tx = ai.path[ai.pathIdx * 2]; tz = ai.path[ai.pathIdx * 2 + 1];
@@ -296,6 +344,173 @@ function steerTo(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, gx: number
 /** Can the bot step ~1 m in direction (dx, dz)? */
 function openAhead(g: NavGrid, e: SimEntity, dx: number, dz: number): boolean {
   return lineWalkable(g, e.pos.x, e.pos.z, e.pos.x + dx * 1.1, e.pos.z + dz * 1.1);
+}
+
+// ---------------------------------------------------------------- N1: links, decks, perches
+
+const navOut: LegOut = { x: 0, z: 0, buttons: 0 };
+const here: NavSpot = { grid: -1, cell: -1 };
+/** A grounded bot this far over the ground grid stands on something (a deck, a crate stack): it plans across grids. */
+const ELEV = 1.5;
+/** Unreachable perch (no clean route): patrol the ground this long before trying again. */
+const PERCH_PAUSE = 20 * TICK_HZ;
+const PERCH_MODES = new Set(['team-deathmatch', 'yard-skirmish']);
+const perchPlan = { link: -1, cost: Infinity, penalty: 0 };
+
+/** Ground-grid height under (x, z). */
+function groundY(g: NavGrid, x: number, z: number): number {
+  const c = cellIndex(g, x, z);
+  return c >= 0 ? g.ground[c] : 0;
+}
+
+/** The grid the bot stands on: a deck while it is up on one, else the ground grid. */
+function hereGrid(sim: Sim, e: SimEntity, ai: AiState, g: NavGrid): NavGrid {
+  if (!ai.nav.elev) return g;
+  const set = navLinksFor(sim);
+  if (!set) return g;
+  const at = locate(set, g, e.pos.x, e.pos.y, e.pos.z, here);
+  return at.grid > 0 ? gridOf(set, g, at.grid) : g;
+}
+
+/**
+ * Steering across grids (N1). Returns the distance left (>= 0, mv written) when the link layer steered, or -1 when
+ * the plain ground-grid steering applies (bot and goal both on the ground grid: the unchanged fast path).
+ */
+function linkSteer(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, gx: number, gy: number, gz: number, moving: boolean): number {
+  const nb = ai.nav, g0 = ctx.grid!;
+  if (e.flags & EFlag.Mounted) { if (nb.link >= 0) endLink(ai); return -1; }   // seated: the vehicle moves it
+  const elevGoal = Number.isFinite(gy) && gy - groundY(g0, gx, gz) > ELEV;
+  if (nb.link < 0 && !nb.elev && !elevGoal) return -1;
+  const set = e.char ? navLinksFor(sim) : null;
+  if (!set) return -1;
+  const prof = profileLinks(sim, set, e.char!.move);
+  if (nb.link >= 0) return runLink(sim, e, ai, set, prof);
+  // an elevated goal stands on the surface under it (a zone's minY floor is below its roof)
+  const goalY = !elevGoal ? groundY(g0, gx, gz) : Math.max(gy, surfaceAt(sim.worldData, gx, gz, gy + 1).y);
+  if (sim.tick - nb.planTick > 90 || Math.hypot(gx - nb.planGX, gz - nb.planGZ) > 1.5 || Math.abs(goalY - nb.planGY) > 1) {
+    planNav(set, prof, g0, e.pos.x, e.pos.y, e.pos.z, gx, goalY, gz, nb.pen, sim.tick, nb.plan);
+    nb.planTick = sim.tick; nb.planGX = gx; nb.planGY = goalY; nb.planGZ = gz;
+  }
+  const at = locate(set, g0, e.pos.x, e.pos.y, e.pos.z, here, true);
+  if (at.grid < 0) return -1;
+  const grid = gridOf(set, g0, at.grid);
+  const L = nb.plan.link >= 0 ? set.links[nb.plan.link] : null;
+  if (!L) {
+    if (at.grid === 0 || !Number.isFinite(nb.plan.cost)) return -1;       // ground grid (or no route): as before
+    return steerOn(sim, e, ai, ctx, grid, gx, gz, moving);               // across the deck
+  }
+  const c = e.char!;
+  const dx = L.from.x - e.pos.x, dz = L.from.z - e.pos.z, d = Math.hypot(dx, dz);
+  if (at.grid === L.fromGrid && d < 2.5 && lineWalkable(grid, e.pos.x, e.pos.z, L.from.x, L.from.z)) {
+    // line up on the entry and stop on it (links are validated from rest)
+    nb.fine = sim.tick;
+    if (d < 0.45 && c.grounded && Math.abs(e.pos.y - L.from.y) < 0.4 && Math.hypot(e.vel.x, e.vel.z) < 1.5) {
+      nb.link = L.id; nb.leg = 0; resetLegRun(nb.run); nb.linkStart = sim.tick;
+      return runLink(sim, e, ai, set, prof);
+    }
+    const k = Math.min(1, (Math.sqrt(2 * c.move.groundDecel * Math.max(0, d - 0.1)) * 0.8) / c.move.runSpeed);
+    mv.x = d > 1e-3 ? (dx / d) * k : 0; mv.z = d > 1e-3 ? (dz / d) * k : 0;
+    return Math.max(2, nb.plan.cost);
+  }
+  steerOn(sim, e, ai, ctx, grid, L.from.x, L.from.z, moving);
+  return Math.max(2, nb.plan.cost);
+}
+
+/** One tick of the link the bot is on: the leg controller drives mv + Jump; misses and contested links end it. */
+function runLink(sim: Sim, e: SimEntity, ai: AiState, set: NavLinkSet, prof: ProfileLinks): number {
+  const nb = ai.nav, L = set.links[nb.link], params = prof.params[nb.link];
+  nb.fine = sim.tick;
+  nb.linkTick = sim.tick;
+  mv.x = 0; mv.z = 0;
+  if (!params) { endLink(ai); return 2; }
+  if (e.health && e.health.lastDamageTick > nb.linkStart) {
+    // contested: shot while climbing — give the link up for a while and fight from here (the ground, soon)
+    nb.contested++;
+    penalize(nb, L.id, sim.tick, CONTEST_PENALTY);
+    endLink(ai);
+    return 2;
+  }
+  const from = nb.leg === 0 ? L.from : L.legs[nb.leg - 1];
+  const res = legStep(e, from, L.legs[nb.leg], params[nb.leg], nb.run, navOut);
+  mv.x = navOut.x; mv.z = navOut.z; nb.buttons = navOut.buttons;
+  if (res === 1) {
+    if (++nb.leg >= L.legs.length) { nb.done++; clearMiss(nb, L.id); endLink(ai); } else resetLegRun(nb.run);
+  } else if (res === -1) {
+    // a missed hop: the next plan retries the link once; a second miss marks it costly (fall back)
+    nb.misses++;
+    if (countMiss(nb, L.id) >= 2) { clearMiss(nb, L.id); penalize(nb, L.id, sim.tick, MISS_PENALTY); nb.fallbacks++; }
+    endLink(ai);
+  }
+  return Math.max(2, nb.plan.cost);
+}
+
+function endLink(ai: AiState): void {
+  ai.nav.link = -1;
+  ai.nav.planTick = -9999;
+  ai.path.length = 0;
+}
+
+/** On the perch it holds (reached, within 2 m, same level)? */
+function isPerched(sim: Sim, e: SimEntity, ai: AiState): boolean {
+  const p = ai.perch;
+  return !!p && p.reachedAt >= 0 && sim.tick >= p.pauseUntil && Math.hypot(p.x - e.pos.x, p.z - e.pos.z) < 2 && Math.abs(p.y - e.pos.y) < 0.6;
+}
+
+/** Patrol toward / hold the perch. Returns the yaw to look along (NaN = the move direction). */
+function perchPatrol(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext): number {
+  const p = ai.perch!, c = e.char!;
+  const dx = p.x - e.pos.x, dz = p.z - e.pos.z, d = Math.hypot(dx, dz), dy = Math.abs(e.pos.y - p.y);
+  if (d < 0.9 && dy < 0.45 && c.grounded) {
+    if (p.reachedAt < 0) p.reachedAt = sim.tick;
+    mv.x = 0; mv.z = 0;
+    return p.yaw + Math.sin(sim.tick * 0.012 + e.id) * 0.55;                 // scan the perch's lanes
+  }
+  if (d < 2.5 && dy < 0.45 && ai.nav.link < 0) {
+    // on the perch's surface: straight in, braking onto the spot
+    const k = Math.min(1, (Math.sqrt(2 * c.move.groundDecel * Math.max(0, d - 0.1)) * 0.8) / c.move.runSpeed);
+    mv.x = (dx / d) * k; mv.z = (dz / d) * k;
+    ai.nav.fine = sim.tick;
+    return NaN;
+  }
+  const left = steerTo(sim, e, ai, ctx, p.x, p.z, false, p.y);
+  mv.sprint = left > 12 && ai.nav.link < 0;
+  // no clean route (none validated, or every one marked costly after misses / getting shot): the ground for a while
+  const nb = ai.nav;
+  if (nb.planTick === sim.tick && nb.link < 0 && (!Number.isFinite(nb.plan.cost) || nb.plan.penalty > 0)) {
+    p.pauseUntil = sim.tick + PERCH_PAUSE;
+    p.reachedAt = -1;
+  }
+  return NaN;
+}
+
+/** Marksman room bots in TDM / yard-skirmish take the cheapest perch no teammate holds (checked every 4 s; not before
+ *  1 s, so building and validating the links never lands on the nav grid's build tick). */
+function autoPerch(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext): void {
+  if (ai.perch || sim.tick < ai.perchNext || sim.tick < TICK_HZ) return;
+  ai.perchNext = sim.tick + 240;
+  if (ai.arch !== 'marksman' || e.kind !== EntityKind.Bot || e.combat?.pve || ai.external || ai.tac.goal || !e.char) return;
+  const perches = sim.worldData.perches;
+  if (!perches?.length || !PERCH_MODES.has((sim.state.room as { mode?: string } | undefined)?.mode ?? '')) return;
+  const set = navLinksFor(sim);
+  if (!set) return;
+  const prof = profileLinks(sim, set, e.char.move);
+  let best: (typeof perches)[number] | null = null, bc = Infinity;
+  for (const p of perches) {
+    if (ctx.chars.some((t) => t !== e && t.team === e.team && t.ai?.perch?.id === p.id)) continue;
+    planNav(set, prof, ctx.grid!, e.pos.x, e.pos.y, e.pos.z, p.x, p.y, p.z, ai.nav.pen, sim.tick, perchPlan);
+    if (perchPlan.penalty > 0 || perchPlan.cost >= bc) continue;
+    bc = perchPlan.cost; best = p;
+  }
+  if (best) ai.perch = { id: best.id, x: best.x, y: best.y, z: best.z, yaw: best.yaw, auto: true, since: sim.tick, reachedAt: -1, pauseUntil: 0 };
+}
+
+/**
+ * N1 API: tell a bot to climb to and hold a perch (feet position; `yaw` = the facing it scans around), or clear it
+ * (null). The bot walks there in patrol when its tactics have no objective for it; see the header.
+ */
+export function holdPerch(sim: Sim, e: SimEntity, p: { id?: string; x: number; y: number; z: number; yaw?: number } | null): void {
+  const ai = ensureBrain(e);
+  ai.perch = p ? { id: p.id ?? 'perch', x: p.x, y: p.y, z: p.z, yaw: p.yaw ?? ai.yaw, auto: false, since: sim.tick, reachedAt: -1, pauseUntil: 0 } : null;
 }
 
 function pickPatrolGoal(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext): void {
@@ -421,9 +636,14 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
     ai.yaw = e.yaw; ai.pitch = 0;
     ai.lastX = e.pos.x; ai.lastZ = e.pos.z;
     setMode(sim, ai, 'patrol');
+    ai.nav.link = -1; ai.nav.elev = false; ai.nav.planTick = -9999;
+    if (ai.perch) ai.perch.reachedAt = -1;
   }
   const g = ctx.grid;
   if (!g) { inp.mx = 0; inp.mz = 0; inp.buttons = 0; inp.yaw = ai.yaw; inp.pitch = ai.pitch; return; }
+  // N1: standing on a deck / a crate stack? (only re-judged on the ground: a jump on the lawn is no deck)
+  if (e.char?.grounded) ai.nav.elev = e.pos.y - groundY(g, e.pos.x, e.pos.z) > ELEV;
+  ai.nav.buttons = 0;
   const a = ARCHETYPES[ai.arch];
   const w = e.wpn!;
   const def = WEAPONS[w.id as WeaponId];
@@ -455,12 +675,18 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   const modeAge = (sim.tick - ai.modeTick) / TICK_HZ;
 
   updateObjectiveGoal(sim, e, ai.tac, g, ctx.chars); // (re-evaluated every 0.5 s; followed in patrol)
+  if (ai.mode === 'patrol') autoPerch(sim, e, ai, ctx);
+  const perched = isPerched(sim, e, ai);
+  /** On its way to a perch it holds (not paused): it keeps going instead of chasing or investigating. */
+  const perchBound = !perched && !!ai.perch && sim.tick >= ai.perch.pauseUntil && !ai.tac.goal;
+  const hg = hereGrid(sim, e, ai, g);   // the grid under the bot (a deck while up on one) for strafe/back-off checks
   switch (ai.mode) {
     case 'patrol': {
       const t = ai.tac;
       if (t.goal) {
         // objective / Upgrade Core: walk there (straight in over the last few meters to a core), interact, hold
-        const d = steerTo(sim, e, ai, ctx, t.gx, t.gz, false);
+        // (N1: t.gy on a deck — a roof zone, the Rooftop Hangar — climbs there; with no route it walks below, as before)
+        const d = steerTo(sim, e, ai, ctx, t.gx, t.gz, false, t.goal === 'post' ? NaN : t.gy);
         if (t.goal === 'core' && d < 4.5 && d > 0.2) { mv.x = (t.gx - e.pos.x) / d; mv.z = (t.gz - e.pos.z) / d; }
         if (t.goal === 'step' && t.interact && d < 1.5) {
           // from the closest walkable cell, straight in until the point is in reach
@@ -487,6 +713,13 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
         ai.hasGoal = false;
         break;
       }
+      if (ai.perch && sim.tick >= ai.perch.pauseUntil) {
+        // N1: climb to the perch and hold it, scanning its lanes
+        const look = perchPatrol(sim, e, ai, ctx);
+        lookYaw = Number.isFinite(look) ? look : mv.x || mv.z ? Math.atan2(-mv.x, -mv.z) : lookYaw;
+        ai.hasGoal = false;
+        break;
+      }
       if (!ai.hasGoal && sim.tick >= ai.waitUntil) pickPatrolGoal(sim, e, ai, ctx);
       if (ai.hasGoal) {
         const d = steerTo(sim, e, ai, ctx, ai.goalX, ai.goalZ, false);
@@ -497,6 +730,13 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
       break;
     }
     case 'alert': {
+      if (perched || perchBound) {
+        // a sniper on (or on its way to) its perch looks toward the noise instead of going there
+        if (perchBound) perchPatrol(sim, e, ai, ctx);
+        lookYaw = Math.atan2(-(ai.alertX - e.pos.x), -(ai.alertZ - e.pos.z));
+        if (modeAge > 4) setMode(sim, ai, 'patrol');
+        break;
+      }
       const d = steerTo(sim, e, ai, ctx, ai.alertX, ai.alertZ, false);
       lookYaw = Math.atan2(-(ai.alertX - e.pos.x), -(ai.alertZ - e.pos.z));
       if (d < 2 || modeAge > 7) setMode(sim, ai, 'patrol');
@@ -509,7 +749,7 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
         setMode(sim, ai, target ? 'alert' : 'patrol');
         break;
       }
-      if (a.retreatHp > 0 && hp.hp < hp.max * a.retreatHp && ai.coverCooldown <= 0) {
+      if (a.retreatHp > 0 && hp.hp < hp.max * a.retreatHp && ai.coverCooldown <= 0 && !perched) {
         if (findCover(sim, e, ai, ctx, target.pos.x, target.pos.y + 1.1, target.pos.z)) {
           setMode(sim, ai, 'cover');
           ai.hasGoal = true;
@@ -523,7 +763,11 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
       const dx = tx - e.pos.x, dz = tz - e.pos.z;
       const dist = Math.hypot(dx, dz) || 1e-3;
       const ux = dx / dist, uz = dz / dist;
-      if (!ai.visible || dist > maxR) {
+      if (perched) {
+        // N1: snipe from the perch: no chasing, no backing off the roof
+      } else if (perchBound && (!ai.visible || dist > maxR)) {
+        perchPatrol(sim, e, ai, ctx);   // out of its band: the perch is the better spot to fight from
+      } else if (!ai.visible || dist > maxR) {
         steerTo(sim, e, ai, ctx, tx, tz, true);
         // close-range kits sprint to close the gap; ranged kits only sprint when far out of band
         mv.sprint = maxR < 12 ? dist > maxR + 2 : dist > maxR + 10 && a.adsBeyond > 0;
@@ -531,11 +775,11 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
         ai.strafeTimer -= dt;
         if (ai.strafeTimer <= 0) { ai.strafeDir = sim.rng() < 0.5 ? -1 : 1; ai.strafeTimer = rand(sim, 0.7, 1.8); }
         let sx = -uz * ai.strafeDir * a.strafe, sz = ux * ai.strafeDir * a.strafe;
-        if (!openAhead(g, e, sx, sz)) { ai.strafeDir = -ai.strafeDir; sx = -sx; sz = -sz; ai.strafeTimer = rand(sim, 0.6, 1.2); }
+        if (!openAhead(hg, e, sx, sz)) { ai.strafeDir = -ai.strafeDir; sx = -sx; sz = -sz; ai.strafeTimer = rand(sim, 0.6, 1.2); }
         let fx = 0, fz = 0;
         if (dist < minR) { fx = -ux; fz = -uz; } else if (dist > (minR + maxR) * 0.5 + 4) { fx = ux * 0.35; fz = uz * 0.35; }
-        if ((fx || fz) && !openAhead(g, e, fx, fz)) { fx = 0; fz = 0; }
-        if (!openAhead(g, e, sx, sz)) { sx = 0; sz = 0; }
+        if ((fx || fz) && !openAhead(hg, e, fx, fz)) { fx = 0; fz = 0; }
+        if (!openAhead(hg, e, sx, sz)) { sx = 0; sz = 0; }
         mv.x = sx + fx; mv.z = sz + fz;
         const l = Math.hypot(mv.x, mv.z);
         if (l > 1) { mv.x /= l; mv.z /= l; }
@@ -559,6 +803,7 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
       break;
     }
     case 'regroup': {
+      if (perched) { setMode(sim, ai, 'patrol'); break; }
       if (!ai.hasGoal) {
         let best: SimEntity | null = null, bd = Infinity;
         for (const t of ctx.chars) {
@@ -583,6 +828,13 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   // holding an objective zone: fight, investigate and take cover from inside it; use an interact step in reach
   if (ai.mode !== 'patrol') holdZone(e, ai.tac);
   buttons |= objectiveInteract(sim, e, ai.tac);
+  // N1: a link in progress runs every tick whatever the mode (a hop can't pause mid-air); nothing else moves the bot
+  if (ai.nav.link >= 0 && (e.flags & EFlag.Mounted)) endLink(ai);
+  if (ai.nav.link >= 0 && ai.nav.linkTick !== sim.tick && e.char) {
+    const set = navLinksFor(sim);
+    if (set) runLink(sim, e, ai, set, profileLinks(sim, set, e.char.move));
+  }
+  const onLink = ai.nav.fine === sim.tick;
 
   // ---- class ability (tactics.ts) and the skyraider's glide hops
   {
@@ -597,7 +849,7 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
       ai.lastSeenTick = sim.tick; ai.lkx = target.pos.x; ai.lky = target.pos.y; ai.lkz = target.pos.z;
     }
     if (intent.press) buttons |= Btn.Ability;
-    if (intent.cover && ai.mode !== 'cover' && target) {
+    if (intent.cover && ai.mode !== 'cover' && target && !perched && !onLink) {
       let ok = true;
       if (abilityDef(e.abil!.id)?.kind === 'barrier') { ai.goalX = e.pos.x; ai.goalZ = e.pos.z; } // stay behind the new wall
       else ok = findCover(sim, e, ai, ctx, target.pos.x, target.pos.y + 1.1, target.pos.z);
@@ -609,9 +861,11 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
         ai.tac.holdUntil = sim.tick + Math.round(2.5 * TICK_HZ);
       }
     }
-    const air = raiderAir(sim, e, ai.tac, ai.mode === 'patrol' && Math.hypot(mv.x, mv.z) > 0.5 && mv.sprint);
-    if (air.hop) ai.jumpNext = true;
-    buttons |= air.buttons;
+    if (!onLink) {
+      const air = raiderAir(sim, e, ai.tac, ai.mode === 'patrol' && Math.hypot(mv.x, mv.z) > 0.5 && mv.sprint);
+      if (air.hop) ai.jumpNext = true;
+      buttons |= air.buttons;
+    }
   }
 
   // ---- stuck detection (odometer while wanting to move) + recovery
@@ -622,15 +876,27 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   if (ai.checkTimer >= 0.5) {
     if (ai.wantMove && ai.odo < 0.3) ai.stuck += ai.checkTimer; else ai.stuck = 0;
     ai.checkTimer = 0; ai.odo = 0;
+    if (onLink) ai.stuck = 0;   // (a link has its own no-progress rule: legStep)
     if (ai.stuck >= 1 && ai.stuck < 1.6) ai.jumpNext = true;
     if (ai.stuck >= 1.5) {
-      // detour: walk to a random nearby open cell, then re-plan
-      const here = nearestWalkable(g, e.pos.x, e.pos.z, 4);
-      const c = randomCell(g, sim.rng, here >= 0 ? g.region[here] : -1, e.pos.x, e.pos.z, 6, 2.5);
-      if (c >= 0) { ai.detourX = cellX(g, c); ai.detourZ = cellZ(g, c); ai.detourUntil = sim.tick + 70; ai.path.length = 0; }
+      // detour: walk straight to a random nearby open cell (of the deck it stands on, if any), then re-plan; prefer
+      // one the straight line reaches (from just off the obstacle the bot is wedged against)
+      const cur = nearestWalkable(hg, e.pos.x, e.pos.z, 4);
+      // wedged in a closed cell (against an obstacle): the nearest open cell is the way out
+      const wayOut = cur >= 0 && !isWalkable(hg, e.pos.x, e.pos.z);
+      let c = wayOut ? cur : -1;
+      for (let k = 0; k < 6 && !wayOut; k++) {
+        const cand = randomCell(hg, sim.rng, cur >= 0 ? hg.region[cur] : -1, e.pos.x, e.pos.z, 6, 2.5);
+        if (cand < 0) continue;
+        if (c < 0) c = cand;
+        const cx = cellX(hg, cand), cz = cellZ(hg, cand), l = Math.hypot(cx - e.pos.x, cz - e.pos.z);
+        if (l > 1e-3 && lineWalkable(hg, e.pos.x + ((cx - e.pos.x) / l) * 0.6, e.pos.z + ((cz - e.pos.z) / l) * 0.6, cx, cz)) { c = cand; break; }
+      }
+      if (c >= 0) { ai.detourX = cellX(hg, c); ai.detourZ = cellZ(hg, c); ai.detourUntil = sim.tick + 70; ai.path.length = 0; }
       if (ai.stuck >= 3) { ai.hasGoal = false; ai.stuck = 0; if (ai.tac.goal) skipGoal(sim, ai.tac); if (ai.mode !== 'engage') setMode(sim, ai, 'patrol'); }
     }
   }
+  if (onLink) ai.detourUntil = 0;
   if (sim.tick < ai.detourUntil) {
     const dx = ai.detourX - e.pos.x, dz = ai.detourZ - e.pos.z;
     const l = Math.hypot(dx, dz);
@@ -638,19 +904,19 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   }
 
   // separation from teammates (characters pass through each other; keep squads readable)
-  for (const t of ctx.chars) {
+  if (!onLink && !perched) for (const t of ctx.chars) {
     if (t === e || t.team !== e.team) continue;
     const dx = e.pos.x - t.pos.x, dz = e.pos.z - t.pos.z;
     const d2 = dx * dx + dz * dz;
-    if (d2 > 1.2 || d2 < 1e-6) continue;
+    if (d2 > 1.2 || d2 < 1e-6 || Math.abs(t.pos.y - e.pos.y) > 1.5) continue;
     const d = Math.sqrt(d2), push = (1.1 - d) * 0.8;
-    if (openAhead(g, e, dx / d, dz / d)) { mv.x += (dx / d) * push; mv.z += (dz / d) * push; }
+    if (openAhead(hg, e, dx / d, dz / d)) { mv.x += (dx / d) * push; mv.z += (dz / d) * push; }
   }
 
   // ---- aim + trigger
   if (target && (ai.visible || sim.tick - ai.lastSeenTick < 20) && ai.mode !== 'cover') {
     const tdist = Math.hypot(target.pos.x - e.pos.x, target.pos.z - e.pos.z);
-    aiming = (tdist > a.adsBeyond || a.telegraph > 0) && !pushBand(sim, ai.tac); // a push runs in, hip-firing
+    aiming = (tdist > a.adsBeyond || a.telegraph > 0) && !pushBand(sim, ai.tac) && !onLink; // a push runs in, hip-firing; a hop runs at run speed
     const shoulder = e.ownerPid === null ? 0 : aiming ? AIM_RAY.shoulderAim : AIM_RAY.shoulderHip;
     const ia = idealAim(e, target, def, a, ai.aimHead, shoulder);
     ai.errTimer -= dt;
@@ -694,6 +960,7 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   let mx = mv.x * cy + mv.z * -sy;
   const ml = Math.hypot(mx, mz);
   if (ml > 1) { mx /= ml; mz /= ml; }
+  if (onLink) { mv.sprint = false; ai.jumpNext = false; buttons = (buttons & ~(Btn.Jump | Btn.Ability | Btn.Aim)) | ai.nav.buttons; }
   if (mv.sprint && mz > 0.5 && !aiming) buttons |= Btn.Sprint;
   if (ai.jumpNext) { if (!(e.prevButtons & Btn.Jump)) buttons |= Btn.Jump; ai.jumpNext = false; }
   inp.mx = mx; inp.mz = mz;

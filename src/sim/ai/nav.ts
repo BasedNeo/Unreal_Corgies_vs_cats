@@ -9,6 +9,10 @@
 // destructible) gets its OWN grid from navGridFor(): a copy of the shared walk/region arrays with the blockers' cells
 // closed, updated IN PLACE when a blocker is added or removed (bots hold on to the grid object they got at tick 1).
 // Ground, costs and the A* scratch stay shared (searches are synchronous; the search stamp is a global counter).
+//
+// N1 decks: buildDeckGrid() floods an ELEVATED walkable surface (a roof, a platform) from a seed point into its own
+// small NavGrid over prop tops (ground = the surface height per cell). findPath & co. work on it unchanged; the
+// link layer (nav-links.ts) joins decks and the ground grid through validated hop sequences.
 import type { Collider } from '@dimforge/rapier3d-compat';
 import type { Sim } from '../sim';
 import type { PropBox, WorldData } from '../../shared/world/world-data';
@@ -16,6 +20,7 @@ import { WORLD_RAY_FILTER } from '../combat/geometry';
 import { Layer } from '../rapier';
 import { isTerrainCollider } from '../world/build';
 import { isDestructibleCollider } from '../destruct/tag';
+import { surfaceAt } from '../../shared/world/queries';
 
 export const NAV_CELL = 1;
 /** Capsule tested per cell: bottom at ground + CLEARANCE (the KCC autostep height). */
@@ -69,7 +74,12 @@ function signature(d: WorldData): string {
   return `${d.name}|${d.seed}|${e}|${d.props.length}|${h}`;
 }
 
-/** The shared grid of a sim's world (destructibles ignored: as if every one were broken). */
+/** The shared grid of a sim's world (destructibles ignored: as if every one were broken). Also the cache key of
+ *  everything derived from a world's static nav (N1: decks and links). */
+export function sharedNavGrid(sim: Sim): NavGrid {
+  return sharedGridFor(sim);
+}
+
 function sharedGridFor(sim: Sim): NavGrid {
   const key = signature(sim.worldData);
   let g = cache.get(key);
@@ -377,7 +387,110 @@ export function buildNavGrid(sim: Sim): NavGrid {
     cell, ox, oz, w, h, walk, ground, cost, region: new Int32Array(n).fill(-1), regionSize: [], mainRegion: -1,
     buildMs: 0, walkable, queries,
     g: new Float32Array(n), parent: new Int32Array(n), open: new Uint32Array(n), closed: new Uint32Array(n),
-    heap: new Int32Array(HEAP_CAP), heapF: new Float32Array(HEAP_CAP), search: 0,
+    heap: new Int32Array(heapCap(n)), heapF: new Float32Array(heapCap(n)), search: 0,
+  };
+  labelRegions(grid);
+  grid.buildMs = performance.now() - t0;
+  return grid;
+}
+
+/** A* heap entries a grid of n cells can need (every expansion pushes at most 8). */
+function heapCap(n: number): number {
+  return Math.min(HEAP_CAP, n * 8 + 64);
+}
+
+// ------------------------------------------------------------------------------------------------- N1 decks
+
+/** Max surface height change between neighbouring deck cells: a parapet (0.6 m) is a wall, a 24° roof slope is not. */
+export const DECK_STEP = 0.5;
+/** A deck cell stands at least this high over the terrain (lower surfaces belong to the ground grid). */
+const DECK_MIN_RISE = 0.9;
+/** Deck floods stop at this many cells from the seed (per axis). */
+const DECK_MAX_HALF = 48;
+
+/** Probe filter for decks: the static world only (no destructibles, no entity colliders such as kiosks or karts). */
+const staticOnly = (c: Collider): boolean => !isDestructibleCollider(c) && c.parent() === null;
+
+/**
+ * N1: flood the elevated walkable surface under (x, y, z) into its own NavGrid (cells on the ground grid's lattice,
+ * bounding box only; ground = surface height). A cell is walkable when its highest surface within DECK_STEP of a
+ * walkable neighbour's stands > DECK_MIN_RISE over the terrain, the slope is walkable and the character probe
+ * (the ground grid's capsule) is clear of the static world. Null when (x, y, z) is not on such a surface.
+ */
+export function buildDeckGrid(sim: Sim, x: number, y: number, z: number): NavGrid | null {
+  const t0 = performance.now();
+  const data = sim.worldData;
+  const cell = NAV_CELL, half = data.halfExtent;
+  const gx0 = -half, gz0 = -half, gw = Math.ceil((2 * half) / cell);
+  const sx = Math.floor((x - gx0) / cell), sz = Math.floor((z - gz0) / cell);
+  if (sx < 1 || sz < 1 || sx >= gw - 1 || sz >= gw - 1) return null;
+  const shape = new sim.R.Capsule(PROBE_HALF, PROBE_RADIUS);
+  const rot = { x: 0, y: 0, z: 0, w: 1 }, pos = { x: 0, y: 0, z: 0 };
+  let queries = 0;
+  const cx = (ix: number) => gx0 + (ix + 0.5) * cell, cz = (iz: number) => gz0 + (iz + 0.5) * cell;
+  /** Surface height of the cell reachable from a neighbour at height `from`, or NaN. */
+  const standAt = (ix: number, iz: number, from: number): number => {
+    const px = cx(ix), pz = cz(iz);
+    const s = surfaceAt(data, px, pz, from + DECK_STEP);
+    if (s.kind === 'terrain' || Math.abs(s.y - from) > DECK_STEP || s.y - data.height(px, pz) < DECK_MIN_RISE) return NaN;
+    // something solid sitting on that surface (a parapet's cap on its body) makes the real top higher: not a floor
+    if (surfaceAt(data, px, pz, s.y + 1.2).y > s.y + 0.02) return NaN;
+    // floor under the whole footprint, not the top of a thin wall (a parapet reached over a stack of shingles): no
+    // corner may drop away (rises are the probe's business)
+    for (let q = 0; q < 4; q++) {
+      const fx = px + (q & 1 ? 0.25 : -0.25), fz = pz + (q & 2 ? 0.25 : -0.25);
+      if (surfaceAt(data, fx, fz, s.y + 0.2).y < s.y - 0.15) return NaN;
+    }
+    queries++;
+    pos.x = px; pos.y = s.y + CLEARANCE + PROBE_RADIUS + PROBE_HALF; pos.z = pz;
+    if (sim.world.intersectionWithShape(pos, rot, shape, undefined, WORLD_RAY_FILTER, undefined, undefined, staticOnly)) return NaN;
+    return s.y;
+  };
+  const seedY = surfaceAt(data, cx(sx), cz(sz), y + 0.35).y;
+  const heights = new Map<number, number>();
+  const key = (ix: number, iz: number) => iz * gw + ix;
+  const h0 = Math.abs(seedY - y) < DECK_STEP ? standAt(sx, sz, seedY) : NaN;
+  if (!Number.isFinite(h0)) return null;
+  heights.set(key(sx, sz), h0);
+  const queue = [key(sx, sz)];
+  for (let q = 0; q < queue.length; q++) {
+    const k = queue[q], ix = k % gw, iz = (k - ix) / gw, hy = heights.get(k)!;
+    for (let d = 0; d < 4; d++) {
+      const nx = ix + DX[d], nz = iz + DZ[d];
+      if (Math.abs(nx - sx) > DECK_MAX_HALF || Math.abs(nz - sz) > DECK_MAX_HALF || nx < 1 || nz < 1 || nx >= gw - 1 || nz >= gw - 1) continue;
+      const nk = key(nx, nz);
+      if (heights.has(nk)) continue;
+      const ny = standAt(nx, nz, hy);
+      heights.set(nk, ny);          // NaN = tested, not walkable
+      if (Number.isFinite(ny)) queue.push(nk);
+    }
+  }
+  let ix0 = Infinity, ix1 = -Infinity, iz0 = Infinity, iz1 = -Infinity;
+  for (const k of queue) { const ix = k % gw, iz = (k - ix) / gw; ix0 = Math.min(ix0, ix); ix1 = Math.max(ix1, ix); iz0 = Math.min(iz0, iz); iz1 = Math.max(iz1, iz); }
+  // one blocked cell of margin, so the neighbour rules never index outside
+  ix0--; iz0--; ix1++; iz1++;
+  const w = ix1 - ix0 + 1, h = iz1 - iz0 + 1, n = w * h;
+  const walk = new Uint8Array(n), ground = new Float32Array(n).fill(h0), cost = new Uint8Array(n).fill(1);
+  for (const k of queue) {
+    const ix = k % gw, iz = (k - ix) / gw, i = (iz - iz0) * w + (ix - ix0);
+    walk[i] = 1; ground[i] = heights.get(k)!;
+  }
+  // slope check (the ground grid's rule) on the flooded surface
+  let walkable = 0;
+  for (let i = 0; i < n; i++) {
+    if (!walk[i]) continue;
+    const ix = i % w, iz = (i - ix) / w;
+    const gxp = ix + 1 < w && walk[i + 1] ? ground[i + 1] : ground[i], gxm = ix > 0 && walk[i - 1] ? ground[i - 1] : ground[i];
+    const gzp = iz + 1 < h && walk[i + w] ? ground[i + w] : ground[i], gzm = iz > 0 && walk[i - w] ? ground[i - w] : ground[i];
+    const ax = (gxp - gxm) / (2 * cell), az = (gzp - gzm) / (2 * cell);
+    if (ax * ax + az * az > MAX_SLOPE * MAX_SLOPE) { walk[i] = 0; continue; }
+    walkable++;
+  }
+  const grid: NavGrid = {
+    cell, ox: gx0 + ix0 * cell, oz: gz0 + iz0 * cell, w, h, walk, ground, cost, region: new Int32Array(n).fill(-1), regionSize: [], mainRegion: -1,
+    buildMs: 0, walkable, queries,
+    g: new Float32Array(n), parent: new Int32Array(n), open: new Uint32Array(n), closed: new Uint32Array(n),
+    heap: new Int32Array(heapCap(n)), heapF: new Float32Array(heapCap(n)), search: 0,
   };
   labelRegions(grid);
   grid.buildMs = performance.now() - t0;
@@ -447,7 +560,7 @@ export function isWalkable(g: NavGrid, x: number, z: number): boolean {
 
 /** Closest walkable cell to (x, z) within maxR cells (optionally in a given region), or -1. */
 export function nearestWalkable(g: NavGrid, x: number, z: number, maxR: number, region = -1): number {
-  const c = cellIndex(g, Math.max(g.ox, Math.min(-g.ox - 0.01, x)), Math.max(g.oz, Math.min(-g.oz - 0.01, z)));
+  const c = cellIndex(g, Math.max(g.ox, Math.min(g.ox + g.w * g.cell - 0.01, x)), Math.max(g.oz, Math.min(g.oz + g.h * g.cell - 0.01, z)));
   if (c < 0) return -1;
   if (g.walk[c] && (region < 0 || g.region[c] === region)) return c;
   const cx = c % g.w, cz = (c / g.w) | 0;

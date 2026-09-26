@@ -9,6 +9,8 @@ import { navGridFor, pathStats } from './nav';
 export { applyArchetype, createBrain, think, type AiState, type AiMode } from './brain';
 export { ARCHETYPES, archetypeForClass, type Archetype, type ArchetypeId } from './archetypes';
 export { navGridFor, buildNavGrid, findPath, lineWalkable, isWalkable, nearestWalkable, cellX, cellZ, type NavGrid } from './nav';
+export { holdPerch, type PerchGoal } from './brain';
+export { canReach, navLevelAt, navLinksFor, type NavLinkSet } from './nav-links';
 
 /** Per-tick AI cost, readable by soaks/debug tools. */
 export interface AiPerf { ms: number; bots: number; searches: number; navBuildMs: number }
