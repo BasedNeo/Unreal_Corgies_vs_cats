@@ -8,7 +8,8 @@ import { matchSystems } from '../match';
 import { worldSystems } from '../world/systems';
 import { bossSystems } from '../boss';
 import { vehicleSystems } from '../vehicles';
+import { interactSystems } from '../interact';
 
 export function createDefaultSystems(): SimSystem[] {
-  return [...aiSystems(), movementSystem, ...worldSystems(), physicsStepSystem, ...combatSystems(), killPlaneSystem, ...matchSystems(), ...bossSystems(), ...vehicleSystems()];
+  return [...aiSystems(), movementSystem, ...worldSystems(), physicsStepSystem, ...combatSystems(), killPlaneSystem, ...matchSystems(), ...bossSystems(), ...vehicleSystems(), ...interactSystems()];
 }

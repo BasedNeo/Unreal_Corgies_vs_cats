@@ -7,9 +7,17 @@
 //            weapon = rider entity id (-1 = empty) · ammo = boost meter 0..100 · hp/maxHp = armor ·
 //            flags: Busy = seat taken, Grounded, Sprinting = boosting (meter or mini-turbo),
 //            Crouching = drifting (handbrake).
-//   Terminal (EntityKind.Terminal): cls = index into TERMINAL_IDS · weapon = its active kart id (-1 none) ·
+//   Terminal (EntityKind.Terminal): cls = index into TERMINAL_IDS (terminals.ts) · weapon = its active kart id (-1 none) ·
 //            ammo = whole seconds of cooldown left · hp/maxHp = cooldown progress (maxHp = cooldown s) ·
 //            flags: Busy = unavailable (kart out or cooling down).
+//
+// The terminal table moved to ./terminals.ts (S1 added the Ordnance Terminal); it is re-exported here so
+// existing imports from vehicles.ts keep working.
+
+export {
+  TERMINALS, TERMINAL_IDS, VEHICLE_TERMINAL_IDS, terminalIndex, terminalByIndex, anyTerminalByIndex, terminalKindAt,
+  type TerminalDef, type TerminalId, type OrdnanceTerminalDef, type AnyTerminalDef, type AnyTerminalId,
+} from './terminals';
 
 export interface KartExplosionDef {
   /** Blast radius (m), damage at the center, full-damage inner radius, damage fraction at the edge. */
@@ -139,28 +147,6 @@ export interface VehicleDef {
   abandonTime: number;
 }
 
-export interface TerminalDef {
-  id: string;
-  name: string;
-  catName: string;
-  /** Vehicle this terminal vends. */
-  vehicle: VehicleId;
-  /** Interact within this distance (m, from the kiosk center) vends a kart. */
-  useRange: number;
-  /** Seconds after its kart is destroyed before the terminal can vend again. */
-  cooldown: number;
-  /** Seconds before re-arming after its kart despawned unused (abandoned) — no penalty. */
-  rearm: number;
-  /** Price in kibble (the economy is not live yet; the authority ignores it while 0). */
-  cost: number;
-  /** Solid kiosk collider half extents (m). */
-  hx: number; hy: number; hz: number;
-  /** The kart pops out this far (m) to the kiosk's right. */
-  padOffset: number;
-  /** Match modes whose map setup places this terminal near each team's spawns (Room-hosted sims). */
-  modes: readonly string[];
-}
-
 export const VEHICLE_IDS = ['mower_kart'] as const;
 export type VehicleId = (typeof VEHICLE_IDS)[number];
 
@@ -189,17 +175,6 @@ export const VEHICLES: Record<VehicleId, VehicleDef> = {
   },
 };
 
-export const TERMINAL_IDS = ['kart_terminal'] as const;
-export type TerminalId = (typeof TERMINAL_IDS)[number];
-
-export const TERMINALS: Record<TerminalId, TerminalDef> = {
-  kart_terminal: {
-    id: 'kart_terminal', name: 'Kart-O-Matic', catName: 'Kart-O-Matic',
-    vehicle: 'mower_kart', useRange: 2.5, cooldown: 20, rearm: 3, cost: 0,
-    hx: 0.6, hy: 1.1, hz: 0.45, padOffset: 3.1, modes: ['yard-skirmish', 'team-deathmatch'],
-  },
-};
-
 /** Index of a vehicle id in VEHICLE_IDS (the value carried in a vehicle's `EntityState.cls`), -1 if unknown. */
 export function vehicleIndex(id: string): number {
   return (VEHICLE_IDS as readonly string[]).indexOf(id);
@@ -208,13 +183,4 @@ export function vehicleIndex(id: string): number {
 export function vehicleByIndex(i: number): VehicleDef | null {
   const id = VEHICLE_IDS[i];
   return id ? VEHICLES[id] : null;
-}
-
-export function terminalIndex(id: string): number {
-  return (TERMINAL_IDS as readonly string[]).indexOf(id);
-}
-
-export function terminalByIndex(i: number): TerminalDef | null {
-  const id = TERMINAL_IDS[i];
-  return id ? TERMINALS[id] : null;
 }
