@@ -12,7 +12,11 @@ export const Btn = {
   Reload: 1 << 7,
   Melee: 1 << 8,
   NextWeapon: 1 << 9,
+  /** Taunt (cosmetic): a voiced line + emote animation (src/sim/systems/emote.ts). */
+  Emote: 1 << 10,
 } as const;
+/** Every defined button bit (sanitizeInput masks to these). */
+export const BTN_MASK = 0x7ff;
 
 export interface InputCmd {
   /** Monotonic per-client sequence number; the authority acks the last one it applied. */
@@ -56,7 +60,7 @@ export function sanitizeInput(raw: unknown): InputCmd | null {
     mz: z,
     yaw: ((yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2),
     pitch: clamp(pitch, -1.45, 1.45),
-    buttons: Math.floor(buttons) & 0x3ff,
+    buttons: Math.floor(buttons) & BTN_MASK,
     rt: typeof r.rt === 'number' && Number.isFinite(r.rt) ? Math.max(0, Math.floor(r.rt)) : 0,
   };
 }

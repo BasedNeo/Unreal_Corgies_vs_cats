@@ -187,6 +187,7 @@ async function main(): Promise<void> {
     }
     if (ev.e === 'spawn') views.trigger(ev.id, 'spawn');
     if (ev.e === 'ability') views.trigger(ev.id, ev.ability);
+    if (ev.e === 'bark') views.trigger(ev.id, 'emote'); // taunts and mission lines: the avatar acts it out
     bossFx.onGameEvent(ev);
     interact.onGameEvent(ev);
     abilityViews.onGameEvent(ev);

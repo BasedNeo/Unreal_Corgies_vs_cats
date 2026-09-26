@@ -4,7 +4,7 @@ import { clamp } from '../../shared/math';
 
 const KEYMAP: Record<string, number> = {
   Space: Btn.Jump, ShiftLeft: Btn.Sprint, ShiftRight: Btn.Sprint, KeyE: Btn.Interact, KeyC: Btn.Crouch,
-  ControlLeft: Btn.Crouch, KeyQ: Btn.Ability, KeyR: Btn.Reload, KeyV: Btn.Melee, KeyF: Btn.Melee, Tab: 0,
+  ControlLeft: Btn.Crouch, KeyQ: Btn.Ability, KeyR: Btn.Reload, KeyV: Btn.Melee, KeyF: Btn.Melee, KeyB: Btn.Emote, Tab: 0,
 };
 
 /** Keyboard focus is in a text field: those keys are text, not game input. */
@@ -104,6 +104,7 @@ export class InputState {
       if (bt(3)) buttons |= Btn.Interact;
       if (bt(5)) buttons |= Btn.Ability;
       if (bt(11)) buttons |= Btn.Melee;
+      if (bt(12)) buttons |= Btn.Emote; // d-pad up: taunt
     }
     const len = Math.hypot(mx, mz);
     if (len > 1) { mx /= len; mz /= len; }

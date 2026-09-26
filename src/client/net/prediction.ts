@@ -18,7 +18,7 @@ import { stepCharacter, type MoveContext } from '../../sim/systems/movement';
 import { stepWorldEffects } from '../../sim/world/systems';
 import type { CharacterState, SimEntity } from '../../sim/entity';
 import type { EntityState, GameEvent } from '../../shared/protocol';
-import { Btn, sanitizeInput, type InputCmd } from '../../shared/input';
+import { Btn, BTN_MASK, sanitizeInput, type InputCmd } from '../../shared/input';
 import { BUFF_FLAGS, CLASS_IDS, EFlag } from '../../shared/types';
 import { PICKUPS } from '../../shared/content/pickups';
 import type { Collider } from '@dimforge/rapier3d-compat';
@@ -304,7 +304,7 @@ export class LocalPredictor {
     } else {
       // No record of the acked input: assume held buttons were already held (no spurious presses).
       const first = pending[0];
-      e.prevButtons = first ? Math.floor(first.buttons) & 0x3ff : 0;
+      e.prevButtons = first ? Math.floor(first.buttons) & BTN_MASK : 0;
       c.jumpHeld = (e.prevButtons & Btn.Jump) !== 0;
       c.jumpBuffer = 0; c.crouchBuffer = 0; c.glideTime = 0;
     }
