@@ -248,7 +248,7 @@ async function main(): Promise<void> {
     acc += dt;
     while (acc >= TICK_DT) {
       acc -= TICK_DT;
-      if (net?.connected) { const cmd = input.sample(++seq, TICK_DT); cmd.rt = Math.max(0, Math.round(net.renderTime(now) * net.tickHz)); net.pushInput(cmd); }
+      if (net?.connected && !net.awaitingSpawn) { const cmd = input.sample(++seq, TICK_DT); cmd.rt = Math.max(0, Math.round(net.renderTime(now) * net.tickHz)); net.pushInput(cmd); }
     }
     net?.flush();
 

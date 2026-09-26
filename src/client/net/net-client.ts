@@ -236,6 +236,15 @@ export class NetClient {
     else if (this.connected) this.ensurePredictor(this.mapSeed);
   }
 
+  /**
+   * Welcomed, but our entity hasn't been in a snapshot yet. Hold inputs until then: the camera's default yaw would
+   * otherwise reach the authority first and turn the fresh spawn away from where the sim faced it ('localSpawn'
+   * sets the camera yaw from the spawn).
+   */
+  get awaitingSpawn(): boolean {
+    return this.spawnPending;
+  }
+
   /** Can this transport re-open after a disconnect? (WebSocket yes, offline worker no.) */
   get canReconnect(): boolean {
     return typeof this.transport.reconnect === 'function';

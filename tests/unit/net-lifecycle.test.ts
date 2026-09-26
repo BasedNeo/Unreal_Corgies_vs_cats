@@ -9,7 +9,7 @@ import { LoopbackSession, type LinkEmulation } from '../../src/client/net/loopba
 import type { InputCmd } from '../../src/shared/input';
 import { NetClient } from '../../src/client/net/net-client';
 import type { Transport } from '../../src/client/net/transport';
-import type { ServerMsg } from '../../src/shared/protocol';
+import { packEntity, type EntityState, type MatchState, type ServerMsg } from '../../src/shared/protocol';
 import { bus } from '../../src/client/core/events';
 
 const LINK: LinkEmulation = { lagMs: 75, jitterMs: 15, lossPct: 3 };
@@ -105,6 +105,25 @@ describe('client liveness', () => {
     return { t, deliver: (m: ServerMsg) => deliver(m), isClosed: () => closed };
   }
   const welcome: ServerMsg = { t: 'welcome', pid: 'p', entity: 1, tick: 0, mapSeed: 1, mode: 'x', tickHz: 60 };
+
+  it('awaits its spawn after a welcome: inputs wait until our entity is in a snapshot (spawn-facing race)', () => {
+    const f = fake();
+    const net = new NetClient(f.t, { now: () => 0, pingIntervalMs: 0, predict: false });
+    const spawned: number[] = [];
+    const off = bus.on('localSpawn', (id) => spawned.push(id));
+    expect(net.awaitingSpawn).toBe(false);
+    f.deliver(welcome);
+    expect(net.awaitingSpawn).toBe(true);
+    const me = { id: 1, kind: 0, team: 0, species: 0, cls: 0, seed: 0, x: 0, y: 0, z: 0, yaw: -0.83, pitch: 0, vx: 0, vy: 0, vz: 0, hp: 100, maxHp: 100, anim: 0, flags: 0, weapon: 0, ammo: 0 };
+    const match: MatchState = { mode: 'x', phase: 'live', timeLeft: 0, score: [0, 0], objective: '', wave: 0, winner: -1 };
+    f.deliver({ t: 'snap', tick: 1, ack: 0, you: 1, ents: [], gone: [], match, ev: [] });
+    expect(net.awaitingSpawn).toBe(true); // a snapshot without us yet
+    f.deliver({ t: 'snap', tick: 2, ack: 0, you: 1, ents: [packEntity(me as EntityState)], gone: [], match, ev: [] });
+    expect(net.awaitingSpawn).toBe(false);
+    expect(spawned).toEqual([1]);
+    expect(net.latestState(1)!.yaw).toBeCloseTo(-0.83, 2); // what main.ts turns the camera to before sending
+    off();
+  });
 
   it('times out a silent link after timeoutMs worth of silent timer periods', () => {
     const f = fake();
