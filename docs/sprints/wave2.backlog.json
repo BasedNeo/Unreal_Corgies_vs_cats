@@ -1,0 +1,32 @@
+{
+  "sprint": "Wave 2 — the vertical slice",
+  "sprintHours": 8,
+  "agents": [
+    { "id": "veh-1", "lanes": ["vehicles"] },
+    { "id": "sys-1", "lanes": ["systems"] },
+    { "id": "world-2", "lanes": ["world"] },
+    { "id": "boss-1", "lanes": ["boss"] },
+    { "id": "qa-1", "lanes": ["qa"] },
+    { "id": "lead", "lanes": ["integration"] }
+  ],
+  "tasks": [
+    { "id": "V1", "title": "Vehicle Terminal + authoritative kart with predicted driving and camera mode", "lane": "vehicles", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/sim/vehicles/**", "src/client/vehicles/**", "src/shared/content/vehicles.ts", "tests/unit/vehicle*"],
+      "acceptance": ["enter/exit never drops the player through geometry", "kart handles distinctly from on-foot", "authority decides collisions"] },
+    { "id": "S1", "title": "Ordnance Terminal kit swap, Upgrade Cores, golden kibble collectibles, objective chain", "lane": "systems", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/sim/interact/**", "src/shared/content/objectives.ts", "src/client/interact/**", "tests/unit/interact*"],
+      "acceptance": ["E interacts only within range and only server-side", "cores reset at match end", "3-step objective chain completes"] },
+    { "id": "G1", "title": "Garden district edge: tall-grass concealment, sentry routes, weather state machine, day/night cycle", "lane": "world", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/shared/world/**", "src/sim/world/**", "src/client/world/**", "tests/unit/world*"],
+      "acceptance": ["concealment reduces AI sight range", "weather transitions blend without pops", "dawn/noon/dusk screenshots readable"] },
+    { "id": "B1", "title": "Maine Coon mech boss set piece (model, attacks, phases)", "lane": "boss", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/sim/boss/**", "src/client/procgen/boss/**", "tests/unit/boss*"],
+      "acceptance": ["3 readable telegraphed attacks", "phase change at 50%", "defeatable by 2 players in 3-5 min"] },
+    { "id": "Q1", "title": "Independent verification: gate, screenshots, netcode feel audit, performance profile", "lane": "qa", "deps": [], "estimate": 2, "priority": 2,
+      "paths": ["docs/qa/**", "tests/e2e/qa*"],
+      "acceptance": ["PASS/FAIL per Wave 1 claim with evidence", "ranked defect list"] },
+    { "id": "INT2", "title": "Integrate wave 2, full gate, slice DoD check", "lane": "integration", "deps": ["V1", "S1", "G1", "B1"], "estimate": 2, "priority": 1,
+      "paths": ["src/client/main.ts", "src/client/views/**", "src/client/camera/**", "src/sim/systems/**", "PROGRESS.md"],
+      "acceptance": ["npm run gate passes", "vertical slice DoD checklist evaluated"] }
+  ]
+}
