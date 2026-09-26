@@ -7,15 +7,29 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 |---|---|---|
 | W0 Foundation | ✅ done | gate: typecheck ✓ boundaries ✓ 4 unit ✓ 2 e2e ✓; artifacts/smoke.png |
 | W1 L1 Characters | ✅ merged | 26 unit tests; char-audit 24/24 kits in budget; artifacts/l1-lab*.png |
-| W1 L2 West Yard world | ⏳ finishing | — |
+| W1 L2 West Yard world | ✅ merged | 15 world tests (collider≈visual ≤1 cm, spawns, climbs); artifacts/l2/*.png |
 | W1 L3 Combat/AI/match | ✅ merged | 33 unit tests; soak PASS (0 errors, 0 stuck, tick p95 ≤ 1.6 ms) |
-| W1 L4 Netcode/server | ⏳ finishing | — |
+| W1 L4 Netcode/server | ✅ merged + wired | 33 net tests, matrix 20/80/150 ms × 0/1/3 % (pred err 0 cm at 80/150); 2-client e2e (dev + prod server) |
 | W1 L5 HUD/audio/FX | ✅ merged + wired | 36 unit tests; FX 0.19 ms/frame, 0 allocs/spawn; artifacts/l5-*.png |
 | W2 V1 Vehicles | ⏳ dispatched | — |
 | W2 B1 Vac-Tank boss | ⏳ dispatched | — |
-| W2 S1 Terminals/cores/objectives, G1 Garden+weather, Q1 verification | ⬜ after L2/L4 | — |
+| W2 G1 Garden + weather | ⏳ dispatched | — |
+| W2 S1 Ordnance Terminal/cores/objectives, Q1 verification | ⬜ next | — |
+| **Wave 1 integration** | ✅ | full gate PASS: typecheck · boundaries · unit · build · e2e (smoke ×2 + 2-client net ×2) |
 
 ## Log
+### 2026-09-26 — Wave 1 integrated (lead)
+- L2 merged (trimesh terrain collider: heightfield leaked 24.5 % of grid-aligned rays and cost 3×); nav uses
+  `isTerrainCollider`; world quality from saved settings / `?quality=`, time of day from `?t=`.
+- L4 merged: prediction exact (quantized parity), delta snapshots 14 KB/s @ 12 players, multi-room hardened server,
+  prod server (`npm run start`), reconnect UI, `serverUrlForPage()`; frame dt cap 0.25 s.
+- E2E moved to a `vite preview` production build (dev-server HMR reloads broke tests while agents edit files);
+  smoke tests wait on game state at `quality=low` (SwiftShader renders the full yard at ~1 fps headless).
+- Proof: `npm run gate` → GATE PASS (typecheck, boundaries, unit, build, e2e 4/4).
+- **How to play now:** `npm install && npm run dev` → http://localhost:5173 (offline, main menu) ·
+  online: `npm run start` → http://localhost:8787 (one port, share the URL on your LAN) or `npm run server` +
+  `?server=ws://localhost:8787`.
+
 ### 2026-09-26 — Wave 1 lanes landing (lead)
 - L5 wired into `main.ts`: game events → FX (shake/hit-stop), audio, HUD, avatar triggers; nameplates; persisted
   settings apply to input/audio/FX; main menu unless `?autoplay`/`?server`.
@@ -40,8 +54,10 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 ## Known issues
 - Rapier KCC on the West Yard heightfield costs ~0.13 ms/character/tick (8× flat) → 1.1–2.2 ms/tick at full rooms (L3).
 - Straight-down raycasts on the heightfield slip through at grid lines ~23 %: use `WorldData.height()` (L3).
-- Room per-player K/D not reset on match restart (L3 → L4/lead).
-- Skirmish snapshot bandwidth 38–42 KB/s, at the 40 KB/s budget (L3).
+- Firefight snapshot bandwidth 30.6 KB/s after delta encoding (was 64 KB/s) — inside budget (L4).
+- Combat knockback is not predicted → occasional smoothed corrections > 0.5 m in live soaks (L4).
+- Offline play downloads Rapier twice (worker + prediction chunk), ~3.75 MB gz total (L4).
+- Client world build blocks the main thread ~1.3 s at load (L2).
 - Bots treat decks/roofs as obstacles; Warden bots weak in the open (L3).
 - Character faces faceted in close-ups; expressions read cute rather than fierce at portrait distance (lead review of L1).
 - Proposed contract additions (L3): archetype on EntityState, weapon on `death`, `MatchState.enemiesLeft`.
