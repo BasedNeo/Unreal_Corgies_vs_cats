@@ -11,6 +11,9 @@
 // Adventure always runs bot-only (a squad of four pups): with a "human" in the squad the reach steps wait for that
 // human, and the net-bot is a combat brain that never walks to one (Q2 P2-8).
 // Snapshot bandwidth is measured at wire size (the server's delta SnapEncoder, JSON text); raw JSON is reported too.
+// --heap samples the authority's heap after a GC every simulated minute (run node with --expose-gc, e.g.
+//   NODE_OPTIONS=--expose-gc npx tsx tools/soak.mjs --seconds 600 --repeat 1 --heap) and reports the growth per
+//   minute after the first (MASTER_PLAN §8.7: no growth over a 10-minute soak).
 //
 // Exit 1 on: any runtime error / non-finite state, a bot stuck (wants to move, doesn't) > 5 s,
 // tick p95 > 3 ms, or (soak config) a mode that never completes a match.
@@ -41,6 +44,7 @@ const FULL = argv.includes('--full');
 const NETBOT = !argv.includes('--no-netbot');
 const OUT = opt('json', 'artifacts/soak.json');
 const REPEAT = Math.max(1, Number(opt('repeat', 3)));
+const HEAP = argv.includes('--heap');
 const LIMITS = { maxStuckSec: 5, maxTickP95Ms: 3, maxErrors: 0 };
 const DRAMA_BAND = [0.6, 4]; // drama events per player-minute (kills, wave clears, match results)
 const MAX_DOWNTIME = 20;
@@ -73,6 +77,18 @@ const L3_SYSTEMS = new Set(['ai', 'weapons', 'abilities', 'projectiles', 'combat
 const pct = (arr, q) => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(q * (s.length - 1)))]; };
 const r2 = (v) => Math.round(v * 100) / 100;
 const clamp01 = (x) => Math.max(0, Math.min(1, x));
+/** Heap samples (MB, one per simulated minute): first, last, and the least-squares growth per minute after minute 1. */
+function heapTrend(h) {
+  const tail = h.slice(1);
+  let slope = 0;
+  if (tail.length >= 2) {
+    const n = tail.length, mx = (n - 1) / 2, my = tail.reduce((a, b) => a + b, 0) / n;
+    let num = 0, den = 0;
+    tail.forEach((y, x) => { num += (x - mx) * (y - my); den += (x - mx) ** 2; });
+    slope = num / den;
+  }
+  return { first: r2(h[0] ?? 0), last: r2(h[h.length - 1] ?? 0), samples: h.length, growthPerMin: r2(slope), gc: typeof globalThis.gc === 'function' };
+}
 
 async function soakMode(mode) {
   const sim = await Sim.create({ seed: SEED });
@@ -91,7 +107,7 @@ async function soakMode(mode) {
 
   // ---- telemetry
   const T = {
-    errors: [], ticks: 0, tickMs: [], wallMs: [], cpuMs: [], aiMs: [], snapBytes: 0, wireBytes: 0, snaps: 0, results: [],
+    errors: [], ticks: 0, tickMs: [], wallMs: [], cpuMs: [], aiMs: [], snapBytes: 0, wireBytes: 0, snaps: 0, results: [], heap: [],
     kills: 0, deaths: [0, 0], shots: 0, hitShots: 0, hits: 0, crits: 0, explosions: 0, abilities: 0, reloads: 0,
     firstLiveTick: -1, firstHitTick: -1, drama: [], matchesEnded: 0, winners: [], maxWave: 0,
     deadTicks: 0, charTicks: 0, stuckMax: 0, stuckBots: new Set(), kd: new Map(), midLeader: null,
@@ -153,7 +169,11 @@ async function soakMode(mode) {
   const ticksTotal = Math.round(SECONDS * TICK_HZ);
   let lastPhase = room.match.phase, mid = Math.floor(ticksTotal / 2);
   const wall0 = performance.now();
+  // the soak's own per-tick telemetry grows ~0.11 MB/min (4 number arrays): take it out, it isn't the room's
+  const telemetryBytes = () => (T.tickMs.length + T.wallMs.length + T.cpuMs.length + T.aiMs.length) * 8;
+  const heapSample = () => { globalThis.gc?.(); T.heap.push((process.memoryUsage().heapUsed - telemetryBytes()) / 1048576); };
   for (let i = 0; i < ticksTotal; i++) {
+    if (HEAP && i % (TICK_HZ * 60) === 0) heapSample();
     if (netbot) {
       const e = attachNetbot();
       if (e?.ai) {
@@ -199,6 +219,7 @@ async function soakMode(mode) {
   }
   const wallMs = performance.now() - wall0;
   const nav = sim.state.aiPerf?.navBuildMs ?? 0;
+  if (HEAP) heapSample();
   const simSec = T.ticks / TICK_HZ;
 
   // ---- session (game-sprint-gates telemetry schema + L3 extras)
@@ -228,6 +249,7 @@ async function soakMode(mode) {
     maxDowntimeSec: r2(maxGap), stuckMaxSec: r2(T.stuckMax), stuckBots: [...T.stuckBots],
     snapshotKBps: r2(T.snaps ? T.wireBytes / 1024 / simSec : 0),
     snapshotRawJsonKBps: r2(T.snaps ? T.snapBytes / 1024 / simSec : 0),
+    heapMB: HEAP ? heapTrend(T.heap) : null,
     netbot: withNetbot ? { kills: netbot.slot.kills, deaths: netbot.slot.deaths, starves: netbot.slot.net?.starves ?? 0 } : null,
     errors: T.errors.length, errorSamples: T.errors.slice(0, 3),
     topPlayerShare: r2(kdTotal ? top / kdTotal : 0),
@@ -295,6 +317,7 @@ for (const s of sessions) {
   console.log(`${s.mode.padEnd(16)} score ${sc.total} (R ${sc.realism} · I ${sc.intensity} · F ${sc.fairness}) | ${s.durationSec}s sim in ${s.wallMs} ms | matches ${s.matchesEnded}: ${s.results.join(', ') || `none (wave ${s.maxWave}, ${s.finalScore.join(':')})`}`);
   console.log(`  kills ${s.kills} · hit ${Math.round(s.hitRate * 100)}% · crit ${Math.round(s.critRate * 100)}% · boom ${s.explosions} · abil ${s.abilities} · ttfe ${s.timeToFirstEngagementSec ?? '-'}s · dead ${Math.round(s.deadTimeFrac * 100)}% · downtime ${s.maxDowntimeSec}s · drama ${sc.dramaPerPlayerMinute}/p-min · top ${s.topPlayerShare}`);
   console.log(`  tick p50 ${s.tickMs.p50} p95 ${s.tickMs.p95} max ${s.tickMs.max} ms (best of ${s.repeats}${s.deterministic ? ', deterministic' : ', NON-DETERMINISTIC'}; single run p95 ${s.tickSingleRunMs.p95} · raw wall ${s.tickWallMs.p95} · cpu ${s.tickCpuMs.p95}; nav build ${s.navBuildMs} ms) · ai p95 ${s.aiMs.p95} ms · stuck max ${s.stuckMaxSec}s · errors ${s.errors}${s.netbot ? ` · net-bot k${s.netbot.kills}/d${s.netbot.deaths} snap ${s.snapshotKBps} KB/s wire (${s.snapshotRawJsonKBps} raw JSON)` : ''}`);
+  if (s.heapMB) console.log(`  heap ${s.heapMB.first} → ${s.heapMB.last} MB over ${s.heapMB.samples} samples, ${s.heapMB.growthPerMin >= 0 ? '+' : ''}${s.heapMB.growthPerMin} MB/min after minute 1${s.heapMB.gc ? '' : ' (no --expose-gc: noisy)'}`);
   const sm = s.systemMsPerTick;
   if (Object.keys(sm).length) console.log(`  avg ms/tick: L3 ${s.l3MsPerTick} (ai ${sm.ai ?? 0} · weapons ${sm.weapons ?? 0} · projectiles ${sm.projectiles ?? 0} · match ${sm.match ?? 0}) · movement ${sm.movement ?? 0} · physics ${sm['physics-step'] ?? 0} · world ${sm['world-effects'] ?? 0} · chars ${s.characters}`);
 }
