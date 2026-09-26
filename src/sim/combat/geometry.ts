@@ -82,7 +82,11 @@ export function worldRay(sim: Sim, ox: number, oy: number, oz: number, dx: numbe
   return hit ? hit.timeOfImpact : maxT;
 }
 
-export interface WorldHit { t: number; nx: number; ny: number; nz: number }
+export interface WorldHit {
+  t: number; nx: number; ny: number; nz: number;
+  /** Rapier handle of the collider hit (-1 = the analytic terrain fallback). */
+  handle?: number;
+}
 
 /** Like worldRay but also returns the surface normal; null when nothing is hit within maxT. */
 export function worldRayNormal(sim: Sim, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number, out: WorldHit, pass?: RayPass): WorldHit | null {
@@ -91,7 +95,7 @@ export function worldRayNormal(sim: Sim, ox: number, oy: number, oz: number, dx:
   ray.dir.x = dx; ray.dir.y = dy; ray.dir.z = dz;
   const hit = sim.world.castRayAndGetNormal(ray, maxT, true, undefined, WORLD_RAY_FILTER, undefined, undefined, pass);
   if (!hit) return null;
-  out.t = hit.timeOfImpact; out.nx = hit.normal.x; out.ny = hit.normal.y; out.nz = hit.normal.z;
+  out.t = hit.timeOfImpact; out.nx = hit.normal.x; out.ny = hit.normal.y; out.nz = hit.normal.z; out.handle = hit.collider.handle;
   return out;
 }
 

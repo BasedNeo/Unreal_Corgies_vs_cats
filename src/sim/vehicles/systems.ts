@@ -24,6 +24,7 @@ import { quatYXZ, surfaceAt } from '../../shared/world/queries';
 import { COMBAT_RULES, WEAPONS, weaponByIndex, type ProjectileDef } from '../../shared/content/weapons';
 import { TERMINALS, VEHICLES, terminalIndex, type KartExplosionDef, type KartId, type TerminalId } from '../../shared/content/vehicles';
 import { applyDamage, knockback, explode, combatLive, capsuleOf } from '../combat';
+import { addProjectileHitListener } from '../combat/projectiles';
 import { damageDestructible } from '../destruct';
 import { destructibleOfCollider } from '../destruct/tag';
 import { falloff } from '../combat/weapon-system';
@@ -31,14 +32,14 @@ import { reportNoiseAt } from '../combat/state';
 import { groups, Layer } from '../rapier';
 import {
   SHOVE_FILTER, TERMINAL_GROUPS, VEHICLE_GROUPS,
-  kartDef, kartHullPoints, kartTeam, vehicleRuntime, vehicleTeam, KART_MOVE_FILTER, type PendingBlast,
+  kartDef, kartHullPoints, kartTeam, planeDef, vehicleRuntime, vehicleTeam, KART_MOVE_FILTER, type PendingBlast,
 } from './state';
 import { kartInputFrom, newKartState, newKartStepResult, stepKart, NO_KART_INPUT, type KartContext, type KartInput } from './kart';
 import { findTerminalSite, hangarSite, type TerminalSite } from './sites';
 import { blankEntity, tagCollider, capsuleClear, staticBlocked, unseat, seatCharacterAt, applyStuns, ticks, blastDef, blastDamageOf } from './common';
 import {
   planeStepSystem, spawnPlane, mountPlane, dismountPlane, validPlaneRider, nearestPlane, resolvePlaneShots, resolvePlaneBlasts,
-  isPlaneShot, planeGunDamage,
+  isPlaneShot, planeGunDamage, damagePlane,
 } from './plane-systems';
 
 export { capsuleClear } from './common';
@@ -302,6 +303,23 @@ function updateTerminal(sim: Sim, e: SimEntity, dt: number): void {
 // ---------------------------------------------------------------------------------------------
 
 export interface KartDamageSource { id: EntityId; team: TeamId | -1; weapon: number }
+
+/**
+ * A projectile that doesn't explode (a frisbee) hitting a kart or plane directly: the shot's damage × the vehicle's
+ * bulletDamageMult (blasts already reach vehicles through their own path). Its rider's and teammates' shots don't count.
+ */
+function onProjectileHit(sim: Sim, handle: number, x: number, y: number, z: number, damage: number, owner: EntityId, ownerTeam: TeamId, weapon: number): void {
+  for (const v of sim.entities.values()) {
+    if (v.kind !== EntityKind.Vehicle || v.removed || v.collider?.handle !== handle) continue;
+    const rider = v.kart?.rider ?? v.plane?.rider ?? -1;
+    if (owner === rider || owner === v.id) return;
+    if (!COMBAT_RULES.friendlyFire && ownerTeam === vehicleTeam(sim, v)) return;
+    if (v.kart) damageKart(sim, v, damage * kartDef(v).bulletDamageMult, { id: owner, team: ownerTeam, weapon }, x, y, z);
+    else if (v.plane) damagePlane(sim, v, damage * planeDef(v).bulletDamageMult, { id: owner, team: ownerTeam }, x, y, z);
+    return;
+  }
+}
+addProjectileHitListener(onProjectileHit);
 
 /** Damage a kart (armor). Emits `hit` (dst = kart). Destroys it at 0 hp. Returns the damage dealt. */
 export function damageKart(sim: Sim, kart: SimEntity, amount: number, src: KartDamageSource, x: number, y: number, z: number): number {

@@ -270,6 +270,53 @@ describe('X1 destructibles: the breach', () => {
     expect(soft.hp).toBe(DESTRUCT_KINDS.crate_stack.hp);
   });
 
+  it('frisbees hit what they touch: a crate stack and an enemy kart take the shot; the wall and a friendly kart do not', async () => {
+    const sim = await Sim.create({ seed: 1, systems: [...systems(), ...vehicleSystems()] });
+    sim.state.vehicleConfig = { autoTerminals: false };
+    sim.step();
+    const lawn = (x: number, z: number) => Math.abs(surfaceAt(sim.worldData, x, z).y - sim.worldData.height(x, z)) < 0.05;
+    // the frisbee launcher is semi-auto: tap, release, tap…
+    const fire = (who: SimEntity, x: number, y: number, z: number, secs: number) => {
+      const out: Ev[] = [];
+      for (let t = 0; t < secs; t += 0.45) { hold(sim, who, 1 / TICK_HZ, { ...aimAt(who, x, y, z), buttons: Btn.Fire }, out); hold(sim, who, 0.45 - 1 / TICK_HZ, aimAt(who, x, y, z), out); }
+      return out;
+    };
+    // a crate stack: a cat Skyraider 8 m away
+    const crate = byId(sim, 'crate_stack_2');
+    const cx = crate.dsx!.def.cx, cz = crate.dsx!.def.cz;
+    const cat = spawn(sim, Team.Cats, 'skyraider', cx, cz + 8, 0);
+    hold(sim, cat, 0.3);
+    const evs = fire(cat, cx, 0.7, cz, 2.5);
+    expect(evs.filter((e) => e.e === 'fire').length).toBeGreaterThan(2);
+    expect(crate.health!.hp < DESTRUCT_KINDS.crate_stack.hp || crate.dsx!.broken).toBe(true);
+    // the breach wall shrugs them off (shotMult 0)
+    const wall = wallOf(sim);
+    const w = spawn(sim, Team.Cats, 'skyraider', ALLEY_X + 2.2, BREACH_Z, WEST);
+    hold(sim, w, 0.3);
+    fire(w, 93.9, 1.5, BREACH_Z, 2);
+    expect(wall.health!.hp).toBe(DESTRUCT_KINDS.wall_boards.hp);
+    // an empty corgi kart on open lawn: the cat's frisbees dent it, a corgi's don't
+    let spot: { x: number; z: number } | null = null;
+    for (let k = 0; k < 24 && !spot; k++) {
+      const x = cx - 12 + (k % 6) * 4, z = cz + 14 + Math.floor(k / 6) * 4;
+      if (lawn(x, z) && lawn(x, z + 8) && worldLineClear(sim, x, sim.worldData.height(x, z) + 0.8, z + 8, x, sim.worldData.height(x, z) + 0.5, z + 1.2)) spot = { x, z };
+    }
+    expect(spot).toBeTruthy();
+    const kart = spawnKart(sim, 'mower_kart', Team.Corgis, spot!.x, sim.worldData.height(spot!.x, spot!.z), spot!.z, 0);
+    hold(sim, cat, 0.1);
+    const hp0 = kart.health!.hp;
+    const pal = spawn(sim, Team.Corgis, 'skyraider', spot!.x, spot!.z + 8, 0);
+    hold(sim, pal, 0.3);
+    fire(pal, spot!.x, kart.pos.y + 0.4, spot!.z, 1.5);
+    expect(kart.health!.hp).toBe(hp0); // friendly: no damage
+    const foe = spawn(sim, Team.Cats, 'skyraider', spot!.x + 0.8, spot!.z + 8, 0);
+    hold(sim, foe, 0.3);
+    const ev2 = fire(foe, spot!.x, kart.pos.y + 0.4, spot!.z, 1.5);
+    expect(kart.health!.hp).toBeLessThan(hp0);
+    expect(ev2.some((e) => e.e === 'hit' && e.dst === kart.id && e.src === foe.id)).toBe(true);
+    sim.dispose();
+  });
+
   it('a tennis-mortar blast breaks tuna and crate stacks; it only scratches the wall', async () => {
     const sim = await yard();
     const mortar = WEAPONS.tennis_mortar.projectile!, wi = weaponIndex('tennis_mortar');

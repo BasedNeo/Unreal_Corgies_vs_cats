@@ -19,7 +19,8 @@ import type { MatchState } from '../../shared/protocol';
 import { Anim, EntityKind, Team, type EntityId } from '../../shared/types';
 import { emptyInput } from '../../shared/input';
 import { DESTRUCT_KINDS } from '../../shared/world/destructibles';
-import { addBlastListener } from '../combat/projectiles';
+import { addBlastListener, addProjectileHitListener } from '../combat/projectiles';
+import { destructibleOfCollider } from './tag';
 import { batchNavBlockers, setNavBlocker } from '../ai/nav';
 import { createBoxCollider, createDestructRuntime, destructRuntime, navKey, type BreakRecord } from './state';
 import { breachCharges, breakEntity, damageEntity, onBlast, restoreEntity, scanShots } from './damage';
@@ -29,6 +30,12 @@ export { BREAK_EVENT_PREFIX } from './damage';
 export type { BreakRecord, DestructState } from './state';
 
 addBlastListener(onBlast);
+// A frisbee hitting a stack (shotMult: the wall's 0 means it bounces off the boards).
+addProjectileHitListener((sim, handle, _x, _y, _z, damage, owner) => {
+  const c = sim.world.getCollider(handle);
+  const e = c ? sim.entities.get(destructibleOfCollider(c)) : undefined;
+  if (e?.dsx && !e.dsx.broken && e.dsx.rule.shotMult > 0) damageEntity(sim, e, damage * e.dsx.rule.shotMult, owner);
+});
 
 function spawnAll(sim: Sim): void {
   const rt = createDestructRuntime(sim);

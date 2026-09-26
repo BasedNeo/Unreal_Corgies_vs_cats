@@ -66,6 +66,17 @@ export function addBlastListener(f: BlastListener): void {
   if (!blastListeners.includes(f)) blastListeners.push(f);
 }
 
+/**
+ * Direct-hit listeners: a projectile that doesn't explode (a frisbee) touched a world collider. Vehicles and
+ * destructibles take its damage through these (combat can't import them: they import combat). `damage` is the shot's
+ * (bounce bonus included); each listener ignores colliders that aren't its own. Register once.
+ */
+export type ProjectileHitListener = (sim: Sim, handle: number, x: number, y: number, z: number, damage: number, owner: EntityId, ownerTeam: TeamId, weapon: number) => void;
+const hitListeners: ProjectileHitListener[] = [];
+export function addProjectileHitListener(f: ProjectileHitListener): void {
+  if (!hitListeners.includes(f)) hitListeners.push(f);
+}
+
 /** Radius-falloff explosion: damage (LOS-checked, self-damage reduced), knockback, `explode` event. */
 export function explode(sim: Sim, x: number, y: number, z: number, pdef: ProjectileDef, owner: EntityId, ownerTeam: TeamId, weapon: number): void {
   const R = pdef.explodeRadius;
@@ -112,7 +123,7 @@ function terrainHit(sim: Sim, ox: number, oy: number, oz: number, dx: number, dy
   const x = ox + dx * lo, z = oz + dz * lo;
   const gx = (H(x + 0.1, z) - H(x - 0.1, z)) / 0.2, gz = (H(x, z + 0.1) - H(x, z - 0.1)) / 0.2;
   const nl = Math.sqrt(gx * gx + 1 + gz * gz);
-  out.t = lo; out.nx = -gx / nl; out.ny = 1 / nl; out.nz = -gz / nl;
+  out.t = lo; out.nx = -gx / nl; out.ny = 1 / nl; out.nz = -gz / nl; out.handle = -1;
   return out;
 }
 
@@ -154,6 +165,9 @@ function stepProjectile(sim: Sim, e: SimEntity, dt: number): void {
     return;
   }
   if (w && w.t <= len) {
+    if (pd.explodeRadius <= 0 && (w.handle ?? -1) >= 0) {
+      for (let i = 0; i < hitListeners.length; i++) hitListeners[i](sim, w.handle!, hx, hy, hz, def.damage * p.dmgMult, p.owner, p.ownerTeam, e.weapon);
+    }
     const px = hx + w.nx * 0.03, py = hy + w.ny * 0.03, pz = hz + w.nz * 0.03;
     if (p.bounces < pd.bounces) {
       const vn = e.vel.x * w.nx + e.vel.y * w.ny + e.vel.z * w.nz;
