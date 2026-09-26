@@ -10,7 +10,8 @@
 import * as THREE from 'three/webgpu';
 import {
   toonOutlinePass, renderOutput, uniform, vec3, vec4, float, mix, smoothstep, luminance,
-  screenUV, time, Fn, fract, sin, dot, vec2,
+  screenUV, time, Fn, fract, sin, dot, vec2, min, normalize, cameraProjectionMatrix, modelViewMatrix,
+  positionLocal, normalLocal,
 } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
@@ -117,11 +118,30 @@ export function buildComicOutput(scene, camera, opts = {}) {
   const ink = uniform(new THREE.Color(PALETTE.ink));
   const thickness = uniform(opts.outlineThickness ?? STYLE.outline.thickness);
   const scenePass = toonOutlinePass(scene, camera, ink, thickness, STYLE.outline.alpha);
+  const inkFar = uniform(opts.inkFar ?? STYLE.outline.farCap);
+  capInkDistance(scenePass, inkFar);
   const b = { ...STYLE.bloom, ...opts.bloom };
   const bloomPass = bloom(scenePass, b.strength, b.radius, b.threshold);
   const grade = createGrade(opts.grade);
   const outputNode = grade.node(renderOutput(scenePass.add(bloomPass)));
-  return { outputNode, scenePass, bloomPass, grade, uniforms: { ink, thickness } };
+  return { outputNode, scenePass, bloomPass, grade, uniforms: { ink, thickness, inkFar } };
+}
+
+/**
+ * The outline hull is extruded by thickness × clip w (constant screen width at every distance). Cap w at `inkFar`
+ * metres for this pass: near ink is unchanged, far ink thins with distance, and distant colours read again.
+ * Same graph as three's ToonOutlinePassNode._createMaterial (r186) with min(pos.w, inkFar).
+ */
+function capInkDistance(pass, inkFar) {
+  const create = pass._createMaterial.bind(pass);
+  pass._createMaterial = () => {
+    const material = create();
+    const mvp = cameraProjectionMatrix.mul(modelViewMatrix);
+    const pos = mvp.mul(vec4(positionLocal, 1.0));
+    const pos2 = mvp.mul(vec4(positionLocal.add(normalLocal.negate()), 1.0));
+    material.vertexNode = pos.add(normalize(pos.sub(pos2)).mul(pass.thicknessNode).mul(min(pos.w, inkFar)));
+    return material;
+  };
 }
 
 /**

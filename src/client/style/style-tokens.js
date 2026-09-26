@@ -34,7 +34,9 @@ export const PALETTE = {
 export const STYLE = {
   toonSteps: 3,
   bandFloor: 0.42,
-  outline: { thickness: 0.0035, alpha: 1 },
+  // farCap (m): beyond it the ink keeps a constant WORLD width, so it thins with distance like comic atmospheric
+  // linework instead of swallowing distant characters (K1: at 35 m a 12×30 px corgi was a solid ink blob).
+  outline: { thickness: 0.0035, alpha: 1, farCap: 8 },
   crease: { angleDeg: 35, widthPx: 1.4 },
   bloom: { strength: 0.6, radius: 0.3, threshold: 0.9 },
   grade: {
