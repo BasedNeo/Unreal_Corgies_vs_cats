@@ -420,7 +420,14 @@ Lead:
 - rams (kart vs stacks, plane vs pets) and direct frisbee hits on vehicles and props;
 - Brotli precompression; e2e for core-rush and adventure from the menu.
 
-Q2 (independent verification) is next. See PROGRESS.
+Q2 verified Wave 4 at 76/100 (`docs/qa/W4_VERIFICATION.md`). The lead fixed its P1 and P2-2 … P2-9; P2-1 is a
+design question for a human and P2-5 (triangles in a live high-tier TDM) is open. See PROGRESS.
+
+### Wave 5 — Bots use the whole yard (`docs/sprints/WAVE5_PLAN.md`)
+- **N1 nav** ✅ — nav links on the Rooftops climb routes; bots climb to perches and roof steps.
+- **B2 ai-vehicles** — bots drive karts (B2a: board, a deterministic driver, rams, hop out near the goal), then fly
+  the RC plane (B2b: strafing runs, bail out when hurt, chapter 6 with a bot pilot).
+- **INT5 lead** — the brain hook for seated bots, soak in all five modes, verify every commit.
 
 ### Quality loop (runs forever after the slice)
 Capture bookmarks → diagnose with `game-worlds-iteration-coach` → change one thing → gate → before/after →
