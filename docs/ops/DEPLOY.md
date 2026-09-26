@@ -15,8 +15,12 @@ A static-only split (client on Vercel, `/ws` on DO) is possible via `?server=wss
 until the client needs a CDN edge.
 
 ## What ships
-- `Dockerfile`: a two-stage build. The build stage runs `npm ci` → `npm run build` (client) → `npm run build:server`
-  (a Vite SSR bundle of `server/prod.ts` into `dist-server/prod.js`). The runtime stage is `npm ci --omit=dev`
+- `Dockerfile`: a two-stage build. The build stage runs `npm ci` → `npm run build` (client) → `npm run precompress`
+  → `npm run build:server` (a Vite SSR bundle of `server/prod.ts` into `dist-server/prod.js`).
+  - `precompress` writes a Brotli (q11) and a gzip -9 copy next to every compressible file in `dist/`.
+  - The server sends the Brotli copy to browsers that accept it: 3.92 → 2.91 MB of JS for offline play, about 26 %
+    less.
+  - Without the copies (for example `npm run start`), it gzips on the fly. The runtime stage is `npm ci --omit=dev`
   (rapier, three, ws) and `node dist-server/prod.js`, running as user `node`, with a `/health` HEALTHCHECK.
 - `.do/app.yaml`: the App Platform spec. Env:
   - `TRUST_PROXY=true`, because DO sits in front and sets X-Forwarded-For;

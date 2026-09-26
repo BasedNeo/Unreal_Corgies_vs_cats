@@ -22,6 +22,7 @@
     "server:prod": "tsx server/prod.ts",
     "start": "vite build && tsx server/prod.ts",
     "build:server": "vite build --ssr server/prod.ts --outDir dist-server --emptyOutDir",
+    "precompress": "tsx server/precompress.ts dist",
     "start:prod": "node dist-server/prod.js",
     "net:bots": "tsx tools/net-bots.ts",
     "test:net": "vitest run tests/unit/net --reporter=verbose",

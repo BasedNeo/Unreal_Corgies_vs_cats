@@ -8,8 +8,9 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
-# client (Vite) + server bundle (Vite SSR build of server/prod.ts → dist-server/prod.js, no tsx at runtime)
-RUN npm run build && npm run build:server
+# client (Vite), its Brotli/gzip siblings (server/precompress.ts: ~26 % less JS to download), and the server
+# bundle (Vite SSR build of server/prod.ts → dist-server/prod.js, no tsx at runtime)
+RUN npm run build && npm run precompress && npm run build:server
 
 FROM node:22-bookworm-slim
 WORKDIR /app

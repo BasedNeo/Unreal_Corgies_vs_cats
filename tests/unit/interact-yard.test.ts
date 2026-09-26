@@ -3,6 +3,7 @@
 // jumper (corgi) with a brute-force hop search over run / sprint / jump / double-jump timings — the objective
 // chain's targets, and the interaction system's cost inside the full default system list.
 import { describe, it, expect, beforeAll } from 'vitest';
+import os from 'node:os';
 import { Sim, type SimSystem } from '../../src/sim/sim';
 import type { SimEntity } from '../../src/sim/entity';
 import { Room } from '../../src/host/room';
@@ -117,8 +118,11 @@ describe('West Yard: objective chain + the full system list', () => {
     expect(objectiveState(sim)).toBeNull(); // the Squeaker chain is a skirmish chain
     const avg = ms / (ticks - 1);
     console.log(`[interact budget] placement ${placeMs.toFixed(1)} ms once · then ${ticks - 1} ticks avg ${avg.toFixed(4)} ms/tick`);
-    expect(avg).toBeLessThan(process.env.CI ? 0.08 : 0.2);
-    expect(placeMs).toBeLessThan(process.env.CI ? 250 : 800);
+    // Locally the budget scales with CPU oversubscription (as in vehicles-yard): at load 19 on 4 cores this measured
+    // 0.235 ms against the 0.022 ms S1 measured idle. CI keeps the tight numbers.
+    const load = Math.max(1, os.loadavg()[0] / Math.max(1, os.cpus().length));
+    expect(avg).toBeLessThan(process.env.CI ? 0.08 : 0.2 * load);
+    expect(placeMs).toBeLessThan(process.env.CI ? 250 : 800 * load);
     room.dispose();
   }, 120000);
 
