@@ -110,12 +110,14 @@ export function createGardenView(data: WorldData, opts: { density?: number } = {
   group.name = 'garden';
   const disposables: { dispose(): void }[] = [];
 
-  // ---- tall grass (2 instanced draws) ----
-  const all: Placement[] = [];
-  for (const zn of data.concealZones ?? []) all.push(...tallGrassPlacements(data, zn));
+  // ---- tall grass: per zone, one instanced draw for its grass and one for its flowers ----
+  // Per zone so the renderer culls the zones out of view: one yard-wide InstancedMesh drew all ~1 270 tufts
+  // (137 k triangles) from a TDM spawn that sees 23 of them (Q2 P2-5). One shared geometry per kind and one material.
   const windDir = new THREE.Vector2(0.8, 0.45).normalize();
+  const grassGeo = tallTuft(3, false), flowerGeo = flowerTuft(5);
+  const mat = createFoliageMaterial(0.32, windDir, { side: THREE.FrontSide });
+  disposables.push(grassGeo, flowerGeo, mat);
   const mkInst = (geo: THREE.BufferGeometry, list: Placement[], name: string) => {
-    const mat = createFoliageMaterial(0.32, windDir, { side: THREE.FrontSide });
     const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, list.length));
     mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, list.length) * 3), 3);
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), p = new THREE.Vector3(), sc = new THREE.Vector3();
@@ -130,23 +132,24 @@ export function createGardenView(data: WorldData, opts: { density?: number } = {
     mesh.receiveShadow = true;
     mesh.name = name;
     mesh.userData.noCameraCollide = true;
-    mesh.computeBoundingSphere();
+    mesh.computeBoundingSphere(); // over the instances: the frustum test is per zone
     group.add(mesh);
-    disposables.push(geo, mat, mesh);
+    disposables.push(mesh);
     return mesh;
   };
-  // mix two tuft shapes in one geometry set: alternate seeds via separate instances would cost draws;
-  // one grass tuft + one flower tuft keep it at 2 draws.
   // Instances sorted by a per-tuft hash, so any prefix (mesh.count) is a uniform thinning: density is live.
   const thinKey = (p: Placement) => hash2(Math.round(p.x * 16), Math.round(p.z * 16), 0x2b);
   const byThin = (a: Placement, b: Placement) => thinKey(a) - thinKey(b);
-  const grassList = all.filter((p) => !p.flower).sort(byThin), flowerList = all.filter((p) => p.flower).sort(byThin);
-  const grassMesh = grassList.length ? mkInst(tallTuft(3, false), grassList, 'garden_tallgrass') : null;
-  const flowerMesh = flowerList.length ? mkInst(flowerTuft(5), flowerList, 'garden_tallflowers') : null;
+  const chunks: { mesh: THREE.InstancedMesh; n: number; flower: boolean }[] = [];
+  for (const zn of data.concealZones ?? []) {
+    const all = tallGrassPlacements(data, zn);
+    const grass = all.filter((p) => !p.flower).sort(byThin), flowers = all.filter((p) => p.flower).sort(byThin);
+    if (grass.length) chunks.push({ mesh: mkInst(grassGeo, grass, `garden_tallgrass_${zn.id}`), n: grass.length, flower: false });
+    if (flowers.length) chunks.push({ mesh: mkInst(flowerGeo, flowers, `garden_tallflowers_${zn.id}`), n: flowers.length, flower: true });
+  }
   const setDensity = (d: number) => {
     const k = Math.max(0, Math.min(1, d));
-    if (grassMesh) grassMesh.count = Math.round(grassList.length * k);
-    if (flowerMesh) flowerMesh.count = Math.round(flowerList.length * k);
+    for (const c of chunks) c.mesh.count = Math.round(c.n * k);
   };
   setDensity(opts.density ?? 1);
 
@@ -223,7 +226,9 @@ export function createGardenView(data: WorldData, opts: { density?: number } = {
       });
     },
     stats() {
-      return { tallGrass: grassMesh?.count ?? 0, tallFlowers: flowerMesh?.count ?? 0, sprinklersOn: live };
+      let tallGrass = 0, tallFlowers = 0;
+      for (const c of chunks) if (c.flower) tallFlowers += c.mesh.count; else tallGrass += c.mesh.count;
+      return { tallGrass, tallFlowers, sprinklersOn: live };
     },
     dispose() {
       for (const d of disposables) d.dispose();

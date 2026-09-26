@@ -25,7 +25,7 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 | W3 lead M1 Ear Glide · M2 buff bits | ✅ | prediction parity 0 cm while gliding; Zoomies+ corrections 1182 → ≤ 2 |
 | Deploy prep (not deployed) | ✅ | docs/ops/DEPLOY.md; bundled server runs on an --omit=dev install |
 | W5 N1 bots climb (nav links) | ✅ merged | 12 tests; perch from base 21–25 s (4 seeds, < 60); 14/15 links valid × 6 profiles, every leg replayed in a real Sim; misses → retry → other route → ground (stuck ≤ 1.5 s); 28-char tick p95 1.43 ms; soak PASS 5 modes (stuck max 1 s, p95 ≤ 1.26 ms) |
-| Q2 Wave 4 verification | ✅ | docs/qa/W4_VERIFICATION.md at `a5177fd`: 76/100 (R 82 · I 70 · F 74), gate PASS; P1-1 fixed `ad28d0f`; P2-2, P2-3, P2-4, P2-6, P2-7, P2-8, P2-9 fixed (lead); P2-1 (design) and P2-5 (triangles) open |
+| Q2 Wave 4 verification | ✅ | docs/qa/W4_VERIFICATION.md at `a5177fd`: 76/100 (R 82 · I 70 · F 74), gate PASS; P1-1 fixed `ad28d0f`; P2-2 … P2-9 fixed (lead); P2-1 is a design question for a human |
 | W4 A2 adventure chapters 3–6 | ✅ merged + wired | 24 new tests; bot-only squads, 6 seeds, all complete inside par, deterministic: ch3 42–63 s / 120, ch4 87–97 s / 180, ch5 74–79 s / 160, ch6 165–186 s / 360; runner ≤ 0.027 ms/tick; artifacts/a2-*.png |
 | W4 S2 vehicle + world audio | ✅ merged | 19 new audio tests; kart putt-putt + plane prop loops (≤ 4, nearest first, 0 allocs/update), vehicle and break voices, adventure step jingle + chapter fanfare; nothing clips (peak 0.825), engines 5–6.6 dB under a shot |
 | W4 A1 adventure framework + ch1–2 | ✅ merged + wired | 32 tests; ch1 bots 52 s (first objective 19 s), ch2 bots 80 s, deterministic; runner ~0.03 ms/tick; artifacts/a1-*.png |
@@ -264,7 +264,11 @@ Newest first. Every task appends: what changed, proof (command + result + screen
       hold anchor, behind the porch, and the respawned brains start without targets. Forced wipes at the last wave now
       re-wipe in 1 of 15 seeds (2 later wipes); before, 3 of 15 (13 later wipes, one seed looping 8 times) (P2-2);
     - the soak runs adventure bot-only with a real 4-pup squad, so chapter 1 completes in it, and reports snapshot
-      bandwidth at wire size (the delta encoder), with the raw JSON beside it (P2-8).
+      bandwidth at wire size (the delta encoder), with the raw JSON beside it (P2-8);
+    - a live high-tier TDM went from 1.50 M to 1.38 M triangles per frame (276 → 254 draws; `perf-render.mjs --query
+      '&mode=team-deathmatch'`). The garden's tall grass was one yard-wide InstancedMesh, culled as one sphere: it drew
+      137 k triangles for 23 tufts in view. It is now drawn per concealment zone. Kibble went from 1 132 to 692
+      triangles a piece (P2-5).
 
 ## Human verdicts
 _(none yet — first human session after Wave 1 integration)_

@@ -197,8 +197,10 @@ export function pickupAssets(): PickupAssets {
   const kb = new PartBuilder();
   const gold = PALETTE.accentHot, crust = PALETTE.teamCorgisTrim, dimple = PALETTE.accent;
   kb.add(rbox(0.36, 0.15, 0.13, 0.05, 2), at(0, 0, 0), gold);
-  for (const e of [-1, 1]) for (const k of [-1, 1]) kb.add(ball(0.1, 12, 8), at(e * 0.2, k * 0.068, 0, 0, 0, 0, 1, 1, 0.72), crust);
-  for (const e of [-1, 1]) kb.add(ball(0.028, 8, 6), at(e * 0.07, 0.005, -0.062, 0, 0, 0, 1, 1, 0.4), dimple);
+  // (8×6 knobs and 6×4 dimples: a kibble is ~0.45 m across, so the old 12×8 spheres were 1 132 triangles a piece for
+  //  no visible gain; up to 22 on screen at once, Q2 P2-5)
+  for (const e of [-1, 1]) for (const k of [-1, 1]) kb.add(ball(0.1, 8, 6), at(e * 0.2, k * 0.068, 0, 0, 0, 0, 1, 1, 0.72), crust);
+  for (const e of [-1, 1]) kb.add(ball(0.028, 6, 4), at(e * 0.07, 0.005, -0.062, 0, 0, 0, 1, 1, 0.4), dimple);
   const kibble = kb.build().geometry;
   kibble.scale(1.25, 1.25, 1.25);
 
