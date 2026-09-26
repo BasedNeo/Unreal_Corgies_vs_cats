@@ -7,10 +7,10 @@
 import { debug } from './debug/debug-hook';
 import * as THREE from 'three/webgpu';
 import { createRenderContext } from './engine/renderer';
-import { toQualityTier } from './engine/quality';
+import { QUALITY, toQualityTier } from './engine/quality';
 import { createWorldData } from '../shared/world/world-data';
 import { createWorldView } from './world/world-view';
-import { districtAt } from '../shared/world/queries';
+import { districtAt, surfaceAt } from '../shared/world/queries';
 import { createWorkerTransport, createWebSocketTransport, type NetEmulation, type Transport } from './net/transport';
 import { NetClient } from './net/net-client';
 import { serverUrlForPage } from './net/server-url';
@@ -86,7 +86,8 @@ async function main(): Promise<void> {
 
   const input = new InputState();
   input.bind(ctx.renderer.domElement);
-  const views = new EntityViews(ctx.scene);
+  const views = new EntityViews(ctx.scene, { surfaceAt: (x, z, y) => surfaceAt(worldData, x, z, y).y });
+  views.setBlobShadows(!QUALITY[toQualityTier(q)].shadows); // low tier: no shadow pass → blob shadows
   const vehicles = createVehicleViews(ctx.scene, { world: worldData, camera: ctx.camera });
   const bossFx = createBossTelegraphFx(ctx.scene, { heightAt: (x, z) => worldData.height(x, z) });
   const bossBar = new BossBar(ui);
@@ -123,6 +124,7 @@ async function main(): Promise<void> {
       settingTier = toQualityTier(st.quality);
       ctx.setQuality(settingTier);
       worldView.setQuality(settingTier);
+      views.setBlobShadows(!QUALITY[settingTier].shadows);
     }
     audio.setQuality(st.quality);
   };
