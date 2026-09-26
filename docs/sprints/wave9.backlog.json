@@ -1,0 +1,240 @@
+{
+  "sprint": "Wave 9 (PROPOSED, awaiting owner approval) — The war gets a purpose: base assault on both maps, The Lot finished (atmosphere + gameplay), enemy squads and veteran rank, one throwable ordnance, a readability pass; independent QA. Starts after W7 P3 (render budget pass) lands",
+  "sprintHours": 8,
+  "agents": [
+    {
+      "id": "world-2",
+      "lanes": [
+        "world"
+      ]
+    },
+    {
+      "id": "mode-1",
+      "lanes": [
+        "mode"
+      ]
+    },
+    {
+      "id": "char-3",
+      "lanes": [
+        "characters",
+        "look"
+      ]
+    },
+    {
+      "id": "arms-2",
+      "lanes": [
+        "ordnance"
+      ]
+    },
+    {
+      "id": "qa-4",
+      "lanes": [
+        "qa"
+      ]
+    },
+    {
+      "id": "lead",
+      "lanes": [
+        "integration"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "C9",
+      "title": "Contracts first (lead, 1 h): optional WorldData.floodlights / climbRoutes / bases (team → flag + ball stand), WaterZone.tint; ROOM_MODES + MAPS modes gain 'base-assault'; Btn.Throw + an ordnance slot in the snapshot flags (no protocol version change unless needed); tests for sanitizers",
+      "lane": "integration",
+      "deps": [],
+      "estimate": 1,
+      "priority": 1,
+      "paths": [
+        "src/shared/world/world-types.ts",
+        "src/shared/world/maps.ts",
+        "src/host/guard.ts",
+        "src/shared/input.ts",
+        "src/shared/protocol.ts",
+        "tests/unit/contracts-w9*"
+      ],
+      "acceptance": [
+        "every new field optional; the West Yard, The Lot and every existing test unchanged",
+        "hostile ?mode=base-assault on adventure-only maps falls back like any unhostable mode (test)"
+      ]
+    },
+    {
+      "id": "L3",
+      "title": "The Lot M3 + M5 (world-2): floodlights from WorldData.floodlights (S4 rig), crane jib lamps, rain/storm default, ditch water tint, calmer gravel rims; PICKUP_LAYOUTS['The Lot'] (cores + kibble, S1 hop search), climb routes onto scaffold/container/pipe crown (N1 links, per-profile validation), bots use all three lanes (lane weights)",
+      "lane": "world",
+      "deps": [
+        "C9"
+      ],
+      "estimate": 3,
+      "priority": 1,
+      "paths": [
+        "src/shared/world/the-lot.ts",
+        "src/shared/world/lot/**",
+        "src/shared/content/pickups.ts",
+        "src/sim/ai/links.ts",
+        "src/client/world/water-view.ts",
+        "labs/lot*",
+        "tests/unit/lot*"
+      ],
+      "acceptance": [
+        "the five hero bookmarks reshot at dusk + storm, looked at: floodlight pools, crane lamps, muddy ditch water, no black floors",
+        "bots reach the scaffold deck and container roof via links; bot-seconds in Canyon and Pipeworks ≥ 25 % each of The Mud's in a 14v14 TDM",
+        "cores/kibble collectable by both species (hop search), soak PASS on The Lot in all three PvP modes"
+      ]
+    },
+    {
+      "id": "G4a",
+      "title": "Base Assault mode rules + presentation (mode-1): steal the enemy's squeaky tennis ball from its FOB stand and bring it to your own flag (carrier slowed 25 %, drops on knockout, returns after 20 s or on touch); first to 3; on the West Yard FOBs (E4 BattleLayout), offline first; HUD strip + ball beacon + comic banners",
+      "lane": "mode",
+      "deps": [],
+      "estimate": 3,
+      "priority": 1,
+      "paths": [
+        "src/sim/match/base-assault.ts",
+        "src/sim/match/index.ts",
+        "src/shared/content/modes.ts",
+        "src/client/modes/base-assault-view.ts",
+        "src/client/ui/base-assault-hud.ts",
+        "tests/unit/base-assault*"
+      ],
+      "acceptance": [
+        "authoritative: pickup/drop/return/capture only in the sim, duplicate-grab and carrier-disconnect cases tested; no ball duplication or loss",
+        "a human vs bots round is playable end to end offline on the West Yard (worker ?mode=base-assault), screenshots looked at"
+      ]
+    },
+    {
+      "id": "G4b",
+      "title": "Bots play Base Assault + both maps online (mode-1): attackers path to the enemy stand and carry home, defenders guard and chase the carrier, escorts, kart rides and nav links; The Lot bases (WorldData.bases); online rooms (?mode=base-assault&map=the_lot)",
+      "lane": "mode",
+      "deps": [
+        "G4a",
+        "C9"
+      ],
+      "estimate": 3,
+      "priority": 2,
+      "paths": [
+        "src/sim/ai/tactics.ts",
+        "src/sim/ai/brain.ts",
+        "tests/unit/ai-base-assault*"
+      ],
+      "acceptance": [
+        "bot-only 4v4 on both maps: ≥ 1 capture per 5-minute match on 4 of 5 seeds, both teams score, no bot stuck > 5 s",
+        "an online room on The Lot plays a full round (two clients in-process); soak PASS with base-assault added to the mode list"
+      ]
+    },
+    {
+      "id": "K3",
+      "title": "Hardened squads + veteran rank (char-3): two PvE enemy squads for Yard Skirmish (e.g. alley-cat raiders: light, fast, flanking archetype; tabby heavies: slow shield-bearers) with their own kit variants and wave slots; a player 'veteran' rank look (rank slot, unlock at level 10) worn online; under-suit value lift so pets read at 35 m under dusk",
+      "lane": "characters",
+      "deps": [],
+      "estimate": 3,
+      "priority": 2,
+      "paths": [
+        "src/client/procgen/characters/**",
+        "src/client/procgen/cosmetics/**",
+        "src/shared/content/cosmetics.ts",
+        "src/sim/ai/archetypes.ts",
+        "src/sim/match/config.ts",
+        "src/client/views/entity-views.ts",
+        "labs/characters*",
+        "tests/unit/char-k3*",
+        "tests/unit/cosmetics-rank*"
+      ],
+      "acceptance": [
+        "24/24 + squad kits within the NPC budget, style audit green, K1 distance and team read not lower",
+        "35 m lineup at dusk: team shells and suits read for both species (screenshot looked at; luma of the suit ≥ agreed floor)",
+        "skirmish waves with the new squads stay inside the existing difficulty band (qa-difficulty), no new player combat power"
+      ]
+    },
+    {
+      "id": "X4",
+      "title": "One throwable per faction from the Ordnance Terminal (arms-2): corgi squeaker grenade / cat hairball bomb, 1 carried, arc preview, fuse, blast via the existing explode(), X3 FX/audio, HUD slot; bots throw at clusters via src/sim/ai/ordnance-ai.ts (a pure decision module the lead wires into tactics at INT9, so it never touches mode-1's tactics.ts)",
+      "lane": "ordnance",
+      "deps": [
+        "C9"
+      ],
+      "estimate": 3,
+      "priority": 2,
+      "paths": [
+        "src/sim/combat/ordnance.ts",
+        "src/shared/content/ordnance.ts",
+        "src/sim/interact/ordnance-kiosk.ts",
+        "src/client/fx/presets-ordnance.ts",
+        "src/client/audio/presets-ordnance.ts",
+        "src/client/ui/ordnance-hud.ts",
+        "tests/unit/ordnance*",
+        "src/sim/ai/ordnance-ai.ts"
+      ],
+      "acceptance": [
+        "authoritative throw (server validates carry, cooldown, arc), prediction-safe; damage within the soft-counter band (TTK tables unchanged for guns)",
+        "grenade arc, fuse and blast read in slow-motion shots; 0 allocations per throw after warm-up"
+      ]
+    },
+    {
+      "id": "P4",
+      "title": "Readability + grade pass on finished systems (look-3): dark bookmarks (deck/flank luma 31–35) lifted without losing the dusk mood, rim light on characters at range, team signal protection checked in storm; low tier parity",
+      "lane": "look",
+      "deps": [],
+      "estimate": 2,
+      "priority": 3,
+      "paths": [
+        "src/client/style/**",
+        "src/client/world/sky.ts",
+        "src/client/engine/quality.ts",
+        "tests/unit/style*"
+      ],
+      "acceptance": [
+        "the W7 bookmark set reshot: luma of every bookmark ≥ 45 at t = 0.74, contrast not lower; looked at",
+        "budgets unchanged (perf-render before/after)"
+      ]
+    },
+    {
+      "id": "Q4",
+      "title": "Independent verification of Waves 7–9 (qa-4): gates scoring (Realism / Intensity / Fairness), budgets on both maps, determinism, abuse probes for base-assault and ordnance, the before/after gallery judged",
+      "lane": "qa",
+      "deps": [
+        "L3",
+        "G4b",
+        "K3",
+        "X4",
+        "P4"
+      ],
+      "estimate": 2,
+      "priority": 2,
+      "paths": [
+        "docs/qa/W9_VERIFICATION.md",
+        "tools/qa4-*"
+      ],
+      "acceptance": [
+        "a scored report with P0/P1/P2 findings and repro commands; score ≥ 70 or blockers listed"
+      ]
+    },
+    {
+      "id": "INT9",
+      "title": "Integrate wave 9 (lead): land lanes one at a time with verify --e2e, soak all modes on both maps, budgets, gallery, PROGRESS/ARCHITECTURE/MASTER_PLAN, knowledge capture",
+      "lane": "integration",
+      "deps": [
+        "L3",
+        "G4b",
+        "K3",
+        "X4",
+        "P4"
+      ],
+      "estimate": 2,
+      "priority": 2,
+      "paths": [
+        "src/client/main.ts",
+        "PROGRESS.md",
+        "ARCHITECTURE.md",
+        "MASTER_PLAN.md",
+        "docs/qa/W9_GALLERY.md"
+      ],
+      "acceptance": [
+        "verify --e2e green on every integration commit; soak PASS in all modes on both maps; budgets within §8.7"
+      ]
+    }
+  ]
+}

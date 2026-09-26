@@ -209,6 +209,23 @@ Newest first. Every task appends: what changed, proof (command + result + screen
   shows the toon-shaded corgi placeholder, ink outlines, crates and a cat bot.
 - Next: Wave 1 lanes in parallel (see MASTER_PLAN §10).
 
+## Next quality loop: highest-leverage items (W7 self-review, 2026-09-26)
+1. **Human playtest of W7 (MASTER_PLAN §9 milestone DoD).** Play, visuals and technical verdicts on the HARDENED build,
+   on a real GPU. Nothing in W7 has been judged by a human, and "humans certify fun".
+2. **Budgets:** P3 (in progress) brings live 4v4 TDM under 1.5 M tris and 12v12 under 400 draws. After that, real-GPU
+   fps at high and medium.
+3. **Readability at range under dusk:** the dark under-suit reads as a near-silhouette at 35 m, and the deck and flank
+   bookmarks sit at luma 31–35. Wave 9 K3 and P4 cover both.
+4. **Kart rams halved on the fortified yard** (3 vs 6 per 6 matches). Is that the right trade (cover vs karts)? It is a
+   design question for the playtest (see Q3 P2-3).
+5. **The Lot:** atmosphere, pickups and bot lane use (Wave 9 L3). Base Assault gives both maps' bases a purpose (Wave 9 G4).
+6. **Small calls left with the owner:**
+   - X3's invented shotgun extra impacts;
+   - the ~0.4° visual-kick crosshair offset;
+   - the rifle's SQUEAK! word under HARDENED;
+   - matches starting later in the day (S4 snippet 6);
+   - bot-only veterans vs a player rank (Wave 9 K3 proposes a level-10 rank look).
+
 ## Known issues
 - Rapier KCC on the heightfield was ~0.13 ms/character/tick. The P1 terrain fast path (grounded capsules only) brought
   28 characters to tick p95 1.72 ms, max 3.16 ms; airborne and structure moves still pay the full KCC (L3, P1).

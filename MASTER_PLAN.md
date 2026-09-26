@@ -434,7 +434,7 @@ design question for a human and P2-5 (triangles in a live high-tier TDM) is open
 - **INT5 lead** ✅ — the brain hook for seated bots; `vehicle`/`airborne` steps strict for bot-only squads (with the
   grace); soak in all five modes; verify every commit.
 
-### Wave 6 — Earn your look (`docs/sprints/WAVE6_PLAN.md`)
+### Wave 6 — Earn your look (`docs/sprints/WAVE6_PLAN.md`) ✅
 Meta progression that never touches stats (§7.17, §7.19): coat patterns true to each species, neckwear and taunt
 packs, unlocked by play (XP, chapter medals, first wins) in one versioned profile, and seen by everyone online.
 Class hats stay the class silhouette cue (K1), and team colours stay readable.
@@ -442,6 +442,36 @@ Class hats stay the class silhouette cue (K1), and team colours stay readable.
 - **P2 profile**: versioned profile with migration, XP and unlock rules. It then does **U2 ux**: locker view and
   reward card.
 - **Lead**: N2 (the look in hello → roster → views, validated server-side), INT6.
+
+### Wave 7 — HARDENED quality loop (`docs/design/HARDENED.md`, `docs/sprints/WAVE7_PLAN.md`) ✅ (P3 budget pass in progress)
+The owner's direction (2026-09-26) is battle-hardened warriors with the animal soul kept. One quality loop, in blocks:
+- **Block 1, K2:** armoured veteran characters and elite variants.
+- **Block 2, E4:** the Yard War front, with forward bases, trenches and weathered ground.
+- **Block 3, X3:** weapons and combat feedback.
+- **Block 4, S4:** the style factory v2, dusk/storm rig and gritty grade, plus **P3**, the render budget pass.
+- **Block 5 (lead):** gallery, docs and the next loop.
+
+Evidence: `docs/qa/W7_GALLERY.md`.
+
+### Wave 8 — Expand the world (`docs/design/EXPANSION_VISION.md`)
+A second, larger battleground next door: **The Lot**, a construction lot at pet scale.
+- **M1 multi-map plumbing (lead) ✅:** map registry, `?map=`, rooms, the MAP picker.
+- **M2 layout (world-2) ✅**
+- **M3 atmosphere, M5 gameplay:** in the Wave 9 proposal (L3).
+- **M4 perf:** folded into P3 and L3.
+- **M6 base assault:** in the Wave 9 proposal (G4).
+
+### Wave 9 — PROPOSED, awaiting owner approval (`docs/sprints/WAVE9_PLAN.md`)
+The war gets a purpose:
+- Base Assault on both maps: steal the squeaky tennis ball.
+- The Lot finished (atmosphere and gameplay).
+- Hardened enemy squads and a veteran rank.
+- One throwable per faction.
+- A readability pass.
+- Independent QA.
+
+Six agents, 8 h makespan, no path collisions (validated with `game-sprint-planner`). Starts after P3 lands and the owner
+approves it.
 
 ### Quality loop (runs forever after the slice)
 Capture bookmarks → diagnose with `game-worlds-iteration-coach` → change one thing → gate → before/after →
