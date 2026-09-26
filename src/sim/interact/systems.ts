@@ -39,7 +39,7 @@ function place(sim: Sim, rt: InteractRuntime): void {
   for (const s of [...(layout?.cores ?? []), ...(layout?.kibble ?? [])]) avoid.push({ x: s.x, z: s.z, r: 4 });
   for (const st of chain?.steps ?? []) avoid.push({ x: st.trigger.params.x, z: st.trigger.params.z, r: st.trigger.params.radius + 4 });
   if (rt.parts.terminals) rt.terminals = placeOrdnanceTerminals(sim, avoid).map((e) => e.id);
-  if (layout) rt.pickups = placePickups(sim, rt, layout).map((e) => e.id);
+  if (layout) { rt.pickupEnts = placePickups(sim, rt, layout); rt.pickups = rt.pickupEnts.map((e) => e.id); }
   if (rt.parts.objectives && chain) initObjectives(sim, rt, chain);
 }
 

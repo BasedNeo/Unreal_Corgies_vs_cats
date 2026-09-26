@@ -24,6 +24,7 @@ import { Nameplates } from './views/nameplates';
 import { BossBar } from './views/boss-bar';
 import { createBossTelegraphFx } from './procgen/boss';
 import { createVehicleViews, vehicleCameraFor, mountedVehicle, followYaw } from './vehicles';
+import { createInteractViews, createInteractPrompts } from './interact';
 import { loadSettings, type Settings } from './ui/settings';
 import { bus } from './core/events';
 import { TICK_DT } from '../shared/constants';
@@ -81,6 +82,8 @@ async function main(): Promise<void> {
   const vehicles = createVehicleViews(ctx.scene, { world: worldData, camera: ctx.camera });
   const bossFx = createBossTelegraphFx(ctx.scene, { heightAt: (x, z) => worldData.height(x, z) });
   const bossBar = new BossBar(ui);
+  // S1: Ordnance kiosks, Upgrade Cores, Golden Kibble, the mission beacon (3D) + E prompt, kit picker, buffs, mission card
+  const interact = createInteractViews(ctx.scene, { world: worldData, camera: ctx.camera });
   // Concealment cue: the sim sets EFlag.Stealthed while the local corgi is hidden in tall grass.
   const hiddenCue = document.createElement('div');
   hiddenCue.textContent = 'HIDDEN';
@@ -117,6 +120,7 @@ async function main(): Promise<void> {
     setSetting: () => applySettings(hud.settings),
   });
   hud.setUiSound((k) => audio.ui(k));
+  const prompts = createInteractPrompts(ui, { send: (msg) => net?.transport.send(msg), sound: (k) => audio.ui(k) });
   applySettings(hud.settings);
   if (autoStart) await startSession(params.get('name') ?? hud.settings.name ?? 'Rex', urlCls, urlTeam);
   else hud.showMenu(true);
@@ -146,6 +150,8 @@ async function main(): Promise<void> {
     if (ev.e === 'spawn') views.trigger(ev.id, 'spawn');
     if (ev.e === 'ability') views.trigger(ev.id, ev.ability);
     bossFx.onGameEvent(ev);
+    interact.onGameEvent(ev);
+    prompts.onGameEvent(ev, net?.localEntity ?? -1);
     const r = fx.onGameEvent(ev);
     if (r.shake > 0) cam.shake(r.shake);
     audio.onGameEvent(ev);
@@ -172,6 +178,8 @@ async function main(): Promise<void> {
     const pdt = dt * fx.hitStop(); // hit-stop slows presentation only, never the sim
     views.sync(states, localId, pdt);
     vehicles.sync(states, pdt);
+    interact.sync(states, pdt);
+    prompts.update(states, localId, dt);
     bossFx.update(dt, states);
     bossBar.update(states, dt);
     const local = states.get(localId) ?? null;

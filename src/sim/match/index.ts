@@ -18,6 +18,7 @@ import { ARCHETYPES, type ArchetypeId } from '../ai/archetypes';
 import { nearestWalkable, cellX, cellZ } from '../ai/nav';
 import { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type MatchConfigOverrides } from './config';
 import { spawnBoss, bossWaveStatus } from '../boss'; // B1 hook: boss waves
+import { objectiveState, takeObjectiveScore, foldObjectiveText } from '../interact'; // S1: mission chain
 
 export { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type WaveDef, type MatchConfigOverrides } from './config';
 
@@ -323,6 +324,12 @@ export const matchSystem: SimSystem = {
     const batch = kills.splice(0);
     if (mode === 'team-deathmatch') updateTdm(sim, rt, dt, batch);
     else updateSkirmish(sim, rt, dt, batch);
+    // S1 mission chain: its points join the team score; its current step rides the objective line
+    // ("Wave 2/5 — 6 cats left · ▶ Hold the trampoline 12/20s (2/3)"). The fold is idempotent.
+    const ms = stateOf(sim);
+    const [c, k] = takeObjectiveScore(sim);
+    ms.score[0] += c; ms.score[1] += k;
+    if (ms.phase === 'live') ms.objective = foldObjectiveText(ms.objective, objectiveState(sim));
   },
 };
 

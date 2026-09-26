@@ -50,7 +50,9 @@ export interface SlotNet {
   /** Real-time input budget (see INPUT_CREDIT_CAP). */
   credit: number;
   inputsSeen: boolean;
+  /** Last deploy-point class / team switch (separate: the menu sends both in one tick). */
   lastSwitchTick: number;
+  lastTeamTick: number;
   lastChatTick: number;
 }
 
@@ -112,7 +114,7 @@ export function defaultMatchState(mode: string): MatchState {
 }
 
 function newSlotNet(): SlotNet {
-  return { starves: 0, catchups: 0, drops: 0, refused: 0, applied: 0, starveRun: 0, minDepth: Infinity, windowTicks: 0, lastMinDepth: 0, credit: 0, inputsSeen: false, lastSwitchTick: -1e9, lastChatTick: -1e9 };
+  return { starves: 0, catchups: 0, drops: 0, refused: 0, applied: 0, starveRun: 0, minDepth: Infinity, windowTicks: 0, lastMinDepth: 0, credit: 0, inputsSeen: false, lastSwitchTick: -1e9, lastTeamTick: -1e9, lastChatTick: -1e9 };
 }
 
 export class Room {
@@ -184,7 +186,7 @@ export class Room {
         if (swap === 'cooldown') return 'ignored';
         if (swap === 'swapped') { p.cls = msg.cls; p.pendingCls = undefined; this.rosterDirty = true; return 'ok'; }
         if (this.atDeploy(p)) {
-          if (!this.switchAllowed(p)) return 'ignored';
+          if (!this.switchAllowed(p, 'lastSwitchTick')) return 'ignored';
           p.cls = msg.cls; p.pendingCls = undefined; this.respawnAs(p);
           return 'ok';
         }
@@ -194,7 +196,7 @@ export class Room {
       case 'team':
         if (msg.team !== Team.Corgis && msg.team !== Team.Cats) return 'abuse';
         if (this.atDeploy(p)) {
-          if (!this.switchAllowed(p)) return 'ignored';
+          if (!this.switchAllowed(p, 'lastTeamTick')) return 'ignored';
           p.team = msg.team; p.pendingTeam = undefined; this.respawnAs(p); this.fillBots();
           return 'ok';
         }
@@ -344,9 +346,9 @@ export class Room {
     }
   }
 
-  private switchAllowed(p: PlayerSlot): boolean {
-    if (this.sim.tick - p.net.lastSwitchTick < TICK_HZ) return false;
-    p.net.lastSwitchTick = this.sim.tick;
+  private switchAllowed(p: PlayerSlot, key: 'lastSwitchTick' | 'lastTeamTick'): boolean {
+    if (this.sim.tick - p.net[key] < TICK_HZ) return false;
+    p.net[key] = this.sim.tick;
     return true;
   }
 

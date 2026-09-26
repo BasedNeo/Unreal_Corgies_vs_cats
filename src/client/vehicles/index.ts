@@ -17,6 +17,7 @@ import { hash2 } from '../../shared/rng';
 import type { WorldData } from '../../shared/world/world-data';
 import { surfaceAt } from '../../shared/world/queries';
 import { VEHICLES, TERMINALS, vehicleByIndex, terminalByIndex } from '../../shared/content/vehicles';
+import { terminalKindAt } from '../../shared/content/terminals';
 import { toon, glow } from '../style/style-webgpu.js';
 import { PALETTE, STYLE } from '../style/style-tokens.js';
 import { kartAssets, KART_WHEELS, KART_EXHAUST, KART_HOOD, KART_CHUTE } from './kart-model';
@@ -391,7 +392,7 @@ export function createVehicleViews(scene: THREE.Scene, opts: VehicleViewsOptions
           if (!v) { v = new KartView(s); karts.set(id, v); group.add(v.root); }
           const near = !cam || Math.hypot(s.x - camPos.x, s.z - camPos.z) < 70;
           v.update(s, dt, opts.world, puffs, near);
-        } else if (s.kind === EntityKind.Terminal) {
+        } else if (s.kind === EntityKind.Terminal && terminalKindAt(s.cls) === 'vehicle') { // S1 kiosks draw themselves
           let v = terms.get(id);
           if (!v) { v = new TerminalView(s, opts.world); terms.set(id, v); group.add(v.root); }
           v.update(s, dt);

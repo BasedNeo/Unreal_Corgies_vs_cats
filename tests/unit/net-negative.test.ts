@@ -157,11 +157,18 @@ describe('negative cases: input pipeline', () => {
     const e0 = a.entity;
     room.handle('a', { t: 'class', cls: 'breacher' });
     const e1 = a.entity;
-    room.handle('a', { t: 'class', cls: 'warden' });
-    room.handle('a', { t: 'team', team: 1 });
+    room.handle('a', { t: 'class', cls: 'warden' }); // class limiter: ignored
     expect(e1).not.toBe(e0);
     expect(a.entity).toBe(e1);
     expect(a.cls).toBe('breacher');
+    // team has its own limiter: the menu sends class + team in one tick and both must land
+    room.handle('a', { t: 'team', team: 1 });
+    const e2 = a.entity;
+    expect(a.team).toBe(1);
+    expect(e2).not.toBe(e1);
+    room.handle('a', { t: 'team', team: 0 }); // team limiter: ignored
+    expect(a.team).toBe(1);
+    expect(a.entity).toBe(e2);
     for (let i = 0; i < 61; i++) room.tick();
     room.handle('a', { t: 'class', cls: 'warden' });
     expect(a.cls).toBe('warden');

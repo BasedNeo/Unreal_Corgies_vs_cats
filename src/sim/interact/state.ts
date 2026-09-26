@@ -1,6 +1,7 @@
 // Interaction components (module augmentation on SimEntity), the per-Sim runtime and the plain-data
 // channels this lane shares through sim.state. No Three.js, no DOM, no Math.random().
 import type { Sim } from '../sim';
+import type { SimEntity } from '../entity';
 import type { EntityId } from '../../shared/types';
 import { TICK_HZ } from '../../shared/constants';
 import { hash2, mulberry32 } from '../../shared/rng';
@@ -92,6 +93,8 @@ export interface InteractRuntime {
   /** Cores have been scheduled for the current match (it went live). */
   coresScheduled: boolean;
   pickups: EntityId[];
+  /** The pickup entities themselves (fixtures for the whole match: no per-tick map lookups). */
+  pickupEnts: SimEntity[];
   terminals: EntityId[];
   beacon: EntityId;
   chain: ObjectiveChain | null;
@@ -106,7 +109,7 @@ export function interactRuntime(sim: Sim): InteractRuntime {
   if (!rt) {
     rt = {
       placed: false, enabled: false, parts: { terminals: false, cores: false, kibble: false, objectives: false },
-      matchRef: undefined, lastPhase: '', coresScheduled: false, pickups: [], terminals: [], beacon: -1, chain: null,
+      matchRef: undefined, lastPhase: '', coresScheduled: false, pickups: [], pickupEnts: [], terminals: [], beacon: -1, chain: null,
       rng: mulberry32(Math.floor(hash2(sim.seed, 0x51, 0x1c7) * 0x7fffffff)),
     };
     runtimes.set(sim, rt);

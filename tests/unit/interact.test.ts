@@ -304,6 +304,19 @@ describe('Room: class and team choices', () => {
     expect(ent().species).toBe(Species.Cat);
     room.dispose();
   });
+
+  it('the menu sends class and team in the same tick: both apply (S1 handoff: the team was rate-limited away)', async () => {
+    const { room, slot, ent } = await makeRoom();
+    expect(room.handle('a', { t: 'class', cls: 'overwatch' })).toBe('ok');
+    expect(room.handle('a', { t: 'team', team: Team.Cats })).toBe('ok');
+    expect(slot.cls).toBe('overwatch');
+    expect(slot.team).toBe(Team.Cats);
+    expect(ent().species).toBe(Species.Cat);
+    expect(ent().cls).toBe('overwatch');
+    // each kind is still limited to one deploy switch per second
+    expect(room.handle('a', { t: 'class', cls: 'assault' })).toBe('ignored');
+    room.dispose();
+  });
 });
 
 // ------------------------------------------------------------------------------------------------ cores
@@ -568,6 +581,7 @@ describe('Objective chain', () => {
     expect(takeObjectiveScore(sim)).toEqual([35, 0]);
     expect(takeObjectiveScore(sim)).toEqual([0, 0]);
     expect(foldObjectiveText('Wave 2/5', st())).toBe('Wave 2/5 · ▶ Done!');
+    expect(foldObjectiveText(foldObjectiveText('Wave 2/5', st()), st())).toBe('Wave 2/5 · ▶ Done!'); // idempotent
     run(sim, 3 * 60);
     expect(st().text).toBe('');
     expect(foldObjectiveText('Wave 2/5', st())).toBe('Wave 2/5');

@@ -48,9 +48,18 @@ function clearDisc(data: WorldData, x: number, z: number, r: number, maxStep: nu
   return y;
 }
 
+/** Site searches are pure functions of (immutable, per-seed cached) WorldData: remember them per world. */
+const siteCache = new WeakMap<WorldData, Map<string, unknown>>();
+function cached<T>(data: WorldData, key: string, f: () => T): T {
+  let m = siteCache.get(data);
+  if (!m) { m = new Map(); siteCache.set(data, m); }
+  if (!m.has(key)) m.set(key, f());
+  return m.get(key) as T;
+}
+
 /** Keep-out circles around the team's vehicle terminal and its kart pad (so Interact never hits both). */
 export function kartKeepOut(data: WorldData, team: TeamId): KeepOut[] {
-  const kart = findTerminalSite(data, team);
+  const kart = cached(data, `kart:${team}`, () => findTerminalSite(data, team));
   if (!kart) return [];
   const od = TERMINALS.ordnance_terminal, kd = TERMINALS.kart_terminal;
   const vd = VEHICLES[kd.vehicle];
@@ -68,6 +77,12 @@ export function kartKeepOut(data: WorldData, team: TeamId): KeepOut[] {
  * Preference: about `siteRadius` m from the spawn centroid, toward the middle of the map, clear of `avoid`.
  */
 export function findOrdnanceSite(data: WorldData, team: TeamId, avoid: readonly KeepOut[] = []): OrdnanceSite | null {
+  const key = `ord:${team}:${avoid.map((k) => `${k.x},${k.z},${k.r}`).join(';')}`;
+  return cached(data, key, () => searchOrdnanceSite(data, team, avoid));
+}
+
+/** The uncached search behind findOrdnanceSite (tests). */
+export function searchOrdnanceSite(data: WorldData, team: TeamId, avoid: readonly KeepOut[] = []): OrdnanceSite | null {
   const spawns = data.spawns.filter((s) => s.team === team);
   if (!spawns.length) return null;
   const td = TERMINALS.ordnance_terminal;

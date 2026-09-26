@@ -13,7 +13,8 @@ src/shared/                        PURE contracts + data (runs everywhere; no th
   input.ts                         InputCmd (+ rt lag-comp tick), Btn bits, sanitizeInput
   protocol.ts                      ClientMsg/ServerMsg, EntityState pack/unpack, MatchState, GameEvent
   rng.ts  math.ts                  mulberry32/hash; angles, damp, view dirs
-  content/                         theme data: classes, weapons (+ AIM_RAY), abilities, vehicles, bosses
+  content/                         theme data: classes, weapons (+ AIM_RAY), abilities, vehicles, bosses,
+                                   terminals (vehicle + ordnance kiosks), pickups (cores, kibble), objectives
   world/                           WorldData contract (world-types), West Yard + Garden builders, terrain,
                                    queries (height/surface/concealment), weather/time-of-day from tick, kit
 src/sim/                           AUTHORITATIVE simulation (worker / Node / tests / client prediction)
@@ -26,6 +27,8 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
   ai/                              brain (HFSM, perception, aim), archetypes, nav (1 m grid A*)
   match/                           yard-skirmish (waves) · team-deathmatch
   vehicles/  boss/                 Wave 2 lanes (Mower Kart + terminals; Vac-Tank boss)
+  interact/                        order 150: Ordnance kiosk kit swaps, Upgrade Cores + buffs, Golden Kibble,
+                                   Squeaker mission chain (folded into MatchState by match/)
 src/host/                          Room (players, bots, input buffers, snapshots), wire (delta encoding),
                                    quantize (snapshot-precision parity), guard (validation), worker-host (offline)
 src/client/
@@ -41,9 +44,10 @@ src/client/
   world/                           world view: terrain, fences, prims, foliage, water, sky/day-night
   ui/  audio/  fx/                 comic HUD + menus + settings · procedural audio + music · pooled FX + words
   vehicles/                        kart + terminal views (Wave 2)
+  interact/                        kiosk/core/kibble/beacon views · E prompt, kit picker, buff chips, mission card
   debug/debug-hook.ts              window.__cvc for tests
 tools/                             gate, boundaries, probe, soak, net-bots, char-audit, world-* benches/shots
-labs/                              lane labs: characters, world, juice (HUD/FX), vehicles, boss
+labs/                              lane labs: characters, world, juice (HUD/FX), vehicles, boss, interact
 tests/unit/  tests/e2e/            Vitest (sim/host/net/world/combat/ai/ui/fx) · Playwright (smoke, 2-client net)
 docs/                              handoff/ (lane reports) · sprints/ (validated lane plans) · legacy/ (Unreal era)
 ```

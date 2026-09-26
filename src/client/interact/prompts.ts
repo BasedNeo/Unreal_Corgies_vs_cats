@@ -82,7 +82,7 @@ const CSS = `
 .cvc-ix .ix-cc .ic svg{width:74%;height:74%}
 .cvc-ix .ix-cc .nm{font-size:${u(18)};letter-spacing:.03em}
 .cvc-ix .ix-cc .rl{font:800 ${u(10)} ${FONT_BODY};letter-spacing:.06em;text-transform:uppercase;opacity:.6}
-.cvc-ix .ix-cc .st{grid-column:1/-1;display:flex;gap:${u(6)};margin-top:${u(5)};font:700 ${u(10.5)} ${FONT_BODY}}
+.cvc-ix .ix-cc .st{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:${u(4)} ${u(5)};margin-top:${u(5)};font:700 ${u(10)} ${FONT_BODY}}
 .cvc-ix .ix-cc .st b{background:rgba(26,18,12,.09);border-radius:${u(5)};padding:${u(1)} ${u(5)};white-space:nowrap}
 .cvc-ix .ix-cc .bl{grid-column:1/-1;font:600 ${u(11)}/1.25 ${FONT_BODY};opacity:.8;margin-top:${u(4)};min-height:${u(28)}}
 .cvc-ix .ix-cc kbd{position:absolute;right:${u(-9)};bottom:${u(-9)};transform:rotate(4deg)}

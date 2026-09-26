@@ -13,12 +13,22 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 | W1 L5 HUD/audio/FX | ✅ merged + wired | 36 unit tests; FX 0.19 ms/frame, 0 allocs/spawn; artifacts/l5-*.png |
 | W2 V1 Vehicles | ✅ merged + wired | 27 tests; kart + Kart-O-Matic; chase camera |
 | W2 B1 Vac-Tank boss | ✅ merged + wired | 23 tests; bots beat it in 217 s; boss bar, telegraphs, ?boss=1 |
-| W2 G1 Garden + weather | ⏳ dispatched | — |
-| W2 S1 Ordnance Terminal/cores/objectives, Q1 verification | ⬜ next | — |
+| W2 G1 Garden + weather | ✅ merged + wired | concealment, deterministic weather + day/night; `de82d72` |
+| W2 S1 Ordnance kiosk/cores/kibble/mission | ✅ merged + wired | 27 interact tests; 20/20 kibble + 4/4 cores hop-validated; 0.022 ms/tick; artifacts/s1-*.png |
 | **Wave 1 integration** | ⚠️ corrected | first claim was false (did not boot); fixed + verified in `3d2de26` — see log |
 | Q1 verification | ✅ | docs/qa/W1_VERIFICATION.md — 55/100, P0/P1 fixes landed |
 
 ## Log
+### 2026-09-26 — QA quick fixes + S1 integrated (lead)
+- QA W1 quick fixes (`4eaeab8`, VERIFY PASS): skirmish waves 1–2 trickle in (per-wave `maxAlive` 2/4); TDM 4v4;
+  aim zoom λ26; class icons on nameplates; `/stats?reset=1` local/token only; ground-pound crouch buffered and the
+  jump buffer honours its full 120 ms (tests fail without each fix); skirmish cats read their own objective; the
+  scoreboard counts wave cats instead of "No one here yet".
+- Difficulty (bot stand-in, `tools/qa-difficulty.mjs`, seeds 1–2): offline skirmish first death **46–65 s** (was
+  14–42 s), won both seeds at K/D 21/15 and 27/15; AFK player: the squad reaches the final wave. TDM 4v4 splits 1:1.
+- S1 wired: kiosks, cores, kibble and the Squeaker mission in game (`artifacts/s1-ingame.png`, 0 errors). Mission
+  points join the team score; the step rides `MatchState.objective` (the banner drops it — the mission card shows
+  it). Class and team switches have separate 1 s limiters (the menu sends both in one tick).
 ### 2026-09-26 — Correction + QA W1 fixes (lead)
 - **Correction:** the "Wave 1 integrated … full gate green" commit (`484a2e2`) did **not** boot. The gate ran green,
   then `git add -A` swept in the Garden lane's in-flight world files (24 missing palette keys). Caught by the
@@ -76,6 +86,10 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 - Bots treat decks/roofs as obstacles; Warden bots weak in the open (L3).
 - Character faces faceted in close-ups; expressions read cute rather than fierce at portrait distance (lead review of L1).
 - Proposed contract additions (L3): archetype on EntityState, weapon on `death`, `MatchState.enemiesLeft`.
+- Upgrade-core buffs are not in snapshots: the HUD rebuilds them from events (late joiners miss running buffs) and
+  Zoomies+ causes small prediction corrections (~3 cm/snapshot) (S1).
+- `EntityState.cls` carries content indexes through `CLASS_IDS`: 6 entries per content table at most (S1, B1).
+- Bots ignore kiosks, cores, kibble and the mission (S1).
 
 ## Human verdicts
 _(none yet — first human session after Wave 1 integration)_

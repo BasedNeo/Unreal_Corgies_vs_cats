@@ -51,7 +51,7 @@ export type CoreId = (typeof CORE_IDS)[number];
 export const PICKUPS: Record<PickupId, PickupDef> = {
   overclock: {
     id: 'overclock', kind: 'core', name: 'Overclock', blurb: '+20% fire rate',
-    radius: 0.9, duration: 20, buff: { fireRate: 1.2 }, score: 10, color: 'glowOrange',
+    radius: 0.9, duration: 20, buff: { fireRate: 1.2 }, score: 10, color: 'laserRed',
   },
   thick_fur: {
     id: 'thick_fur', kind: 'core', name: 'Thick Fur', blurb: '+30% max hp shield',

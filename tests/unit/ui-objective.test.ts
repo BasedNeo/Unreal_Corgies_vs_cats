@@ -19,3 +19,11 @@ describe('objectiveForTeam', () => {
     expect(cat('The cats took the yard! (wave 3/5)')).toBe('The cats took the yard! (wave 3/5)');
   });
 });
+
+describe('objectiveForTeam with the S1 mission fold', () => {
+  it('the banner drops the mission step (the mission card shows it) and maps the base line for cats', () => {
+    const folded = 'Wave 2/5 — 6 cats left · ▶ Hold the trampoline 12/20s (2/3)';
+    expect(objectiveForTeam(folded, 'yard-skirmish', 0)).toBe('Wave 2/5 — 6 cats left');
+    expect(objectiveForTeam(folded, 'yard-skirmish', 1)).toBe('Wave 2/5 — take down the corgi squad (6 cats in the raid)');
+  });
+});

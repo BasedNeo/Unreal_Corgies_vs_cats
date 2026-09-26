@@ -176,7 +176,7 @@ class CoreView {
     this.t = s.seed * 1.7;
     const ped = builtMesh(a.pedestal, 'core_pedestal');
     this.root.add(ped);
-    this.crystal = new THREE.Mesh(a.crystal, glow(PALETTE.glowOrange, 2.4));
+    this.crystal = new THREE.Mesh(a.crystal, glow(PALETTE.glowOrange, 1.6));
     this.ghost = new THREE.Mesh(a.crystal, glow(PALETTE.glowOrange, 0.55));
     for (let i = 0; i < 2; i++) { const r = builtMesh(a.ring, `core_ring${i}`); this.rings.push(r); this.spin.add(r); }
     this.spin.add(this.crystal);
@@ -201,10 +201,10 @@ class CoreView {
     if (this.crystal.userData.id === d.id) return;
     this.def = d;
     const c = colorOf(d);
-    this.crystal.material = glow(c, 2.4);
+    this.crystal.material = glow(c, 1.6);
     this.crystal.userData.id = d.id;
-    this.ghost.material = glow(c, 0.55);
-    this.halo.material = glow(c, 1.6);
+    this.ghost.material = glow(c, 0.5);
+    this.halo.material = glow(c, 1.15);
   }
 
   collected(): void { this.pop = 1; }
@@ -290,7 +290,7 @@ class KibbleField {
       const up = pop > 0 ? (1 - pop) * 1.6 : 0;
       const scale = pop > 0 ? pop * 1.3 : 1;
       this.v.set(s.x, s.y + Math.sin(this.t * 2.6 + ph) * 0.09 + up, s.z);
-      this.e.set(0, this.t * 1.8 + ph, 0);
+      this.e.set(0.25 * Math.sin(this.t * 1.3 + ph), this.t * 1.6 + ph, 0.18);
       this.q.setFromEuler(this.e);
       this.s.setScalar(scale);
       this.body.setMatrixAt(n++, this.m.compose(this.v, this.q, this.s));
@@ -329,8 +329,8 @@ class BeaconView {
   constructor(private world: WorldData | undefined) {
     const a = pickupAssets();
     this.root.name = 'objective_beacon';
-    this.pillar = new THREE.Mesh(a.pillar, glow(PALETTE.accentHot, 1.8));
-    this.pillar.scale.y = 26;
+    this.pillar = new THREE.Mesh(a.pillar, glow(PALETTE.accentHot, 1.1));
+    this.pillar.scale.set(0.7, 16, 0.7);
     this.chevron = new THREE.Mesh(a.chevron, glow(PALETTE.accentHot, 2.6));
     this.squeaker = builtMesh(a.squeaker, 'squeaker');
     this.ring = new THREE.Mesh(a.halo, glow(PALETTE.glowCyan, 1.6));
@@ -351,15 +351,22 @@ class BeaconView {
     this.root.position.set(s.x, s.y, s.z);
     const hold = t.type === 'hold';
     const contested = (s.flags & EFlag.Busy) !== 0;
+    const item = step.id === 'grab_squeaker';
+    const base = top - s.y;
+    // The pillar starts above the chevron so it never hides the item or the target.
     this.pillar.visible = !hold;
-    this.chevron.position.set(0, top - s.y + 3.2 + Math.sin(this.t * 3) * 0.25, 0);
+    this.pillar.position.y = base + 3.9;
+    this.chevron.position.set(0, base + 3.2 + Math.sin(this.t * 3) * 0.25, 0);
     this.chevron.rotation.y += dt * 1.5;
-    this.squeaker.visible = step.id === 'grab_squeaker';
-    this.squeaker.position.set(0, 0.55 + Math.sin(this.t * 2.2) * 0.1, 0);
+    this.squeaker.visible = item;
+    this.squeaker.position.set(0, 1.0 + Math.sin(this.t * 2.2) * 0.12, 0);
     this.squeaker.rotation.set(0.25, this.t * 1.4, Math.sin(this.t * 3) * 0.2);
+    // A squeeze-and-release "squeak" pulse every 1.6 s.
+    const sq = Math.max(0, Math.sin(this.t * 3.9)) ** 8;
+    this.squeaker.scale.set(1.7 + sq * 0.25, 1.7 - sq * 0.35, 1.7);
     // Ring: the trigger radius on the ground (the trampoline's rim for the hold), pips = hold progress.
     const r = t.params.radius;
-    this.ring.position.y = hold ? top - s.y + 0.08 : 0.06;
+    this.ring.position.y = 0.06; // beacon y = the terrain under the target: the ring lies on the lawn
     this.ring.scale.setScalar(r);
     this.ring.material = glow(contested ? PALETTE.laserRed : hold ? PALETTE.accentHot : PALETTE.glowCyan, contested ? 2.2 + Math.sin(this.t * 14) * 0.6 : 1.5);
     const lit = hold ? Math.round((s.ammo / 100) * HOLD_PIPS) : 0;

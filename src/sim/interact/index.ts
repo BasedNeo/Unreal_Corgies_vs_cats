@@ -3,7 +3,7 @@
 // src/shared/content/{terminals,pickups,objectives}.ts. Handoff: docs/handoff/S1.md.
 export { interactSystems, interactSystem, interactEnabledFor } from './systems';
 export { trySwapKit, swapKit, ordnanceTerminalFor, placeOrdnanceTerminals, spawnOrdnanceTerminal, type KitSwapResult } from './ordnance';
-export { findOrdnanceSite, kartKeepOut, type OrdnanceSite, type KeepOut } from './sites';
+export { findOrdnanceSite, searchOrdnanceSite, kartKeepOut, type OrdnanceSite, type KeepOut } from './sites';
 export {
   touchesPickup, canCollect, collectPickup, spawnPickupSpot, placePickups, stepPickups, scheduleCores, resetPickups, rollCore,
 } from './pickups';

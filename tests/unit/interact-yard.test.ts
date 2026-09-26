@@ -11,7 +11,7 @@ import { movementSystem } from '../../src/sim/systems/movement';
 import { physicsStepSystem, killPlaneSystem } from '../../src/sim/systems/core';
 import { worldSystems } from '../../src/sim/world/systems';
 import { findTerminalSite } from '../../src/sim/vehicles';
-import { findOrdnanceSite, kartKeepOut, touchesPickup, objectiveState } from '../../src/sim/interact';
+import { findOrdnanceSite, searchOrdnanceSite, kartKeepOut, touchesPickup, objectiveState } from '../../src/sim/interact';
 import { createWorldData, type WorldData } from '../../src/shared/world/world-data';
 import { nearestPropDist, occupiedAt, surfaceAt, waterAt } from '../../src/shared/world/queries';
 import { Btn } from '../../src/shared/input';
@@ -34,8 +34,8 @@ describe('West Yard: Ordnance Terminal sites', () => {
     const avoid = [...LAYOUT.cores, ...LAYOUT.kibble].map((s) => ({ x: s.x, z: s.z, r: 4 }));
     for (const team of [Team.Corgis, Team.Cats] as TeamId[]) {
       const a = findOrdnanceSite(data, team, [...avoid, ...kartKeepOut(data, team)])!;
-      const b = findOrdnanceSite(data, team, [...avoid, ...kartKeepOut(data, team)])!;
-      expect(a).toEqual(b);
+      const b = searchOrdnanceSite(data, team, [...avoid, ...kartKeepOut(data, team)])!; // uncached: same answer
+      expect(b).toEqual(a);
       const c = centroid(team);
       expect(Math.hypot(a.x - c.x, a.z - c.z)).toBeLessThan(20);
       expect(surfaceAt(data, a.x, a.z).kind).toBe('terrain');
@@ -99,9 +99,12 @@ describe('West Yard: objective chain + the full system list', () => {
       expect(open, st.id).toBeGreaterThanOrEqual(6);
     }
     // Wrap the interaction system with a timer inside the default list (TDM, 4v4 bots, 25 s).
-    let ms = 0, ticks = 0;
+    let ms = 0, ticks = 0, placeMs = 0;
     const systems: SimSystem[] = createDefaultSystems().map((s) => s.name !== 'interact' ? s : {
-      ...s, update(sim, dt) { const t0 = performance.now(); s.update(sim, dt); ms += performance.now() - t0; ticks++; },
+      ...s, update(sim, dt) {
+        const t0 = performance.now(); s.update(sim, dt); const d = performance.now() - t0;
+        if (ticks++ === 0) placeMs = d; else ms += d; // tick 0 = one-time runtime placement (site searches)
+      },
     });
     const sim = await Sim.create({ seed: 1, systems });
     const room = new Room(sim, { mode: 'team-deathmatch', botsPerTeam: [4, 4] });
@@ -112,9 +115,10 @@ describe('West Yard: objective chain + the full system list', () => {
     expect(states.filter((s) => s.kind === EntityKind.Pickup).length).toBe(24);
     for (const s of states) for (const v of [s.x, s.y, s.z, s.hp, s.ammo]) expect(Number.isFinite(v)).toBe(true);
     expect(objectiveState(sim)).toBeNull(); // the Squeaker chain is a skirmish chain
-    const avg = ms / ticks;
-    console.log(`[interact budget] ${ticks} ticks · avg ${avg.toFixed(4)} ms/tick`);
-    expect(avg).toBeLessThan(process.env.CI ? 0.1 : 0.25);
+    const avg = ms / (ticks - 1);
+    console.log(`[interact budget] placement ${placeMs.toFixed(1)} ms once · then ${ticks - 1} ticks avg ${avg.toFixed(4)} ms/tick`);
+    expect(avg).toBeLessThan(process.env.CI ? 0.08 : 0.2);
+    expect(placeMs).toBeLessThan(process.env.CI ? 250 : 800);
     room.dispose();
   }, 120000);
 

@@ -167,7 +167,7 @@ async function main() {
       const mat = new THREE.Mesh(new THREE.CylinderGeometry(5.8, 5.8, 0.02, 40), toon({ color: PALETTE.catBlack }));
       mat.position.y = 1.26;
       ctx.scene.add(pad, mat);
-      states.set(50, beacon(1, contested ? 46 : 63, contested ? EFlag.Busy : 0, 0, 1.25, 0));
+      states.set(50, beacon(1, contested ? 46 : 63, contested ? EFlag.Busy : 0, 0, 0, 0));
       const me: EntityState = { ...base, id: localId, kind: EntityKind.Player, team: Team.Corgis, species: Species.Corgi, cls: 0, x: -1.6, y: 1.25, z: 2.2, yaw: 0.3, hp: 120, maxHp: 120, seed: 7, flags: EFlag.Grounded };
       const pal: EntityState = { ...me, id: 102, kind: EntityKind.Bot, x: 2.2, z: 1.6, yaw: -0.4, seed: 12, cls: 1 };
       states.set(localId, me); states.set(102, pal);

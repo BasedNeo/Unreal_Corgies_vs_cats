@@ -5,7 +5,7 @@
 //   Upgrade Core     a glowing crystal inside a two-ring gyroscope cage over a small pedestal with 12
 //                    countdown pips.
 //   Golden Kibble    a fat three-lobed kibble nugget (gold toon, a little emissive) + 4-point sparkles.
-//   Squeaker         the objective toy: a red rubber squeaky bone with a yellow squeak nub.
+//   Squeaker         the objective toy: a corgi-blue rubber squeaky bone with a gold squeak nub.
 // Kiosk space: +Y up, the screen faces -Z (like the Kart-O-Matic), ground at y = 0.
 // Merged vertex-colored parts come from the vehicle lane's PartBuilder (one toon draw + one crease-ink draw).
 import * as THREE from 'three/webgpu';
@@ -106,9 +106,12 @@ export function kioskAssets(team: TeamId): KioskAssets {
   // Kit-drop chute with a swinging flap.
   b.add(rbox(0.9, 0.38, 0.1, 0.04, 1), at(0, 0.56, -0.54), P.dark, true);
   b.add(box(0.78, 0.26, 0.02), at(0, 0.58, -0.6, 0.12), P.metal);
-  // Header: an ammo crate with rope handles.
-  b.add(rbox(1.72, 0.36, 1.18, 0.1), at(0, 2.48, 0), P.trim);
-  b.add(box(1.74, 0.07, 1.2), at(0, 2.48, 0), P.body);
+  // Header: a wooden ammo crate (the "ordnance" read, unlike the Kart-O-Matic's steering wheel) with
+  // team-colored bands, corner brackets and rope handles.
+  b.add(rbox(1.72, 0.4, 1.18, 0.08), at(0, 2.5, 0), PALETTE.fenceWood, true);
+  for (const x of [-0.5, 0.5]) b.add(box(0.12, 0.42, 1.2), at(x, 2.5, 0), P.body);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.add(box(0.14, 0.44, 0.14), at(sx * 0.8, 2.5, sz * 0.54), P.dark);
+  b.add(box(0.5, 0.2, 0.02), at(0, 2.5, -0.6), P.trim, true); // stencil plate
   for (const sx of [-1, 1]) b.add(torus(0.1, 0.025, 4, 10, Math.PI), at(sx * 0.87, 2.5, 0, 0, Math.PI / 2), P.dark);
   // Crossed toy bones behind the ball (ordnance!), on a short post.
   b.add(cyl(0.06, 0.07, 0.26, 8), at(0, 2.78, 0.02), P.dark);
@@ -190,16 +193,14 @@ export function pickupAssets(): PickupAssets {
   const halo = new THREE.TorusGeometry(1, 0.03, 3, 40);
   halo.rotateX(Math.PI / 2);
 
-  // Kibble: three fat lobes around a hub, flattened (a kibble bit), with a dimple.
+  // Golden Kibble: a chunky bone-shaped biscuit (the classic dog treat) with a baked rim and two dimples.
   const kb = new PartBuilder();
-  for (let i = 0; i < 3; i++) {
-    const a = (i / 3) * Math.PI * 2;
-    kb.add(ball(0.17, 12, 8), at(Math.cos(a) * 0.12, 0, Math.sin(a) * 0.12, 0, 0, 0, 1, 0.62, 1), PALETTE.accentHot);
-  }
-  kb.add(cyl(0.16, 0.16, 0.2, 14), at(0, 0, 0), PALETTE.teamCorgisTrim);
-  kb.add(cyl(0.07, 0.07, 0.04, 10), at(0, 0.1, 0), PALETTE.accent);
+  const gold = PALETTE.accentHot, crust = PALETTE.teamCorgisTrim, dimple = PALETTE.accent;
+  kb.add(rbox(0.36, 0.15, 0.13, 0.05, 2), at(0, 0, 0), gold);
+  for (const e of [-1, 1]) for (const k of [-1, 1]) kb.add(ball(0.1, 12, 8), at(e * 0.2, k * 0.068, 0, 0, 0, 0, 1, 1, 0.72), crust);
+  for (const e of [-1, 1]) kb.add(ball(0.028, 8, 6), at(e * 0.07, 0.005, -0.062, 0, 0, 0, 1, 1, 0.4), dimple);
   const kibble = kb.build().geometry;
-  kibble.rotateX(Math.PI / 2 - 0.35); // show the face, tilted toward the viewer
+  kibble.scale(1.25, 1.25, 1.25);
 
   // Sparkle: a 4-point star (two squashed octahedra).
   const sp = new THREE.OctahedronGeometry(0.1, 0);
@@ -208,9 +209,9 @@ export function pickupAssets(): PickupAssets {
   sp2.scale(1.3, 0.35, 0.12);
   const sparkle = mergeSimple([sp, sp2]);
 
-  // Squeaker: rubber bone + squeak nub.
+  // Squeaker: rubber bone + squeak nub (the squad's toy the cats stole).
   const sq = new PartBuilder();
-  const red = PALETTE.danger, yellow = PALETTE.accentHot;
+  const red = PALETTE.teamCorgis, yellow = PALETTE.accentHot; // the squad's own toy: corgi blue + gold
   sq.add(cyl(0.11, 0.11, 0.62, 12), at(0, 0, 0, 0, 0, Math.PI / 2), red);
   for (const e of [-1, 1]) for (const k of [-1, 1]) sq.add(ball(0.13, 12, 8), at(e * 0.33, k * 0.09, 0), red);
   sq.add(cyl(0.06, 0.07, 0.06, 10), at(0, 0.13, 0), yellow, true);

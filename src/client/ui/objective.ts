@@ -4,8 +4,19 @@
 
 const PVE_MODE = /skirmish|boss/i;
 
+/** Separator the authority uses to append the mission step (sim/interact foldObjectiveText). */
+const MISSION_SEP = ' · ▶ ';
+
+/**
+ * The objective banner line for `team`. The authority appends the S1 mission step to MatchState.objective; the
+ * banner drops it (the mission card shows the chain with room to spare, and the banner truncated it).
+ */
 export function objectiveForTeam(text: string, mode: string, team: number): string {
-  if (team !== 1 || !PVE_MODE.test(mode)) return text;
+  const base = text.split(MISSION_SEP)[0];
+  return team === 1 && PVE_MODE.test(mode) ? catLine(base) : base;
+}
+
+function catLine(text: string): string {
   let m: RegExpMatchArray | null;
   if ((m = text.match(/^Defend the yard! Cats attack in (\d+)/))) return `Raid the yard! Attack in ${m[1]}`;
   if ((m = text.match(/^Squad down! (\d+) (?:retry|retries) left/))) return `Corgi squad wiped! They can regroup ${m[1]} more ${m[1] === '1' ? 'time' : 'times'}`;

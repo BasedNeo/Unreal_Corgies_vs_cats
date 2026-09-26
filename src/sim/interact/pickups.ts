@@ -130,14 +130,15 @@ export function collectPickup(sim: Sim, rt: InteractRuntime, e: SimEntity, by: S
   writeSnapshot(e);
 }
 
+const chars: SimEntity[] = [];
+
 /** Per tick: refill timers and touches. `coresLive` = the match is in a phase where cores run. */
 export function stepPickups(sim: Sim, rt: InteractRuntime, dt: number, coresLive: boolean): void {
-  const chars: SimEntity[] = [];
+  chars.length = 0;
   for (const c of sim.entities.values()) if (canCollect(c)) chars.push(c);
-  for (const id of rt.pickups) {
-    const e = sim.entities.get(id);
-    const p = e?.pickup;
-    if (!e || !p) continue;
+  for (const e of rt.pickupEnts) {
+    const p = e.pickup;
+    if (!p || e.removed) continue;
     if (!p.available) {
       if (p.kind === 'core' && !coresLive) continue;
       p.timer -= dt;
@@ -154,6 +155,7 @@ export function stepPickups(sim: Sim, rt: InteractRuntime, dt: number, coresLive
     }
     if (best) collectPickup(sim, rt, e, best);
   }
+  chars.length = 0;
 }
 
 /** Snapshot fields (see src/shared/content/pickups.ts). */

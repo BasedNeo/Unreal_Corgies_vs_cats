@@ -53,9 +53,11 @@ export function takeObjectiveScore(sim: Sim): [number, number] {
  * ("Wave 2/5 — 6 cats left · ▶ Hold the trampoline 12/20 s"). Pure; the lead's fold can use it.
  */
 export function foldObjectiveText(matchText: string, st: ObjectiveState | null): string {
-  if (!st || !st.text) return matchText;
-  return matchText ? `${matchText} · ▶ ${st.text}` : st.text;
+  const base = matchText.split(OBJ_SEP)[0]; // idempotent: a text folded last tick is folded again, not appended twice
+  if (!st || !st.text) return base;
+  return base ? `${base}${OBJ_SEP}${st.text}` : st.text;
 }
+const OBJ_SEP = ' · ▶ ';
 
 function groundY(sim: Sim, x: number, z: number): number {
   return sim.worldData.height(x, z);
