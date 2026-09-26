@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cosmetics Lab — Corgis vs Cats</title>
+    <!--
+      C3 cosmetics lab: every coat and neckwear on both species, through the real comic pipeline.
+      URL params
+        view=coats|necks|classes|close|lineup|swap   (default coats)
+          coats    all 8 coats (corgi: red, tricolor, sable, merle; cat: tabby, tuxedo, calico, siamese point)
+          necks    team collar + 4 neckwear on both species (upper-body camera)
+          classes  one look (coat=, neck=) on every class, both species (clipping against class gear)
+          close    one character close up (species=, cls=, coat=, neck=, yaw=)
+          lineup   every class × both species at dist= m (default 35) with looks, next to the classic look
+          swap     applyLook live: one avatar per species cycling through every coat × neckwear (idempotency check)
+        cls=assault  team=0|1  npc (NPC tier: what other players see)  yaw=deg  anim=idle|aim|run|emote
+        coat=<cosmetic id>  neck=<cosmetic id>  species=corgi|cat
+        seed=1  the seeded breed (1: plain corgi / plain cat; cat seed 2: sphynx, find chonk seeds with variantFor)
+        t=1.2  pre-simulate 1.2 s at 60 Hz and freeze (deterministic screenshots)   webgl   labels=0
+        cam=x,y,z  at=x,y,z  fov=deg
+    -->
+    <style>
+      html, body { margin: 0; height: 100%; background: #9ccfe6; overflow: hidden; font-family: "Trebuchet MS", system-ui, sans-serif; }
+      #app { position: fixed; inset: 0; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #info { position: fixed; left: 10px; top: 8px; color: #1a120c; font-size: 12px; line-height: 1.35; white-space: pre;
+        background: rgba(246, 231, 207, 0.78); border: 2px solid #1a120c; border-radius: 6px; padding: 6px 9px; pointer-events: none; }
+      #labels { position: fixed; inset: 0; pointer-events: none; }
+      .lbl { position: absolute; transform: translate(-50%, 0); color: #1a120c; font-size: 11px; font-weight: bold; text-align: center;
+        background: rgba(246, 231, 207, 0.85); border: 1.5px solid #1a120c; border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="labels"></div>
+    <div id="info">loading…</div>
+    <script type="module">
+      import * as THREE from 'three/webgpu';
+      import { createRenderContext } from '/src/client/engine/renderer.ts';
+      import { toon } from '/src/client/style/style-webgpu.js';
+      import { PALETTE } from '/src/client/style/style-tokens.js';
+      import { createCharacter } from '/src/client/procgen/characters/index.ts';
+      import { applyLook } from '/src/client/procgen/cosmetics/index.ts';
+      import { cosmeticsFor, cosmeticById, defaultLook } from '/src/shared/content/cosmetics.ts';
+      import { CLASS_IDS, Species, Team, Anim } from '/src/shared/types.ts';
+
+      const P = new URLSearchParams(location.search);
+      const view = P.get('view') ?? 'coats';
+      const info = document.getElementById('info');
+      const labelsEl = document.getElementById('labels');
+      const num = (k, d) => (P.has(k) ? Number(P.get(k)) : d);
+      const vec = (k) => (P.has(k) ? P.get(k).split(',').map(Number) : null);
+      const cls0 = P.get('cls') ?? 'assault';
+      const npc = P.has('npc');
+      const yaw0 = (num('yaw', view === 'close' ? 20 : 12) * Math.PI) / 180;
+      const anim = P.get('anim') ?? 'idle';
+      const teamOf = (sp) => (P.has('team') ? Number(P.get('team')) : sp === Species.Cat ? Team.Cats : Team.Corgis);
+      const ids = (sp, slot) => cosmeticsFor(sp, slot).map((c) => c.id);
+      const SPECIES = P.get('species') === 'cat' ? [Species.Cat] : P.get('species') === 'corgi' ? [Species.Corgi] : [Species.Corgi, Species.Cat];
+      // Seed 1 = the plain breed for both species (corgi / standard cat); seed=3 → a sphynx... pick with ?seed=.
+      const seedFor = () => num('seed', 1);
+
+      /** Specs: { species, cls, look (null = classic), x, z, yaw, label }. */
+      function layout() {
+        const out = [];
+        const add = (s) => out.push({ cls: cls0, yaw: yaw0, z: 0, ...s });
+        switch (view) {
+          case 'necks': {
+            let i = 0;
+            const n = SPECIES.length * 5;
+            SPECIES.forEach((sp) => ids(sp, 'neck').forEach((neck) => { add({ species: sp, look: { ...defaultLook(sp), neck, coat: P.get(sp === Species.Cat ? 'catcoat' : 'coat') ?? defaultLook(sp).coat }, x: ((n - 1) / 2 - i) * 0.82 }); i++; }));
+            break;
+          }
+          case 'classes': {
+            SPECIES.forEach((sp, r) => CLASS_IDS.forEach((c, i) => add({ species: sp, cls: c, look: { ...defaultLook(sp), coat: P.get(sp === Species.Cat ? 'catcoat' : 'coat') ?? defaultLook(sp).coat, neck: P.get('neck') ?? 'neck_bandana' }, x: -3.6 + i * 1.44, z: r * 2.2 - (SPECIES.length - 1) * 1.1 })));
+            break;
+          }
+          case 'close': {
+            const sp = SPECIES[SPECIES.length === 1 ? 0 : 0];
+            add({ species: sp, look: { ...defaultLook(sp), coat: P.get('coat') ?? defaultLook(sp).coat, neck: P.get('neck') ?? 'neck_none' }, x: 0 });
+            break;
+          }
+          case 'lineup': {
+            // Two groups per species at `dist` m: classic look (left) and a look (right), every class, facing the camera.
+            const dist = num('dist', 35), step = 1.9 / dist, gap = 1.6 / dist;
+            const groups = [];
+            for (const sp of SPECIES) groups.push([sp, null], [sp, { coat: P.get(sp === Species.Cat ? 'catcoat' : 'coat') ?? (sp === Species.Cat ? 'cat_calico' : 'corgi_merle'), neck: P.get('neck') ?? 'neck_bandana' }]);
+            const span = groups.length * CLASS_IDS.length * step + (groups.length - 1) * gap - step;
+            let a = -span / 2;
+            for (const [sp, look] of groups) {
+              CLASS_IDS.forEach((c) => {
+                const x = dist * Math.sin(a), z = 17.5 - dist * Math.cos(a);
+                add({ species: sp, cls: c, look, x, z, yaw: Math.atan2(x, -(17.5 - z)) });
+                a += step;
+              });
+              a += gap;
+            }
+            break;
+          }
+          case 'swap': {
+            SPECIES.forEach((sp, i) => add({ species: sp, look: defaultLook(sp), x: -0.7 + i * 1.4, swap: true }));
+            break;
+          }
+          default: { // coats: 4 per species
+            // One row: corgis on the character's right (screen left from the front camera), cats beside them.
+            let i = 0;
+            const n = SPECIES.length * 4;
+            SPECIES.forEach((sp) => ids(sp, 'coat').forEach((coat) => { add({ species: sp, look: { ...defaultLook(sp), coat, neck: P.get('neck') ?? 'neck_none' }, x: ((n - 1) / 2 - i) * 1.02 }); i++; }));
+          }
+        }
+        return out;
+      }
+
+      const frameFor = (t) => {
+        const f = { speed: 0, vy: 0, grounded: true, anim: Anim.Idle, flags: 1, aimPitch: 0.05, aimYawOffset: 0, hpFrac: 1, dead: false, firing: false, aiming: false, sprinting: false };
+        if (anim === 'aim') { f.aiming = true; f.aimPitch = Number(P.get('pitch') ?? -0.45); }
+        if (anim === 'run') { f.speed = 6.4; f.anim = Anim.Run; }
+        if (anim === 'sprint') { f.speed = 9.6; f.anim = Anim.Sprint; f.sprinting = true; }
+        return f;
+      };
+
+      async function main() {
+        const ctx = await createRenderContext(document.getElementById('app'), { forceWebGL: P.has('webgl') });
+        const { scene, camera, renderer } = ctx;
+        scene.background = new THREE.Color(PALETTE.void);
+        const ground = new THREE.Mesh(new THREE.CircleGeometry(40, 48).rotateX(-Math.PI / 2), toon({ color: PALETTE.grass }));
+        ground.receiveShadow = true;
+        scene.add(ground);
+        const pad = new THREE.Mesh(new THREE.CircleGeometry(6.5, 48).rotateX(-Math.PI / 2), toon({ color: PALETTE.grassDry }));
+        pad.position.y = 0.002; pad.receiveShadow = true;
+        scene.add(pad);
+        scene.traverse((o) => {
+          if (o.isDirectionalLight && o.intensity > 2) {
+            o.castShadow = true; o.shadow.mapSize.set(2048, 2048);
+            const c = o.shadow.camera; c.left = -7; c.right = 7; c.top = 7; c.bottom = -7; c.near = 0.5; c.far = 40; o.shadow.bias = -0.0005;
+          }
+        });
+        if (view === 'lineup') scene.fog = new THREE.FogExp2(0xbfe3f4, 0.003);
+
+        const avs = [];
+        const tags = [];
+        for (const s of layout()) {
+          const av = createCharacter({ species: s.species, cls: s.cls, team: teamOf(s.species), seed: seedFor(), isLocal: !npc, look: s.look });
+          av.root.position.set(s.x, 0, s.z);
+          av.root.rotation.y = s.yaw;
+          scene.add(av.root);
+          avs.push({ av, s });
+          if (P.get('labels') !== '0' && view !== 'lineup') {
+            const el = document.createElement('div');
+            el.className = 'lbl';
+            labelsEl.appendChild(el);
+            tags.push({ el, av, s });
+          }
+        }
+        const labelOf = (av, s) => {
+          const l = av.stats.look;
+          if (!l) return `classic ${av.stats.variant}`;
+          const name = (id) => cosmeticById(id)?.name ?? id;
+          return view === 'classes' ? s.cls : view === 'necks' ? name(l.neck) : view === 'coats' ? name(l.coat) : `${name(l.coat)} · ${name(l.neck)}`;
+        };
+
+        const target = new THREE.Vector3();
+        const setCam = (px, py, pz, tx, ty, tz, fov) => { camera.position.set(px, py, pz); target.set(tx, ty, tz); camera.fov = fov; camera.updateProjectionMatrix(); camera.lookAt(target); };
+        switch (view) {
+          case 'necks': setCam(0, 1.1, -6.0, 0, 0.7, 0, 38); break;
+          case 'classes': setCam(-1.2, 2.6, -8.6, 0, 0.6, 0, 40); break;
+          case 'close': setCam(0, 0.95, -1.35, 0, 0.8, 0, 32); break;
+          case 'lineup': setCam(0, 1.7, 17.5, 0, 0.6, 17.5 - num('dist', 35), 62); break;
+          case 'swap': setCam(0, 1.1, -3.4, 0, 0.7, 0, 36); break;
+          default: setCam(0, 1.3, -7.4, 0, 0.62, 0, 40);
+        }
+        { const c = vec('cam'), at = vec('at'); if (c || at || P.has('fov')) setCam(...(c ?? camera.position.toArray()), ...(at ?? target.toArray()), num('fov', camera.fov)); }
+
+        // view=swap: cycle every coat × neckwear through applyLook (in place, same avatar).
+        const combos = (sp) => { const out = []; for (const coat of ids(sp, 'coat')) for (const neck of ids(sp, 'neck')) out.push({ coat, neck, taunt: defaultLook(sp).taunt }); return out; };
+        let swapT = 0, swapI = 0;
+        const swapEvery = num('every', 0.8);
+        const freeze = P.has('t') && !P.has('live');
+        const step = (dt) => {
+          for (const { av } of avs) av.update(frameFor(0), dt);
+          if (view === 'swap') {
+            swapT += dt;
+            if (swapT > swapEvery) { swapT = 0; swapI++; for (const { av, s } of avs) { const c = combos(s.species); applyLook(av, c[swapI % c.length]); } }
+          }
+        };
+        if (freeze) { const n = Math.round(Number(P.get('t')) * 60); for (let k = 0; k < n; k++) step(1 / 60); }
+
+        let last = performance.now(), frames = 0, fpsT = last, fps = 0;
+        const v = new THREE.Vector3();
+        renderer.setAnimationLoop(() => {
+          const now = performance.now();
+          const dt = Math.min(0.1, (now - last) / 1000);
+          last = now;
+          if (!freeze) step(dt);
+          ctx.render();
+          for (const tg of tags) {
+            tg.el.textContent = labelOf(tg.av, tg.s);
+            v.set(0, tg.av.height + 0.3, 0).applyMatrix4(tg.av.root.matrixWorld).project(camera);
+            tg.el.style.left = `${((v.x + 1) / 2) * innerWidth}px`;
+            tg.el.style.top = `${((1 - v.y) / 2) * innerHeight}px`;
+          }
+          frames++;
+          if (now - fpsT > 500) { fps = (frames * 1000) / (now - fpsT); frames = 0; fpsT = now; }
+          const tris = avs.map(({ av }) => av.stats.triangles), draws = avs.map(({ av }) => av.stats.drawCalls);
+          info.textContent = `cosmetics lab · view=${view} · ${ctx.backend} · ${fps.toFixed(0)} fps\n` +
+            `${avs.length} characters · ${npc ? 'NPC' : 'hero'} tier · ≤ ${Math.max(...tris)} tris · ≤ ${Math.max(...draws)} draws each` + (freeze ? ` · frozen at t=${P.get('t')}s` : '');
+          const mem = renderer.info.memory;
+          globalThis.__lab = { ready: true, characters: avs.length, fps, looks: avs.map(({ av }) => av.stats.look), tris, draws, swaps: swapI, geometries: mem.geometries, meshes: avs.map(({ av }) => { let n = 0; av.root.traverse((o) => { if (o.isMesh) n++; }); return n; }) };
+        });
+      }
+      main().catch((e) => { info.textContent = `lab failed: ${e?.stack ?? e}`; console.error(e); });
+    </script>
+  </body>
+</html>

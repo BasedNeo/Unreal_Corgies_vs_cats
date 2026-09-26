@@ -5,7 +5,7 @@ import { PALETTE } from '../../style/style-tokens.js';
 import { Species, type ClassId, type SpeciesId } from '../../../shared/types';
 import { mixHex } from './colors';
 
-export type CoatPattern = 'plain' | 'sable' | 'tri' | 'tabby' | 'points' | 'tux' | 'sphynx';
+export type CoatPattern = 'plain' | 'sable' | 'tri' | 'tabby' | 'points' | 'tux' | 'sphynx' | 'merle' | 'calico';
 
 export interface Coat {
   name: string;
@@ -19,6 +19,20 @@ export interface Coat {
   brow: number;
   socks: boolean;     // light paws
   tongue: number;
+  /** Third fur colour of patched coats (calico orange). */
+  accent?: number;
+}
+
+/**
+ * Body shape family from the seed. It never changes with a look (C3): a look repaints the coat, so the rig, the
+ * silhouette and every class read stay exactly the seeded ones. Chonk = wide cat, sphynx = hairless cat.
+ */
+export type Breed = 'corgi' | 'cat' | 'chonk' | 'sphynx';
+
+/** The breed a seeded coat implies (chonk and sphynx are cat body variants; everything else is the plain plan). */
+export function breedOfCoat(species: SpeciesId, coat: Coat): Breed {
+  if (species !== Species.Cat) return 'corgi';
+  return coat.name === 'chonk' ? 'chonk' : coat.pattern === 'sphynx' ? 'sphynx' : 'cat';
 }
 
 export interface BodyPlan {
@@ -46,6 +60,8 @@ export interface BodyPlan {
   brow: { c: [number, number, number]; r: [number, number, number] };
   ear: { base: [number, number, number]; tip: [number, number, number]; w: number; d: number; mid: number };
   tail: { base: [number, number, number]; pts: [number, number, number][]; r: number[]; fluffy: boolean };
+  /** Hairless body (sphynx): no fur tufts on the ruff / pants, whatever the coat paint. */
+  hairless?: boolean;
 }
 
 // --- coats -------------------------------------------------------------------------------------
@@ -70,6 +86,12 @@ export const CAT_COATS: Coat[] = [
 ];
 
 export function coatsFor(species: SpeciesId): Coat[] { return species === Species.Cat ? CAT_COATS : CORGI_COATS; }
+
+// Earned coats (C3 cosmetics) that no seed rolls: they only come from a look.
+/** Blue merle: silver-grey fur marbled with black, white blaze/bib/socks, copper brows. */
+export const MERLE_COAT: Coat = { name: 'merle', base: mixHex(P.catGrey, P.catWhite, 0.2), light: P.catWhite, dark: mixHex(P.catBlack, P.corgiTri, 0.5), pattern: 'merle', nose: P.corgiTri, innerEar: mixHex(P.corgiCream, P.danger, 0.12), iris: P.corgiTri, brow: mixHex(P.corgiOrange, P.corgiRed, 0.35), socks: true, tongue: tonguePink };
+/** Calico: white with big ginger and black patches (white muzzle, bib and paws). */
+export const CALICO_COAT: Coat = { name: 'calico', base: P.catWhite, light: P.catWhite, dark: P.catBlack, accent: P.catGinger, pattern: 'calico', nose: pink, innerEar: pink, iris: mixHex(P.accentHot, P.grass, 0.45), brow: mixHex(P.catGrey, P.catBlack, 0.7), socks: true, tongue: tonguePink };
 
 // --- body plans ----------------------------------------------------------------------------------
 
@@ -169,17 +191,22 @@ function applyBuild(p: BodyPlan, cls: ClassId | undefined): BodyPlan {
 }
 
 export function planFor(species: SpeciesId, coat: Coat, cls?: ClassId): BodyPlan {
-  return seatFace(applyBuild(planForRaw(species, coat), cls));
+  return planForBreed(species, breedOfCoat(species, coat), cls);
 }
 
-function planForRaw(species: SpeciesId, coat: Coat): BodyPlan {
+export function planForBreed(species: SpeciesId, breed: Breed, cls?: ClassId): BodyPlan {
+  return seatFace(applyBuild(planForRaw(species, breed), cls));
+}
+
+function planForRaw(species: SpeciesId, breed: Breed): BodyPlan {
   if (species === Species.Cat) {
-    const p = catPlan(coat.name === 'chonk');
-    if (coat.pattern === 'sphynx') {
+    const p = catPlan(breed === 'chonk');
+    if (breed === 'sphynx') {
       // Hairless: bigger ears, no cheek tufts, whip-thin tail.
       p.ear = { ...p.ear, tip: [0.23, 0.54, 0.01], w: 0.1 };
       p.cheek = { ...p.cheek, r: [0.1, 0.075, 0.09], tufts: 0 };
       p.tail = { ...p.tail, r: [0.034, 0.03, 0.026, 0.022, 0.016] };
+      p.hairless = true;
     }
     return p;
   }

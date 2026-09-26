@@ -2,7 +2,7 @@
 // Color regions follow shape boundaries (muzzle, cheeks, bib, socks, inner ears) so they stay crisp;
 // soft markings (blaze, cap, stripes, points) are per-vertex palette functions.
 import { PALETTE } from '../../style/style-tokens.js';
-import { mixHex } from './colors';
+import { mixHex, valueNoise3 } from './colors';
 import { ellipsoid, sweep, mirrorX, xform, seg, isLite, tuftCol, type ColorFn, type MeshBuilder, type Prim, type V3 } from './mesh-builder';
 import { computeJoints, muzzlePoint, padPoint, SIDES, SX, type P3 } from './skeleton';
 import type { BodyPlan, Coat } from './species';
@@ -17,15 +17,53 @@ export interface FaceInfo {
   headTop: number;
 }
 
+/** Snout tip + head top of a plan (what buildBody returns; the coat never moves them). */
+export function faceInfo(plan: BodyPlan): FaceInfo {
+  const H = plan.headY;
+  const headAt = (p: P3): V3 => [p[0], p[1] + H, p[2]];
+  let snoutTip: V3;
+  if (plan.muzzle) { const m = plan.muzzle; snoutTip = headAt([m.tip[0], m.tip[1], m.tip[2] - m.rTip[0] * 0.8]); }
+  else { const pd = plan.pads!; snoutTip = headAt([0, pd.c[1], pd.c[2] - pd.r * 0.85]); }
+  return { snoutTip, headTop: computeJoints(plan).headTop[1] };
+}
+
+/**
+ * The coat's main fur colour at a model-space point. Plain coats: `base`. Patched coats (C3 looks) paint from
+ * 3D value noise, so the patches wrap continuously over head, body, limbs and tail:
+ *   merle  — silver-grey marbled with slate, and black patches;
+ *   calico — white with big ginger and black patches.
+ */
+export function furFn(coat: Coat): (x: number, y: number, z: number) => number {
+  if (coat.pattern === 'merle') {
+    const slate = mixHex(coat.base, coat.dark, 0.42);
+    return (x, y, z) => {
+      const n = valueNoise3(x * 9 + 3.1, y * 9, z * 9, 11);
+      if (n > 0.6) return coat.dark;
+      return valueNoise3(x * 14, y * 14 + 1.7, z * 14, 29) > 0.5 ? slate : coat.base;
+    };
+  }
+  if (coat.pattern === 'calico') {
+    const accent = coat.accent ?? coat.dark;
+    return (x, y, z) => {
+      if (valueNoise3(x * 6.5 + 0.4, y * 6.5, z * 6.5, 5) > 0.5) return accent;
+      if (valueNoise3(x * 7.5, y * 7.5 + 2.2, z * 7.5, 17) > 0.57) return coat.dark;
+      return coat.base;
+    };
+  }
+  return () => coat.base;
+}
+
 /** Head-surface color (model space) for the coat's markings. */
 export function headColorFn(plan: BodyPlan, coat: Coat): ColorFn {
   const h = plan.headY, c = plan.cranium.c, r = plan.cranium.r;
+  const fur = furFn(coat);
   return (x, y, z) => {
     const nx = x / r[0], ny = (y - h - c[1]) / r[1], nz = (z - c[2]) / r[2];
     const ax = Math.abs(nx);
     switch (coat.pattern) {
       case 'plain':
       case 'sable':
+      case 'merle':
       case 'tri': {
         // White blaze between the eyes widening into the muzzle + light throat.
         const blazeW = 0.1 + 0.34 * Math.max(0, Math.min(1, (0.25 - ny) * 1.2));
@@ -33,7 +71,14 @@ export function headColorFn(plan: BodyPlan, coat: Coat): ColorFn {
         if (ny < -0.55 && nz < 0.2) return coat.light;
         if (coat.pattern === 'tri' && (ny > 0.55 + 0.2 * Math.max(0, -nz) || (nz > 0.25 && ny > -0.35))) return coat.dark;
         if (coat.pattern === 'sable' && ny > 0.35 + 0.15 * ax) return coat.dark;
-        return coat.base;
+        return fur(x, y, z);
+      }
+      case 'calico': {
+        // White muzzle, chin and a blaze up the nose; patches over the crown, ears and cheeks.
+        if (nz < -0.3 && ny < -0.05 && ax < 0.55) return coat.light;
+        if (nz < -0.45 && ax < 0.12 && ny < 0.45) return coat.light;
+        if (ny < -0.6) return coat.light;
+        return fur(x, y, z);
       }
       case 'tabby': {
         // Forehead "M" stripes, side and back stripes.
@@ -63,12 +108,13 @@ export function headColorFn(plan: BodyPlan, coat: Coat): ColorFn {
 
 /** Limb color: socks / points / rings along the limb (v = 0 at the root, 1 at the paw). */
 function limbColorFn(coat: Coat, from: number): ColorFn {
-  return (_x, _y, _z, _u, v) => {
+  const fur = furFn(coat);
+  return (x, y, z, _u, v) => {
     if (coat.pattern === 'points') return mixHex(coat.base, coat.dark, sstep(from - 0.25, from + 0.1, v));
     if (coat.socks && v > from) return coat.light;
     if (coat.pattern === 'tabby' && Math.sin(v * Math.PI * 6) > 0.6) return coat.dark;
     if (coat.pattern === 'tri' && v < 0.3) return coat.dark;
-    return coat.base;
+    return fur(x, y, z);
   };
 }
 
@@ -86,6 +132,7 @@ export function buildBody(mb: MeshBuilder, plan: BodyPlan, coat: Coat, q: number
   const H = plan.headY;
   const isCat = plan.species === 'cat';
   const headFn = headColorFn(plan, coat);
+  const fur = furFn(coat);
 
   mb.begin('torso');
   // --- torso -------------------------------------------------------------------------------
@@ -99,8 +146,9 @@ export function buildBody(mb: MeshBuilder, plan: BodyPlan, coat: Coat, q: number
     if (coat.pattern === 'tri' && z > 0.02 && y > plan.hipsY) return coat.dark;
     if (coat.pattern === 'tux' && z < -0.05 && Math.abs(x) < 0.12) return coat.light;
     if (coat.pattern === 'tabby' && z > 0 && Math.sin(y * 45) > 0.5) return coat.dark;
-    if ((coat.pattern === 'plain' || coat.pattern === 'sable') && z < -0.08 && y < plan.hipsY + 0.08) return coat.light;
-    return coat.base;
+    if ((coat.pattern === 'plain' || coat.pattern === 'sable' || coat.pattern === 'merle') && z < -0.08 && y < plan.hipsY + 0.08) return coat.light;
+    if (coat.pattern === 'calico' && z < -0.06) return coat.light;
+    return fur(x, y, z);
   };
   mb.add(sweep(torsoPath, torsoR, seg(12, q, 8), { up: [1, 0, 0], capStart: 1, capEnd: 1, capStartLen: 0.6, capEndLen: 0.5 }), torsoColor, { auto: ['hips', 'spine', 'chest'] });
 
@@ -109,7 +157,7 @@ export function buildBody(mb: MeshBuilder, plan: BodyPlan, coat: Coat, q: number
 
   // Chest ruff: fluffy bib poking out of the vest neckline (tufts along the lower rim).
   const ruffColor = coat.pattern === 'points' || coat.pattern === 'sphynx' ? coat.base : coat.pattern === 'tri' ? coat.light : coat.light;
-  const ruffTufts = coat.pattern === 'sphynx' ? 0 : 0.2;
+  const ruffTufts = plan.hairless ? 0 : 0.2;
   // Fur tufts shape the silhouette only; the toon bands shade the smooth base shape (no zig-zag facets).
   const ruffW = seg(10, q, 8);
   mb.add(ellipsoid([0, plan.neckY - 0.005, -0.1], [0.15, 0.1, 0.085], ruffW, seg(6, q, 4), {
@@ -119,7 +167,7 @@ export function buildBody(mb: MeshBuilder, plan: BodyPlan, coat: Coat, q: number
   // Fluffy rear: two cream "buns" (corgi) with base-colored tops.
   if (plan.butt) {
     const b = plan.butt;
-    const buttColor: ColorFn = (_x, y) => (y < b.y + 0.02 ? coat.light : coat.pattern === 'tri' ? coat.dark : coat.base);
+    const buttColor: ColorFn = (x, y, z) => (y < b.y + 0.02 ? coat.light : coat.pattern === 'tri' ? coat.dark : fur(x, y, z));
     const lobeW = seg(8, q, 6);
     const lobe = ellipsoid([b.x, b.y, b.z], [b.r, b.r * 0.92, b.r * 0.85], lobeW, seg(6, q, 5), {
       tuft: (u, v) => 1 + 0.07 * tuftCol(u, lobeW) * sstep(0.45, 0.8, v),
@@ -131,12 +179,12 @@ export function buildBody(mb: MeshBuilder, plan: BodyPlan, coat: Coat, q: number
   mb.begin('tail');
   // --- tail --------------------------------------------------------------------------------
   const tl = plan.tail;
-  const tailColor: ColorFn = (_x, _y, _z, _u, v) => {
+  const tailColor: ColorFn = (x, y, z, _u, v) => {
     if (coat.pattern === 'points') return mixHex(coat.base, coat.dark, sstep(0.0, 0.4, v));
     if (coat.pattern === 'tabby') return Math.sin(v * Math.PI * 7) > 0.35 || v > 0.9 ? coat.dark : coat.base;
     if (coat.pattern === 'tux') return v > 0.88 ? coat.light : coat.base;
-    if (!isCat) return v > 0.7 ? coat.light : coat.pattern === 'tri' ? coat.dark : coat.base;
-    return coat.base;
+    if (!isCat) return v > 0.7 ? coat.light : coat.pattern === 'tri' ? coat.dark : fur(x, y, z);
+    return fur(x, y, z);
   };
   const tailN = seg(tl.fluffy ? 10 : 8, q, 6);
   mb.add(sweep(tl.pts as V3[], tl.r.map((r) => [r, r] as [number, number]), tailN, {
@@ -150,7 +198,7 @@ export function buildBody(mb: MeshBuilder, plan: BodyPlan, coat: Coat, q: number
     const k = SX[s];
     const legPath: V3[] = [add(j.hip[s], [0, 0.02, 0]), lerp3(j.hip[s], j.knee[s], 0.5), j.knee[s], j.ankle[s]];
     const tr = plan.thighR, sr = plan.shinR;
-    const fluffPants = !isCat && coat.pattern !== 'sphynx';
+    const fluffPants = !isCat && !plan.hairless;
     const legN = seg(8, q, 6);
     mb.add(sweep(legPath, [[tr, tr * 1.05], [tr * 0.98, tr], [(tr + sr) / 2, (tr + sr) / 2], [sr, sr]], legN, {
       up: [0, 0, 1], capStart: 1, capEnd: 1,
@@ -302,7 +350,8 @@ export function buildBody(mb: MeshBuilder, plan: BodyPlan, coat: Coat, q: number
   const E = plan.ear;
   for (const s of SIDES) {
     const b = j.earBase[s], m = j.earMid[s], t = j.earTip[s];
-    const outerColor = coat.pattern === 'tri' || coat.pattern === 'points' ? coat.dark : coat.pattern === 'tabby' ? coat.dark : coat.base;
+    const outerColor: ColorFn | number = coat.pattern === 'tri' || coat.pattern === 'points' ? coat.dark : coat.pattern === 'tabby' ? coat.dark
+      : coat.pattern === 'merle' || coat.pattern === 'calico' ? (x: number, y: number, z: number) => fur(x, y, z) : coat.base;
     const up: V3 = [0, 0, 1];
     const earN = seg(8, q, 6);
     const tipIn = lerp3(m, t, 0.55);

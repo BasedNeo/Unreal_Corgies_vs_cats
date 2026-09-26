@@ -34,7 +34,7 @@ const LENS = mixHex(PALETTE.tealDark, PALETTE.water, 0.4);
 const SCARF = mixHex(PALETTE.catWhite, PALETTE.corgiCream, 0.3);
 
 /** Torso radii at height y (interpolated from the plan) — gear hugs the body. */
-function torsoAt(plan: BodyPlan, y: number): [number, number, number] {
+export function torsoAt(plan: BodyPlan, y: number): [number, number, number] {
   const T = plan.torso;
   if (y <= T.y[0]) return [T.rx[0], T.rz[0], T.z[0]];
   for (let i = 0; i < T.y.length - 1; i++) {
@@ -47,7 +47,11 @@ function torsoAt(plan: BodyPlan, y: number): [number, number, number] {
   return [T.rx[n], T.rz[n], T.z[n]];
 }
 
-export function buildGear(mb: MeshBuilder, plan: BodyPlan, cls: ClassId, team: TeamId, q: number, qf = q): void {
+/**
+ * `collar` false leaves out the team collar and its tag / bell: a C3 neckwear (src/client/procgen/cosmetics) takes
+ * that spot, and the ~100 triangles it frees pay for the neckwear, so a kit with any look stays in budget.
+ */
+export function buildGear(mb: MeshBuilder, plan: BodyPlan, cls: ClassId, team: TeamId, q: number, qf = q, collar = true): void {
   const j = computeJoints(plan);
   const tc = teamColors(team);
   const H = plan.headY;
@@ -109,9 +113,11 @@ export function buildGear(mb: MeshBuilder, plan: BodyPlan, cls: ClassId, team: T
   }
   // Collar + tag (corgi: gold dog tag; cat: bell).
   const colY = plan.neckY + 0.045;
-  mb.add(ring(ellipseLoop([0, colY, -0.01], [0.108, 0, 0], [0, 0, 0.1], seg(10, q, 8)), [0.022, 0.018], 4, [0, 1, 0]), isCat ? mixHex(tc.trim, tc.main, 0.4) : tc.trim, { auto: ['chest', 'neck'] });
-  if (isCat) mb.add(ellipsoid([0, colY - 0.035, -0.118], [0.028, 0.03, 0.028], seg(6, q, 5), seg(5, q, 4)), PALETTE.accentHot, { rigid: 'neck' });
-  else mb.add(ellipsoid([0, colY - 0.04, -0.118], [0.03, 0.036, 0.008], seg(6, q, 5), 4, { p: 3 }), PALETTE.accentHot, { rigid: 'neck' });
+  if (collar) {
+    mb.add(ring(ellipseLoop([0, colY, -0.01], [0.108, 0, 0], [0, 0, 0.1], seg(10, q, 8)), [0.022, 0.018], 4, [0, 1, 0]), isCat ? mixHex(tc.trim, tc.main, 0.4) : tc.trim, { auto: ['chest', 'neck'] });
+    if (isCat) mb.add(ellipsoid([0, colY - 0.035, -0.118], [0.028, 0.03, 0.028], seg(6, q, 5), seg(5, q, 4)), PALETTE.accentHot, { rigid: 'neck' });
+    else mb.add(ellipsoid([0, colY - 0.04, -0.118], [0.03, 0.036, 0.008], seg(6, q, 5), 4, { p: 3 }), PALETTE.accentHot, { rigid: 'neck' });
+  }
 
   mb.begin('kit');
   // --- class kit ---------------------------------------------------------------------------
@@ -281,6 +287,18 @@ export function buildGear(mb: MeshBuilder, plan: BodyPlan, cls: ClassId, team: T
       break;
     }
   }
+}
+
+/**
+ * The chest plate's front face (model space): its top edge y and its front z at the centre line. Neckwear (C3)
+ * drapes onto the plate's top trim instead of cutting through it, whatever the class build.
+ */
+export function chestPlateFront(plan: BodyPlan, cls: ClassId): { top: number; z: number } {
+  const heavy = cls === 'breacher', pad = heavy ? 0.036 : 0.02;
+  const cy = plan.chestY - 0.005;
+  const [, crz, cz] = torsoAt(plan, cy);
+  const plateZ = cz - crz - pad - 0.012;
+  return { top: cy + (heavy ? 0.22 : 0.17) * 0.5 + 0.012, z: plateZ + 0.008 - 0.026 };
 }
 
 /** Overwatch whip mast (model space, chest-rigid): leans back so zoomies do not turn it into a lance. */
