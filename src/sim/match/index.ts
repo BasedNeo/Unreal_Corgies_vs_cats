@@ -1,6 +1,309 @@
 // OWNER: combat lane (match rules). Score, timer, waves, win conditions (order 800).
-import type { SimSystem } from '../sim';
+// Reads the mode from sim.state.room.mode (set by the Room) and writes sim.state.match (MatchState,
+// sent in every snapshot) plus sim.state.rules (MatchRules, read by combat).
+//
+//   yard-skirmish    co-op PvE: corgis (players + bots) vs escalating cat waves from the cat spawns.
+//                    warmup → wave 1..N (intermissions between) → win after the final wave, or lose
+//                    when the whole squad is down at once more than `wipeLives` times → restart.
+//   team-deathmatch  warmup → live (first to killLimit or timeLimit) → ended (winner shown) → restart
+//                    with reset scores.
+import type { Sim, SimSystem } from '../sim';
+import type { SimEntity } from '../entity';
+import type { MatchState } from '../../shared/protocol';
+import { Team, Species, EntityKind, type TeamId, type EntityId } from '../../shared/types';
+import { combatBus, ensureCombat, type MatchRules, type KillRecord } from '../combat/state';
+import { respawnNow } from '../combat/damage';
+import { applyArchetype, simNavGrid } from '../ai';
+import { ARCHETYPES, type ArchetypeId } from '../ai/archetypes';
+import { nearestWalkable, cellX, cellZ } from '../ai/nav';
+import { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type MatchConfigOverrides } from './config';
+
+export { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type WaveDef, type MatchConfigOverrides } from './config';
+
+export const MODES = ['yard-skirmish', 'team-deathmatch'] as const;
+
+/** Match runtime bookkeeping (plain data in sim.state.matchRt). */
+interface MatchRuntime {
+  mode: string;
+  /** Seconds left in the current timed step (warmup, intermission, ended hold, TDM clock). */
+  clock: number;
+  intermission: boolean;
+  queue: ArchetypeId[];
+  spawnTimer: number;
+  spawned: number;
+  wipes: number;
+  squadAlive: boolean;
+  banner: string;
+  bannerTime: number;
+}
+
+function roomMode(sim: Sim): string | undefined {
+  return (sim.state.room as { mode?: string } | undefined)?.mode;
+}
+
+function overrides(sim: Sim): MatchConfigOverrides {
+  return (sim.state.matchConfig as MatchConfigOverrides | undefined) ?? {};
+}
+
+export function skirmishConfig(sim: Sim): SkirmishConfig {
+  return { ...SKIRMISH, ...overrides(sim).skirmish };
+}
+
+export function tdmConfig(sim: Sim): TdmConfig {
+  return { ...TDM, ...overrides(sim).tdm };
+}
+
+function stateOf(sim: Sim): MatchState {
+  return sim.state.match as MatchState;
+}
+
+function rulesOf(sim: Sim): MatchRules {
+  return sim.state.rules as MatchRules;
+}
+
+function init(sim: Sim, mode: string): MatchRuntime {
+  const rt: MatchRuntime = { mode, clock: 0, intermission: false, queue: [], spawnTimer: 0, spawned: 0, wipes: 0, squadAlive: false, banner: '', bannerTime: 0 };
+  sim.state.matchRt = rt;
+  const ms: MatchState = { mode, phase: 'warmup', timeLeft: 0, score: [0, 0], objective: '', wave: 0, winner: -1 };
+  sim.state.match = ms;
+  const rules: MatchRules = { combatLive: false, respawn: [true, mode !== 'yard-skirmish', true] };
+  sim.state.rules = rules;
+  rt.clock = mode === 'team-deathmatch' ? tdmConfig(sim).warmup : skirmishConfig(sim).warmup;
+  ms.timeLeft = rt.clock;
+  return rt;
+}
+
+function addScore(sim: Sim, team: TeamId, pts: number, reason: string): void {
+  const ms = stateOf(sim);
+  if (team !== Team.Corgis && team !== Team.Cats) return;
+  ms.score[team] += pts;
+  sim.emit({ e: 'score', team, pts, reason });
+}
+
+function characters(sim: Sim): SimEntity[] {
+  const out: SimEntity[] = [];
+  for (const e of sim.entities.values()) if (e.char) out.push(e);
+  return out;
+}
+
+/** Restart: clear wave enemies, bring every player/bot back at a spawn, reset scores. */
+function restart(sim: Sim, rt: MatchRuntime): void {
+  const remove: EntityId[] = [];
+  for (const e of sim.entities.values()) if (e.char && e.combat?.pve) remove.push(e.id);
+  for (const id of remove) sim.removeEntity(id);
+  for (const e of characters(sim)) respawnNow(sim, e, undefined, true);
+  const ms = stateOf(sim);
+  ms.score[0] = 0; ms.score[1] = 0;
+  sim.emit({ e: 'score', team: Team.Corgis, pts: 0, reason: 'reset' });
+  sim.emit({ e: 'score', team: Team.Cats, pts: 0, reason: 'reset' });
+  combatBus(sim).kills.length = 0;
+  const fresh = init(sim, rt.mode);
+  Object.assign(rt, fresh);
+  sim.state.matchRt = rt;
+}
+
+function endMatch(sim: Sim, rt: MatchRuntime, winner: TeamId | -1, text: string, hold: number): void {
+  const ms = stateOf(sim);
+  ms.phase = 'ended';
+  ms.winner = winner;
+  ms.objective = text;
+  rt.clock = hold;
+  ms.timeLeft = hold;
+  rulesOf(sim).combatLive = false;
+  if (winner === Team.Corgis || winner === Team.Cats) sim.emit({ e: 'score', team: winner, pts: 0, reason: 'win' });
+}
+
+// ------------------------------------------------------------------ team deathmatch
+
+function updateTdm(sim: Sim, rt: MatchRuntime, dt: number, kills: KillRecord[]): void {
+  const cfg = tdmConfig(sim);
+  const ms = stateOf(sim);
+  const rules = rulesOf(sim);
+  rt.clock -= dt;
+  if (ms.phase === 'warmup') {
+    rules.combatLive = false;
+    ms.objective = `Warm-up — fight starts in ${Math.max(1, Math.ceil(rt.clock))}`;
+    if (rt.clock <= 0) {
+      ms.phase = 'live';
+      rt.clock = cfg.timeLimit;
+      rules.combatLive = true;
+    }
+  } else if (ms.phase === 'live') {
+    for (const k of kills) {
+      if (k.killerTeam !== -1 && k.killerTeam !== k.victimTeam) addScore(sim, k.killerTeam, 1, 'kill');
+    }
+    ms.objective = `Team Deathmatch — first to ${cfg.killLimit}`;
+    const [c, k] = ms.score;
+    if (c >= cfg.killLimit || k >= cfg.killLimit || rt.clock <= 0) {
+      const winner: TeamId | -1 = c > k ? Team.Corgis : k > c ? Team.Cats : -1;
+      const text = winner === Team.Corgis ? `Corgis win ${c}–${k}!` : winner === Team.Cats ? `Cats win ${k}–${c}!` : `Draw ${c}–${k}!`;
+      endMatch(sim, rt, winner, text, cfg.endedHold);
+    }
+  } else if (rt.clock <= 0) {
+    restart(sim, rt);
+    return;
+  }
+  ms.timeLeft = Math.max(0, rt.clock);
+}
+
+// ------------------------------------------------------------------ yard skirmish
+
+function waveScale(cfg: SkirmishConfig, corgis: number): number {
+  return Math.min(cfg.scaleMax, Math.max(cfg.scaleMin, cfg.scaleBase + cfg.scalePerCorgi * corgis));
+}
+
+function startWave(sim: Sim, rt: MatchRuntime, cfg: SkirmishConfig, n: number): void {
+  const ms = stateOf(sim);
+  ms.wave = n;
+  ms.phase = 'live';
+  rt.intermission = false;
+  rulesOf(sim).combatLive = true;
+  let corgis = 0;
+  for (const e of sim.entities.values()) if (e.char && e.team === Team.Corgis) corgis++;
+  const scale = waveScale(cfg, corgis);
+  const def = cfg.waves[n - 1];
+  const q: ArchetypeId[] = [];
+  for (const [id, count] of Object.entries(def.counts) as [ArchetypeId, number][]) {
+    const c = Math.max(count > 0 ? 1 : 0, Math.round(count * scale));
+    for (let i = 0; i < c; i++) q.push(id);
+  }
+  // room-slot cats (team-fill bots) fight as part of every wave and count toward its size: the PvE
+  // spawns shrink by their number (grunts first, never below half the wave). They don't respawn mid-wave.
+  let roomCats = 0;
+  for (const e of sim.entities.values()) {
+    if (!e.char || e.team !== Team.Cats || e.combat?.pve || e.kind !== EntityKind.Bot) continue;
+    if (e.dead) respawnNow(sim, e);
+    roomCats++;
+  }
+  let cut = q.length - Math.max(Math.ceil(q.length / 2), q.length - roomCats);
+  for (const trim of ['grunt', 'kitten', 'sniper', 'brute'] as ArchetypeId[]) {
+    for (let i = q.length - 1; i >= 0 && cut > 0; i--) if (q[i] === trim) { q.splice(i, 1); cut--; }
+  }
+  for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(sim.rng() * (i + 1)); const t = q[i]; q[i] = q[j]; q[j] = t; }
+  rt.queue = q;
+  rt.spawnTimer = 0;
+  ms.timeLeft = 0;
+  ms.objective = waveObjective(cfg, n, q.length + roomCats);
+}
+
+function waveObjective(cfg: SkirmishConfig, wave: number, left: number): string {
+  const label = cfg.waves[wave - 1]?.label;
+  const head = label ? `${label} (${wave}/${cfg.waves.length})` : `Wave ${wave}/${cfg.waves.length}`;
+  return `${head} — ${left} ${left === 1 ? 'cat' : 'cats'} left`;
+}
+
+/** Spawn one PvE wave enemy near a cat spawn (nav-checked jitter so squads don't stack). */
+export function spawnWaveEnemy(sim: Sim, arch: ArchetypeId, index: number): SimEntity {
+  const A = ARCHETYPES[arch];
+  const spawns = sim.worldData.spawns.filter((s) => s.team === Team.Cats);
+  const list = spawns.length ? spawns : sim.worldData.spawns;
+  const s = list[Math.floor(sim.rng() * list.length) % list.length];
+  let x = s.x, y = s.y, z = s.z;
+  const g = simNavGrid(sim);
+  if (g) {
+    const c = nearestWalkable(g, s.x + (sim.rng() - 0.5) * 6, s.z + (sim.rng() - 0.5) * 6, 4);
+    if (c >= 0) { x = cellX(g, c); z = cellZ(g, c); y = g.ground[c] + 0.05; }
+  }
+  const e = sim.spawnCharacter({ kind: EntityKind.Bot, team: Team.Cats, species: Species.Cat, cls: A.cls, name: `${A.label} ${index}`, x, y, z, yaw: s.yaw });
+  ensureCombat(e);
+  e.combat!.pve = true;
+  applyArchetype(e, arch);
+  return e;
+}
+
+function updateSkirmish(sim: Sim, rt: MatchRuntime, dt: number, kills: KillRecord[]): void {
+  const cfg = skirmishConfig(sim);
+  const ms = stateOf(sim);
+  const rules = rulesOf(sim);
+  const total = cfg.waves.length;
+  for (const k of kills) {
+    if (ms.phase === 'ended') break;
+    if (k.killerTeam === Team.Corgis && k.victimTeam === Team.Cats) addScore(sim, Team.Corgis, 1, 'kill');
+    else if (k.killerTeam === Team.Cats && k.victimTeam === Team.Corgis) addScore(sim, Team.Cats, 1, 'kill');
+  }
+  let corgis = 0, corgisAlive = 0, catsAlive = 0;
+  for (const e of sim.entities.values()) {
+    if (!e.char) continue;
+    if (e.team === Team.Corgis) { corgis++; if (!e.dead) corgisAlive++; }
+    else if (e.team === Team.Cats && !e.dead && e.kind === EntityKind.Bot) catsAlive++; // humans on the cat side don't hold waves open
+  }
+  if (rt.bannerTime > 0) rt.bannerTime -= dt;
+  rt.clock -= dt;
+
+  if (ms.phase === 'warmup') {
+    rules.combatLive = false;
+    ms.timeLeft = Math.max(0, rt.clock);
+    ms.objective = `Defend the yard! Cats attack in ${Math.max(1, Math.ceil(rt.clock))}`;
+    if (rt.clock <= 0) startWave(sim, rt, cfg, 1);
+    rt.squadAlive = corgisAlive > 0;
+    return;
+  }
+  if (ms.phase === 'ended') {
+    ms.timeLeft = Math.max(0, rt.clock);
+    if (rt.clock <= 0) restart(sim, rt);
+    return;
+  }
+
+  // squad wipe: every corgi down at the same moment
+  if (corgis > 0 && corgisAlive === 0 && rt.squadAlive) {
+    rt.wipes++;
+    if (rt.wipes > cfg.wipeLives) {
+      endMatch(sim, rt, Team.Cats, `The cats took the yard! (wave ${ms.wave}/${total})`, cfg.endedHold);
+      rt.squadAlive = false;
+      return;
+    }
+    const left = cfg.wipeLives - rt.wipes + 1;
+    rt.banner = `Squad down! ${left} ${left === 1 ? 'retry' : 'retries'} left`;
+    rt.bannerTime = 4;
+  }
+  rt.squadAlive = corgisAlive > 0;
+
+  if (rt.intermission) {
+    ms.timeLeft = Math.max(0, rt.clock);
+    ms.objective = `Wave ${ms.wave} cleared! Wave ${ms.wave + 1}${ms.wave + 1 === total ? ' (FINAL)' : ''} in ${Math.max(1, Math.ceil(rt.clock))}`;
+    if (rt.clock <= 0) startWave(sim, rt, cfg, ms.wave + 1);
+    return;
+  }
+
+  // spawn the wave in batches while under the alive cap
+  rt.spawnTimer -= dt;
+  if (rt.queue.length && rt.spawnTimer <= 0 && catsAlive < cfg.maxAlive) {
+    const n = Math.min(cfg.spawnBatch, rt.queue.length, cfg.maxAlive - catsAlive);
+    for (let i = 0; i < n; i++) spawnWaveEnemy(sim, rt.queue.shift()!, ++rt.spawned);
+    catsAlive += n;
+    rt.spawnTimer = cfg.spawnInterval;
+  }
+  const left = catsAlive + rt.queue.length;
+  if (left === 0) {
+    addScore(sim, Team.Corgis, cfg.waveBonus, 'wave');
+    if (ms.wave >= total) {
+      endMatch(sim, rt, Team.Corgis, 'Yard secured! The cats retreat.', cfg.endedHold);
+      return;
+    }
+    rt.intermission = true;
+    rt.clock = cfg.intermission;
+    ms.timeLeft = rt.clock;
+    return;
+  }
+  ms.timeLeft = 0;
+  ms.objective = rt.bannerTime > 0 ? `${rt.banner} · ${left} cats left` : waveObjective(cfg, ms.wave, left);
+}
+
+export const matchSystem: SimSystem = {
+  name: 'match',
+  order: 800,
+  update(sim, dt) {
+    const mode = roomMode(sim);
+    const kills = combatBus(sim).kills;
+    if (mode !== 'yard-skirmish' && mode !== 'team-deathmatch') return;
+    let rt = sim.state.matchRt as MatchRuntime | undefined;
+    if (!rt || rt.mode !== mode) rt = init(sim, mode);
+    const batch = kills.splice(0);
+    if (mode === 'team-deathmatch') updateTdm(sim, rt, dt, batch);
+    else updateSkirmish(sim, rt, dt, batch);
+  },
+};
 
 export function matchSystems(): SimSystem[] {
-  return [];
+  return [matchSystem];
 }

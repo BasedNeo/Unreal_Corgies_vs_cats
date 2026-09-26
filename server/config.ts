@@ -1,0 +1,109 @@
+// Server configuration from environment variables (all optional). Shared by server/index.ts
+// (WebSocket authority, dev) and server/prod.ts (static dist/ + WebSocket on one port).
+import type { WireEncoding } from '../src/host/wire';
+
+export interface ServerConfig {
+  host: string;
+  port: number;
+  /** Match mode for new rooms. */
+  mode: string;
+  /** Bots per team in every room. */
+  bots: [number, number];
+  /** Map/sim seed for every room. */
+  seed: number;
+  maxRooms: number;
+  maxConnections: number;
+  maxConnectionsPerIp: number;
+  /** Trust X-Forwarded-For for per-IP limits (only behind your own reverse proxy). */
+  trustProxy: boolean;
+  /** Empty rooms are destroyed after this long (ms). */
+  roomTtlMs: number;
+  /** A connection must send 'hello' within this long (ms). */
+  helloTimeoutMs: number;
+  /** No message at all for this long closes the connection (ms). */
+  idleTimeoutMs: number;
+  /** WebSocket ping period (ms); also measures RTT for the roster. Missing pong => terminated. */
+  heartbeatMs: number;
+  /** Hard frame-size cap enforced by ws (bytes); larger frames close the socket with 1009. */
+  maxPayload: number;
+  /** Per-connection message rate (msgs/s) and burst. */
+  msgRate: number;
+  msgBurst: number;
+  /** Per-connection byte rate (bytes/s) and burst. */
+  byteRate: number;
+  byteBurst: number;
+  /** Abuse score (strikes, halving every 10 s) at which a connection is kicked (close 1008). */
+  kickScore: number;
+  /** Snapshots are skipped while a socket has more than this buffered (slow consumer). */
+  maxBufferedBytes: number;
+  /** Close a connection that stays congested this long (ms). */
+  congestionKickMs: number;
+  /** Allowed Origin headers (null = allow all). */
+  allowedOrigins: string[] | null;
+  /** Serve this directory over HTTP (prod). null = WebSocket + /health only. */
+  staticDir: string | null;
+  /** Accept WebSocket upgrades only on this path (null = any path). */
+  wsPath: string | null;
+  /** Default snapshot encoding (clients may request ?enc=raw). */
+  encoding: WireEncoding;
+  /** Log connections/rooms (false in tests). */
+  log: boolean;
+}
+
+type Env = Record<string, string | undefined>;
+
+function num(env: Env, key: string, def: number, min = -Infinity, max = Infinity): number {
+  const raw = env[key];
+  if (raw === undefined || raw === '') return def;
+  const v = Number(raw);
+  if (!Number.isFinite(v)) throw new Error(`config: ${key}=${raw} is not a number`);
+  return Math.min(max, Math.max(min, v));
+}
+
+function bots(raw: string | undefined, def: [number, number]): [number, number] {
+  if (!raw) return def;
+  const [a, b] = raw.split(',').map((s) => Math.max(0, Math.min(16, Math.floor(Number(s)))));
+  return [Number.isFinite(a) ? a : def[0], Number.isFinite(b) ? b : def[1]];
+}
+
+export function loadConfig(env: Env = process.env, defaults: Partial<ServerConfig> = {}): ServerConfig {
+  const d: ServerConfig = {
+    host: '0.0.0.0', port: 8787, mode: 'yard-skirmish', bots: [0, 4], seed: 1,
+    maxRooms: 32, maxConnections: 256, maxConnectionsPerIp: 16, trustProxy: false,
+    roomTtlMs: 10_000, helloTimeoutMs: 10_000, idleTimeoutMs: 30_000, heartbeatMs: 5_000,
+    maxPayload: 16 * 1024, msgRate: 120, msgBurst: 240, byteRate: 64 * 1024, byteBurst: 128 * 1024,
+    kickScore: 20, maxBufferedBytes: 512 * 1024, congestionKickMs: 15_000,
+    allowedOrigins: null, staticDir: null, wsPath: null, encoding: 'delta', log: true,
+    ...defaults,
+  };
+  const origins = env.ALLOWED_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean);
+  return {
+    ...d,
+    host: env.HOST ?? d.host,
+    port: num(env, 'PORT', d.port, 0, 65535),
+    mode: env.MODE ?? d.mode,
+    bots: bots(env.BOTS, d.bots),
+    seed: num(env, 'SEED', d.seed),
+    maxRooms: num(env, 'MAX_ROOMS', d.maxRooms, 1),
+    maxConnections: num(env, 'MAX_CONNECTIONS', d.maxConnections, 1),
+    maxConnectionsPerIp: num(env, 'MAX_CONN_PER_IP', d.maxConnectionsPerIp, 1),
+    trustProxy: env.TRUST_PROXY ? env.TRUST_PROXY === '1' || env.TRUST_PROXY === 'true' : d.trustProxy,
+    roomTtlMs: num(env, 'ROOM_TTL_MS', d.roomTtlMs, 0),
+    helloTimeoutMs: num(env, 'HELLO_TIMEOUT_MS', d.helloTimeoutMs, 100),
+    idleTimeoutMs: num(env, 'IDLE_TIMEOUT_MS', d.idleTimeoutMs, 1000),
+    heartbeatMs: num(env, 'HEARTBEAT_MS', d.heartbeatMs, 100),
+    maxPayload: num(env, 'MAX_PAYLOAD', d.maxPayload, 1024),
+    msgRate: num(env, 'MSG_RATE', d.msgRate, 1),
+    msgBurst: num(env, 'MSG_BURST', d.msgBurst, 1),
+    byteRate: num(env, 'BYTE_RATE', d.byteRate, 1024),
+    byteBurst: num(env, 'BYTE_BURST', d.byteBurst, 1024),
+    kickScore: num(env, 'KICK_SCORE', d.kickScore, 1),
+    maxBufferedBytes: num(env, 'MAX_BUFFERED', d.maxBufferedBytes, 16 * 1024),
+    congestionKickMs: num(env, 'CONGESTION_KICK_MS', d.congestionKickMs, 1000),
+    allowedOrigins: origins && origins.length ? origins : d.allowedOrigins,
+    staticDir: env.STATIC_DIR ?? d.staticDir,
+    wsPath: env.WS_PATH ?? d.wsPath,
+    encoding: env.WIRE === 'raw' ? 'raw' : env.WIRE === 'delta' ? 'delta' : d.encoding,
+    log: env.LOG ? env.LOG !== '0' : d.log,
+  };
+}
