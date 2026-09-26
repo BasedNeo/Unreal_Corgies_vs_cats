@@ -69,7 +69,7 @@ import { WEAPONS, type WeaponId } from '../../shared/content/weapons';
 import { BREACH, DESTRUCT_KINDS, destructDistance } from '../../shared/world/destructibles';
 import type { Destructible } from '../../shared/world/world-types';
 import {
-  SENTRY_DWELL, adventureChapter, adventureItems, adventureState, adventureStep, adventureTargets, isAdventureMode, squadHasHuman,
+  SENTRY_DWELL, adventureChapter, adventureItems, adventureRuntime, adventureState, adventureStep, adventureTargets, isAdventureMode, squadHasHuman,
 } from '../adventure/state';
 import type { Archetype } from './archetypes';
 import { type NavGrid, cellX, cellZ, findPath, isWalkable, lineWalkable, nearestWalkable, randomCell } from './nav';
@@ -669,6 +669,9 @@ function propTarget(e: SimEntity, t: TacticsState, p: SimEntity): void {
 }
 
 /** Adventure goals (see the header). Negative goal ids name zones, positive ones the entity walked to. */
+/** Seconds a destroy step belongs to the human before the pups help (the set piece is theirs; Q3 P1-1). */
+export const DESTROY_HOLD_OFF = 25;
+
 function adventureGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, chars: SimEntity[], prev: string, prevId: EntityId): void {
   const st = adventureState(sim), def = adventureChapter(sim);
   if (!st || !def) return;
@@ -726,6 +729,12 @@ function adventureGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, char
       let best: SimEntity | null = null, bd = Infinity;
       for (const x of targets) { const d = Math.hypot(x.pos.x - e.pos.x, x.pos.z - e.pos.z); if (d < bd) { bd = d; best = x; } }
       if (!best) break;
+      // Q3 P1-1: with a human in the squad a destroy step is their set piece (ch3's breach): pups cover the approach
+      // for DESTROY_HOLD_OFF s and only then help, so a player who is stuck still fails forward
+      if (tr.type === 'destroy' && human && (adventureRuntime(sim)?.stepTicks ?? 0) < DESTROY_HOLD_OFF * TICK_HZ) {
+        zoneGoal(sim, t, g, best.pos.x, best.pos.z, 8, zid - 6, prev, prevId);
+        return;
+      }
       pointGoal(sim, t, g, best.pos.x, best.pos.z, best.id, prev, prevId);
       if (tr.type === 'destroy') { t.destroy = true; t.gr = 2.5; propTarget(e, t, best); approachProp(t, g, e, best); }
       return;
