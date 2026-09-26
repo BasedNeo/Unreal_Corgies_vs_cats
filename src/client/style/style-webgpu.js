@@ -38,7 +38,7 @@ export function glow(color = PALETTE.glowCyan, intensity = 3) {
   const key = matKey({ glow: color, intensity });
   if (materialCache.has(key)) return materialCache.get(key);
   const m = new THREE.MeshBasicNodeMaterial();
-  m.colorNode = vec3(new THREE.Color(color)).mul(intensity);
+  m.colorNode = uniform(new THREE.Color(color)).mul(intensity); // vec3(Color) renders black in r186
   m.userData.style = 'glow';
   materialCache.set(key, m);
   return m;

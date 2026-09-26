@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Character Lab — Corgis vs Cats</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #9ccfe6; overflow: hidden; font-family: "Trebuchet MS", system-ui, sans-serif; }
+      #app { position: fixed; inset: 0; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #info { position: fixed; left: 10px; top: 8px; color: #1a120c; font-size: 12px; line-height: 1.35; white-space: pre;
+        background: rgba(246, 231, 207, 0.78); border: 2px solid #1a120c; border-radius: 6px; padding: 6px 9px; pointer-events: none; }
+      #labels { position: fixed; inset: 0; pointer-events: none; }
+      .lbl { position: absolute; transform: translate(-50%, 0); color: #1a120c; font-size: 11px; font-weight: bold; text-align: center;
+        background: rgba(246, 231, 207, 0.85); border: 1.5px solid #1a120c; border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="labels"></div>
+    <div id="info">loading…</div>
+    <script type="module" src="/labs/characters.ts"></script>
+  </body>
+</html>
