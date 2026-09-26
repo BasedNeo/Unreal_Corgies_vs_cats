@@ -94,7 +94,10 @@ export interface KartNav {
   g: Float32Array; parent: Int32Array; open: Uint32Array; closed: Uint32Array; heap: Int32Array; heapF: Float32Array; search: number;
 }
 
-/** Per-world (keyed by the grid's shared ground array): 1 = flat, dry, off pads, no kart-stopping ledge. */
+/** Per-world (keyed by the grid's shared ground array): 1 = flat, dry, off pads, no kart-stopping ledge. A pure function
+ *  of the static world (ground, costs, WorldData props), never of a sim's walk: every sim's X1 copy of the grid shares
+ *  the ground array, and buildKartNav ANDs in the sim's own walk (D1: this used to skip the first caller's closed
+ *  cells, so a kiosk or a standing destructible of that sim stayed undrivable for every sim, and after it broke). */
 const flats = new WeakMap<Float32Array, Uint8Array>();
 const navs = new WeakMap<NavGrid, KartNav>();
 
@@ -143,7 +146,7 @@ function flatFor(g: NavGrid, data: WorldData): Uint8Array {
   for (let iz = 1; iz < g.h - 1; iz++) {
     for (let ix = 1; ix < g.w - 1; ix++) {
       const i = iz * g.w + ix;
-      if (g.cost[i] !== 1 || !g.walk[i]) continue; // water / jump pad / blocked
+      if (g.cost[i] !== 1) continue; // water / jump pad (blocked cells: buildKartNav checks the sim's walk)
       const l = lists.get(i);
       if (!l) { f[i] = 1; continue; }
       // a prop near this cell: a ledge (a top-surface step) within the probe distance of the center?

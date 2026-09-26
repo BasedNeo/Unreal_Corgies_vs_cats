@@ -27,7 +27,8 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
                                    listeners for layers that import combat: addBlastListener (blasts, after characters)
                                    and addProjectileHitListener (non-explosive direct hits on a collider: vehicles,
                                    destructibles); friendlyShotPass lets a team's shots through its own barriers/drones
-  ai/                              brain (HFSM, perception, aim), archetypes, nav (1 m grid A* + N1 decks)
+  ai/                              brain (HFSM, perception, aim), archetypes, nav (1 m grid A* + N1 decks; shared grids =
+                                   static world only, per-sim kiosk fixtures and X1 blockers)
   match/                           yard-skirmish (waves) · team-deathmatch
   vehicles/  boss/                 Wave 2 lanes (Mower Kart + terminals; Vac-Tank boss) · boss/ also the sniper elite
                                    (E1: sniper.ts perches/dot/shot/leaps, hairball.ts shared lob); ?boss=<id> → Room

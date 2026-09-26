@@ -11,7 +11,7 @@
 //  - Worlds without a baked grid (flat test worlds) get a flat ground slab.
 //  - terrainFastMove(): the exact analytic twin of the terrain trimesh for character movement (perf lane P1,
 //    see the section at the end of this file).
-import type { Collider, World } from '@dimforge/rapier3d-compat';
+import type { Collider, ColliderDesc, World } from '@dimforge/rapier3d-compat';
 import type { Sim } from '../sim';
 import type { Rapier } from '../rapier';
 import { WORLD_GROUPS } from '../rapier';
@@ -55,31 +55,42 @@ export function isTerrainCollider(c: Collider): boolean {
   return (c as unknown as { __terrain?: boolean }).__terrain === true;
 }
 
+/** True for the colliders buildStaticWorld made from WorldData (terrain or ground slab, props, cylinders): the static
+ *  world every sim of that world shares. Entity colliders on the World layer (kiosks) and destructibles are not. Data
+ *  shared between sims (the nav grid, D1) may only be built from these. */
+export function isStaticWorldCollider(c: Collider): boolean {
+  return (c as unknown as { __static?: boolean }).__static === true;
+}
+
 export function buildStaticWorld(R: Rapier, world: World, data: WorldData): void {
   const g = data.terrain;
+  const add = (desc: ColliderDesc): Collider => {
+    const c = world.createCollider(desc.setCollisionGroups(WORLD_GROUPS));
+    (c as unknown as { __static: boolean }).__static = true;
+    return c;
+  };
   let terrain: Collider | null = null;
   if (g && TERRAIN_COLLIDER === 'trimesh') {
     const { vertices, indices } = terrainTriangles(g);
     const flags = (R as unknown as { TriMeshFlags?: { FIX_INTERNAL_EDGES: number } }).TriMeshFlags?.FIX_INTERNAL_EDGES;
-    terrain = world.createCollider(R.ColliderDesc.trimesh(vertices, indices, flags as never).setCollisionGroups(WORLD_GROUPS));
+    terrain = add(R.ColliderDesc.trimesh(vertices, indices, flags as never));
   } else if (g) {
     const res = g.n - 1, size = res * g.cell;
-    terrain = world.createCollider(R.ColliderDesc.heightfield(res, res, heightfieldMatrix(g), { x: size, y: 1, z: size })
-      .setTranslation(g.x0 + size / 2, 0, g.z0 + size / 2)
-      .setCollisionGroups(WORLD_GROUPS));
+    terrain = add(R.ColliderDesc.heightfield(res, res, heightfieldMatrix(g), { x: size, y: 1, z: size })
+      .setTranslation(g.x0 + size / 2, 0, g.z0 + size / 2));
   }
   if (terrain) (terrain as unknown as { __terrain: boolean }).__terrain = true;
   if (terrain && g && TERRAIN_COLLIDER === 'trimesh') terrainOf.set(world, g);
   if (!terrain) {
     const h = data.halfExtent;
-    world.createCollider(R.ColliderDesc.cuboid(h, 0.5, h).setTranslation(0, -0.5, 0).setCollisionGroups(WORLD_GROUPS));
+    add(R.ColliderDesc.cuboid(h, 0.5, h).setTranslation(0, -0.5, 0));
   }
   for (const p of data.props) {
     const q = quatYXZ(p.pitch ?? 0, p.rotY, p.roll ?? 0);
-    world.createCollider(R.ColliderDesc.cuboid(p.hx, p.hy, p.hz).setTranslation(p.x, p.y, p.z).setRotation(q).setCollisionGroups(WORLD_GROUPS));
+    add(R.ColliderDesc.cuboid(p.hx, p.hy, p.hz).setTranslation(p.x, p.y, p.z).setRotation(q));
   }
   for (const c of data.cylinders ?? []) {
-    world.createCollider(R.ColliderDesc.cylinder(c.hh, c.r).setTranslation(c.x, c.y, c.z).setCollisionGroups(WORLD_GROUPS));
+    add(R.ColliderDesc.cylinder(c.hh, c.r).setTranslation(c.x, c.y, c.z));
   }
 }
 

@@ -4,6 +4,13 @@
 // lane builds are respected without knowing their shapes. Built once per world (cached by a
 // content signature) after the first physics step, when Rapier's query structures exist.
 //
+// D1 determinism: the grid is shared by every sim of the world (a server hosts many rooms in one process), so it is
+// built from the STATIC world only (isStaticWorldCollider: what buildStaticWorld made from WorldData). Whatever else a
+// sim has on the World/Vehicle layers is that sim's own: kiosks (per mode), karts, planes, barriers, destructibles.
+// Probing those made the grid depend on which room built it first (a TDM room's Kart-O-Matic cells stayed closed for
+// every later room). World fixtures that bots walk around (kiosks: never move, never removed) are per-sim blockers
+// (setNavFixture), on the ground grid and on the decks (deckGridFor).
+//
 // X1 dynamic blockers: the shared (cached) grid ignores destructible colliders — it is the world with every
 // destructible broken. A sim that registers blockers (setNavBlocker: the destruct system does, for every standing
 // destructible) gets its OWN grid from navGridFor(): a copy of the shared walk/region arrays with the blockers' cells
@@ -18,8 +25,7 @@ import type { Sim } from '../sim';
 import type { PropBox, WorldData } from '../../shared/world/world-data';
 import { WORLD_RAY_FILTER } from '../combat/geometry';
 import { Layer } from '../rapier';
-import { isTerrainCollider } from '../world/build';
-import { isDestructibleCollider } from '../destruct/tag';
+import { isStaticWorldCollider, isTerrainCollider } from '../world/build';
 import { surfaceAt } from '../../shared/world/queries';
 
 export const NAV_CELL = 1;
@@ -100,6 +106,7 @@ export function navGridFor(sim: Sim): NavGrid {
     o.count = new Uint8Array(base.walk.length);
     const t0 = performance.now();
     for (const boxes of o.blockers.values()) for (const i of blockedCells(base, boxes)) o.count[i]++;
+    for (const boxes of o.fixtures.values()) for (const i of blockedCells(base, boxes)) o.count[i]++;
     relabelAll(o);
     o.applyMs = performance.now() - t0;
   }
@@ -110,6 +117,11 @@ export function navGridFor(sim: Sim): NavGrid {
 
 interface NavOverlay {
   blockers: Map<string, readonly PropBox[]>;
+  /** D1 world fixtures of this sim (kiosks): closed on the ground grid like blockers, and on the decks. */
+  fixtures: Map<string, readonly PropBox[]>;
+  fixtureVersion: number;
+  /** This sim's copy of each shared deck its fixtures touch (deckGridFor), and the fixture version it was made at. */
+  decks: WeakMap<NavGrid, { version: number; grid: NavGrid }>;
   base: NavGrid | null;
   grid: NavGrid | null;
   /** Blockers covering each cell. */
@@ -131,22 +143,74 @@ const cellCache = new WeakMap<NavGrid, WeakMap<readonly PropBox[], Int32Array>>(
  * possible; runs on a reset). Other sims of the same world are unaffected.
  */
 export function setNavBlocker(sim: Sim, key: string, boxes: readonly PropBox[] | null): void {
+  const o = overlayOf(sim);
+  cover(o, o.blockers, key, boxes);
+}
+
+/**
+ * D1: a world fixture of this sim that bots walk around (a kiosk): its cells close on this sim's ground grid (as a
+ * blocker would) and on its view of the decks (deckGridFor). The shared grids never see it: which fixtures exist
+ * depends on the sim's mode. The owner registers it when it places the fixture (vehicles/interact terminals).
+ */
+export function setNavFixture(sim: Sim, key: string, boxes: readonly PropBox[] | null): void {
+  const o = overlayOf(sim);
+  if (cover(o, o.fixtures, key, boxes)) o.fixtureVersion++;
+}
+
+/** Bumped whenever this sim's fixtures change (nav-links.ts rebuilds its per-sim deck view). */
+export function navFixtureVersion(sim: Sim): number {
+  return overlays.get(sim)?.fixtureVersion ?? 0;
+}
+
+/**
+ * This sim's view of a shared deck grid (N1): the deck with the cells under this sim's fixtures closed (the Rooftop
+ * Hangar kiosk on the garage roof), or the shared deck itself when no fixture touches it. Built on first use per sim
+ * and fixture set; walk/region are copies, ground/costs/A* scratch stay shared (as for the ground grid).
+ */
+export function deckGridFor(sim: Sim, deck: NavGrid): NavGrid {
+  const o = overlays.get(sim);
+  if (!o || o.fixtures.size === 0) return deck;
+  const hit = o.decks.get(deck);
+  if (hit && hit.version === o.fixtureVersion) return hit.grid;
+  const closed = new Set<number>();
+  for (const boxes of o.fixtures.values()) for (const i of blockedCells(deck, boxes)) if (deck.walk[i]) closed.add(i);
+  let grid = deck;
+  if (closed.size) {
+    grid = { ...deck, walk: new Uint8Array(deck.walk), region: new Int32Array(deck.region.length).fill(-1), regionSize: [], mainRegion: -1 };
+    for (const i of closed) grid.walk[i] = 0;
+    grid.walkable = deck.walkable - closed.size;
+    labelRegions(grid);
+  }
+  o.decks.set(deck, { version: o.fixtureVersion, grid });
+  return grid;
+}
+
+function overlayOf(sim: Sim): NavOverlay {
   let o = overlays.get(sim);
-  if (!o) { o = { blockers: new Map(), base: null, grid: null, count: null, closed: 0, applyMs: 0, batch: 0, dirty: false }; overlays.set(sim, o); }
-  const prev = o.blockers.get(key);
+  if (!o) {
+    o = { blockers: new Map(), fixtures: new Map(), fixtureVersion: 0, decks: new WeakMap(), base: null, grid: null, count: null, closed: 0, applyMs: 0, batch: 0, dirty: false };
+    overlays.set(sim, o);
+  }
+  return o;
+}
+
+/** Add, replace or remove (null) the boxes under `key` in one of a sim's cover maps (blockers or fixtures), and
+ *  update the sim's grid in place if it exists. False when nothing changed. */
+function cover(o: NavOverlay, map: Map<string, readonly PropBox[]>, key: string, boxes: readonly PropBox[] | null): boolean {
+  const prev = map.get(key);
   if (boxes) {
-    if (prev === boxes) return;
-    o.blockers.set(key, boxes);
+    if (prev === boxes) return false;
+    map.set(key, boxes);
   } else {
-    if (!prev) return;
-    o.blockers.delete(key);
+    if (!prev) return false;
+    map.delete(key);
   }
   const g = o.grid, base = o.base, count = o.count;
-  if (!g || !base || !count) return;
+  if (!g || !base || !count) return true;
   const t0 = performance.now();
   if (prev) for (const i of blockedCells(base, prev)) count[i]--;
   if (boxes) for (const i of blockedCells(base, boxes)) count[i]++;
-  if (o.batch > 0) { o.dirty = true; return; }
+  if (o.batch > 0) { o.dirty = true; return true; }
   if (prev && !boxes) {
     const opened: number[] = [];
     for (const i of blockedCells(base, prev)) if (count[i] === 0 && base.walk[i] && !g.walk[i]) { g.walk[i] = 1; opened.push(i); }
@@ -155,6 +219,7 @@ export function setNavBlocker(sim: Sim, key: string, boxes: readonly PropBox[] |
     mergeOpened(g, opened);
   } else relabelAll(o);
   o.applyMs = performance.now() - t0;
+  return true;
 }
 
 /** Apply several blocker changes of a sim with one region relabel at the end (X1: resetting every destructible). */
@@ -288,12 +353,12 @@ function propAabbs(d: WorldData): Aabb[] {
   return out;
 }
 
-/** Static (World-layer) collider count and the terrain collider (trimesh or heightfield), if any. Destructible
- *  colliders are not static (X1): the shared grid ignores them (setNavBlocker closes their cells per sim). */
+/** Static-world collider count and the terrain collider (trimesh or heightfield), if any. Only buildStaticWorld's
+ *  colliders are static (D1): destructibles (X1: setNavBlocker) and kiosks (setNavFixture) close their cells per sim. */
 function staticColliders(sim: Sim): { count: number; terrain: Collider | undefined } {
   let count = 0, terrain: Collider | undefined;
   sim.world.forEachCollider((c) => {
-    if (((c.collisionGroups() >>> 16) & Layer.World) === 0 || isDestructibleCollider(c)) return;
+    if (((c.collisionGroups() >>> 16) & Layer.World) === 0 || !isStaticWorldCollider(c)) return;
     count++;
     if (isTerrainCollider(c)) terrain = c;
   });
@@ -312,7 +377,8 @@ function onPad(d: WorldData, x: number, z: number): boolean {
   return false;
 }
 
-const notDestructible = (c: Collider): boolean => !isDestructibleCollider(c);
+/** Probe filter of the shared grids (ground and decks): the static world only, never a sim's own colliders (D1). */
+const staticWorldOnly = (c: Collider): boolean => isStaticWorldCollider(c);
 
 export function buildNavGrid(sim: Sim): NavGrid {
   const t0 = performance.now();
@@ -330,7 +396,8 @@ export function buildNavGrid(sim: Sim): NavGrid {
   const b = data.bounds;
   // Analytic prefilter: only cells whose probe overlaps a prop AABB need a Rapier query; elsewhere
   // the probe can only touch the terrain, tested from height(). If the world holds static colliders
-  // this code doesn't know about, every cell is queried (always correct, just slower).
+  // this code doesn't know about, every cell is queried (always correct, just slower). D1: kiosks used to count
+  // as such in every room (so every cell was queried, ~200 ms); the probe only sees the static world now.
   // Terrain is covered by the slope test, so probes skip the heightfield (capsule-vs-heightfield
   // queries cost ~8 µs each; prop-only queries ~2 µs).
   const statics = staticColliders(sim);
@@ -375,7 +442,7 @@ export function buildNavGrid(sim: Sim): NavGrid {
       if (near) {
         queries++;
         pos.x = x; pos.y = y0 + R + PROBE_HALF; pos.z = z;
-        if (sim.world.intersectionWithShape(pos, rot, shape, undefined, WORLD_RAY_FILTER, exact ? undefined : statics.terrain, undefined, notDestructible)) continue;
+        if (sim.world.intersectionWithShape(pos, rot, shape, undefined, WORLD_RAY_FILTER, exact ? undefined : statics.terrain, undefined, staticWorldOnly)) continue;
       }
       walk[i] = 1;
       walkable++;
@@ -407,9 +474,6 @@ export const DECK_STEP = 0.5;
 const DECK_MIN_RISE = 0.9;
 /** Deck floods stop at this many cells from the seed (per axis). */
 const DECK_MAX_HALF = 48;
-
-/** Probe filter for decks: the static world only (no destructibles, no entity colliders such as kiosks or karts). */
-const staticOnly = (c: Collider): boolean => !isDestructibleCollider(c) && c.parent() === null;
 
 /**
  * N1: flood the elevated walkable surface under (x, y, z) into its own NavGrid (cells on the ground grid's lattice,
@@ -443,7 +507,7 @@ export function buildDeckGrid(sim: Sim, x: number, y: number, z: number): NavGri
     }
     queries++;
     pos.x = px; pos.y = s.y + CLEARANCE + PROBE_RADIUS + PROBE_HALF; pos.z = pz;
-    if (sim.world.intersectionWithShape(pos, rot, shape, undefined, WORLD_RAY_FILTER, undefined, undefined, staticOnly)) return NaN;
+    if (sim.world.intersectionWithShape(pos, rot, shape, undefined, WORLD_RAY_FILTER, undefined, undefined, staticWorldOnly)) return NaN;
     return s.y;
   };
   const seedY = surfaceAt(data, cx(sx), cz(sz), y + 0.35).y;

@@ -27,6 +27,7 @@ import { applyDamage, knockback, explode, combatLive, capsuleOf } from '../comba
 import { addProjectileHitListener } from '../combat/projectiles';
 import { damageDestructible } from '../destruct';
 import { destructibleOfCollider } from '../destruct/tag';
+import { setNavFixture } from '../ai/nav';
 import { falloff } from '../combat/weapon-system';
 import { reportNoiseAt } from '../combat/state';
 import { groups, Layer } from '../rapier';
@@ -96,6 +97,8 @@ export function spawnTerminal(sim: Sim, site: TerminalSite, id: TerminalId = 'ka
   );
   tagCollider(sim, e);
   sim.entities.set(e.id, e);
+  // bots walk around it: this sim's nav only (the shared grid is the static world; which kiosks exist is per mode, D1)
+  setNavFixture(sim, `terminal:${e.id}`, [{ type: 'terminal', x: site.x, y: site.y + td.hy, z: site.z, hx: td.hx, hy: td.hy, hz: td.hz, rotY: site.yaw }]);
   return e;
 }
 

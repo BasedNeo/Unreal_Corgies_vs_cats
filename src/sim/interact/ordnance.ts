@@ -15,6 +15,7 @@ import { WEAPONS, type WeaponId } from '../../shared/content/weapons';
 import { abilityDef } from '../../shared/content/abilities';
 import { WORLD_GROUPS } from '../rapier';
 import { ensureCombat, equipWeapon } from '../combat';
+import { setNavFixture } from '../ai/nav';
 import { resumeBuffs, suspendBuffs } from './buffs';
 import { findOrdnanceSite, kartKeepOut, type KeepOut, type OrdnanceSite } from './sites';
 import { ticksOf } from './state';
@@ -40,6 +41,8 @@ export function spawnOrdnanceTerminal(sim: Sim, site: OrdnanceSite): SimEntity {
   );
   (e.collider as unknown as { __entityId: number }).__entityId = id;
   sim.entities.set(id, e);
+  // bots walk around it: this sim's nav only (the shared grid is the static world, D1)
+  setNavFixture(sim, `terminal:${id}`, [{ type: 'terminal', x: site.x, y: site.y + DEF.hy, z: site.z, hx: DEF.hx, hy: DEF.hy, hz: DEF.hz, rotY: site.yaw }]);
   return e;
 }
 

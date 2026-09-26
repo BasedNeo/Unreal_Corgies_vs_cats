@@ -230,9 +230,6 @@ Newest first. Every task appends: what changed, proof (command + result + screen
   dodge the dot; a human must confirm the 2–4 minute duel target.
 - Bots drive karts (B2a): rides every match, but ram kills are rare. Targets back off from karts, so rams close at
   ~12 m/s for 51–63 damage. The kart grid costs 60–100 ms once per world (first need), 12 ms per destructible change.
-- Sim outcomes depend on what ran before in the same process: a TDM Room before a bot-only ch6 changes its step
-  times, with or without B2. Identical back-to-back runs agree. Some per-world cache holds per-sim state (found by
-  B2, not fixed yet).
 - Destructibles (X1): outside adventure destroy steps bots ignore props; a match reset relabels nav regions once
   (~5–9 ms).
 - RC plane (R1):
@@ -255,6 +252,16 @@ Newest first. Every task appends: what changed, proof (command + result + screen
     and the plane slows and takes a knock (lead);
   - spawn facing: the client holds inputs until its entity is in a snapshot, so a fresh spawn keeps the sim's facing
     in every mode (lead; found by A1).
+  - rooms in one process no longer leak into each other (D1, `docs/handoff/D1.md`). The shared nav grid baked in the
+    kiosks (and any parked kart) of whichever room built it first, and 11 of 30 room pairs diverged; now 0 of 30. The
+    shared grid, decks and kart flat mask come from the static world only, and each room closes its own kiosk cells
+    (`setNavFixture`). `tools/qa-determinism.mjs` checks any pair; `determinism-cross-sim.test.ts` guards it. The
+    shared grid builds in ~100 ms cold / ~26 ms warm (was ~200 / ~115);
+  - client views that leave the scene release their render objects (`engine/release.ts`): shared geometry and
+    materials kept every dropped drone, avatar, kart and core alive with its uniform buffers (+188 WebGL buffers in
+    5 min of TDM). A 10-minute headless TDM now shows no buffer or render-object growth (`tools/qa-memory.mjs`,
+    heap +0.19 MB/min, mostly JIT code); the authority's heap grows ≤ 0.14 MB/min with no collection growing
+    (`soak.mjs --heap`);
   - Q2's Wave 4 polish (lead; `docs/qa/W4_VERIFICATION.md` §P2):
     - adaptive resolution steps before the frame renders, so a resize can't present a blank frame (P2-9);
     - the objective line puts its "(n/N)" first; the scoreboard header drops "0:00" when untimed and says STEP in an

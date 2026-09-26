@@ -28,7 +28,10 @@
 //           gives the elevated goal up). Getting shot on a link (contested) aborts it and marks it costly for 20 s.
 //
 // Deterministic: decks, links and validations are pure functions of the world and the profile (a lazily built cache
-// never changes results, only wall time). No Math.random.
+// never changes results, only wall time). No Math.random. D1: "the world" is the static world only (nav.ts builds the
+// ground and deck grids from buildStaticWorld's colliders, the validation scratch world from WorldData); a sim's own
+// fixtures (the Rooftop Hangar kiosk on the roof) close deck cells in that sim's VIEW of the set (navLinksFor: the
+// decks from deckGridFor, links / profiles / scratch world shared).
 import type { KinematicCharacterController, World } from '@dimforge/rapier3d-compat';
 import type { Sim } from '../sim';
 import type { SimEntity } from '../entity';
@@ -43,7 +46,7 @@ import { CHARACTER_GROUPS } from '../rapier';
 import { buildStaticWorld } from '../world/build';
 import { baseMoveStats, stepWorldEffects } from '../world/systems';
 import { stepCharacter } from '../systems/movement';
-import { type NavGrid, buildDeckGrid, cellIndex, cellX, cellZ, navGridFor, nearestWalkable, sharedNavGrid } from './nav';
+import { type NavGrid, buildDeckGrid, cellIndex, cellX, cellZ, deckGridFor, navFixtureVersion, navGridFor, nearestWalkable, sharedNavGrid } from './nav';
 
 export interface P3 { x: number; y: number; z: number }
 
@@ -106,22 +109,46 @@ const DROPS_PER_DECK = 6;
 // ------------------------------------------------------------------------------------------------ set build
 
 const sets = new WeakMap<NavGrid, NavLinkSet | null>();
+/** D1: a sim's view of its world's set (its own decks; everything else is the shared set's), and the shared set of a
+ *  view (profiles and the validation scratch world live there). */
+const views = new WeakMap<Sim, { set: NavLinkSet; version: number; view: NavLinkSet }>();
+const sharedOf = new WeakMap<NavLinkSet, NavLinkSet>();
 
-/** The link set of a sim's world if it was built already (no build). */
+/** The link set of a sim's world if it was built already (no build), as this sim sees it. */
 export function navLinksIfBuilt(sim: Sim): NavLinkSet | null {
-  return sets.get(sharedNavGrid(sim)) ?? null;
+  const set = sets.get(sharedNavGrid(sim)) ?? null;
+  return set && viewFor(sim, set);
 }
 
 /**
- * The link set of a sim's world, built on first use (decks + links, not yet validated), cached per world. Null for
- * worlds without climbable routes. Needs Rapier's query structures (after the first physics step).
+ * The link set of a sim's world, built on first use (decks + links, not yet validated), cached per world, as this sim
+ * sees it (viewFor). Null for worlds without climbable routes. Needs Rapier's query structures (after the first
+ * physics step).
  */
 export function navLinksFor(sim: Sim): NavLinkSet | null {
   const base = sharedNavGrid(sim);
-  if (sets.has(base)) return sets.get(base) ?? null;
-  const set = buildLinkSet(sim, base);
-  sets.set(base, set);
-  return set;
+  let set = sets.get(base);
+  if (set === undefined) {
+    set = buildLinkSet(sim, base);
+    sets.set(base, set);
+  }
+  return set && viewFor(sim, set);
+}
+
+/** The shared set itself when none of the sim's fixtures touches a deck, else a copy with this sim's decks (cached
+ *  per sim until its fixtures change). Links, the profiles map and the scratch world are the shared set's. */
+function viewFor(sim: Sim, set: NavLinkSet): NavLinkSet {
+  const version = navFixtureVersion(sim);
+  const v = views.get(sim);
+  if (v && v.set === set && v.version === version) return v.view;
+  const decks = set.decks.map((d) => deckGridFor(sim, d));
+  let view = set;
+  if (decks.some((d, k) => d !== set.decks[k])) {
+    view = { ...set, decks };
+    sharedOf.set(view, set);
+  }
+  views.set(sim, { set, version, view });
+  return view;
 }
 
 function buildLinkSet(sim: Sim, g0: NavGrid): NavLinkSet | null {
@@ -447,10 +474,11 @@ export function profileKey(m: MoveStats): string {
 /** The validated links of a movement profile (validates on first use; cached per world and profile). */
 export function profileLinks(sim: Sim, set: NavLinkSet, move: MoveStats): ProfileLinks {
   const key = profileKey(move);
-  let p = set.profiles.get(key);
+  const shared = sharedOf.get(set) ?? set;
+  let p = shared.profiles.get(key);
   if (!p) {
-    p = validateProfile(sim, set, baseMoveStats(move), key);
-    set.profiles.set(key, p);
+    p = validateProfile(sim, shared, baseMoveStats(move), key);
+    shared.profiles.set(key, p);
   }
   return p;
 }
@@ -465,8 +493,10 @@ function cropTerrain(g: TerrainGrid, x0: number, x1: number, z0: number, z1: num
   return { x0: g.x0 + i0 * g.cell, z0: g.z0 + j0 * g.cell, cell: g.cell, n, heights };
 }
 
-/** A Rapier world with the static world around the links (plus standing destructibles: conservative). */
-function scratchFor(sim: Sim, set: NavLinkSet): Scratch {
+/** A Rapier world with the static world around the links (plus standing destructibles: conservative). Built from
+ *  WorldData only (never from a sim's live world), once per world: a sim's view shares its set's. */
+function scratchFor(sim: Sim, view: NavLinkSet): Scratch {
+  const set = sharedOf.get(view) ?? view;
   if (set.scratch) return set.scratch;
   const data = sim.worldData;
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
