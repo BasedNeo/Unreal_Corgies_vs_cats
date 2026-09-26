@@ -271,7 +271,7 @@ async function main(): Promise<void> {
     bossBar.update(states, dt);
     const local = states.get(localId) ?? null;
     const kart = local ? mountedVehicle(local, states) : null;
-    planeHud.update(kart, kart ? worldData.height(kart.x, kart.z) : 0); // shows itself only for a plane
+    planeHud.update(kart, kart ? surfaceAt(worldData, kart.x, kart.z, kart.y + 0.5).y : 0); // the surface under it (a roof too); shows itself only for a plane
     if (kart) {
       const c = vehicleCameraFor(kart);
       if (!input.lookedRecently()) {
@@ -325,8 +325,10 @@ async function main(): Promise<void> {
     fx.update(dt, states, localId);
     audio.update(ctx.camera, states, localId, dt);
     nameplates.update(states, localId, local?.team ?? 0, ctx.camera, (id) => views.get(id)?.avatar.height ?? 1.4);
-    ctx.render();
+    // Adaptive resolution first: setPixelRatio resizes (clears) the canvas, so it must land before this frame renders,
+    // never between a render and the compositor (Q2 P2-9: an occasional blank frame at a resolution step).
     quality.update(frameMs);
+    ctx.render();
 
     fpsFrames++;
     if (now - fpsStart > 500) { debug.fps = (fpsFrames * 1000) / (now - fpsStart); fpsFrames = 0; fpsStart = now; }

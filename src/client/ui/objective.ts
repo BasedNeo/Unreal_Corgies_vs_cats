@@ -25,3 +25,21 @@ function catLine(text: string): string {
   if ((m = text.match(/^(.+) — (\d+) cats? left$/))) return `${m[1]} — take down the corgi squad (${m[2]} ${m[2] === '1' ? 'cat' : 'cats'} in the raid)`;
   return text;
 }
+
+/** A trailing "(n/N)" step counter moves to the front, so a long objective's ellipsis never eats it (Q2 P2-7). */
+export function counterFirst(text: string): string {
+  const m = /^(.*\S)\s*\((\d+\/\d+)\)\s*$/.exec(text);
+  return m ? `(${m[2]}) ${m[1]}` : text;
+}
+
+/** Scoreboard header: "MODE · 3:12 · WAVE 2", untimed phases without a 0:00, and STEP n in an adventure (Q2 P2-7). */
+export function scoreboardMeta(M: { mode: string; phase: string; timeLeft: number; wave: number }): string {
+  const mode = M.mode.replace(/-/g, ' ').toUpperCase();
+  const unit = M.mode === 'adventure' ? 'STEP' : 'WAVE';
+  const wave = M.wave > 0 ? `${unit} ${M.wave}` : '';
+  if (M.phase === 'ended') return `${mode} · FINAL`;
+  const untimed = M.phase === 'live' && M.timeLeft <= 0;
+  const t = Math.max(0, Math.ceil(M.timeLeft)); // same rounding as the HUD timer
+  const clock = untimed ? '' : `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+  return [mode, clock, wave].filter(Boolean).join(' · ');
+}

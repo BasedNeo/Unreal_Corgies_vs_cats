@@ -19,7 +19,7 @@ import { classIcon, weaponGlyph, WEAPON_GLYPHS } from './icons';
 import { KillFeed, seatedGlyph, type FeedParty } from './kill-feed';
 import { createMenu, createSettingsPanel, firstPad, PadNav, type Menu, type MenuDeps, type PlayOptions, type UiSoundKind } from './menu';
 import { buildScoreboard, renderScoreboardHtml } from './scoreboard';
-import { objectiveForTeam } from './objective';
+import { counterFirst, objectiveForTeam, scoreboardMeta } from './objective';
 import { loadSettings, saveSettings, safeStorage, type KV, type QualitySetting, type Settings, type SettingKey } from './settings';
 import { ABILITY_COOLDOWN_ESTIMATE, CONTROLS, DEATH_QUIPS, RELOAD_ESTIMATE, RESPAWN_ESTIMATE, TEAM_NAMES } from './strings';
 import { createChat } from './chat';
@@ -418,7 +418,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
         setText(timer, tt);
         toggle(timer, 'warm', M.phase === 'warmup');
         toggle(timer, 'low', M.phase === 'live' && !untimed && M.timeLeft <= 30);
-        setText(obj, objectiveForTeam(M.objective, M.mode, L ? L.team : 0));
+        setText(obj, counterFirst(objectiveForTeam(M.objective, M.mode, L ? L.team : 0)));
         const showWave = M.wave > 0 && /skirmish|wave|pve/i.test(M.mode);
         show(wave, showWave && !untimed); // an untimed live phase already reads WAVE n in the timer
         if (showWave) setText(wave, `WAVE ${M.wave}`);
@@ -625,7 +625,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
         const pve = !!M && /skirmish|boss/i.test(M.mode);
         const catEmpty = pve ? (waveCats ? `${waveCats} wave ${waveCats === 1 ? 'cat' : 'cats'} in the yard` : 'The next wave is on its way') : 'No one here yet';
         sbCols.innerHTML = renderScoreboardHtml(model, M ? M.score : null, classIcon, (c) => CLASSES[c].displayName, ['No one here yet', catEmpty]);
-        setText(sbMeta, M ? `${M.mode.replace(/-/g, ' ').toUpperCase()} · ${M.phase === 'ended' ? 'FINAL' : fmtTime(M.timeLeft)}${M.wave > 0 ? ` · WAVE ${M.wave}` : ''}` : '');
+        setText(sbMeta, M ? scoreboardMeta(M) : '');
       }
     },
 

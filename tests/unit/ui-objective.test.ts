@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { objectiveForTeam } from '../../src/client/ui/objective';
+import { counterFirst, objectiveForTeam, scoreboardMeta } from '../../src/client/ui/objective';
 
 describe('objectiveForTeam', () => {
   it('leaves corgis and team deathmatch untouched', () => {
@@ -25,5 +25,21 @@ describe('objectiveForTeam with the S1 mission fold', () => {
     const folded = 'Wave 2/5 — 6 cats left · ▶ Hold the trampoline 12/20s (2/3)';
     expect(objectiveForTeam(folded, 'yard-skirmish', 0)).toBe('Wave 2/5 — 6 cats left');
     expect(objectiveForTeam(folded, 'yard-skirmish', 1)).toBe('Wave 2/5 — take down the corgi squad (6 cats in the raid)');
+  });
+});
+
+describe('counterFirst / scoreboardMeta (Q2 P2-7)', () => {
+  it('moves a trailing step counter to the front, and leaves other lines alone', () => {
+    expect(counterFirst('Sneak through the tall grass to the shed (2/4)')).toBe('(2/4) Sneak through the tall grass to the shed');
+    expect(counterFirst('Team Deathmatch — first to 30')).toBe('Team Deathmatch — first to 30');
+    expect(counterFirst('The cats took the yard! (wave 3/5)')).toBe('The cats took the yard! (wave 3/5)');
+  });
+
+  it('scoreboard header: clock with the HUD rounding, no 0:00 when untimed, STEP in an adventure, FINAL at the end', () => {
+    expect(scoreboardMeta({ mode: 'yard-skirmish', phase: 'live', timeLeft: 191.2, wave: 2 })).toBe('YARD SKIRMISH · 3:12 · WAVE 2');
+    expect(scoreboardMeta({ mode: 'adventure', phase: 'live', timeLeft: 0, wave: 3 })).toBe('ADVENTURE · STEP 3');
+    expect(scoreboardMeta({ mode: 'boss-rush', phase: 'live', timeLeft: 0, wave: 0 })).toBe('BOSS RUSH');
+    expect(scoreboardMeta({ mode: 'team-deathmatch', phase: 'warmup', timeLeft: 4.5, wave: 0 })).toBe('TEAM DEATHMATCH · 0:05');
+    expect(scoreboardMeta({ mode: 'team-deathmatch', phase: 'ended', timeLeft: 0, wave: 0 })).toBe('TEAM DEATHMATCH · FINAL');
   });
 });

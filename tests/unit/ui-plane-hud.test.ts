@@ -31,6 +31,8 @@ describe('plane HUD readout', () => {
     expect(planeReadout(plane({ flags: EFlag.Reloading }), 0)!.boost).toBe('charging');
     const r = planeReadout(plane({ flags: EFlag.Aiming | EFlag.Crouching | EFlag.Grounded, y: 1 }), 3)!;
     expect(r).toMatchObject({ overheat: true, stall: true, grounded: true, alt: 0 });
+    // parked on a roof the terrain height is far below: the gear is on something, so the height reads 0
+    expect(planeReadout(plane({ flags: EFlag.Grounded, y: 9.2 }), 0)!.alt).toBe(0);
   });
 
   it('uses the cat name for the cat team, and is null for karts', () => {

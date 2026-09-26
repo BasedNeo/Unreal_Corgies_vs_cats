@@ -39,7 +39,7 @@ export function planeReadout(s: EntityState, groundY: number): PlaneReadout | nu
     hull: s.maxHp > 0 ? Math.max(0, Math.min(1, s.hp / s.maxHp)) : 0,
     throttle: unpackPlaneAux(s.ammo).throttle,
     speed: Math.round(Math.hypot(s.vx, s.vy, s.vz)),
-    alt: Math.max(0, Math.round(s.y - groundY)),
+    alt: f & EFlag.Grounded ? 0 : Math.max(0, Math.round(s.y - groundY)),
     boost: f & EFlag.Sprinting ? 'on' : f & EFlag.Reloading ? 'charging' : 'ready',
     overheat: (f & EFlag.Aiming) !== 0,
     stall: (f & EFlag.Crouching) !== 0,
