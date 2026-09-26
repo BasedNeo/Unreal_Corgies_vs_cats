@@ -19,6 +19,12 @@ export interface CharacterState {
   /** Downward speed at the last landing (m/s), for land FX/anim. */
   landImpact: number;
   sprinting: boolean;
+  /** Seconds left in the current slide (0 = not sliding). */
+  slideTime: number;
+  /** Seconds until another slide is allowed. */
+  slideCooldown: number;
+  /** True while slamming down in a ground pound. */
+  pounding: boolean;
 }
 
 export interface HealthState {

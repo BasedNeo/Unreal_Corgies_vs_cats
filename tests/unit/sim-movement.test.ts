@@ -52,3 +52,36 @@ describe('character movement', () => {
     expect(e.pos.x).toBeGreaterThan(10);
   });
 });
+
+describe('slide and ground pound', () => {
+  it('slides when crouching during a sprint and keeps speed above run', async () => {
+    const { sim, e } = await makeSim();
+    for (let i = 0; i < 30; i++) sim.step();
+    let seq = 1;
+    const go = (b: number) => { sim.setInput(e.id, { seq: seq++, mx: 0, mz: 1, yaw: 0, pitch: 0, buttons: b, rt: 0 }); sim.step(); };
+    for (let i = 0; i < 45; i++) go(Btn.Sprint);
+    go(Btn.Sprint | Btn.Crouch);
+    const evs = sim.drainEvents();
+    expect(evs.some((v) => v.e === 'ability' && v.ability === 'slide')).toBe(true);
+    for (let i = 0; i < 10; i++) go(Btn.Sprint | Btn.Crouch);
+    expect(e.char!.slideTime).toBeGreaterThan(0);
+    expect(Math.hypot(e.vel.x, e.vel.z)).toBeGreaterThan(e.char!.move.runSpeed);
+    for (let i = 0; i < 60; i++) go(0);
+    expect(e.char!.slideTime).toBe(0);
+  });
+
+  it('ground pounds from the air and emits the impact', async () => {
+    const { sim, e } = await makeSim();
+    for (let i = 0; i < 30; i++) sim.step();
+    let seq = 1;
+    const go = (b: number) => { sim.setInput(e.id, { seq: seq++, mx: 0, mz: 0, yaw: 0, pitch: 0, buttons: b, rt: 0 }); sim.step(); };
+    go(Btn.Jump); for (let i = 0; i < 20; i++) go(Btn.Jump);
+    sim.drainEvents();
+    go(Btn.Crouch);
+    expect(e.char!.pounding).toBe(true);
+    const seen: string[] = [];
+    for (let i = 0; i < 60; i++) { go(0); for (const v of sim.drainEvents()) seen.push(v.e === 'ability' ? v.ability : v.e); }
+    expect(seen).toContain('ground_pound');
+    expect(e.char!.grounded).toBe(true);
+  });
+});

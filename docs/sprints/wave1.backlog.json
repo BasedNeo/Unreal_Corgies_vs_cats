@@ -1,0 +1,32 @@
+{
+  "sprint": "Wave 1 — parallel lanes on the walking skeleton",
+  "sprintHours": 6,
+  "agents": [
+    { "id": "char-1", "lanes": ["characters"] },
+    { "id": "world-1", "lanes": ["world"] },
+    { "id": "combat-1", "lanes": ["combat"] },
+    { "id": "net-1", "lanes": ["netcode"] },
+    { "id": "juice-1", "lanes": ["juice"] },
+    { "id": "lead", "lanes": ["integration"] }
+  ],
+  "tasks": [
+    { "id": "L1", "title": "Procedural corgi + cat characters with skeleton, face and animation", "lane": "characters", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/client/procgen/characters/**", "src/client/anim/**", "tests/unit/characters*", "char.html", "tools/char-*"],
+      "acceptance": ["species/team/class readable at thumbnail size", "tris <= 6k hero / 3.5k npc, bones <= 48", "locomotion, jump, land, aim, fire, hit, death animate"] },
+    { "id": "L2", "title": "West Yard hub at pet scale: terrain, props, colliders, sky", "lane": "world", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/shared/world/**", "src/sim/world/**", "src/client/world/**", "tests/unit/world*"],
+      "acceptance": ["collider matches rendered surface within 1 cm", "spawns clear of props for both teams", "5 bookmark screenshots readable"] },
+    { "id": "L3", "title": "Authoritative weapons, damage, respawn, cat AI, match modes", "lane": "combat", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/sim/combat/**", "src/sim/ai/**", "src/sim/match/**", "src/shared/content/weapons.ts", "src/shared/content/abilities.ts", "tests/unit/combat*", "tests/unit/ai*", "tests/unit/match*"],
+      "acceptance": ["lag-compensated hitscan tested", "60 s bot soak completes a match with no errors", "bots navigate the yard without sticking"] },
+    { "id": "L4", "title": "Client prediction + reconciliation, hardened server, net test matrix", "lane": "netcode", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/client/net/**", "src/host/**", "server/**", "tests/unit/net*", "tests/e2e/net*"],
+      "acceptance": ["prediction error < 5 cm at 80 ms / 1% loss", "2 clients play over npm run server", "invalid inputs rejected"] },
+    { "id": "L5", "title": "Comic HUD, menus, procedural audio, pooled FX", "lane": "juice", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/client/ui/**", "src/client/audio/**", "src/client/fx/**", "tests/unit/ui*", "tests/unit/audio*", "tests/unit/fx*"],
+      "acceptance": ["every action has audio + FX feedback", "scoreboard/kill feed/hit markers readable at 720p", "zero allocations per FX spawn after warm-up"] },
+    { "id": "INT", "title": "Integrate lanes into main.ts, full gate, screenshots, commit", "lane": "integration", "deps": ["L1", "L2", "L3", "L4", "L5"], "estimate": 2, "priority": 1,
+      "paths": ["src/client/main.ts", "src/client/views/**", "src/client/camera/**", "src/client/input/**", "src/client/engine/**", "PROGRESS.md", "ARCHITECTURE.md"],
+      "acceptance": ["npm run gate passes", "in-game screenshot shows real characters in West Yard with HUD"] }
+  ]
+}

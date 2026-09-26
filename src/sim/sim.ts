@@ -111,7 +111,7 @@ export class Sim {
       pos: { x: spawn.x, y: spawn.y, z: spawn.z }, vel: { x: 0, y: 0, z: 0 },
       yaw: spawn.yaw, pitch: 0, collider: null,
       input: { ...emptyInput(0), yaw: spawn.yaw }, prevButtons: 0, lastInputSeq: 0,
-      char: { move, grounded: false, airTime: 0, jumpBuffer: 0, jumpsUsed: 0, jumpHeld: false, landImpact: 0, sprinting: false },
+      char: { move, grounded: false, airTime: 0, jumpBuffer: 0, jumpsUsed: 0, jumpHeld: false, landImpact: 0, sprinting: false, slideTime: 0, slideCooldown: 0, pounding: false },
       health: { hp: CLASSES[o.cls].maxHp, max: CLASSES[o.cls].maxHp, lastDamageTick: -9999, lastAttacker: -1 },
       anim: Anim.Idle, flags: 0, dead: false, respawnTick: 0, weapon: -1, ammo: 0,
       ownerPid: o.ownerPid ?? null, removed: false, data: {},
