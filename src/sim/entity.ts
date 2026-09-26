@@ -1,0 +1,72 @@
+// Simulation entity: plain data plus optional components. Systems in other folders may add
+// component fields through module augmentation, e.g.
+//   declare module '../entity' { interface SimEntity { weaponState?: WeaponState } }
+// Never store Three.js objects or DOM references here — src/sim must run headless in Node.
+import type { Collider } from '@dimforge/rapier3d-compat';
+import type { AnimId, ClassId, EntityId, EntityKindId, SpeciesId, TeamId, Vec3 } from '../shared/types';
+import type { InputCmd } from '../shared/input';
+import type { MoveStats } from '../shared/content/classes';
+
+export interface CharacterState {
+  move: MoveStats;
+  grounded: boolean;
+  /** Seconds since last grounded (for coyote time). */
+  airTime: number;
+  /** Seconds a jump press stays buffered. */
+  jumpBuffer: number;
+  jumpsUsed: number;
+  jumpHeld: boolean;
+  /** Downward speed at the last landing (m/s), for land FX/anim. */
+  landImpact: number;
+  sprinting: boolean;
+}
+
+export interface HealthState {
+  hp: number;
+  max: number;
+  lastDamageTick: number;
+  lastAttacker: EntityId;
+}
+
+export interface SimEntity {
+  id: EntityId;
+  kind: EntityKindId;
+  team: TeamId;
+  species: SpeciesId;
+  cls: ClassId | null;
+  seed: number;
+  name: string;
+  /** Feet position (bottom of the capsule). */
+  pos: Vec3;
+  vel: Vec3;
+  /** Aim/view yaw and pitch. */
+  yaw: number;
+  pitch: number;
+  collider: Collider | null;
+  input: InputCmd;
+  /** Previous tick's buttons, for edge detection. */
+  prevButtons: number;
+  lastInputSeq: number;
+  char: CharacterState | null;
+  health: HealthState | null;
+  anim: AnimId;
+  flags: number;
+  dead: boolean;
+  /** Tick at which a dead entity respawns (0 = not scheduled). */
+  respawnTick: number;
+  weapon: number;
+  ammo: number;
+  /** Connection id of the controlling player, or null for bots/props. */
+  ownerPid: string | null;
+  removed: boolean;
+  /** Per-system scratch space, namespaced by system name. Must be plain data. */
+  data: Record<string, unknown>;
+}
+
+export function pressed(e: SimEntity, btn: number): boolean {
+  return (e.input.buttons & btn) !== 0 && (e.prevButtons & btn) === 0;
+}
+
+export function held(e: SimEntity, btn: number): boolean {
+  return (e.input.buttons & btn) !== 0;
+}

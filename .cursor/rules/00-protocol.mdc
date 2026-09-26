@@ -1,0 +1,9 @@
+---
+description: Corgis vs Cats master protocol — always applied
+alwaysApply: true
+---
+Before writing any code: re-read MASTER_PLAN.md (§0 + current card), ARCHITECTURE.md and PROGRESS.md, and obey them.
+Obey the implementation order (MASTER_PLAN §10) strictly. Never expand scope — only implement the current card.
+Stay in your lane's owned paths; shared contracts change only through the lead.
+After changes: run `npm run gate` (or `gate:fast` + card proof), update PROGRESS.md and ARCHITECTURE.md.
+Prefer Accept-ready, complete, working code. Minimize placeholders. Full details: AGENTS.md.

@@ -1,0 +1,36 @@
+{
+  "name": "corgis-vs-cats-three",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Corgis vs Cats — multiplayer third-person action-platformer built with Three.js (WebGPU/TSL), Rapier and an authoritative TypeScript simulation.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "vite",
+    "server": "tsx server/index.ts",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:boundaries": "node tools/check-boundaries.mjs",
+    "test:e2e": "playwright test",
+    "gate": "node tools/gate.mjs",
+    "gate:fast": "node tools/gate.mjs --fast"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "0.21.0",
+    "three": "0.186.1",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/node": "^22.10.0",
+    "@types/three": "0.186.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.15",
+    "typescript": "5.9.3",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
+  }
+}

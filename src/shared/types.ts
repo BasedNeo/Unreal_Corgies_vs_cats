@@ -1,0 +1,40 @@
+// Core shared enumerations. Plain `as const` objects (no TS enums) so the code stays erasable.
+
+export type EntityId = number;
+
+export const Team = { Corgis: 0, Cats: 1, Neutral: 2 } as const;
+export type TeamId = (typeof Team)[keyof typeof Team];
+
+/** Species decides the character body plan in the client and base stats in the sim. */
+export const Species = { Corgi: 0, Cat: 1 } as const;
+export type SpeciesId = (typeof Species)[keyof typeof Species];
+
+/**
+ * The six class jobs (locked names from the legacy roadmap, with the Conker-identical
+ * "Demolisher" renamed to "Breacher"). Kits are data in src/shared/content.
+ */
+export const CLASS_IDS = ['assault', 'infiltrator', 'overwatch', 'breacher', 'warden', 'skyraider'] as const;
+export type ClassId = (typeof CLASS_IDS)[number];
+
+export const EntityKind = { Player: 0, Bot: 1, Projectile: 2, Pickup: 3, Vehicle: 4, Prop: 5 } as const;
+export type EntityKindId = (typeof EntityKind)[keyof typeof EntityKind];
+
+/** Locomotion/presentation state the client animates from. Derived by the sim, never trusted from clients. */
+export const Anim = { Idle: 0, Walk: 1, Run: 2, Sprint: 3, Jump: 4, Fall: 5, Land: 6, Dead: 7, Slide: 8, Swim: 9, Drive: 10 } as const;
+export type AnimId = (typeof Anim)[keyof typeof Anim];
+
+/** Entity flag bits in snapshots. */
+export const EFlag = {
+  Grounded: 1 << 0,
+  Sprinting: 1 << 1,
+  Firing: 1 << 2,
+  Aiming: 1 << 3,
+  Dead: 1 << 4,
+  Crouching: 1 << 5,
+  Reloading: 1 << 6,
+  Invulnerable: 1 << 7,
+  Stealthed: 1 << 8,
+  Alerted: 1 << 9,
+} as const;
+
+export interface Vec3 { x: number; y: number; z: number }
