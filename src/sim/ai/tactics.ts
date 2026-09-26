@@ -18,10 +18,16 @@
 // room bots with ≥ 50 % health walk to an Upgrade Core within 30 m that stands on walkable ground.
 // core-rush: every other bot of a team (by id) attacks the best pad it does not own (near, contested or being taken
 // by the enemy scores higher); the rest defend owned pads under attack, else sit on the nearest owned pad.
+// adventure (A1, src/sim/adventure): squad bots follow the chapter step — reach/hold/survive: take spots in the zone
+// (survive: around the rally point) · interact: with a human in the squad they guard the point (humans trigger it),
+// else the runner uses it (also at the Ordnance Kiosk) · collect: one item each (by rank) · defeat/destroy: walk to
+// the nearest target (breachers mine a destructible) · a stealth step with a human and no alarm yet: they hang back
+// at the rally point so the human leads · briefing / result: they gather at the rally point. Chapter cats spawned
+// as sentries (stealth steps) pace their loop (goal 'post') until the alarm turns them into hunters.
 import type { Sim } from '../sim';
 import type { SimEntity } from '../entity';
 import { Btn } from '../../shared/input';
-import { EFlag, EntityKind, type EntityId } from '../../shared/types';
+import { EFlag, EntityKind, Team, type EntityId } from '../../shared/types';
 import { angleDelta } from '../../shared/math';
 import { abilityDef } from '../../shared/content/abilities';
 import { pickupLayoutFor } from '../../shared/content/pickups';
@@ -31,6 +37,10 @@ import { concealLevel } from '../world/env';
 import { abilityEntities } from '../combat/ability-core';
 import { objectiveState, interactRuntime, interactConfig } from '../interact';
 import { coreRushConfig, coreRushPads, type CorePadInfo } from '../match/core-rush';
+import { KIOSK_PROMPT } from '../../shared/content/chapters';
+import {
+  SENTRY_DWELL, adventureChapter, adventureItems, adventureState, adventureStep, adventureTargets, isAdventureMode, squadHasHuman,
+} from '../adventure/state';
 import type { Archetype } from './archetypes';
 import { type NavGrid, cellX, cellZ, isWalkable, nearestWalkable, randomCell } from './nav';
 
@@ -52,13 +62,17 @@ export interface TacticsState {
   chokeAt: number;
   /** Skyraider: next deliberate hop; the tick the current hop started. */
   hopAt: number;
-  /** Objective/core goal (kind '' = none), re-evaluated every ~0.5 s. */
-  goal: '' | 'core' | 'step';
+  /** Objective/core goal (kind '' = none; 'post' = an adventure sentry's waypoint), re-evaluated every ~0.5 s. */
+  goal: '' | 'core' | 'step' | 'post';
   gx: number; gz: number; gy: number; gr: number;
   /** Objective step: the zone/point center (gx/gz is the bot's own spot in a hold zone). */
   cx: number; cz: number;
   interact: boolean;
   hold: boolean;
+  /** Adventure: the interact step is at an Ordnance Kiosk (E is fine next to that terminal). */
+  kiosk: boolean;
+  /** Adventure: the goal is a destructible to break (breachers mine it). */
+  destroy: boolean;
   goalId: EntityId;
   goalAt: number;
   goalSince: number;
@@ -72,7 +86,7 @@ export interface TacticsState {
 export function createTactics(): TacticsState {
   return {
     lock: 0, pushUntil: 0, pushRolled: -1, pushRollAt: 0, rolledFor: -1, wallFrom: -1, wallUntil: 0, holdUntil: 0, chokeAt: 0, hopAt: 0,
-    goal: '', gx: 0, gz: 0, gy: 0, gr: 0, cx: 0, cz: 0, interact: false, hold: false, goalId: -1, goalAt: 0, goalSince: 0, drone: -1, droneLined: false, skip: [],
+    goal: '', gx: 0, gz: 0, gy: 0, gr: 0, cx: 0, cz: 0, interact: false, hold: false, kiosk: false, destroy: false, goalId: -1, goalAt: 0, goalSince: 0, drone: -1, droneLined: false, skip: [],
   };
 }
 
@@ -108,6 +122,7 @@ function roll(sim: Sim, a: Archetype, p: number): boolean {
 const PVE_ABILITY_WAVE = 3;
 function pveHoldsBack(sim: Sim, e: SimEntity): boolean {
   if (!e.combat?.pve) return false;
+  if (isAdventureMode(sim)) return (adventureChapter(sim)?.index ?? 1) <= 1; // the tutorial chapter's cats fight plain
   const wave = (sim.state.match as { wave?: number } | undefined)?.wave ?? PVE_ABILITY_WAVE;
   return wave < PVE_ABILITY_WAVE;
 }
@@ -159,7 +174,7 @@ export function abilityIntent(sim: Sim, e: SimEntity, t: TacticsState, a: Archet
       }
       // room bots close in to use it: always on a target that is reloading, else on a roll (per target, every 8 s)
       if (!out.press && k.mode === 'engage' && k.visible && k.target && k.dist > reach && k.dist < 22 && e.kind === EntityKind.Bot && !e.combat?.pve
-        && sim.tick >= t.pushUntil && roomModeOf(sim) !== 'yard-skirmish') { // (co-op squads hold their range)
+        && sim.tick >= t.pushUntil && roomModeOf(sim) !== 'yard-skirmish' && roomModeOf(sim) !== 'adventure') { // (co-op squads hold their range)
         const reloading = (k.target.wpn?.reload ?? 0) > 0.3;
         if (reloading || t.pushRolled !== k.target.id || sim.tick >= t.pushRollAt) {
           t.pushRolled = k.target.id;
@@ -190,6 +205,8 @@ export function abilityIntent(sim: Sim, e: SimEntity, t: TacticsState, a: Archet
       break;
     }
     case 'charge': {
+      // adventure destroy step: plant one next to the destructible (its fuse or a passing cat sets it off)
+      if (t.goal === 'step' && t.destroy && Math.hypot(t.cx - e.pos.x, t.cz - e.pos.z) < 3.5 && ownEntities(sim, e, 'charge') === 0) { out.press = true; break; }
       if (k.mode === 'cover' && k.target && k.dist < 18) { out.press = roll(sim, a, 0.05); break; }
       if (k.mode === 'engage' && k.visible && k.target && k.dist < 16) {
         // an enemy closing in, or trading shots up close: mine the ground it has to cross
@@ -336,6 +353,8 @@ export function updateObjectiveGoal(sim: Sim, e: SimEntity, t: TacticsState, g: 
   t.goalAt = sim.tick + 30;
   const prev = t.goal, prevId = t.goalId;
   t.goal = '';
+  t.kiosk = false; t.destroy = false;
+  if (isAdventureMode(sim)) { adventureGoal(sim, e, t, g, chars, prev, prevId); return; }
   if (e.combat?.pve || e.kind !== EntityKind.Bot) return;
   const hpFrac = e.health ? e.health.hp / e.health.max : 1;
   const buddy = buddyInTrouble(sim, e, chars) !== null;
@@ -432,8 +451,112 @@ export function objectiveInteract(sim: Sim, e: SimEntity, t: TacticsState): numb
   if (t.goal !== 'step' || !t.interact || e.prevButtons & Btn.Interact) return 0;
   if (Math.hypot(t.cx - e.pos.x, t.cz - e.pos.z) > t.gr - 0.25 || Math.abs(e.pos.y - t.gy) > 3) return 0;
   for (const x of sim.entities.values()) {
-    if (x.kind !== EntityKind.Vehicle && x.kind !== EntityKind.Terminal) continue;
+    if (x.kind !== EntityKind.Vehicle && (x.kind !== EntityKind.Terminal || t.kiosk)) continue;
     if (Math.hypot(x.pos.x - e.pos.x, x.pos.z - e.pos.z) < 3.2) return 0;
   }
   return Btn.Interact;
+}
+
+// ---------------------------------------------------------------- adventure (A1)
+
+/** Take a spot inside a zone (kept while it stays inside); the bot fights from inside it (brain holdZone). */
+function zoneGoal(sim: Sim, t: TacticsState, g: NavGrid, x: number, z: number, r: number, id: number, prev: string, prevId: EntityId): void {
+  t.goal = 'step'; t.interact = false; t.hold = true;
+  t.gr = r; t.gy = sim.worldData.height(x, z); t.cx = x; t.cz = z;
+  const same = prev === 'step' && prevId === id && Math.hypot(t.gx - x, t.gz - z) < r * 0.95;
+  if (!same) {
+    let c = randomCell(g, sim.rng, g.mainRegion, x, z, r * 0.6);
+    if (c < 0) c = randomCell(g, sim.rng, -1, x, z, r * 0.92);
+    if (c < 0) c = nearestWalkable(g, x, z, Math.ceil(r) + 2);
+    t.gx = c >= 0 ? cellX(g, c) : x; t.gz = c >= 0 ? cellZ(g, c) : z;
+    t.goalSince = sim.tick;
+  }
+  t.goalId = id;
+}
+
+/** Walk to a point (an item, a target): the point itself when walkable, else the closest walkable cell. */
+function pointGoal(sim: Sim, t: TacticsState, g: NavGrid, x: number, z: number, id: number, prev: string, prevId: EntityId): void {
+  t.goal = 'step'; t.interact = false; t.hold = false;
+  t.gr = 0.5; t.gy = sim.worldData.height(x, z); t.cx = x; t.cz = z;
+  t.gx = x; t.gz = z;
+  if (!isWalkable(g, x, z)) {
+    const c = nearestWalkable(g, x, z, 4);
+    if (c >= 0) { t.gx = cellX(g, c); t.gz = cellZ(g, c); }
+  }
+  if (prev !== 'step' || prevId !== id) t.goalSince = sim.tick;
+  t.goalId = id;
+}
+
+/** Chapter cat on sentry duty: pace the loop, dwelling at each waypoint (the facing sweeps as it turns). */
+function sentryPost(sim: Sim, e: SimEntity, t: TacticsState): void {
+  const s = e.adv!.sentry!;
+  const n = s.route.length >> 1;
+  const wx = s.route[s.i * 2], wz = s.route[s.i * 2 + 1];
+  if (Math.hypot(wx - e.pos.x, wz - e.pos.z) < 1.1) {
+    if (s.until === 0) s.until = sim.tick + Math.round((SENTRY_DWELL[0] + sim.rng() * (SENTRY_DWELL[1] - SENTRY_DWELL[0])) * 60);
+    else if (sim.tick >= s.until && n > 1) { s.i = (s.i + 1) % n; s.until = 0; }
+  }
+  t.goal = 'post'; t.interact = false; t.hold = false;
+  t.gx = s.route[s.i * 2]; t.gz = s.route[s.i * 2 + 1]; t.cx = t.gx; t.cz = t.gz; t.gr = 0.6; t.gy = e.pos.y;
+  t.goalId = -9;
+}
+
+/** Adventure goals (see the header). Negative goal ids name zones, positive ones the entity walked to. */
+function adventureGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, chars: SimEntity[], prev: string, prevId: EntityId): void {
+  const st = adventureState(sim), def = adventureChapter(sim);
+  if (!st || !def) return;
+  if (e.combat?.pve) { if (e.adv?.sentry) sentryPost(sim, e, t); return; }
+  if (e.kind !== EntityKind.Bot || e.team !== Team.Corgis) return;
+  if (buddyInTrouble(sim, e, chars)) return; // help the human first
+  const human = squadHasHuman(sim);
+  const step = st.phase === 'live' ? adventureStep(sim) : null;
+  const zid = -(10 + Math.max(0, st.step) * 8);
+  if (!step || (step.stealth && !st.alarm && human)) { zoneGoal(sim, t, g, st.anchorX, st.anchorZ, 4, zid - 1, prev, prevId); return; }
+  const tr = step.trigger;
+  switch (tr.type) {
+    case 'reach':
+    case 'hold':
+      zoneGoal(sim, t, g, tr.params.x, tr.params.z, tr.params.radius, zid - 2, prev, prevId);
+      return;
+    case 'interact': {
+      const p = tr.params;
+      if (human || !isRunner(sim, e, chars)) { zoneGoal(sim, t, g, p.x, p.z, p.radius + 3, zid - 3, prev, prevId); return; }
+      t.goal = 'step'; t.interact = true; t.hold = false; t.kiosk = p.prompt === KIOSK_PROMPT;
+      t.gr = p.radius; t.gy = sim.worldData.height(p.x, p.z); t.cx = p.x; t.cz = p.z;
+      if (prev !== 'step' || prevId !== zid - 4) {
+        // the point may be inside a prop (the kiosk): the closest walkable cell, then straight in
+        t.gx = p.x; t.gz = p.z;
+        const c = nearestWalkable(g, p.x, p.z, Math.ceil(p.radius) + 2);
+        if (c >= 0) { t.gx = cellX(g, c); t.gz = cellZ(g, c); }
+        t.goalSince = sim.tick;
+      }
+      t.goalId = zid - 4;
+      return;
+    }
+    case 'collect': {
+      const items = adventureItems(sim);
+      if (!items.length) break;
+      let rank = 0;
+      for (const c of chars) if (c.team === e.team && c.kind === EntityKind.Bot && !c.combat?.pve && c.id < e.id) rank++;
+      // the bot's share: one item each by rank (items in spawn order), so the squad spreads out
+      const sorted = items.slice().sort((a, b) => a.id - b.id);
+      const it = sorted[rank % sorted.length];
+      pointGoal(sim, t, g, it.pos.x, it.pos.z, it.id, prev, prevId);
+      return;
+    }
+    case 'defeat':
+    case 'destroy': {
+      const targets = adventureTargets(sim);
+      let best: SimEntity | null = null, bd = Infinity;
+      for (const x of targets) { const d = Math.hypot(x.pos.x - e.pos.x, x.pos.z - e.pos.z); if (d < bd) { bd = d; best = x; } }
+      if (!best) break;
+      pointGoal(sim, t, g, best.pos.x, best.pos.z, best.id, prev, prevId);
+      if (tr.type === 'destroy') { t.destroy = true; t.gr = 2.5; }
+      return;
+    }
+    case 'survive':
+      zoneGoal(sim, t, g, st.anchorX, st.anchorZ, 7, zid - 5, prev, prevId);
+      return;
+  }
+  zoneGoal(sim, t, g, st.anchorX, st.anchorZ, 5, zid - 1, prev, prevId);
 }

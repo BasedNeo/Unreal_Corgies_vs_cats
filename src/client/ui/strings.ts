@@ -93,3 +93,33 @@ export const QUALITY_STRINGS = {
   reloadInMatch: 'Reloading leaves this match.',
   reloadButton: 'RELOAD NOW',
 };
+
+// ---- A1 (adventure): chapter picker, captions, chapter-complete card ----
+export const ADVENTURE_STRINGS = {
+  matchLabel: 'ADVENTURE',
+  matchHint: 'Story mode: six chapters, one district each. Solo with pups or co-op.',
+  pickerTitle: 'THE LAST TENNIS BALL',
+  pickerNote: 'pick a chapter',
+  chapter: 'CHAPTER',
+  comingSoon: 'COMING SOON',
+  locked: 'LOCKED',
+  lockedHint: (n: number) => `Finish chapter ${n} first`,
+  featured: 'FEATURED KIT',
+  kitNote: 'swap kits at any Ordnance Kiosk',
+  play: 'PLAY CHAPTER ▸',
+  skip: 'skip',
+  squadDown: 'SQUAD DOWN!',
+  backToCheckpoint: (n: number) => `Back to the checkpoint in ${n}…`,
+  complete: 'CHAPTER COMPLETE!',
+  time: 'TIME',
+  par: 'PAR',
+  newBest: 'NEW BEST!',
+  next: 'NEXT CHAPTER ▸',
+  replay: '↻ REPLAY',
+  nextSoon: 'MORE CHAPTERS SOON',
+  nextIn: (n: number) => `Next chapter in ${n}s`,
+  replayIn: (n: number) => `Replaying in ${n}s`,
+  medal: { gold: 'GOLD PAW', silver: 'SILVER PAW', bronze: 'BRONZE PAW' } as Record<'gold' | 'silver' | 'bronze', string>,
+  keysHint: '[ENTER] next · [BACKSPACE] replay',
+  sentryCone: 'sentry',
+};

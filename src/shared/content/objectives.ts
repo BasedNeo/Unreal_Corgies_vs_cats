@@ -7,6 +7,11 @@
 // pauses while contested and drains at `decay` ×/s while empty), `reach` (any squad member enters the
 // cylinder). §13's `collect`, `defeat` and `survive` are reserved for later chains.
 //
+// Adventure (A1): OBJECTIVE_CHAIN_IDS[1] = 'adventure' is the slot of the running adventure chapter. Its chain is not
+// static: the client's adventure layer calls setActiveAdventureChain(chapterChain(def)) for the chapter the beacon
+// names (beacon seed = chapter index; src/shared/content/chapters.ts), so objectiveChainByIndex(1) — and with it
+// S1's beacon view, E prompt and mission card — follows the chapter's steps. The authority never reads it.
+//
 // Snapshot convention for the beacon (EntityState, EntityKind.Prop — one per running chain):
 //   cls = index into OBJECTIVE_CHAIN_IDS · team = the chain's team · x, y, z = current target point ·
 //   weapon = current step index (-1 = inactive, steps.length = chain complete) · ammo = hold progress % ·
@@ -51,13 +56,19 @@ export interface ObjectiveChain {
   /** HUD text shown for `doneTime` s after the last step. */
   doneText: string;
   doneTime: number;
+  /** Mission card heading (default: the Squeaker mission's). */
+  title?: string;
 }
 
-/** Wire order (beacon EntityState.cls). Append only. */
-export const OBJECTIVE_CHAIN_IDS = ['yard_squeaker'] as const;
+/** Wire order (beacon EntityState.cls). Append only. 'adventure' is the running chapter's slot (see above). */
+export const OBJECTIVE_CHAIN_IDS = ['yard_squeaker', 'adventure'] as const;
 export type ObjectiveChainId = (typeof OBJECTIVE_CHAIN_IDS)[number];
+/** Chains defined here (every slot but the adventure's). */
+export type StaticChainId = Exclude<ObjectiveChainId, 'adventure'>;
+/** Beacon cls of the adventure chapter's chain. */
+export const ADVENTURE_CHAIN_INDEX = 1;
 
-export const OBJECTIVE_CHAINS: Record<ObjectiveChainId, ObjectiveChain> = {
+export const OBJECTIVE_CHAINS: Record<StaticChainId, ObjectiveChain> = {
   // West Yard skirmish: the cats stole the squad's favourite squeaky toy and stashed it by their shed.
   // Grab it (behind the cat spawns), rally on the trampoline while the waves come at you, then take the
   // fight to the Cat Tree and bark the yard back.
@@ -88,9 +99,17 @@ export function objectiveChainIndex(id: string): number {
   return (OBJECTIVE_CHAIN_IDS as readonly string[]).indexOf(id);
 }
 
+let activeAdventure: ObjectiveChain | null = null;
+
+/** Client: the chain the adventure beacon (cls = ADVENTURE_CHAIN_INDEX) stands for; null = none running. */
+export function setActiveAdventureChain(chain: ObjectiveChain | null): void {
+  activeAdventure = chain;
+}
+
 export function objectiveChainByIndex(i: number): ObjectiveChain | null {
+  if (i === ADVENTURE_CHAIN_INDEX) return activeAdventure;
   const id = OBJECTIVE_CHAIN_IDS[i];
-  return id ? OBJECTIVE_CHAINS[id] : null;
+  return id && id !== 'adventure' ? OBJECTIVE_CHAINS[id] : null;
 }
 
 /** Chains that run on a map in a mode. */

@@ -414,7 +414,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
         }
         // Untimed live phases (skirmish waves) show the wave instead of a red 0:00.
         const untimed = M.phase === 'live' && M.timeLeft <= 0;
-        const tt = M.phase === 'warmup' ? `WARMUP ${fmtTime(M.timeLeft)}` : M.phase === 'ended' ? 'FINAL' : untimed ? (M.wave > 0 ? `WAVE ${M.wave}` : 'LIVE') : fmtTime(M.timeLeft);
+        const tt = M.phase === 'warmup' ? `WARMUP ${fmtTime(M.timeLeft)}` : M.phase === 'ended' ? 'FINAL' : untimed ? (M.wave > 0 ? `${M.mode === 'adventure' ? 'STEP' : 'WAVE'} ${M.wave}` : 'LIVE') : fmtTime(M.timeLeft);
         setText(timer, tt);
         toggle(timer, 'warm', M.phase === 'warmup');
         toggle(timer, 'low', M.phase === 'live' && !untimed && M.timeLeft <= 30);
@@ -424,7 +424,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
         if (showWave) setText(wave, `WAVE ${M.wave}`);
         if (M.phase !== lastPhase) {
           if (lastPhase === 'warmup' && M.phase === 'live') banner('FUR WILL FLY!', null, 1.6);
-          if (M.phase === 'ended') banner(M.winner === 0 ? 'CORGIS WIN!' : M.winner === 1 ? 'CATS WIN!' : 'DRAW!', M.winner >= 0 ? M.winner : null, 6);
+          if (M.phase === 'ended' && M.mode !== 'adventure') banner(M.winner === 0 ? 'CORGIS WIN!' : M.winner === 1 ? 'CATS WIN!' : 'DRAW!', M.winner >= 0 ? M.winner : null, 6);
           lastPhase = M.phase;
         }
         if (showWave && lastWave >= 0 && M.wave > lastWave && M.phase === 'live') banner(`WAVE ${M.wave}!`, null, 1.8);
@@ -614,7 +614,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
       // ---- scoreboard (Tab / gamepad Back / forced / match end)
       const pad = firstPad();
       padBack = !!pad && !!pad.buttons[8]?.pressed;
-      const sbOpen = !inMenu && (tabHeld || sbForced || padBack || (M?.phase === 'ended' && now > bannerUntil - 3.5));
+      const sbOpen = !inMenu && (tabHeld || sbForced || padBack || (M?.phase === 'ended' && M.mode !== 'adventure' && now > bannerUntil - 3.5));
       show(sb, sbOpen);
       if (sbOpen && now - sbRenderedAt > 0.25) {
         sbRenderedAt = now;

@@ -166,7 +166,9 @@ export class Room {
     if (!hello || hello.v !== PROTOCOL_VERSION) { conn.send({ t: 'reject', reason: `protocol ${hello?.v} != ${PROTOCOL_VERSION}` }); return null; }
     if (this.humanCount >= MAX_PLAYERS_PER_ROOM) { conn.send({ t: 'reject', reason: 'room full' }); return null; }
     const cls: ClassId = (CLASS_IDS as readonly string[]).includes(hello.cls) ? hello.cls : 'assault';
-    const team: TeamId = hello.team === Team.Corgis || hello.team === Team.Cats ? hello.team : (this.opts.defaultTeam ?? this.smallerTeam());
+    // adventure: the squad is all corgis (the chapter brings the PvE cats)
+    const team: TeamId = this.opts.mode === 'adventure' ? Team.Corgis
+      : hello.team === Team.Corgis || hello.team === Team.Cats ? hello.team : (this.opts.defaultTeam ?? this.smallerTeam());
     const name = cleanText(String(hello.name ?? 'Player'), 64).replace(/[^\w \-.]/g, '').slice(0, 16) || 'Player';
     const slot = this.addSlot(conn.id, name, conn, false, team, cls);
     conn.send({ t: 'welcome', pid: slot.pid, entity: slot.entity, tick: this.sim.tick, mapSeed: this.sim.seed, mode: this.opts.mode, tickHz: TICK_HZ });
@@ -255,7 +257,15 @@ export class Room {
       else if (ev.e === 'score' && ev.reason === 'reset') restarted = true;
       else if (ev.e === 'spawn') (spawned ??= []).push(ev.id);
     }
-    if (spawned) this.applyPendingSwitches(spawned);
+    if (spawned) {
+      this.applyPendingSwitches(spawned);
+      // A (re)spawned human faces where the sim turned them (adventure: the chapter's first objective) until their own
+      // inputs arrive: the held lastCmd would otherwise turn them back to the yaw it carried from before.
+      for (const p of this.players.values()) {
+        const e = !p.bot && spawned.includes(p.entity) ? this.sim.entities.get(p.entity) : undefined;
+        if (e) p.lastCmd = { ...p.lastCmd, yaw: e.yaw, pitch: 0, mx: 0, mz: 0 };
+      }
+    }
     // Match restart (match rules emit score 'reset'; ended -> warmup/live as a fallback signal):
     // per-player K/D/score in the roster start over with the new match.
     const phase = this.match.phase;

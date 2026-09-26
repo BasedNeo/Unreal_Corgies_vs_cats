@@ -26,6 +26,8 @@ import { BossBar } from './views/boss-bar';
 import { createBossTelegraphFx } from './procgen/boss';
 import { createVehicleViews, vehicleCameraFor, mountedVehicle, followYaw } from './vehicles';
 import { createPlaneHud } from './ui/plane-hud';
+import { createAdventureHud, createAdventureViews } from './adventure'; // A1
+import { chapterById } from '../shared/content/chapters';
 import { createInteractViews, createInteractPrompts } from './interact';
 import { createCoreRushView } from './modes/core-rush-view';
 import { createAbilityViews } from './abilities';
@@ -100,6 +102,7 @@ async function main(): Promise<void> {
   const interact = createInteractViews(ctx.scene, { world: worldData, camera: ctx.camera });
   const rush = createCoreRushView(ctx.scene, ui); // core-rush pads + A·B·C strip (idle in other modes)
   const abilityViews = createAbilityViews(ctx.scene, { camera: ctx.camera }); // C2: drones, charges, barriers, spotted markers
+  const advViews = createAdventureViews(ctx.scene); // A1: sentry cones (stealth steps), catnip bags
   // Concealment cue: the sim sets EFlag.Stealthed while the local corgi is hidden in tall grass.
   const hiddenCue = document.createElement('div');
   hiddenCue.textContent = 'HIDDEN';
@@ -144,13 +147,14 @@ async function main(): Promise<void> {
       ctx.renderer.domElement.requestPointerLock?.();
       if (o.mode === 'online' && o.server) {
         const room = o.room ? `&room=${encodeURIComponent(o.room)}` : '';
-        location.search = `?server=${encodeURIComponent(o.server)}&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}${room}`;
+        const adv = o.match === 'adventure' && o.chapter ? `&mode=adventure&chapter=${encodeURIComponent(o.chapter)}` : ''; // A1: co-op chapter room
+        location.search = `?server=${encodeURIComponent(o.server)}&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}${room}${adv}`;
         return;
       }
-      if (!net) { void startSession(o.name, o.cls, o.team, o.match); return; }
-      if (!serverUrl && o.match && o.match !== mode) {
-        // a different offline match type needs a fresh authority: restart the page straight into it
-        location.search = `?mode=${o.match}&autoplay&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}`;
+      if (!net) { if (o.chapter) chapter = o.chapter; void startSession(o.name, o.cls, o.team, o.match); return; } // A1: the picked chapter
+      if (!serverUrl && o.match && (o.match !== mode || (o.match === 'adventure' && o.chapter !== chapter))) {
+        // a different offline match type (or chapter) needs a fresh authority: restart the page straight into it
+        location.search = `?mode=${o.match}${o.chapter ? `&chapter=${encodeURIComponent(o.chapter)}` : ''}&autoplay&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}`;
         return;
       }
       net.transport.send({ t: 'class', cls: o.cls });
@@ -166,6 +170,21 @@ async function main(): Promise<void> {
   hud.setUiSound((k) => audio.ui(k));
   const prompts = createInteractPrompts(ui, { send: (msg) => net?.transport.send(msg), sound: (k) => audio.ui(k) });
   const planeHud = createPlaneHud(ui);
+  // A1: intro/outro captions, step barks, the squad-down beat, the chapter-complete card (+ device progress)
+  const adventureUrl = (id: string) => {
+    const p = new URLSearchParams(location.search);
+    p.set('mode', 'adventure'); p.set('chapter', id); p.set('autoplay', ''); p.set('team', '0');
+    p.set('cls', chapterById(id)?.cls ?? 'assault'); p.set('name', hud.settings.name ?? 'Rex');
+    return `?${p}`;
+  };
+  const adventure = createAdventureHud(ui, {
+    roomAdvances: !!serverUrl, // online rooms move on by themselves after the result
+    sound: (k) => audio.ui(k),
+    onNext: (id) => { location.search = adventureUrl(id); },
+    onReplay: (id) => { location.search = adventureUrl(id); },
+    // a new chapter: face its first objective (the start yaw) and use its time of day
+    onChapter: (def) => { input.yaw = def.start.yaw; if (def.t !== undefined && !params.has('t')) worldView.setTimeOfDay(def.t); },
+  });
   applySettings(hud.settings);
   if (autoStart) await startSession(params.get('name') ?? hud.settings.name ?? 'Rex', urlCls, urlTeam);
   else hud.showMenu(true);
@@ -206,6 +225,7 @@ async function main(): Promise<void> {
     interact.onGameEvent(ev);
     abilityViews.onGameEvent(ev);
     worldView.destruct.onGameEvent(ev); // X1: breaks (rubble + debris at once)
+    adventure.onGameEvent(ev); // A1
     prompts.onGameEvent(ev, net?.localEntity ?? -1);
     const r = fx.onGameEvent(ev);
     if (r.shake > 0) cam.shake(r.shake);
@@ -237,6 +257,8 @@ async function main(): Promise<void> {
     const pdt = dt * fx.hitStop(); // hit-stop slows presentation only, never the sim
     views.sync(states, localId, pdt);
     vehicles.sync(states, pdt);
+    adventure.update(states, net?.match ?? null, localId, dt); // A1: before interact.sync (points S1's chain slot at the chapter)
+    advViews.sync(states, adventure.view, pdt);
     interact.sync(states, pdt);
     prompts.update(states, localId, dt);
     rush.sync(states, states.get(localId)?.team ?? 0, ctx.camera, dt);

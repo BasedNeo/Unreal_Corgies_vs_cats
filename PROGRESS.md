@@ -24,6 +24,7 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 | W3 K1 character polish | ✅ merged | silhouette distance 0.033 → 0.122; 24/24 kits in budget; `9d8b11f` |
 | W3 lead M1 Ear Glide · M2 buff bits | ✅ | prediction parity 0 cm while gliding; Zoomies+ corrections 1182 → ≤ 2 |
 | Deploy prep (not deployed) | ✅ | docs/ops/DEPLOY.md; bundled server runs on an --omit=dev install |
+| W4 A1 adventure framework + ch1–2 | ✅ merged + wired | 32 tests; ch1 bots 52 s (first objective 19 s), ch2 bots 80 s, deterministic; runner ~0.03 ms/tick; artifacts/a1-*.png |
 | W4 E1 sniper elite (Madame Pointillé) | ✅ merged + wired | 15 sniper + 6 model/FX tests; marksman duel 151–213 s (sweep 125–242 s), with squad 62–107 s; ?boss=madame_pointille; artifacts/e1-*.png |
 | W4 X1 destructibles | ✅ merged + wired | 17 tests (destruct 11, view 5, perf 1); a Dig Charge breaches the Garage wall (walk, nav and prediction open); tuna + crate stacks break; break ≤ 0.3 ms authority / ~0.2 ms client; artifacts/x1/*.png |
 | W4 R1 RC plane + Rooftop Hangar | ✅ merged + wired | 25 new tests (flight, crash + eject + stun, no tunnelling, ceiling/box, Skyraider, own-plane gun, PvP, determinism, Rooftops→shed 8.8 s); stun predicted; artifacts/r1-*.png |
@@ -34,6 +35,13 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 ### 2026-09-26 — Wave 4 in flight (lead)
 - Lanes A1 (adventure framework, chapters 1–2), X1 (destructibles), R1 (RC plane), E1 (Siamese sniper elite) are
   building against `docs/design/ADVENTURE.md`; A2 (chapters 3–6) and INT4 follow.
+- **A1 integrated**: ADVENTURE in the MATCH selector with a chapter picker. Chapter 1 "Yard Day" (Assault) and chapter 2
+  "The Tall Grass" (Infiltrator, stealth with sentry cones and an alarm) run on chapter data: reach, interact, hold,
+  collect, defeat, destroy and survive steps; checkpoints with fail forward; intro/outro panels; a chapter card with
+  time vs par and a paw medal. Bots finish both chapters alone; with a human, the human completes reach and interact
+  steps. Lead: systems registered (+ the X1 checkpoint hook, so a wipe stands later-broken props back up), the adventure
+  HUD/views in main.ts, the corgi-team rule, bot damage ×0.42 like the skirmish, STEP instead of WAVE, no win banner or
+  scoreboard over the chapter card, and a respawn-facing fix in Room.
 - **E1 integrated**: Madame Pointillé, the Dot Artiste, a Siamese sniper elite (second boss): three perches across
   the lawn, a laser dot that must track you 1.1 s before she fires (break line of sight to lose it), a lens that
   glints before each shot (hit it to spoil the shot), hairball lobs at hiders, leaps between perches, phase 2 at
@@ -158,6 +166,9 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 - `EntityState.cls` carries content indexes through `CLASS_IDS`: 6 entries per content table at most (S1, B1).
 - Bots don't climb to the Rooftops perches (they fight in the Garage fine) (D3/C2).
 - Ability entities: shotgun damage to drones/barriers is estimated from the first pellet (C2).
+- Adventure (A1): sentries jog their patrol loops (no walk intent); bots can't shoot destructibles or drive/glide on
+  purpose (A2); one adventure chapter per page on the client; picker locks are cosmetic; sentry cones draw through
+  walls (intended readability); the spawn-facing race is patched per mode, not at its root.
 - Sniper elite (E1): perches are hard-coded West Yard spots (tests catch lost sightlines, not looks); L3 bots don't
   dodge the dot; a human must confirm the 2–4 minute duel target.
 - Destructibles (X1): bots don't breach on their own yet (A2); kart rams don't break stacks (kart wrecks do); a match

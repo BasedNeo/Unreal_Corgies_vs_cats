@@ -54,7 +54,17 @@ npm run dev            # http://localhost:5173 → main menu → PLAY (offline: 
 5. **Team deathmatch** (MATCH: DEATHMATCH, 4v4). Does it feel even? Can you tell the cat classes apart at range?
 6. **Core Rush** (MATCH: CORE RUSH, 4v4). Take and hold the A/B/C pads. Is it clear what to do, and does holding
    feel tense?
-7. **Online (optional).** Run `npm run start`; a friend opens `http://<your-ip>:8787`, then ROOMS ▸ lists your
+7. **Adventure** (MATCH: ADVENTURE → chapter 1, then 2).
+   - Chapter 1 "Yard Day": do you reach the first objective inside a minute?
+   - Chapter 2 "The Tall Grass": can you sneak past the sentries' cones? If you get spotted, is the alarm fair?
+   - Is the chapter card (time vs par, paw medal) worth replaying for?
+8. **New toys.**
+   - Climb to the garage roof and E at the Rooftop Hangar: fly the RC plane (mouse steers, W/S throttle, Shift
+     boost, E bails out). Does it feel good? Crash it into a wall once.
+   - As a Breacher, plant a Dig Charge against the boarded wall on the Garage's alley side, then shoot the tuna-can
+     stacks inside.
+   - Duel the sniper elite with `?boss=madame_pointille`. Watch for the red dot, and hit the lens when it glints.
+9. **Online (optional).** Run `npm run start`; a friend opens `http://<your-ip>:8787`, then ROOMS ▸ lists your
    room. Try chat (Enter).
 
 ## Answer (1–5, plus one sentence each)
@@ -64,6 +74,8 @@ npm run dev            # http://localhost:5173 → main menu → PLAY (offline: 
 | Moment-to-moment feel (moving, jumping, shooting) | | |
 | Abilities (which kit is best / weakest) | | |
 | Core Rush (clear? tense?) | | |
+| Adventure (chapters 1–2: clear? replayable?) | | |
+| RC plane / breach / sniper duel | | |
 | Readability (who is who, what hit me, where to go) | | |
 | Difficulty (1 = too easy, 3 = right, 5 = too hard) | | |
 | Look (toon style, characters, yard) | | |

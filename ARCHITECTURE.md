@@ -34,6 +34,8 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
                                    Squeaker mission chain (folded into MatchState by match/)
   combat/ability-*.ts              Spotter Drone / Dig Charge / Squeak Barrier entities (EntityKind.Ability)
   match/core-rush.ts               core-rush: fair Core Pad placement, capture, hold scoring (EntityKind.Zone)
+  adventure/                       A1 mode adventure: setup 95 + runner 790 (chapter steps and triggers, spawns and
+                                   sentries, stealth alarm, checkpoints with fail forward, MatchState/beacon fold)
   destruct/                        X1 breakable props (EntityKind.Destructible), order 505: breaching fuse, hitscan
                                    damage, blasts via explode()'s blast listeners; break/restore toggles colliders and
                                    nav blockers (ai/nav.ts per-sim dynamic blockers); mirrorDestructibles (prediction)
@@ -61,6 +63,8 @@ src/client/
   interact/                        kiosk/core/kibble/beacon views · E prompt, kit picker, buff chips, mission card
   abilities/                       drone, charge, barrier views + spotted markers
   modes/core-rush-view.ts          Core Pads, A·B·C markers and strip
+  adventure/                       A1: intro/outro captions, step barks, chapter card (medals), sentry cones, catnip
+                                   bags, `cvc.adventure` progress; content in shared/content/chapters.ts
   debug/debug-hook.ts              window.__cvc for tests
 tools/                             gate, boundaries, probe, soak, net-bots, char-audit, world-* benches/shots
 labs/                              lane labs: characters, world, juice (HUD/FX), vehicles, boss, interact

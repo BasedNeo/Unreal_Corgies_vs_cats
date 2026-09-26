@@ -1,6 +1,9 @@
 // OWNER: L5 (juice). Main menu (play offline / join server, name, team, class picker) and the settings panel,
 // with keyboard + gamepad navigation (spatial focus movement over [data-nav] elements).
 // U1 (ux): the Online rooms view (room-browser.ts), the quality "applies after reload" notice and the tips reset.
+// A1 (adventure): ADVENTURE in the MATCH selector; with it picked, the right card shows the chapter picker (six slots:
+// playable, locked-but-visible, or coming soon; paws from localStorage `cvc.adventure`) instead of the class grid —
+// a chapter plays its featured kit (swap at any Ordnance Kiosk), on the corgi side.
 import { CLASSES } from '../../shared/content/classes';
 import { CLASS_IDS, type ClassId, type TeamId } from '../../shared/types';
 import { classIcon } from './icons';
@@ -9,14 +12,64 @@ import { CLASS_BLURBS, CONTROLS, QUALITY_STRINGS, ROOM_STRINGS, TEAM_NAMES, TIP_
 import { qualityNote } from './quality-note';
 import { createRoomBrowser, type RoomBrowser } from './room-browser';
 import { serverBase, type RoomPoller } from './rooms';
+import { ADVENTURE_STRINGS } from './strings';
+import { FONT_BODY, FONT_DISPLAY } from './fonts';
+import { CHAPTER_PLAN, chapterById, type ChapterDef } from '../../shared/content/chapters';
+import { isUnlocked, loadProgress, type AdventureProgress } from '../adventure/progress';
+import { pawSvg } from '../adventure/hud';
 
 /** Offline match types the menu offers (the online server decides its own). */
-export type MatchMode = 'yard-skirmish' | 'team-deathmatch' | 'core-rush';
+export type MatchMode = 'yard-skirmish' | 'team-deathmatch' | 'core-rush' | 'adventure';
 export const MATCH_MODES: ReadonlyArray<{ id: MatchMode; label: string; hint: string }> = [
+  { id: 'adventure', label: ADVENTURE_STRINGS.matchLabel, hint: ADVENTURE_STRINGS.matchHint },
   { id: 'yard-skirmish', label: 'SKIRMISH', hint: 'Co-op: your squad vs five waves of cats and the Vac-Tank' },
   { id: 'team-deathmatch', label: 'DEATHMATCH', hint: '4 vs 4: first team to 30 knockouts' },
   { id: 'core-rush', label: 'CORE RUSH', hint: '4 vs 4: hold the three Core Pads, first to 250' },
 ];
+
+/** Chapter picker CSS (A1; scoped like the HUD's, injected once). */
+const CHAPTER_CSS = (u: (n: number) => string) => `
+#cvc-hud .seg.mm-match{display:grid;grid-template-columns:1fr 1fr}
+#cvc-hud .seg.mm-match button{border-right:${u(3)} solid var(--ink);border-bottom:${u(3)} solid var(--ink);font-size:${u(14)};padding:${u(6)} ${u(6)}}
+#cvc-hud .seg.mm-match button:nth-child(2n){border-right:none} #cvc-hud .seg.mm-match button:nth-last-child(-n+2){border-bottom:none}
+#cvc-hud .seg.mm-match button[data-match=adventure][aria-checked=true]{background:var(--corgi)}
+#cvc-hud .mm-chap-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:${u(10)}}
+#cvc-hud .mm-chap{position:relative;text-align:left;font:inherit;color:var(--ink);background:#fffaf0;border:${u(3)} solid var(--ink);border-radius:${u(10)};
+  padding:${u(8)} ${u(10)} ${u(9)};box-shadow:${u(3)} ${u(3)} 0 var(--ink);cursor:pointer;display:flex;flex-direction:column;gap:${u(3)};min-height:${u(128)};transition:transform .1s}
+#cvc-hud .mm-chap:hover:not(:disabled){transform:translateY(${u(-2)})}
+#cvc-hud .mm-chap[aria-checked=true]{background:var(--gold);transform:rotate(-1.5deg) scale(1.03);box-shadow:${u(4)} ${u(5)} 0 var(--ink)}
+#cvc-hud .mm-chap:focus-visible{outline:${u(4)} solid var(--gold);outline-offset:${u(3)}}
+#cvc-hud .mm-chap-no{font-size:${u(28)};line-height:1;color:#fff;-webkit-text-stroke:${u(2.2)} var(--ink);paint-order:stroke fill;text-shadow:0 ${u(3)} 0 var(--ink)}
+#cvc-hud .mm-chap-t{font-size:${u(16)};letter-spacing:.02em;line-height:1.05}
+#cvc-hud .mm-chap-d{font:800 ${u(10)} ${FONT_BODY};letter-spacing:.06em;text-transform:uppercase;opacity:.6}
+#cvc-hud .mm-chap-kit{position:absolute;right:${u(8)};top:${u(8)};width:${u(30)};height:${u(30)};border-radius:50%;background:var(--corgi);border:${u(2.5)} solid var(--ink);display:grid;place-items:center;color:var(--corgi2)}
+#cvc-hud .mm-chap-kit .ico,#cvc-hud .mm-chap-kit svg{width:72%;height:72%}
+#cvc-hud .mm-chap-paw{position:absolute;right:${u(6)};bottom:${u(6)};width:${u(34)};height:${u(34)};transform:rotate(-10deg)}
+#cvc-hud .mm-chap-paw svg{width:100%;height:100%}
+#cvc-hud .mm-chap-tag{margin-top:auto;align-self:flex-start;font:800 ${u(9.5)} ${FONT_BODY};letter-spacing:.08em;background:var(--ink);color:var(--gold);border-radius:${u(5)};padding:${u(2)} ${u(6)}}
+#cvc-hud .mm-chap:disabled{cursor:default;filter:grayscale(.85);opacity:.55;background:#e9e1d0}
+#cvc-hud .mm-chap:disabled .mm-chap-kit{background:#9a9384}
+#cvc-hud .mm-chap-lock{position:absolute;right:${u(9)};bottom:${u(8)};font-size:${u(20)}}
+#cvc-hud .mm-chap-sel{margin-top:${u(10)};display:flex;align-items:center;gap:${u(10)};font:800 ${u(12)} ${FONT_BODY};letter-spacing:.04em}
+#cvc-hud .mm-chap-sel b{font-size:${u(16)};font-family:${FONT_DISPLAY}}
+`;
+let chapterCssEl: HTMLStyleElement | null = null;
+function ensureChapterCss(): void {
+  if (chapterCssEl || typeof document === 'undefined') return;
+  chapterCssEl = document.createElement('style');
+  chapterCssEl.textContent = CHAPTER_CSS((n) => `calc(var(--u)*${n})`);
+  document.head.appendChild(chapterCssEl);
+}
+
+/** The chapter the picker starts on: the furthest unlocked playable one. */
+export function defaultChapter(p: AdventureProgress): ChapterDef {
+  let best = chapterById(CHAPTER_PLAN[0].id)!;
+  for (const slot of CHAPTER_PLAN) {
+    const def = chapterById(slot.id);
+    if (def && isUnlocked(p, slot.index)) best = def;
+  }
+  return best;
+}
 
 export interface PlayOptions {
   mode: 'offline' | 'online';
@@ -26,6 +79,8 @@ export interface PlayOptions {
   server?: string;
   /** Online room to join or create (U1 room browser). Absent = the server's default room. */
   room?: string;
+  /** Adventure chapter id (match 'adventure', offline or online). */
+  chapter?: string;
   name: string;
   team: TeamId | -1;
   cls: ClassId;
@@ -244,7 +299,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
             <button class="t1" data-nav data-team="1" role="radio">CATS</button>
           </div></div>
         <div class="mm-field"><span class="mm-label">MATCH</span>
-          <div class="seg" role="radiogroup" aria-label="Match">
+          <div class="seg mm-match" role="radiogroup" aria-label="Match">
             ${MATCH_MODES.map((m) => `<button data-nav data-match="${m.id}" role="radio">${m.label}</button>`).join('')}
           </div>
           <span class="mm-label" data-match-hint style="opacity:.8;letter-spacing:0;text-transform:none;margin-top:.3em"></span></div>
@@ -268,6 +323,21 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
               </button>`).join('')}
           </div>
         </div>
+        <div class="mm-chapters hidden">
+          <h2 class="mm-h">${ADVENTURE_STRINGS.pickerTitle} <small>${ADVENTURE_STRINGS.pickerNote}</small></h2>
+          <div class="mm-chap-grid" role="radiogroup" aria-label="Chapter">
+            ${CHAPTER_PLAN.map((c) => `
+              <button class="mm-chap" data-nav data-ch="${c.id}" data-idx="${c.index}" role="radio">
+                <span class="mm-chap-no">${c.index}</span>
+                <span class="mm-chap-t">${esc(c.title)}</span>
+                <span class="mm-chap-d">${esc(c.district)}</span>
+                <span class="mm-chap-kit">${classIcon(c.cls)}</span>
+                <span class="mm-chap-tag"></span>
+                <span class="mm-chap-paw"></span>
+              </button>`).join('')}
+          </div>
+          <div class="mm-chap-sel"></div>
+        </div>
         <div class="mm-settings hidden"></div>
         <div class="mm-rooms hidden"></div>
       </div>
@@ -283,6 +353,12 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
   const matchHint = el.querySelector<HTMLElement>('[data-match-hint]')!;
   let match: MatchMode = MATCH_MODES.some((m) => m.id === deps.match) ? (deps.match as MatchMode) : 'yard-skirmish';
   const classesView = el.querySelector<HTMLElement>('.mm-classes')!;
+  const chaptersView = el.querySelector<HTMLElement>('.mm-chapters')!;
+  const chBtns = [...el.querySelectorAll<HTMLButtonElement>('[data-ch]')];
+  const chSel = el.querySelector<HTMLElement>('.mm-chap-sel')!;
+  ensureChapterCss();
+  let progress = loadProgress();
+  let chapter: ChapterDef = defaultChapter(progress);
   const settingsView = el.querySelector<HTMLElement>('.mm-settings')!;
   const roomsView = el.querySelector<HTMLElement>('.mm-rooms')!;
   const right = el.querySelector<HTMLElement>('.mm-right')!;
@@ -311,14 +387,33 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
     for (const b of clsBtns) b.setAttribute('aria-checked', String(b.dataset.cls === s.cls));
     for (const b of matchBtns) b.setAttribute('aria-checked', String(b.dataset.match === match));
     matchHint.textContent = MATCH_MODES.find((m) => m.id === match)?.hint ?? '';
+    paintChapters();
+    const teamRow = teamBtns[0]?.closest<HTMLElement>('.mm-field');
+    if (teamRow) { teamRow.style.opacity = match === 'adventure' ? '0.45' : ''; teamRow.title = match === 'adventure' ? 'Adventure: the squad is all corgis' : ''; }
+    if (view === 'main') { classesView.classList.toggle('hidden', match === 'adventure'); chaptersView.classList.toggle('hidden', match !== 'adventure'); }
     // Class icons take the chosen team's colors (auto → corgis).
     right.classList.toggle('t1', s.team === 1);
     right.classList.toggle('t0', s.team !== 1);
     settingsPanel.refresh();
   };
+  const paintChapters = () => {
+    for (const b of chBtns) {
+      const idx = Number(b.dataset.idx);
+      const def = chapterById(b.dataset.ch);
+      const open = !!def && isUnlocked(progress, idx);
+      b.disabled = !open;
+      b.setAttribute('aria-checked', String(!!def && def.id === chapter.id));
+      const medal = def ? progress.medals[def.id] ?? null : null;
+      b.querySelector('.mm-chap-tag')!.textContent = !def ? ADVENTURE_STRINGS.comingSoon : !open ? ADVENTURE_STRINGS.locked : medal ? ADVENTURE_STRINGS.medal[medal] : `${ADVENTURE_STRINGS.chapter} ${idx}`;
+      b.title = !def ? ADVENTURE_STRINGS.comingSoon : !open ? ADVENTURE_STRINGS.lockedHint(idx - 1) : '';
+      b.querySelector('.mm-chap-paw')!.innerHTML = open && medal ? pawSvg(medal) : !def || !open ? '<span class="mm-chap-lock">🔒</span>' : '';
+    }
+    chSel.innerHTML = `<span>${ADVENTURE_STRINGS.featured}</span><b>${esc(CLASSES[chapter.cls].displayName.toUpperCase())}</b><span style="opacity:.65">· ${ADVENTURE_STRINGS.kitNote}</span>`;
+  };
   const showView = (v: MenuView) => {
     view = v;
-    classesView.classList.toggle('hidden', v !== 'main');
+    classesView.classList.toggle('hidden', v !== 'main' || match === 'adventure');
+    chaptersView.classList.toggle('hidden', v !== 'main' || match !== 'adventure');
     settingsView.classList.toggle('hidden', v !== 'settings');
     roomsView.classList.toggle('hidden', v !== 'rooms');
     if (v === 'rooms' && open) rooms.open(); else rooms.close();
@@ -341,6 +436,13 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
   for (const b of teamBtns) b.addEventListener('click', () => { s.team = Number(b.dataset.team) as -1 | 0 | 1; deps.onSetting('team', s.team); deps.onTeam(s.team); deps.sound?.('click'); paint(); });
   for (const b of matchBtns) b.addEventListener('click', () => { match = b.dataset.match as MatchMode; deps.sound?.('click'); paint(); });
   for (const b of clsBtns) b.addEventListener('click', () => { s.cls = b.dataset.cls as ClassId; deps.onSetting('cls', s.cls); deps.onClass(s.cls); deps.sound?.('click'); paint(); });
+  for (const b of chBtns) b.addEventListener('click', () => {
+    const def = chapterById(b.dataset.ch);
+    if (!def || b.disabled) return;
+    chapter = def;
+    deps.sound?.('click');
+    paint();
+  });
   const play = (mode: 'offline' | 'online', room?: string) => {
     commitName();
     let server: string | undefined;
@@ -353,6 +455,11 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
       if (room === undefined) { try { room = new URL(v).searchParams.get('room') ?? undefined; } catch { /* not a URL */ } }
     }
     deps.sound?.('open');
+    if (match === 'adventure') {
+      // a chapter plays its featured kit on the corgi side (the kiosk swaps kits in play)
+      deps.onPlay({ mode, server, room: mode === 'online' ? room : undefined, match: 'adventure', chapter: chapter.id, name: s.name, team: 0, cls: chapter.cls });
+      return;
+    }
     deps.onPlay({ mode, server, room: mode === 'online' ? room : undefined, match: mode === 'offline' ? match : undefined, name: s.name, team: s.team, cls: s.cls });
   };
   el.querySelector('[data-play]')!.addEventListener('click', () => play('offline'));
@@ -385,7 +492,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
   return {
     el,
     get isOpen() { return open; },
-    open(v = 'main') { open = true; el.classList.remove('hidden'); paint(); showView(v); },
+    open(v = 'main') { open = true; progress = loadProgress(); if (!isUnlocked(progress, chapter.index)) chapter = defaultChapter(progress); el.classList.remove('hidden'); paint(); showView(v); },
     close() { open = false; rooms.close(); el.classList.add('hidden'); (document.activeElement as HTMLElement | null)?.blur?.(); },
     poll(now) { if (open) pad.poll(now, el, back, () => { if (view === 'main') play('offline'); }); },
     refresh: paint,

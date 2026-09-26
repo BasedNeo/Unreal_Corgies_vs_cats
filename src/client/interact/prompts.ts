@@ -233,7 +233,7 @@ export function createInteractPrompts(uiRoot: HTMLElement, opts: InteractPrompts
     const key = `${chain.id}:${cur}:${hold ? `${beacon.ammo}:${contested}` : ''}`;
     if (key === missionKey) return;
     missionKey = key;
-    missionTtl.textContent = done ? 'MISSION COMPLETE!' : 'SQUEAKER MISSION';
+    missionTtl.textContent = done ? 'MISSION COMPLETE!' : chain.title ?? 'SQUEAKER MISSION'; // A1: the chapter's title
     missionN.textContent = done ? `+${chain.steps.reduce((a, s) => a + s.reward.score, 0)}` : `${cur + 1}/${chain.steps.length}`;
     missionSteps.innerHTML = chain.steps.map((s, i) => {
       const cls = i < cur ? 'done' : i === cur ? 'cur' : '';
