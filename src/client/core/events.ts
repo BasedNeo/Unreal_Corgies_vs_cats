@@ -7,7 +7,8 @@ export interface ClientEvents {
   roster: RosterEntry[];
   notice: string;
   chat: { from: string; text: string; team?: number };
-  connected: { pid: string; entity: number };
+  /** `map`/`mapSeed`: the world the authority runs (the page reloads into it if it built another one). */
+  connected: { pid: string; entity: number; map: string; mapSeed: number };
   disconnected: string;
   localSpawn: number;
 }

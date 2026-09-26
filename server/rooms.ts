@@ -10,9 +10,18 @@ import { MAX_PLAYERS_PER_ROOM, TICK_HZ } from '../src/shared/constants';
 import type { MatchPhase } from '../src/shared/protocol';
 import { botsForMode, type ServerConfig } from './config';
 import type { RoomMode } from '../src/host/guard';
+import { adventureState } from '../src/sim/adventure';
+import { DEFAULT_MAP } from '../src/shared/world/maps';
 
-/** How a new room is set up (from its first joiner's ?mode= / ?chapter= / ?boss=, validated by sanitizeRoomSetup). */
-export interface RoomSetup { mode: RoomMode; chapter?: string; boss?: string }
+/** The chapter an adventure room is playing now: online rooms advance after each result, so the chapter it was created
+ *  for goes stale (Q3 P2-1). Other modes list none. */
+function listedChapter(room: Room): string | undefined {
+  if (room.opts.mode !== 'adventure') return undefined;
+  return adventureState(room.sim)?.chapter || room.opts.chapter;
+}
+
+/** How a new room is set up (from its first joiner's ?mode= / ?chapter= / ?boss= / ?map=, validated by sanitizeRoomSetup). */
+export interface RoomSetup { mode: RoomMode; chapter?: string; boss?: string; map?: string }
 
 /**
  * Room names starting with this are unlisted: anyone with the name can join (`?room=_porch`), but the room browser
@@ -30,7 +39,9 @@ export interface RoomListing {
   bots: number;
   maxPlayers: number;
   phase: MatchPhase;
-  /** Adventure rooms: the chapter id the room was created for. */
+  /** The map the room runs (registry id, src/shared/world/maps.ts). */
+  map: string;
+  /** Adventure rooms: the chapter the room is playing now (online rooms move on after each result). */
   chapter?: string;
 }
 
@@ -177,7 +188,8 @@ export class RoomManager {
       if (humans === 0) continue; // emptied, waiting out its TTL: not a room anyone is playing in
       out.push({
         name: mr.name, mode: mr.room.opts.mode, players: humans + bots, humans, bots, maxPlayers: MAX_PLAYERS_PER_ROOM, phase: mr.room.match.phase,
-        ...(mr.room.opts.chapter ? { chapter: mr.room.opts.chapter } : {}),
+        map: mr.room.sim.worldData.map ?? DEFAULT_MAP,
+        ...(listedChapter(mr.room) ? { chapter: listedChapter(mr.room) } : {}),
       });
     }
     out.sort((a, b) => b.humans - a.humans || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -200,7 +212,7 @@ export class RoomManager {
   }
 
   private async create(name: string, setup: RoomSetup | null): Promise<ManagedRoom> {
-    const sim = await Sim.create({ seed: this.cfg.seed });
+    const sim = await Sim.create({ seed: this.cfg.seed, map: setup?.map });
     // the server's MODE/BOTS apply unless the creator asked for a mode (co-op adventure, core-rush, …)
     const room = setup
       ? new Room(sim, { mode: setup.mode, chapter: setup.chapter, boss: setup.boss, botsPerTeam: botsForMode(setup.mode, this.cfg.bots) })

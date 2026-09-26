@@ -6,6 +6,10 @@ import { Sim } from '../sim/sim';
 import { Room, startRoomLoop, type Conn } from './room';
 import { validateClientMsg } from './guard';
 import type { ServerMsg } from '../shared/protocol';
+import { mapForMode } from '../shared/world/maps';
+
+/** The page's offline setup (src/client/net/transport.ts createWorkerTransport). `map` is sanitized like a room's. */
+export interface WorkerBootConfig { seed: number; mode: string; bots: [number, number]; chapter?: string; boss?: string; map?: string }
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -13,8 +17,8 @@ let room: Room | null = null;
 const pending: unknown[] = [];
 const conn: Conn = { id: 'local', send: (m: ServerMsg) => self.postMessage(m) };
 
-async function boot(cfg: { seed: number; mode: string; bots: [number, number]; chapter?: string; boss?: string }) {
-  const sim = await Sim.create({ seed: cfg.seed });
+async function boot(cfg: WorkerBootConfig) {
+  const sim = await Sim.create({ seed: cfg.seed, map: mapForMode(cfg.map, cfg.mode) });
   // Offline an adventure's result card waits for the player's choice; online rooms move on after a countdown.
   if (cfg.mode === 'adventure') sim.state.adventureConfig = { holdResult: true };
   room = new Room(sim, { mode: cfg.mode, botsPerTeam: cfg.bots, defaultTeam: 0, chapter: cfg.chapter, boss: cfg.boss });
@@ -31,7 +35,7 @@ function handle(raw: unknown) {
 }
 
 self.onmessage = (ev: MessageEvent) => {
-  const d = ev.data as { t?: string; cfg?: { seed: number; mode: string; bots: [number, number] } };
+  const d = ev.data as { t?: string; cfg?: WorkerBootConfig };
   if (d?.t === '__boot' && d.cfg) void boot(d.cfg);
   else handle(ev.data);
 };

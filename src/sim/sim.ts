@@ -23,6 +23,8 @@ export interface SimSystem {
 
 export interface SimOptions {
   seed?: number;
+  /** Registered map id (src/shared/world/maps.ts) to build when no `world` is given; default the West Yard. */
+  map?: string;
   world?: WorldData;
   /** Override the system list (tests). */
   systems?: SimSystem[];
@@ -70,7 +72,7 @@ export class Sim {
     this.kcc.setMaxSlopeClimbAngle((52 * Math.PI) / 180);
     this.kcc.setMinSlopeSlideAngle((58 * Math.PI) / 180);
     this.kcc.setApplyImpulsesToDynamicBodies(true);
-    this.worldData = opts.world ?? createWorldData(this.seed);
+    this.worldData = opts.world ?? createWorldData(this.seed, opts.map);
     buildSimWorld(this);
     this.systems = [...(opts.systems ?? createDefaultSystems())].sort((a, b) => a.order - b.order);
     for (const s of this.systems) s.init?.(this);

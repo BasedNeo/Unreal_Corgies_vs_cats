@@ -237,7 +237,7 @@ export class LoopbackSession {
     const link = new LoopbackLink({ loop: this.loop, room: this.room, id: o.id, up: o.up, down: o.down, seed: o.seed, encoding: o.encoding });
     const net = new NetClient(link.transport, {
       now: () => this.loop.now, pingIntervalMs: 0, predict: o.predict ?? true,
-      createPredictor: (seed) => LocalPredictor.create(seed), onReconcile: o.onReconcile,
+      createPredictor: (seed, map) => LocalPredictor.create(seed, map), onReconcile: o.onReconcile,
     });
     net.join(o.name ?? o.id, 'assault', o.team ?? -1);
     const c: SessionClient = { id: o.id, net, link, seq: 0, frames: 0, opts: o, next: this.loop.now + (o.phaseMs ?? 3) };

@@ -231,6 +231,8 @@ export interface Destructible {
 export interface WorldData {
   seed: number;
   name: string;
+  /** Registry id (src/shared/world/maps.ts) when built by createWorldData; absent for hand-made test worlds. */
+  map?: string;
   /** Terrain height at world XZ (meters). Must be deterministic and identical on every machine. */
   height(x: number, z: number): number;
   /** Half-size of the playable square, centered on the origin. */

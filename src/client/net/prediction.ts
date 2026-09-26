@@ -1,7 +1,7 @@
 // Client-side prediction + reconciliation for the local player.
 //
 // The predictor owns a private headless Sim with NO systems: `Sim.create` builds the static world
-// through buildSimWorld -> buildStaticWorld(R, world, createWorldData(seed)) and configures the
+// through buildSimWorld -> buildStaticWorld(R, world, createWorldData(seed, map)) and configures the
 // kinematic character controller exactly like the authority, so the only movement code involved is
 // the shared `stepCharacter` (+ the map lane's per-character `stepWorldEffects`: jump pads, water).
 // Every sampled input is applied immediately (same sanitizeInput, same order as the authority tick). On every snapshot the authoritative state at the
@@ -89,9 +89,9 @@ export class LocalPredictor {
     this.quiet = { world: sim.world, kcc: sim.kcc };
   }
 
-  /** Build the prediction world for a map seed (loads Rapier once per page). */
-  static async create(seed: number): Promise<LocalPredictor> {
-    const sim = await Sim.create({ seed, systems: [] });
+  /** Build the prediction world for a map + seed (loads Rapier once per page). */
+  static async create(seed: number, map?: string): Promise<LocalPredictor> {
+    const sim = await Sim.create({ seed, map, systems: [] });
     sim.world.step(); // populate the broad-phase so character queries see the static world
     return new LocalPredictor(sim, seed);
   }

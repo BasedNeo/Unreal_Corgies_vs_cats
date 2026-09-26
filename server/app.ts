@@ -240,7 +240,7 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
     const id = `c${nextId++}`;
     const encoding: WireEncoding = url.searchParams.get('enc') === 'raw' ? 'raw' : url.searchParams.get('enc') === 'delta' ? 'delta' : cfg.encoding;
     const c: Client = {
-      id, ws, ip, roomName: sanitizeRoomName(url.searchParams.get('room')), roomSetup: sanitizeRoomSetup(url.searchParams.get('mode'), url.searchParams.get('chapter'), url.searchParams.get('boss')),
+      id, ws, ip, roomName: sanitizeRoomName(url.searchParams.get('room')), roomSetup: sanitizeRoomSetup(url.searchParams.get('mode'), url.searchParams.get('chapter'), url.searchParams.get('boss'), url.searchParams.get('map')),
       room: null, joined: false, joining: false,
       connectedAt: now, lastMsgAt: now, lastSeenAt: now, pingSentAt: 0, rttMs: 0,
       msgs: new TokenBucket(cfg.msgBurst, cfg.msgRate, now), bytes: new TokenBucket(cfg.byteBurst, cfg.byteRate, now),

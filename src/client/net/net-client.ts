@@ -17,6 +17,7 @@ import { EFlag, type ClassId, type TeamId } from '../../shared/types';
 import { INTERP_DELAY, PROTOCOL_VERSION, SNAPSHOT_EVERY, TICK_HZ } from '../../shared/constants';
 import { lerp, lerpAngle } from '../../shared/math';
 import { bus } from '../core/events';
+import { DEFAULT_MAP, sanitizeMap, type MapId } from '../../shared/world/maps';
 
 interface Snapshot {
   tick: number;
@@ -72,7 +73,7 @@ export interface NetClientOptions {
   /** Previously sent unacked inputs re-sent with each input message (default 3 on lossy links, 0 on reliable ones). */
   redundancy?: number;
   /** Predictor factory (default: lazy `import('./prediction')`). */
-  createPredictor?: (seed: number) => Promise<LocalPredictor>;
+  createPredictor?: (seed: number, map: MapId) => Promise<LocalPredictor>;
   /** Called after every reconciliation (telemetry, tests). */
   onReconcile?: (r: ReconcileResult, ack: number) => void;
 }
@@ -104,6 +105,8 @@ export class NetClient {
   localEntity = -1;
   tickHz = TICK_HZ;
   mapSeed = 0;
+  /** The map the authority runs (from its welcome; the default map for pre-Wave-8 authorities). */
+  map: MapId = DEFAULT_MAP;
   mode = '';
   match: MatchState | null = null;
   roster: RosterEntry[] = [];
@@ -128,7 +131,7 @@ export class NetClient {
   private readonly now: () => number;
   private readonly redundancy: number;
   private readonly timeoutMs: number;
-  private readonly createPredictor: (seed: number) => Promise<LocalPredictor>;
+  private readonly createPredictor: (seed: number, map: MapId) => Promise<LocalPredictor>;
   private readonly onReconcile: ((r: ReconcileResult, ack: number) => void) | null;
   // clock sync: serverTime(s) = localMs/1000 + offset; offset tracks the least-delayed arrivals
   private offset = 0;
@@ -137,8 +140,8 @@ export class NetClient {
   private interpDelay = INTERP_DELAY;
   // prediction
   private predictor: LocalPredictor | null = null;
-  private predictorSeed = NaN;
-  private loadingSeed = NaN;
+  private predictorKey = '';
+  private loadingKey = '';
   private loading: Promise<void> | null = null;
   private predictOn: boolean;
   private errors: number[] = [];
@@ -164,7 +167,7 @@ export class NetClient {
     this.timeoutMs = opts.timeoutMs ?? 5000;
     this.predictOn = opts.predict ?? defaultPredict();
     this.prediction.enabled = this.predictOn;
-    this.createPredictor = opts.createPredictor ?? ((seed) => import('./prediction').then((m) => m.LocalPredictor.create(seed)));
+    this.createPredictor = opts.createPredictor ?? ((seed, map) => import('./prediction').then((m) => m.LocalPredictor.create(seed, map)));
     this.onReconcile = opts.onReconcile ?? null;
     this.windowStart = this.now();
     transport.onMessage((m) => this.onMessage(m));
@@ -233,7 +236,7 @@ export class NetClient {
     this.predictOn = on;
     this.prediction.enabled = on;
     if (!on) this.predictor?.deactivate();
-    else if (this.connected) this.ensurePredictor(this.mapSeed);
+    else if (this.connected) this.ensurePredictor(this.mapSeed, this.map);
   }
 
   /**
@@ -352,16 +355,16 @@ export class NetClient {
     switch (m.t) {
       case 'welcome': {
         const sameSession = this.connected && m.pid === this.pid;
-        this.pid = m.pid; this.localEntity = m.entity; this.tickHz = m.tickHz; this.mapSeed = m.mapSeed; this.mode = m.mode;
+        this.pid = m.pid; this.localEntity = m.entity; this.tickHz = m.tickHz; this.mapSeed = m.mapSeed; this.map = sanitizeMap(m.map); this.mode = m.mode;
         this.connected = true;
         this.closeEmitted = false;
         this.unacked.length = 0; // the authority cleared its input queue for the new entity
         this.outbox.length = 0;
         if (!sameSession) { this.snaps.length = 0; this.haveTime = false; this.interpDelay = INTERP_DELAY; }
         this.predictor?.deactivate();
-        this.ensurePredictor(m.mapSeed);
+        this.ensurePredictor(m.mapSeed, this.map);
         this.spawnPending = true;
-        bus.emit('connected', { pid: m.pid, entity: m.entity });
+        bus.emit('connected', { pid: m.pid, entity: m.entity, map: this.map, mapSeed: m.mapSeed });
         break;
       }
       case 'snap': this.onSnapshot(m); break;
@@ -449,17 +452,18 @@ export class NetClient {
     }
   }
 
-  private ensurePredictor(seed: number): void {
+  private ensurePredictor(seed: number, map: MapId): void {
     if (!this.predictOn) return;
-    if (this.predictor && this.predictorSeed === seed) return;
-    if (this.loading && this.loadingSeed === seed) return;
-    this.loadingSeed = seed;
-    this.loading = this.createPredictor(seed).then(
+    const key = `${map}:${seed}`; // the prediction world is a pure function of (map, seed)
+    if (this.predictor && this.predictorKey === key) return;
+    if (this.loading && this.loadingKey === key) return;
+    this.loadingKey = key;
+    this.loading = this.createPredictor(seed, map).then(
       (p) => {
-        if (this.loadingSeed !== seed) { p.dispose(); return; }
+        if (this.loadingKey !== key) { p.dispose(); return; }
         this.predictor?.dispose();
         this.predictor = p;
-        this.predictorSeed = seed;
+        this.predictorKey = key;
       },
       (err) => {
         console.warn('[net] client prediction unavailable:', err);

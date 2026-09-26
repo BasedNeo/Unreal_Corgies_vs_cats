@@ -4,6 +4,7 @@
 // ServerMsg objects before emulation, so emulated loss behaves like UDP loss on a real link.
 import type { ClientMsg, ServerMsg } from '../../shared/protocol';
 import { SnapDecoder, decodeServerFrame } from '../../host/wire';
+import type { WorkerBootConfig } from '../../host/worker-host';
 
 export interface TransportStats {
   bytesIn: number;
@@ -55,7 +56,7 @@ export function emulate<T extends { t: string }>(em: NetEmulation | null, delive
   };
 }
 
-export function createWorkerTransport(cfg: { seed: number; mode: string; bots: [number, number]; chapter?: string; boss?: string }, em: NetEmulation | null): Transport {
+export function createWorkerTransport(cfg: WorkerBootConfig, em: NetEmulation | null): Transport {
   const worker = new Worker(new URL('../../host/worker-host.ts', import.meta.url), { type: 'module' });
   worker.postMessage({ t: '__boot', cfg });
   const stats = newStats();

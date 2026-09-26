@@ -78,7 +78,7 @@ async function main(): Promise<void> {
     const bot: Bot = { i, net: null as unknown as NetClient, seq: 0, input: walker(1000 + i), firstTick: -1, firstAt: 0, rtts: [], errors: [], bigCorrections: 0, disconnected: null };
     bot.net = new NetClient(transport, {
       predict: PREDICT, pingIntervalMs: 500,
-      createPredictor: (seed) => LocalPredictor.create(seed),
+      createPredictor: (seed, map) => LocalPredictor.create(seed, map),
       onReconcile: (r) => {
         if (!measuring) return;
         if (Number.isFinite(r.error)) bot.errors.push(r.error);

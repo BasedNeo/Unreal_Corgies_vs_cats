@@ -1,25 +1,29 @@
 // World description shared by the authority (colliders) and the client (visuals).
-// OWNER: world lane (L2). createWorldData(seed) builds the West Yard hub (see west-yard.ts).
+// OWNER: world lane (L2). createWorldData(seed, map) builds a registered map (maps.ts; the West Yard hub by default).
 // Contract types live in world-types.ts and are re-exported here so existing imports keep working.
 import type { PropBox, SpawnPoint, WorldData } from './world-types';
-import { buildWestYard } from './west-yard';
+import { MAPS, sanitizeMap } from './maps';
 
 export type {
   PropBox, PropCylinder, SpawnPoint, WorldData, JumpPad, WaterZone, Bookmark, VisualPrim, PrimShape, PrimGroup,
   TerrainGrid, SurfaceSample, ScatterZone, FenceRun, ConcealZone, Sprinkler, District, Lamp, Perch, Destructible, DestructKind,
 } from './world-types';
 
-/** Cache: the yard is a pure function of the seed, and building it (terrain bake + catalog) costs
- *  ~100 ms, so repeated calls with the same seed (sim + prediction + view) share one instance.
+/** Cache: a map is a pure function of (map, seed), and building one (terrain bake + catalog) costs
+ *  ~100 ms, so repeated calls with the same pair (sim + prediction + view) share one instance.
  *  WorldData is treated as immutable by every consumer. */
-const cache = new Map<number, WorldData>();
+const cache = new Map<string, WorldData>();
 
-export function createWorldData(seed = 1): WorldData {
-  let w = cache.get(seed);
+/** Build (or reuse) a registered map. An unknown map id is the default map (the West Yard). */
+export function createWorldData(seed = 1, map?: string): WorldData {
+  const id = sanitizeMap(map);
+  const key = `${id}:${seed}`;
+  let w = cache.get(key);
   if (!w) {
-    w = buildWestYard(seed);
+    w = MAPS[id].build(seed);
+    w.map = id;
     if (cache.size > 4) cache.clear();
-    cache.set(seed, w);
+    cache.set(key, w);
   }
   return w;
 }

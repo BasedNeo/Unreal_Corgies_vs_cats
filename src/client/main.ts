@@ -4,11 +4,14 @@
 // URL params: ?server=ws://host:8787  play online (default: local worker authority)
 //             ?name=Rex&cls=assault&team=0|1  ·  ?lag=80&jitter=10&loss=1  network emulation
 //             ?webgl  force the WebGL2 backend  ·  ?bots=0,4  offline bot fill  ·  ?mode=yard-skirmish
+//             ?map=west_yard  the battleground (src/shared/world/maps.ts; online, the room's map wins)
 import { debug } from './debug/debug-hook';
 import * as THREE from 'three/webgpu';
 import { createRenderContext } from './engine/renderer';
 import { QUALITY, toQualityTier } from './engine/quality';
 import { createWorldData } from '../shared/world/world-data';
+import { DEFAULT_MAP, MAPS, mapForMode } from '../shared/world/maps';
+import { worldReloadSearch } from './net/map-sync';
 import { createWorldView } from './world/world-view';
 import { districtAt, surfaceAt } from '../shared/world/queries';
 import { createWorkerTransport, createWebSocketTransport, type NetEmulation, type Transport } from './net/transport';
@@ -54,10 +57,14 @@ async function main(): Promise<void> {
   const ctx = await createRenderContext(app, { forceWebGL: params.has('webgl'), quality: toQualityTier(q) });
   debug.backend = ctx.backend;
 
-  loadingStep('Mowing West Yard…');
+  // Wave 8: the battleground (?map=, kept only if it can host the mode); an online room's welcome can overrule it
+  const mapId = mapForMode(params.get('map'), params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish');
+  const mapQ = mapId === DEFAULT_MAP ? '' : `&map=${mapId}`;
+  const mapTitle = MAPS[mapId].title;
+  loadingStep(mapTitle === 'West Yard' ? 'Mowing West Yard…' : `Scouting ${mapTitle}…`);
   await new Promise((r) => setTimeout(r, 0)); // let the step text paint before the blocking world build
   const seed = Number(params.get('seed') ?? 1);
-  const worldData = createWorldData(seed);
+  const worldData = createWorldData(seed, mapId);
   const worldView = createWorldView(ctx.scene, worldData, { quality: q === 'medium' ? 'med' : q, grade: ctx.pipeline.grade.uniforms });
   if (params.has('t')) worldView.setTimeOfDay(Number(params.get('t')));
 
@@ -81,7 +88,7 @@ async function main(): Promise<void> {
     if (match && !params.has('boss')) mode = match; // the menu's MATCH selector (offline only)
     const bots = botsFor(mode);
     loadingStep(serverUrl ? 'Calling the server…' : 'Waking up the squad…');
-    transport = serverUrl ? await createWebSocketTransport(serverUrl, em) : createWorkerTransport({ seed, mode, bots, chapter: mode === 'adventure' ? chapter : undefined, boss: mode === 'boss-rush' ? bossId : undefined }, em);
+    transport = serverUrl ? await createWebSocketTransport(serverUrl, em) : createWorkerTransport({ seed, mode, bots, map: mapId, chapter: mode === 'adventure' ? chapter : undefined, boss: mode === 'boss-rush' ? bossId : undefined }, em);
     debug.transport = transport.kind;
     net = new NetClient(transport);
     net.join(name, cls, team);
@@ -150,13 +157,13 @@ async function main(): Promise<void> {
       if (o.mode === 'online' && o.server) {
         const room = o.room ? `&room=${encodeURIComponent(o.room)}` : '';
         const adv = o.match === 'adventure' && o.chapter ? `&mode=adventure&chapter=${encodeURIComponent(o.chapter)}` : ''; // A1: co-op chapter room
-        location.search = `?server=${encodeURIComponent(o.server)}&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}${room}${adv}`;
+        location.search = `?server=${encodeURIComponent(o.server)}&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}${room}${adv}${mapQ}`;
         return;
       }
       if (!net) { if (o.chapter) chapter = o.chapter; void startSession(o.name, o.cls, o.team, o.match); return; } // A1: the picked chapter
       if (!serverUrl && o.match && (o.match !== mode || (o.match === 'adventure' && o.chapter !== chapter))) {
         // a different offline match type (or chapter) needs a fresh authority: restart the page straight into it
-        location.search = `?mode=${o.match}${o.chapter ? `&chapter=${encodeURIComponent(o.chapter)}` : ''}&autoplay&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}`;
+        location.search = `?mode=${o.match}${o.chapter ? `&chapter=${encodeURIComponent(o.chapter)}` : ''}&autoplay&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}${mapQ}`;
         return;
       }
       net.transport.send({ t: 'class', cls: o.cls });
@@ -192,6 +199,11 @@ async function main(): Promise<void> {
   if (autoStart) await startSession(params.get('name') ?? hud.settings.name ?? 'Rex', urlCls, urlTeam);
   else hud.showMenu(true);
 
+  // the authority runs another world than the one built above (a room made by someone else, another SEED): reload into it
+  bus.on('connected', (w) => {
+    const next = worldReloadSearch(location.search, { map: mapId, seed }, w);
+    if (next) { loadingStep(`Moving to ${MAPS[w.map as keyof typeof MAPS]?.title ?? w.map}…`); location.search = next; }
+  });
   bus.on('localSpawn', (id) => {
     const s = net?.latestState(id);
     if (s) input.yaw = s.yaw;

@@ -99,7 +99,8 @@ export type ClientMsg =
 
 // ---- authority -> client ----
 export type ServerMsg =
-  | { t: 'welcome'; pid: string; entity: EntityId; tick: number; mapSeed: number; mode: string; tickHz: number }
+  /** `map`: the registry id the room runs (src/shared/world/maps.ts); absent from pre-Wave-8 authorities = the default map. */
+  | { t: 'welcome'; pid: string; entity: EntityId; tick: number; mapSeed: number; map?: string; mode: string; tickHz: number }
   | { t: 'snap'; tick: number; ack: number; you: EntityId; ents: number[][]; gone: EntityId[]; match: MatchState; ev: GameEvent[] }
   | { t: 'roster'; players: RosterEntry[] }
   | { t: 'pong'; id: number; ct: number; st: number }

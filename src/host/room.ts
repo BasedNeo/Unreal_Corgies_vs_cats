@@ -23,6 +23,7 @@ import { type ClassId, type TeamId, type EntityId, CLASS_IDS, EFlag, EntityKind,
 import { SNAPSHOT_EVERY, MAX_PLAYERS_PER_ROOM, PROTOCOL_VERSION, TICK_HZ, TICK_DT } from '../shared/constants';
 import { MAX_CMDS_PER_MSG, cleanText } from './guard';
 import { quantizeMotion } from './quantize';
+import { DEFAULT_MAP } from '../shared/world/maps';
 import { trySwapKit, swapKit, drainRosterCredits } from '../sim/interact';
 
 export interface Conn {
@@ -171,7 +172,7 @@ export class Room {
       : hello.team === Team.Corgis || hello.team === Team.Cats ? hello.team : (this.opts.defaultTeam ?? this.smallerTeam());
     const name = cleanText(String(hello.name ?? 'Player'), 64).replace(/[^\w \-.]/g, '').slice(0, 16) || 'Player';
     const slot = this.addSlot(conn.id, name, conn, false, team, cls);
-    conn.send({ t: 'welcome', pid: slot.pid, entity: slot.entity, tick: this.sim.tick, mapSeed: this.sim.seed, mode: this.opts.mode, tickHz: TICK_HZ });
+    conn.send({ t: 'welcome', pid: slot.pid, entity: slot.entity, tick: this.sim.tick, mapSeed: this.sim.seed, map: this.sim.worldData.map ?? DEFAULT_MAP, mode: this.opts.mode, tickHz: TICK_HZ });
     this.fillBots();
     this.rosterDirty = true;
     return slot;
@@ -417,7 +418,7 @@ export class Room {
     const e = this.sim.spawnCharacter({ kind: p.bot ? EntityKind.Bot : EntityKind.Player, team: p.team, species, cls: p.cls, name: p.name, ownerPid: p.bot ? null : p.pid });
     p.entity = e.id;
     p.queue = [];
-    if (p.conn) p.conn.send({ t: 'welcome', pid: p.pid, entity: e.id, tick: this.sim.tick, mapSeed: this.sim.seed, mode: this.opts.mode, tickHz: TICK_HZ });
+    if (p.conn) p.conn.send({ t: 'welcome', pid: p.pid, entity: e.id, tick: this.sim.tick, mapSeed: this.sim.seed, map: this.sim.worldData.map ?? DEFAULT_MAP, mode: this.opts.mode, tickHz: TICK_HZ });
     this.rosterDirty = true;
   }
 
