@@ -23,6 +23,7 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
   const pivot = new THREE.Vector3();
   let dist = 4.2, shoulder: number = AIM_RAY.shoulderHip, fov = 62, aimK = 0, speedFov = 0, trauma = 0, first = true;
   const ray = new THREE.Raycaster();
+  const hits: THREE.Intersection[] = []; // reused: 6 casts per frame would otherwise allocate 6 arrays
   const tmp = new THREE.Vector3(), dir = new THREE.Vector3(), want = new THREE.Vector3();
   let solids: THREE.Object3D[] = [];
   let boom = 4.2;
@@ -73,7 +74,8 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
       let sh = shoulder;
       if (solids.length && sh > 0.01) {
         ray.set(pivot, right); ray.far = sh + CAM_RADIUS;
-        const hit = ray.intersectObjects(solids, false)[0];
+        hits.length = 0;
+        const hit = ray.intersectObjects(solids, false, hits)[0];
         if (hit) sh = Math.max(0, hit.distance - CAM_RADIUS);
       }
       origin.copy(pivot).addScaledVector(right, sh);
@@ -88,7 +90,8 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
           if (i === 1) start.addScaledVector(up, CAM_RADIUS); else if (i === 2) start.addScaledVector(up, -CAM_RADIUS);
           else if (i === 3) start.addScaledVector(side, CAM_RADIUS); else if (i === 4) start.addScaledVector(side, -CAM_RADIUS);
           ray.set(start, dir); ray.far = dist + CAM_RADIUS;
-          const hit = ray.intersectObjects(solids, false)[0];
+          hits.length = 0;
+          const hit = ray.intersectObjects(solids, false, hits)[0];
           if (hit) d = Math.min(d, Math.max(MIN_BOOM, hit.distance - CAM_RADIUS));
         }
       }

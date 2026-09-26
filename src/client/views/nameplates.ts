@@ -12,6 +12,7 @@ export class Nameplates {
   private plates = new Map<number, Plate>();
   private names = new Map<number, { name: string; bot: boolean }>();
   private v = new THREE.Vector3();
+  private at = new THREE.Vector3();
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement('div');
@@ -38,7 +39,7 @@ export class Nameplates {
       const dead = (s.flags & EFlag.Dead) !== 0;
       const stealthed = (s.flags & EFlag.Stealthed) !== 0 && s.team !== localTeam;
       this.v.set(s.x, s.y + heights(id) + 0.35, s.z).project(camera);
-      const dist = camera.position.distanceTo(new THREE.Vector3(s.x, s.y, s.z));
+      const dist = camera.position.distanceTo(this.at.set(s.x, s.y, s.z));
       const visible = !dead && !stealthed && this.v.z < 1 && Math.abs(this.v.x) < 1.1 && Math.abs(this.v.y) < 1.1 && dist < 60;
       p.el.style.display = visible ? 'block' : 'none';
       if (!visible) continue;
