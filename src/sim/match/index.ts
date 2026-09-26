@@ -17,6 +17,7 @@ import { applyArchetype, simNavGrid } from '../ai';
 import { ARCHETYPES, type ArchetypeId } from '../ai/archetypes';
 import { nearestWalkable, cellX, cellZ } from '../ai/nav';
 import { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type MatchConfigOverrides } from './config';
+import { spawnBoss, bossWaveStatus } from '../boss'; // B1 hook: boss waves
 
 export { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type WaveDef, type MatchConfigOverrides } from './config';
 
@@ -35,6 +36,8 @@ interface MatchRuntime {
   squadAlive: boolean;
   banner: string;
   bannerTime: number;
+  /** B1 hook: entity id of the current wave's boss (0 = none). */
+  boss: EntityId;
 }
 
 function roomMode(sim: Sim): string | undefined {
@@ -62,7 +65,7 @@ function rulesOf(sim: Sim): MatchRules {
 }
 
 function init(sim: Sim, mode: string): MatchRuntime {
-  const rt: MatchRuntime = { mode, clock: 0, intermission: false, queue: [], spawnTimer: 0, spawned: 0, wipes: 0, squadAlive: false, banner: '', bannerTime: 0 };
+  const rt: MatchRuntime = { mode, clock: 0, intermission: false, queue: [], spawnTimer: 0, spawned: 0, wipes: 0, squadAlive: false, banner: '', bannerTime: 0, boss: 0 };
   sim.state.matchRt = rt;
   const ms: MatchState = { mode, phase: 'warmup', timeLeft: 0, score: [0, 0], objective: '', wave: 0, winner: -1 };
   sim.state.match = ms;
@@ -182,8 +185,9 @@ function startWave(sim: Sim, rt: MatchRuntime, cfg: SkirmishConfig, n: number): 
   for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(sim.rng() * (i + 1)); const t = q[i]; q[i] = q[j]; q[j] = t; }
   rt.queue = q;
   rt.spawnTimer = 0;
+  rt.boss = def.boss ? spawnBoss(sim, undefined, { boss: def.boss }).id : 0; // B1 hook
   ms.timeLeft = 0;
-  ms.objective = waveObjective(cfg, n, q.length + roomCats);
+  ms.objective = waveObjective(cfg, n, q.length + roomCats + (rt.boss ? 1 : 0));
 }
 
 function waveObjective(cfg: SkirmishConfig, wave: number, left: number): string {
@@ -263,6 +267,18 @@ function updateSkirmish(sim: Sim, rt: MatchRuntime, dt: number, kills: KillRecor
     ms.objective = `Wave ${ms.wave} cleared! Wave ${ms.wave + 1}${ms.wave + 1 === total ? ' (FINAL)' : ''} in ${Math.max(1, Math.ceil(rt.clock))}`;
     if (rt.clock <= 0) startWave(sim, rt, cfg, ms.wave + 1);
     return;
+  }
+
+  // B1 hook: a wave boss holds the wave open; its defeat clears the wave (the rest of the cats retreat)
+  if (rt.boss) {
+    const boss = bossWaveStatus(sim, rt.boss);
+    if (boss.alive) catsAlive++;
+    else {
+      if (boss.score > 0) addScore(sim, Team.Corgis, boss.score, 'boss');
+      rt.boss = 0;
+      rt.queue.length = 0;
+      catsAlive = 0;
+    }
   }
 
   // spawn the wave in batches while under the alive cap

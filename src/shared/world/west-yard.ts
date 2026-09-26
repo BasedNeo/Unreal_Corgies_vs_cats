@@ -4,7 +4,9 @@
 //
 // Layout (x east, z south; the house is north):
 //   N  house wall + raised deck & stairs (Corgi base) · doghouse · AC-unit parkour · patio + grill
-//   W  raised garden beds · big climbable tree · sandbox · back mound + birdbath · neighbour strip
+//   W  The Garden (G1, garden.ts): veg plot + tomato cages + trellis bridge · tall-grass meadow with
+//      pumpkins, bean teepee, compost, sprinklers · flower jungle + gnome watchtower ·
+//      big climbable tree · sandbox · back mound + birdbath · neighbour strip
 //   C  trampoline (jump pad) · lawn chairs · picnic table · hedge islands · wheelbarrow · hose
 //   E  swing set + slide · pond (wading water) · gnome · neighbour strip
 //   S  red shed + cat-tree tower + plank bridge (Cats base) · kiddie pool · cardboard boxes
@@ -15,6 +17,7 @@ import { Kit, type Frame } from './kit';
 import { bakeTerrainGrid, createYardField, gridHeight, inGrid, type SurfaceOp, type TerrainOp, type TerrainSpec } from './terrain';
 import { createRng, hash2 } from './noise';
 import { yawToward } from './queries';
+import { buildGarden, gardenTerrain, GARDEN_FLANK_PATH } from './garden';
 
 export const FENCE_H = 8;
 const HALF = 100;
@@ -26,7 +29,8 @@ export function buildWestYard(seed = 1): WorldData {
   // ------------------------------------------------------------------ terrain
   const pathMain = [-53, -74, -44, -56, -26, -34, -10, -14, 4, 6, 16, 24, 28, 44, 40, 62, 46, 76];
   const pathPatio = [26, -74, 28, -64, 34, -50, 48, -42, 60, -36, 68, -34];
-  const pathWest = [-95, -45, -84, -40, -70, -30, -60, -8, -56, 8];
+  const pathWest = GARDEN_FLANK_PATH;   // dig hole -> through the Garden -> big tree
+  const garden = gardenTerrain();
   const pathEast = [98, 45, 86, 42, 74, 36, 72, 30];
   const ops: TerrainOp[] = [
     { op: 'raise', x: -38, z: 66, r: 9, falloff: 19, h: 4.2 },             // back mound (Cats-side high ground)
@@ -42,9 +46,6 @@ export function buildWestYard(seed = 1): WorldData {
     { op: 'flat', x: 66, z: -36, hx: 14, hz: 8, h: 0, falloff: 4 },       // swing set
     { op: 'flat', x: 28, z: -52, hx: 7, hz: 5, h: 0, falloff: 4 },        // picnic table
     { op: 'flat', x: -14, z: 52, hx: 9, hz: 9, h: 0, falloff: 4 },        // kiddie pool
-    { op: 'flat', x: -88, z: -52, hx: 7, hz: 11, h: 0, falloff: 3 },      // garden beds
-    { op: 'flat', x: -88, z: -18, hx: 7, hz: 11, h: 0, falloff: 3 },
-    { op: 'flat', x: -86, z: 16, hx: 7, hz: 10, h: 0, falloff: 3 },
     { op: 'flat', x: -72, z: 58, hx: 9, hz: 9, h: 0, falloff: 3 },        // sandbox
     { op: 'path', pts: pathMain, width: 5.5, depth: 0.12 },
     { op: 'path', pts: pathPatio, width: 4.5, depth: 0.1 },
@@ -55,6 +56,7 @@ export function buildWestYard(seed = 1): WorldData {
     { op: 'hole', x: -100, z: 45, r: 2.8, depth: 0.9 },
     { op: 'hole', x: -30, z: -79, r: 1.6, depth: 0.45 },                    // corgi digging near the doghouse
     { op: 'hole', x: -9, z: -74, r: 1.2, depth: 0.35 },
+    ...garden.ops,
   ];
   const surfaces: SurfaceOp[] = [
     { kind: 'dirt', shape: 'path', pts: pathMain, width: 3.6, soft: 0.9 },
@@ -76,6 +78,7 @@ export function buildWestYard(seed = 1): WorldData {
     { kind: 'mulch', shape: 'rect', x: -80, z: -97, hx: 5, hz: 3, soft: 0.6 },
     { kind: 'mulch', shape: 'circle', x: -38, z: 66, r: 3.5, soft: 0.8 },                // birdbath bed
     { kind: 'mulch', shape: 'rect', x: 47, z: 98.5, hx: 14, hz: 1.4, soft: 0.5 },       // behind the shed
+    ...garden.surfaces,
   ];
   const spec: TerrainSpec = {
     seed,
@@ -172,10 +175,9 @@ export function buildWestYard(seed = 1): WorldData {
   beachBall(kit.frame(-34, height(-34, -6), -6, 0));
   hose(kit, height);
 
-  // ------------------------------------------------------------------ west flank
-  gardenBed(kit.frame(-88, 0, -52, 0), rng, 'veg');
-  gardenBed(kit.frame(-88, 0, -18, 0), rng, 'flowers');
-  gardenBed(kit.frame(-86, 0, 16, 0), rng, 'veg');
+  // ------------------------------------------------------------------ west flank: The Garden (G1)
+  const gardenRng = createRng(`garden:${seed}`);
+  const gardenBuilt = buildGarden(kit, gardenRng, height);
   bigTree(kit, rng, -52, 22, height);
   sandbox(kit.frame(-72, 0, 58, 0));
   birdbath(kit.frame(-38, height(-38, 66), 66, 0.3));
@@ -223,6 +225,7 @@ export function buildWestYard(seed = 1): WorldData {
     { name: 'pond', pos: [36, 2.6, 6], look: [62, 1, 32], fov: 62 },
     { name: 'tree', pos: [-30, 3, 0], look: [-54, 8, 26], fov: 62 },
     { name: 'strip', pos: [-107, 2.2, -62], look: [-106, 2.5, 20], fov: 62 },
+    ...gardenBuilt.bookmarks,
   ];
 
   return {
@@ -244,6 +247,9 @@ export function buildWestYard(seed = 1): WorldData {
     scatterZones: zones,
     bounds: { minX: -117, maxX: 117, minZ: -103, maxZ: 103 },
     timeOfDay: 0.68,
+    concealZones: gardenBuilt.concealZones,
+    sprinklers: gardenBuilt.sprinklers,
+    districts: [gardenBuilt.district],
   };
 }
 
@@ -714,43 +720,6 @@ function hose(kit: Kit, height: (x: number, z: number) => number): void {
   sp.cyl(0, 0.3, 0, 0.9, 0.6, 1.1, 'metal', { seg: 12 });
   sp.cyl(0, 0.9, 0, 0.2, 0.6, 0.2, 'teamCorgisTrim', { seg: 8 });
   sp.box(0, 1.25, 0, 2.2, 0.2, 0.3, 'teamCorgisTrim', { yaw: 0.5, bev: 0.05 });
-}
-
-// ====================================================================== raised garden bed
-function gardenBed(f: Frame, rng: ReturnType<typeof createRng>, kind: 'veg' | 'flowers'): void {
-  const W = 11, D = 18, H = 1.3, T = 0.6;
-  f.colBox('bed', 0, (H - 1) / 2, 0, W, H + 1, D);
-  for (const s of [-1, 1]) {
-    f.box(s * (W / 2 - T / 2), H / 2, 0, T, H, D, 'fenceWood', { bev: 0.12 });
-    f.box(0, H / 2, s * (D / 2 - T / 2), W - 2 * T + 0.02, H, T, 'fenceWood', { bev: 0.12 });
-  }
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) f.box(sx * (W / 2 - 0.35), H / 2 + 0.1, sz * (D / 2 - 0.35), 0.8, H + 0.2, 0.8, 'fenceDark', { bev: 0.1 });
-  f.box(0, H - 0.18, 0, W - 2 * T, 0.3, D - 2 * T, 'mulch', { g: 'noink', bev: 0.05 });
-  if (kind === 'veg') {
-    // cabbages + tomato cages
-    for (let r = 0; r < 3; r++) for (let c = 0; c < 2; c++) {
-      const x = -2.2 + c * 4.4, z = -6 + r * 6;
-      if ((r + c) % 2) {
-        const rr = 1.0 + rng.range(0, 0.3);
-        f.sphere(x, H + rr * 0.55, z, rr, rr * 0.8, rr, 'leafLight', { g: 'soft', seg: 10 });
-        f.sphere(x, H + rr * 0.6, z, rr * 0.7, rr * 0.7, rr * 0.7, 'leaf', { g: 'soft', seg: 8 });
-      } else {
-        f.cyl(x, H + 1.8, z, 0.08, 3.6, 0.08, 'metal', { seg: 5 });
-        f.torus(x, H + 1.2, z, 0.9, 0.06, 'metal', { pitch: Math.PI / 2, seg: 10, g: 'noink' });
-        f.torus(x, H + 2.6, z, 1.1, 0.06, 'metal', { pitch: Math.PI / 2, seg: 10, g: 'noink' });
-        f.sphere(x, H + 1.9, z, 1.1, 1.5, 1.1, 'leafDark', { g: 'soft', seg: 9 });
-        for (let k = 0; k < 3; k++) f.sphere(x + Math.cos(k * 2.2) * 0.9, H + 1.4 + k * 0.5, z + Math.sin(k * 2.2) * 0.9, 0.36, 0.36, 0.36, 'tomato', { seg: 8 });
-      }
-    }
-  } else {
-    for (let i = 0; i < 12; i++) {
-      const x = rng.range(-3.6, 3.6), z = -7.6 + i * 1.4;
-      const h = rng.range(1.2, 2.2);
-      f.cyl(x, H + h / 2, z, 0.08, h, 0.1, 'leafDark', { seg: 5, g: 'soft' });
-      f.sphere(x, H + h + 0.2, z, 0.62, 0.42, 0.62, (['pink', 'flowerYellow', 'purple', 'catWhite'] as const)[i % 4], { g: 'soft', seg: 8 });
-      f.sphere(x + 0.3, H + h * 0.4, z, 0.45, 0.25, 0.3, 'leaf', { g: 'soft', seg: 6 });
-    }
-  }
 }
 
 // ====================================================================== big tree

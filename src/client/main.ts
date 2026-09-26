@@ -12,6 +12,7 @@ import { createWorldData } from '../shared/world/world-data';
 import { createWorldView } from './world/world-view';
 import { createWorkerTransport, createWebSocketTransport, type NetEmulation } from './net/transport';
 import { NetClient } from './net/net-client';
+import { serverUrlForPage } from './net/server-url';
 import { InputState } from './input/input';
 import { EntityViews } from './views/entity-views';
 import { createThirdPersonCamera } from './camera/third-person';
@@ -40,7 +41,7 @@ async function main(): Promise<void> {
   if (params.has('t')) worldView.setTimeOfDay(Number(params.get('t')));
 
   const em: NetEmulation = { lagMs: Number(params.get('lag') ?? 0), jitterMs: Number(params.get('jitter') ?? 0), lossPct: Number(params.get('loss') ?? 0) };
-  const serverUrl = params.get('server');
+  const serverUrl = serverUrlForPage(); // ?server / ?online / ?room / page served by server/prod.ts
   const mode = params.get('mode') ?? 'yard-skirmish';
   // Skirmish: a corgi squad of bots with you; cat waves come from the match rules. TDM: bot-filled teams.
   const bots = (params.get('bots') ?? (mode === 'team-deathmatch' ? '4,5' : '3,0')).split(',').map(Number) as [number, number];
@@ -87,11 +88,21 @@ async function main(): Promise<void> {
   });
   hud.setUiSound((k) => audio.ui(k));
   applySettings(hud.settings);
-  if (!params.has('autoplay') && !params.has('server')) hud.showMenu(true);
+  if (!params.has('autoplay') && !serverUrl) hud.showMenu(true);
 
-  bus.on('connected', ({ entity }) => {
-    const s = net.latestState(entity);
+  bus.on('localSpawn', (id) => {
+    const s = net.latestState(id);
     if (s) input.yaw = s.yaw;
+  });
+  bus.on('disconnected', (reason) => {
+    hud.notice(`Disconnected: ${reason}`);
+    if (!net.canReconnect) return;
+    const btn = document.createElement('button');
+    btn.textContent = 'Reconnect';
+    btn.className = 'interactive';
+    btn.style.cssText = 'position:absolute;left:50%;top:60%;transform:translateX(-50%);font:800 22px system-ui;padding:10px 22px;border:3px solid #1a120c;border-radius:12px;background:#f2c14e;cursor:pointer;pointer-events:auto';
+    btn.onclick = () => { btn.remove(); net.reconnect(); };
+    ui.appendChild(btn);
   });
   bus.on('roster', (r) => nameplates.setRoster(r));
   bus.on('notice', (t) => hud.notice(t));
@@ -113,7 +124,7 @@ async function main(): Promise<void> {
   ctx.renderer.setAnimationLoop(() => {
     const now = performance.now();
     const frameMs = now - last;
-    const dt = Math.min(0.1, frameMs / 1000);
+    const dt = Math.min(0.25, frameMs / 1000); // keep input real-time even on slow frames (server absorbs bursts)
     last = now;
     acc += dt;
     while (acc >= TICK_DT) {

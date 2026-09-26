@@ -27,10 +27,10 @@ export interface VehicleDef {
   name: string;
   catName: string;
   // ---- body ----
-  /** Collision body: an upright rounded cylinder (rotation-invariant, so turning never clips walls). */
+  /** Collision body: an upright 16-sided prism (≈ rotation-invariant, so turning never clips walls). */
   radius: number;
   halfHeight: number;
-  /** Rounded edge radius (part of radius/halfHeight). Helps the body ride over seams and small lips. */
+  /** Bottom-edge chamfer (m). Helps the body ride over seams and small lips. */
   border: number;
   /** Rider feet position in kart space (x right, y up from the kart's ground point, z toward the back). */
   seat: { x: number; y: number; z: number };
@@ -63,13 +63,16 @@ export interface VehicleDef {
   /** Steering authority lost at boost speed (0..1): a little understeer when flat out. */
   understeer: number;
   // ---- grip & drift ----
-  /** Lateral grip (1/s): how fast sideways velocity dies while gripping. */
+  /** Grip (1/s): how fast the velocity swings onto the heading. Steady slip angle ≈ yaw rate / grip. */
   grip: number;
-  /** Share of the sideways speed that grip converts back into forward speed (arcade cornering). */
-  gripTransfer: number;
-  /** Lateral grip while drifting (handbrake held). */
+  /** Grip while drifting (handbrake held): lower = wider slide. */
   driftGrip: number;
-  driftTransfer: number;
+  /** Speed lost per second while drifting (m/s²). */
+  driftDrag: number;
+  /** Beyond this slip angle (rad) grip stops steering the velocity and plain sideways friction takes over. */
+  maxGripSlip: number;
+  /** Sideways friction (1/s) for big slides, knockbacks and crawling speeds. */
+  skidFriction: number;
   /** Minimum forward speed to start or hold a drift. */
   driftMinSpeed: number;
   /** Yaw-rate multiplier while drifting (tighter line). */
@@ -169,8 +172,8 @@ export const VEHICLES: Record<VehicleId, VehicleDef> = {
     accel: 12, boostAccel: 20, reverseAccel: 9,
     brakeDecel: 28, coastDecel: 3.2, handbrakeDecel: 2.5, overspeedDecel: 6,
     slopeGravity: 0.55,
-    maxYawRate: 2.5, yawAccel: 18, steerFullSpeed: 4.5, understeer: 0.3,
-    grip: 11, gripTransfer: 0.35, driftGrip: 1.5, driftTransfer: 0.15, driftMinSpeed: 7,
+    maxYawRate: 2.5, yawAccel: 18, steerFullSpeed: 4.5, understeer: 0.45,
+    grip: 14, driftGrip: 5.5, driftDrag: 2, maxGripSlip: 1.2, skidFriction: 7, driftMinSpeed: 7,
     driftYawMult: 1.35, turboCharge: 0.9, turboTime: 0.6,
     boostDuration: 2.6, boostRecharge: 7, boostRechargeDelay: 1.2,
     gravityScale: 1.35, airYawControl: 0.4, airDrag: 0.04, jumpPadMult: 0.85, waterDrag: 0.93,

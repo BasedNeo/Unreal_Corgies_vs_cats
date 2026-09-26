@@ -19,7 +19,7 @@ import { stepWorldEffects } from '../sim/world/systems';
 import type { ClientMsg, MatchState, RosterEntry, ServerMsg, GameEvent } from '../shared/protocol';
 import { packEntity } from '../shared/protocol';
 import { sanitizeInput, emptyInput, type InputCmd } from '../shared/input';
-import { type ClassId, type TeamId, type EntityId, CLASS_IDS, EntityKind, Species, Team } from '../shared/types';
+import { type ClassId, type TeamId, type EntityId, CLASS_IDS, EFlag, EntityKind, Species, Team } from '../shared/types';
 import { SNAPSHOT_EVERY, MAX_PLAYERS_PER_ROOM, PROTOCOL_VERSION, TICK_HZ, TICK_DT } from '../shared/constants';
 import { MAX_CMDS_PER_MSG, cleanText } from './guard';
 import { quantizeMotion } from './quantize';
@@ -270,7 +270,7 @@ export class Room {
     }
     net.starveRun = 0;
     const e = this.sim.entities.get(p.entity);
-    if (e && !e.dead && e.char && p.queue.length && net.lastMinDepth >= CATCHUP_MIN_DEPTH && p.queue[0].buttons === cmd.buttons) {
+    if (e && !e.dead && e.char && !(e.flags & EFlag.Mounted) && p.queue.length && net.lastMinDepth >= CATCHUP_MIN_DEPTH && p.queue[0].buttons === cmd.buttons) {
       this.stepExtra(e, cmd);
       net.applied++;
       net.catchups++;
@@ -300,7 +300,7 @@ export class Room {
     for (const p of this.players.values()) {
       if (p.bot) continue;
       const e = this.sim.entities.get(p.entity);
-      if (e && e.char && !e.dead) quantizeMotion(e);
+      if (e && e.char && !e.dead && !(e.flags & EFlag.Mounted)) quantizeMotion(e); // riders follow their vehicle
     }
   }
 

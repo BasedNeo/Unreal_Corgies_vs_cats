@@ -97,9 +97,16 @@ export function kartForwardSpeed(e: SimEntity): number {
   return -Math.sin(e.yaw) * e.vel.x - Math.cos(e.yaw) * e.vel.z;
 }
 
-/** Collider center height above the kart's ground point. */
-export function kartCenterOffset(def: VehicleDef): number {
-  return def.halfHeight;
+/**
+ * The kart's ground point (EntityState y): where its wheels touch. The collision body is a flat-bottomed
+ * prism, so on a slope it rests on its uphill edge with the center up to ~0.2 m above the surface; while
+ * grounded the ground point is the surface under the center instead, so the rendered kart (pitched to
+ * the slope) and the seated rider sit on the ground. Airborne: the body's bottom.
+ */
+export function kartGroundPoint(data: WorldData, def: VehicleDef, x: number, bottomY: number, z: number, grounded: boolean): number {
+  if (!grounded) return bottomY;
+  const s = surfaceAt(data, x, z, bottomY + 0.25).y;
+  return bottomY - s < def.radius * 0.6 && s > bottomY - 0.6 ? Math.min(bottomY, s) : bottomY;
 }
 
 const wrapAngle = (a: number) => {
@@ -163,9 +170,11 @@ export function stepKart(ctx: KartContext, e: SimEntity, input: KartInput, dt: n
     if (throttle > 0.05) {
       if (vf < -0.3) vf = approach(vf, 0, d.brakeDecel * dt);
       else {
-        const target = top * throttle;
+        // The throttle targets total speed: while sliding, part of it is sideways.
+        const want = top * throttle;
+        const target = Math.sqrt(Math.max(0, want * want - vl * vl));
         if (vf < target) vf = Math.min(target, vf + (fast ? d.boostAccel : d.accel) * (1 - 0.45 * clamp(vf / top, 0, 1)) * dt);
-        else vf = approach(vf, target, (vf > top ? d.overspeedDecel : d.coastDecel) * dt);
+        else vf = approach(vf, target, (vf > target + 0.5 ? d.overspeedDecel : d.coastDecel) * dt);
       }
     } else if (throttle < -0.05) {
       if (vf > 0.3) vf = approach(vf, 0, d.brakeDecel * Math.max(0.5, -throttle) * dt);
@@ -191,21 +200,38 @@ export function stepKart(ctx: KartContext, e: SimEntity, input: KartInput, dt: n
     k.yawRate = approach(k.yawRate, -steer * d.maxYawRate * d.airYawControl, d.yawAccel * 0.5 * dt);
   }
 
-  // --- heading update; velocity is re-expressed in the new frame, then grip acts sideways ---
+  // --- heading update; the velocity stays in world space, then grip pulls it onto the new heading ---
   yaw = wrapAngle(yaw + k.yawRate * dt);
   if (k.grounded) {
-    const wx = -sy * vf + cy * vl, wz = -cy * vf - sy * vl;
+    let wx = -sy * vf + cy * vl, wz = -cy * vf - sy * vl;
     sy = Math.sin(yaw); cy = Math.cos(yaw);
+    const speed = Math.hypot(wx, wz);
     vf = -sy * wx - cy * wz;
     vl = cy * wx - sy * wz;
+    // Slip angle against the travel axis (forward, or backward while reversing).
+    const slip = Math.atan2(vl, Math.abs(vf)) * (vf >= 0 ? 1 : -1);
     const g = k.drifting ? d.driftGrip : d.grip;
-    const keep = Math.exp(-g * dt);
-    const lost = Math.abs(vl) * (1 - keep);
-    vl *= keep;
-    if (Math.abs(vf) > 0.5) vf += Math.sign(vf) * lost * (k.drifting ? d.driftTransfer : d.gripTransfer);
-    vel.x = -sy * vf + cy * vl;
-    vel.z = -cy * vf - sy * vl;
-    vel.y = -1; // gentle stick; the controller's ground snap does the rest
+    if (speed > 1.5 && Math.abs(slip) < d.maxGripSlip) {
+      // Arcade grip: rotate the velocity toward the heading axis and keep its magnitude, so turns do not
+      // bleed speed; the heading leads the velocity by ≈ yawRate / grip (≈ 10° gripping, ≈ 35° drifting).
+      const rot = slip * (1 - Math.exp(-g * dt));
+      const cr = Math.cos(rot), sr = Math.sin(rot);
+      const nx = wx * cr + wz * sr, nz = -wx * sr + wz * cr;
+      wx = nx; wz = nz;
+      if (k.drifting) {
+        const s2 = Math.max(0, speed - d.driftDrag * dt) / speed;
+        wx *= s2; wz *= s2;
+      }
+    } else {
+      // Big slides (spun out, knocked sideways) and crawling: plain sideways friction.
+      vl *= Math.exp(-d.skidFriction * dt);
+      wx = -sy * vf + cy * vl; wz = -cy * vf - sy * vl;
+    }
+    vel.x = wx;
+    vel.z = wz;
+    // No downward push while grounded: the controller's ground snap follows the terrain, and a
+    // downward component makes Rapier's KCC report false ground blocks (dead stops) now and then.
+    vel.y = 0;
   } else {
     sy = Math.sin(yaw); cy = Math.cos(yaw);
     vel.y = Math.max(-40, vel.y + GRAVITY * d.gravityScale * dt);
@@ -253,7 +279,8 @@ export function stepKart(ctx: KartContext, e: SimEntity, input: KartInput, dt: n
   const t = e.collider.translation();
   const px = t.x + mv.x, py = t.y + mv.y, pz = t.z + mv.z;
   e.collider.setTranslation({ x: px, y: py, z: pz });
-  e.pos.x = px; e.pos.y = py - d.halfHeight; e.pos.z = pz;
+  e.pos.x = px; e.pos.z = pz;
+  e.pos.y = kartGroundPoint(ctx.data, d, px, py - d.halfHeight, pz, k.grounded);
   if (!bounced) {
     // Blocked without a usable contact (corners, seams): bleed velocity like stepCharacter does.
     if (Math.abs(mv.x) < Math.abs(desired.x) * 0.5) vel.x = mv.x / dt;

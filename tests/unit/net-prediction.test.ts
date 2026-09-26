@@ -150,6 +150,14 @@ describe('client prediction (LocalPredictor)', () => {
     ent.flags &= ~EFlag.Dead;
     await run(200, () => ({ mz: 1 }));
     expect(net.prediction.active).toBe(true);
+
+    // Seated in a vehicle: the vehicle moves the rider, so the client stops predicting on foot.
+    ent.flags |= EFlag.Mounted;
+    await run(200, () => ({ mz: 1 }));
+    expect(net.prediction.active).toBe(false);
+    ent.flags &= ~EFlag.Mounted;
+    await run(200, () => ({ mz: 1 }));
+    expect(net.prediction.active).toBe(true);
     net.dispose();
     room.dispose();
   });

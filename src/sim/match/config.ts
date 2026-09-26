@@ -7,6 +7,8 @@ export interface WaveDef {
   counts: Partial<Record<ArchetypeId, number>>;
   /** HUD label override (e.g. the big final wave). */
   label?: string;
+  /** B1 hook: a boss (BOSSES id) joins this wave; it holds the wave open and its defeat clears it. */
+  boss?: string;
 }
 
 export interface SkirmishConfig {
@@ -50,7 +52,8 @@ export const SKIRMISH: SkirmishConfig = {
     { counts: { grunt: 4, kitten: 3 } },
     { counts: { grunt: 4, sniper: 1, kitten: 4 } },
     { counts: { grunt: 5, sniper: 2, brute: 1, kitten: 4 } },
-    { counts: { grunt: 6, sniper: 2, brute: 2, kitten: 6 }, label: 'FINAL WAVE' },
+    // finale: the Vac-Tank (B1) with a light escort (the old final wave was 6 grunts, 2 snipers, 2 brutes, 6 kittens)
+    { counts: { grunt: 3, kitten: 3 }, label: 'FINAL WAVE', boss: 'vac_tank' },
   ],
   maxAlive: 10,
   spawnInterval: 1.6,

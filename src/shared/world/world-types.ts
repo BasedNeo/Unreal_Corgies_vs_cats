@@ -125,6 +125,47 @@ export interface ScatterZone {
   density: number;
 }
 
+/**
+ * Tall grass / dense foliage that hides characters standing in it (G1, The Garden). An ellipse on the
+ * ground (radii rx, rz along its local axes after `yaw`), fading out over the outer ~28 % of the radius.
+ * concealmentAt() (queries.ts) turns it into a 0..1 value; the sim's conceal system combines it with
+ * stance (still / sneaking / running) and firing into the AI-facing concealment level.
+ */
+export interface ConcealZone {
+  id: string;
+  x: number; z: number;
+  rx: number; rz: number;
+  yaw?: number;
+  /** Foliage height above the ground (m). Feet more than ~h - 1 m above the ground are not hidden. */
+  h: number;
+  /** Visual density multiplier (1 = default). */
+  density?: number;
+  /** Visual mix: tall grass, grass + flower heads, or scruffy weeds. */
+  style?: 'grass' | 'flowers' | 'weeds';
+}
+
+/**
+ * Garden sprinkler (G1). While a burst is on, a water jet sweeps back and forth across the arc
+ * [a0, a1] (math angle in XZ: direction (cos a, sin a)); characters in the jet are shoved along it
+ * and popped off their feet, and the swept grass turns slippery. The schedule is a pure function of
+ * (world seed, tick): see sprinklerAt() in weather.ts.
+ */
+export interface Sprinkler {
+  id: string;
+  /** Nozzle position. */
+  x: number; y: number; z: number;
+  /** Horizontal reach of the jet (m). */
+  reach: number;
+  a0: number; a1: number;
+  /** Seconds per back-and-forth sweep. */
+  sweep: number;
+  /** Burst schedule (seconds): one `burst`-long burst per `period`, never before `first`. */
+  burst: number; period: number; first: number;
+}
+
+/** A named district rectangle (HUD/music/debug: "entering The Garden"). */
+export interface District { id: string; name: string; minX: number; maxX: number; minZ: number; maxZ: number }
+
 export interface WorldData {
   seed: number;
   name: string;
@@ -151,4 +192,10 @@ export interface WorldData {
   bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
   /** Default time of day for visuals (0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset). */
   timeOfDay?: number;
+  // ---- G1 additions (optional) ----
+  /** Tall-grass concealment zones (The Garden). */
+  concealZones?: ConcealZone[];
+  /** Garden sprinklers (bursts are scheduled by weather.ts from seed + tick). */
+  sprinklers?: Sprinkler[];
+  districts?: District[];
 }

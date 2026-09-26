@@ -56,7 +56,9 @@ export interface TerminalState {
 /** Rider-side mount record (mirrors EFlag.Mounted). */
 export interface SeatState {
   vehicle: EntityId;
-  /** Raw (unmasked) buttons of the previous tick, for horn edge detection. */
+  /** This tick's raw buttons (before the vehicle system masks the rider's combat buttons). */
+  raw: number;
+  /** Raw buttons of the previous tick, for horn edge detection. */
   prevRaw: number;
 }
 
@@ -133,6 +135,28 @@ export function capsuleShape(sim: Sim, e: SimEntity): Shape {
 export function kartTeam(sim: Sim, kart: SimEntity): TeamId {
   const r = kart.kart && kart.kart.rider >= 0 ? sim.entities.get(kart.kart.rider) : undefined;
   return r ? r.team : kart.team;
+}
+
+const hulls = new Map<string, Float32Array>();
+/**
+ * Kart collision body: a 16-sided prism (radius, 2×halfHeight tall) with a chamfered bottom edge so
+ * it rides over seams and lips. A convex hull rather than Rapier's rounded cylinder: the controller's
+ * shape casts stay exact against very large boxes, where GJK on rounded/curved shapes let bodies
+ * sink (measured: see LEARNINGS.jsonl). Points are relative to the collider center.
+ */
+export function kartHullPoints(def: VehicleDef, sides = 16): Float32Array {
+  const key = `${def.id}:${sides}`;
+  let pts = hulls.get(key);
+  if (pts) return pts;
+  const r = def.radius, hh = def.halfHeight, ch = def.border;
+  const out: number[] = [];
+  for (let i = 0; i < sides; i++) {
+    const a = ((i + 0.5) / sides) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+    out.push(c * r, hh, s * r, c * r, -hh + ch, s * r, c * (r - ch), -hh, s * (r - ch));
+  }
+  pts = new Float32Array(out);
+  hulls.set(key, pts);
+  return pts;
 }
 
 export function kartDef(kart: SimEntity): VehicleDef {

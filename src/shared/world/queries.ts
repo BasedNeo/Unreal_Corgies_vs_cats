@@ -1,7 +1,7 @@
 // Pure spatial queries over WorldData (no physics engine needed): walkable surface height, prop
 // footprints, water and jump-pad lookups. Used by world systems, spawn validation, tests and (later)
 // AI navigation grids. Deterministic, allocation-light.
-import type { JumpPad, PropBox, PropCylinder, WaterZone, WorldData } from './world-types';
+import type { ConcealZone, District, JumpPad, PropBox, PropCylinder, WaterZone, WorldData } from './world-types';
 
 export interface Quat { x: number; y: number; z: number; w: number }
 
@@ -207,4 +207,60 @@ export function occupiedAt(data: WorldData, x: number, y: number, z: number, pad
     if (Math.hypot(x - c.x, z - c.z) <= c.r + pad && Math.abs(y - c.y) <= c.hh + pad) return true;
   }
   return false;
+}
+
+/**
+ * How hidden a character standing at (x, y, z) (feet) is by tall-grass concealment zones: 0 = in the
+ * open, 1 = deep inside tall grass with the feet on the ground. The ellipse edge fades over its outer
+ * ~28 % and the value drops to 0 as the feet rise to (grass height - 1 m), so standing on a raised-bed
+ * wall, a pumpkin or jumping reveals you. Stance, movement and firing are applied by the sim's conceal
+ * system on top of this (src/sim/world/env.ts). Pure; + - * / sqrt only.
+ */
+export function concealmentAt(data: WorldData, x: number, y: number, z: number): number {
+  const zones = data.concealZones;
+  if (!zones || zones.length === 0) return 0;
+  let best = 0;
+  for (const zn of zones) {
+    const dx = x - zn.x, dz = z - zn.z;
+    const r = zn.rx > zn.rz ? zn.rx : zn.rz;
+    if (dx * dx + dz * dz > r * r) continue;
+    let lx = dx, lz = dz;
+    if (zn.yaw) {
+      const c = Math.cos(zn.yaw), s = Math.sin(zn.yaw);
+      lx = dx * c - dz * s; lz = dx * s + dz * c;
+    }
+    const ex = lx / zn.rx, ez = lz / zn.rz;
+    const e2 = ex * ex + ez * ez;
+    if (e2 >= 1) continue;
+    const inside = 1 - smooth01(0.72, 1, Math.sqrt(e2));
+    if (inside <= best) continue;
+    const above = y - data.height(x, z);
+    const hf = 1 - smooth01(0.3, Math.max(0.35, zn.h - 1), above);
+    const v = inside * hf;
+    if (v > best) best = v;
+  }
+  return best;
+}
+
+/** The concealment zone containing (x, z) with the strongest edge factor, or null. */
+export function concealZoneAt(data: WorldData, x: number, z: number): ConcealZone | null {
+  let best: ConcealZone | null = null, bestE = 1;
+  for (const zn of data.concealZones ?? []) {
+    let lx = x - zn.x, lz = z - zn.z;
+    if (zn.yaw) { const c = Math.cos(zn.yaw), s = Math.sin(zn.yaw); const t = lx * c - lz * s; lz = lx * s + lz * c; lx = t; }
+    const e2 = (lx / zn.rx) ** 2 + (lz / zn.rz) ** 2;
+    if (e2 < bestE) { bestE = e2; best = zn; }
+  }
+  return best;
+}
+
+/** The district rectangle containing (x, z), or null. */
+export function districtAt(data: WorldData, x: number, z: number): District | null {
+  for (const d of data.districts ?? []) if (x >= d.minX && x <= d.maxX && z >= d.minZ && z <= d.maxZ) return d;
+  return null;
+}
+
+function smooth01(a: number, b: number, x: number): number {
+  const t = x <= a ? 0 : x >= b ? 1 : (x - a) / (b - a);
+  return t * t * (3 - 2 * t);
 }

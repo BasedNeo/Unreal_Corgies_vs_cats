@@ -386,7 +386,8 @@ export class NetClient {
   private reconcileLocal(s: EntityState | null, ack: number): void {
     const pred = this.predictor;
     if (!pred) return;
-    if (!this.predictOn || !s || (s.flags & EFlag.Dead)) {
+    // Dead or seated in a vehicle (the vehicle moves the rider): show the authority's state instead.
+    if (!this.predictOn || !s || (s.flags & (EFlag.Dead | EFlag.Mounted))) {
       if (pred.active) pred.deactivate();
       this.prediction.active = false;
       return;
