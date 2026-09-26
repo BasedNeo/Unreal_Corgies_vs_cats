@@ -1,7 +1,7 @@
 // The online authority: one HTTP server that answers /health, /stats and /rooms, optionally serves the
 // production build (staticDir), and upgrades WebSockets (on wsPath, or any path) into rooms.
 //
-// GET /rooms (U1 room browser): `[{ name, mode, players, humans, bots, maxPlayers, phase }]` for live public rooms,
+// GET /rooms (U1 room browser): `[{ name, mode, players, humans, bots, maxPlayers, phase, chapter? }]` for live public rooms,
 // busiest first, capped at roomsListMax rows. Room names only: no addresses, connection ids or player names;
 // unlisted rooms (`_name`) never appear. CORS-readable (the dev client runs on another port). /rooms and /stats
 // share a per-IP token bucket (httpRate/httpBurst → 429 + Retry-After); /health is exempt.

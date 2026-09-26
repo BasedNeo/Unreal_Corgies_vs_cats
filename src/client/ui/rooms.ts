@@ -17,6 +17,8 @@ export interface RoomInfo {
   /** Human slots. */
   maxPlayers: number;
   phase: MatchPhase;
+  /** Adventure rooms: the chapter being played. */
+  chapter?: string;
 }
 
 /** Rows the browser shows at most (the server caps its response too). */
@@ -67,7 +69,8 @@ export function parseRooms(body: unknown, max = ROOMS_MAX): RoomInfo[] {
     const players = int(o.players, 9999);
     const phase = PHASES.includes(o.phase as MatchPhase) ? (o.phase as MatchPhase) : null;
     if (!name || name.startsWith(UNLISTED_PREFIX) || !mode || humans === null || bots === null || maxPlayers === null || players === null || !phase) continue;
-    out.push({ name, mode, players, humans, bots, maxPlayers, phase });
+    const chapter = typeof o.chapter === 'string' && /^[a-z0-9_]{1,32}$/.test(o.chapter) ? o.chapter : undefined;
+    out.push({ name, mode, players, humans, bots, maxPlayers, phase, ...(chapter ? { chapter } : {}) });
   }
   return out;
 }
@@ -85,7 +88,10 @@ export const MODE_LABELS: Record<string, string> = {
   'team-deathmatch': 'Team Deathmatch',
   'boss-rush': 'Boss Rush',
   'core-rush': 'Core Rush',
+  adventure: 'Adventure',
 };
+/** "yard_day" → "Yard Day" (chapter ids are snake_case; titles live in content/chapters.ts). */
+export const chapterLabel = (id: string): string => id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 export const modeLabel = (mode: string): string => MODE_LABELS[mode] ?? mode.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 export const PHASE_LABELS: Record<MatchPhase, string> = { warmup: 'WARMUP', live: 'IN PLAY', ended: 'POST-MATCH' };
 export const isFull = (r: RoomInfo): boolean => r.humans >= r.maxPlayers;

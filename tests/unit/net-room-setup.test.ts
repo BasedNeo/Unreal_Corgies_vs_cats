@@ -58,4 +58,14 @@ describe('room setup from the creator', () => {
     const c = await welcome(`${s.wsUrl}/?room=plain`, 'Cy');
     expect(c.mode).toBe('yard-skirmish'); // the server's MODE when nothing was asked
   }, 60_000);
+
+  it('an adventure room lists its chapter for the room browser', async () => {
+    const s = await startGameServer(loadConfig({}, { host: '127.0.0.1', port: 0, log: false }));
+    servers.push(s);
+    await welcome(`${s.wsUrl}/?room=coop&mode=adventure&chapter=yard_day`, 'Ann');
+    await welcome(`${s.wsUrl}/?room=pvp&mode=team-deathmatch&chapter=yard_day`, 'Bob');
+    const list = s.rooms.list(10);
+    expect(list.find((r) => r.name === 'coop')).toMatchObject({ mode: 'adventure', chapter: 'yard_day' });
+    expect(list.find((r) => r.name === 'pvp')).not.toHaveProperty('chapter');
+  }, 60_000);
 });

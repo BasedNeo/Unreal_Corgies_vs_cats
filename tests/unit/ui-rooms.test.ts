@@ -1,7 +1,7 @@
 // U1: room browser logic — endpoint from the server URL, validation of the untrusted list, room-name cleaning,
 // and the poller's loading / ready / empty / error / busy / offline / bad-url states with a 5 s refresh.
 import { describe, expect, it } from 'vitest';
-import { RoomPoller, cleanRoomName, isFull, modeLabel, parseRooms, roomsEndpoint, serverBase, type FetchLike, type RoomsState } from '../../src/client/ui/rooms';
+import { RoomPoller, chapterLabel, cleanRoomName, isFull, modeLabel, parseRooms, roomsEndpoint, serverBase, type FetchLike, type RoomsState } from '../../src/client/ui/rooms';
 
 const ROOM = { name: 'porch', mode: 'yard-skirmish', players: 5, humans: 2, bots: 3, maxPlayers: 12, phase: 'live' };
 
@@ -50,6 +50,18 @@ describe('room list helpers', () => {
     expect(modeLabel('yard-skirmish')).toBe('Yard Skirmish');
     expect(modeLabel('capture-the-ball')).toBe('Capture The Ball');
     expect(isFull({ ...ROOM, humans: 12 } as never)).toBe(true);
+    expect(modeLabel('adventure')).toBe('Adventure');
+    expect(chapterLabel('yard_day')).toBe('Yard Day');
+  });
+
+  it('keeps an adventure room\'s chapter only when it is a plain chapter id', () => {
+    const rows = parseRooms([
+      { ...ROOM, name: 'a', mode: 'adventure', chapter: 'the_tall_grass' },
+      { ...ROOM, name: 'b', mode: 'adventure', chapter: '<b>x</b>' },
+      { ...ROOM, name: 'c', mode: 'adventure', chapter: 7 },
+    ]);
+    expect(rows.map((r) => r.chapter)).toEqual(['the_tall_grass', undefined, undefined]);
+    expect(rows[1]).not.toHaveProperty('chapter');
   });
 });
 

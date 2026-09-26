@@ -30,6 +30,8 @@ export interface RoomListing {
   bots: number;
   maxPlayers: number;
   phase: MatchPhase;
+  /** Adventure rooms: the chapter id the room was created for. */
+  chapter?: string;
 }
 
 const TICK_MS = 1000 / TICK_HZ;
@@ -173,7 +175,10 @@ export class RoomManager {
       let humans = 0, bots = 0;
       for (const p of mr.room.players.values()) { if (p.bot) bots++; else humans++; }
       if (humans === 0) continue; // emptied, waiting out its TTL: not a room anyone is playing in
-      out.push({ name: mr.name, mode: mr.room.opts.mode, players: humans + bots, humans, bots, maxPlayers: MAX_PLAYERS_PER_ROOM, phase: mr.room.match.phase });
+      out.push({
+        name: mr.name, mode: mr.room.opts.mode, players: humans + bots, humans, bots, maxPlayers: MAX_PLAYERS_PER_ROOM, phase: mr.room.match.phase,
+        ...(mr.room.opts.chapter ? { chapter: mr.room.opts.chapter } : {}),
+      });
     }
     out.sort((a, b) => b.humans - a.humans || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return out.slice(0, Math.max(0, Math.floor(max)));

@@ -4,7 +4,7 @@
 // last good list on screen, dimmed, instead of blanking it. Joining uses the normal PLAY flow with `room` set.
 // All server-provided text goes through textContent; row buttons keep keyboard/gamepad focus across refreshes.
 import { ROOM_STRINGS } from './strings';
-import { RoomPoller, cleanRoomName, isFull, modeLabel, PHASE_LABELS, type RoomInfo, type RoomsState } from './rooms';
+import { RoomPoller, chapterLabel, cleanRoomName, isFull, modeLabel, PHASE_LABELS, type RoomInfo, type RoomsState } from './rooms';
 
 export interface RoomBrowserDeps {
   /** The server whose rooms to list (the DEPLOY card's field, or the page's own server). */
@@ -75,7 +75,7 @@ export function createRoomBrowser(deps: RoomBrowserDeps): RoomBrowser {
     d.setAttribute('role', 'listitem');
     d.dataset.room = r.name;
     d.appendChild(mk('span', 'rb-name', r.name));
-    d.appendChild(mk('span', 'rb-mode', modeLabel(r.mode)));
+    d.appendChild(mk('span', 'rb-mode', r.chapter ? `${modeLabel(r.mode)} · ${chapterLabel(r.chapter)}` : modeLabel(r.mode)));
     const pl = mk('span', 'rb-pl');
     pl.appendChild(mk('b', '', String(r.humans)));
     pl.appendChild(document.createTextNode(`/${r.maxPlayers}`));
