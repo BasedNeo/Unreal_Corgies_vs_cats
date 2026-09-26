@@ -25,6 +25,12 @@ export interface CharacterState {
   slideCooldown: number;
   /** True while slamming down in a ground pound. */
   pounding: boolean;
+  /**
+   * Collider position after the last full controller sweep that left the character resting (grounded, still).
+   * While the collider is still exactly there and the character has no intent, the sweep is skipped; anything
+   * that moves the collider (push, teleport, respawn, reconciliation) forces a full sweep. NaN = not resting.
+   */
+  restX: number; restY: number; restZ: number;
 }
 
 export interface HealthState {

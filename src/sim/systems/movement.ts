@@ -109,6 +109,19 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
   const g = GRAVITY * (e.vel.y < 0 ? m.fallGravityScale : 1);
   e.vel.y = c.pounding ? POUND_SPEED : Math.max(-40, e.vel.y + g * dt);
 
+  // --- resting fast path: grounded, still, no intent, collider untouched since the last full sweep ---
+  const t0 = e.collider.translation();
+  if (c.grounded && !c.pounding && c.slideTime <= 0 && c.jumpBuffer <= 0 && wlen < 1e-3 && e.vel.y <= 0 &&
+      Math.abs(e.vel.x) < 1e-3 && Math.abs(e.vel.z) < 1e-3 && t0.x === c.restX && t0.y === c.restY && t0.z === c.restZ) {
+    e.vel.x = 0; e.vel.y = 0; e.vel.z = 0; c.airTime = 0; c.jumpsUsed = 0;
+    e.anim = Anim.Idle as typeof e.anim;
+    let f = e.flags & ~(EFlag.Grounded | EFlag.Sprinting | EFlag.Aiming | EFlag.Crouching);
+    f |= EFlag.Grounded;
+    if (aiming) f |= EFlag.Aiming;
+    e.flags = f;
+    return;
+  }
+
   // --- collide & slide ---
   const desired = { x: e.vel.x * dt, y: e.vel.y * dt, z: e.vel.z * dt };
   ctx.kcc.computeColliderMovement(e.collider, desired, undefined, CHARACTER_MOVE_FILTER);
@@ -122,7 +135,10 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
   // Collide & slide for velocity too: remove only the component pushing INTO what we actually hit (wall or
   // ceiling normals). The old "movement shorter than half the request → zero the axis" rule turned one-tick
   // controller hiccups into dead stops mid-sprint (QA W1).
-  const n = ctx.kcc.numComputedCollisions();
+  // Only a step that came up short horizontally can have hit a wall; the floor contact alone needs no response.
+  const hBlocked = Math.abs(mv.x - desired.x) + Math.abs(mv.z - desired.z) > 1e-5;
+  if (!hBlocked && e.vel.y > 0 && mv.y < desired.y * 0.5) e.vel.y = 0; // head bump without a wall
+  const n = hBlocked ? ctx.kcc.numComputedCollisions() : 0;
   const feetBefore = t.y - (m.capsuleHalfHeight + m.capsuleRadius);
   for (let i = 0; i < n; i++) {
     const col = ctx.kcc.computedCollision(i, collisionScratch);
@@ -152,6 +168,13 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
   } else {
     c.airTime += dt;
   }
+
+  // Remember where a full sweep left a resting character (see the fast path above).
+  const hsRest = Math.hypot(e.vel.x, e.vel.z);
+  if (c.grounded && hsRest < 1e-3 && e.vel.y <= 0 && !c.pounding && c.slideTime <= 0) {
+    const r = e.collider.translation();
+    c.restX = r.x; c.restY = r.y; c.restZ = r.z;
+  } else { c.restX = NaN; c.restY = NaN; c.restZ = NaN; }
 
   // --- presentation state ---
   const hs = Math.hypot(e.vel.x, e.vel.z);
