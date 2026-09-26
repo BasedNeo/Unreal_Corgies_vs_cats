@@ -8,6 +8,9 @@
 //   npx tsx tools/soak.mjs                      # 60 s per mode, soak match config (a full match fits in 60 s)
 //   npx tsx tools/soak.mjs --seconds 300 --full # shipping match config, longer
 //   options: --modes yard-skirmish,team-deathmatch,core-rush (+ boss-rush,adventure: completion not required)  --seed 1  --no-netbot  --repeat 3  --json artifacts/soak.json
+// Adventure always runs bot-only (a squad of four pups): with a "human" in the squad the reach steps wait for that
+// human, and the net-bot is a combat brain that never walks to one (Q2 P2-8).
+// Snapshot bandwidth is measured at wire size (the server's delta SnapEncoder, JSON text); raw JSON is reported too.
 //
 // Exit 1 on: any runtime error / non-finite state, a bot stuck (wants to move, doesn't) > 5 s,
 // tick p95 > 3 ms, or (soak config) a mode that never completes a match.
@@ -27,6 +30,7 @@ import { PROTOCOL_VERSION, TICK_HZ } from '../src/shared/constants';
 import { Team } from '../src/shared/types';
 import { applyArchetype } from '../src/sim/ai';
 import { weaponByIndex } from '../src/shared/content/weapons';
+import { SnapEncoder, encodeServerMsg } from '../src/host/wire';
 
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
@@ -58,7 +62,11 @@ const LINEUP = {
     [Team.Cats, 'assault'], [Team.Cats, 'overwatch'], [Team.Cats, 'breacher'], [Team.Cats, 'warden']],
   'core-rush': [[Team.Corgis, 'skyraider'], [Team.Corgis, 'breacher'], [Team.Corgis, 'warden'],
     [Team.Cats, 'assault'], [Team.Cats, 'skyraider'], [Team.Cats, 'breacher'], [Team.Cats, 'warden']],
+  // the squad of four pups (plus the bot that stands in for the net-bot); the chapter re-kits them and brings the cats
+  adventure: [[Team.Corgis, 'assault'], [Team.Corgis, 'assault'], [Team.Corgis, 'assault']],
 };
+/** Modes soaked without the net-bot whatever the flag says (see the header). */
+const BOT_ONLY = new Set(['adventure']);
 const OPEN_ENDED = new Set(['boss-rush', 'adventure']);
 const L3_SYSTEMS = new Set(['ai', 'weapons', 'abilities', 'projectiles', 'combat-status', 'respawn-regen', 'lag-record', 'match']);
 
@@ -83,7 +91,7 @@ async function soakMode(mode) {
 
   // ---- telemetry
   const T = {
-    errors: [], ticks: 0, tickMs: [], wallMs: [], cpuMs: [], aiMs: [], snapBytes: 0, snaps: 0, results: [],
+    errors: [], ticks: 0, tickMs: [], wallMs: [], cpuMs: [], aiMs: [], snapBytes: 0, wireBytes: 0, snaps: 0, results: [],
     kills: 0, deaths: [0, 0], shots: 0, hitShots: 0, hits: 0, crits: 0, explosions: 0, abilities: 0, reloads: 0,
     firstLiveTick: -1, firstHitTick: -1, drama: [], matchesEnded: 0, winners: [], maxWave: 0,
     deadTicks: 0, charTicks: 0, stuckMax: 0, stuckBots: new Set(), kd: new Map(), midLeader: null,
@@ -112,13 +120,16 @@ async function soakMode(mode) {
 
   // ---- headless net-bot client (stub Conn) through the real input path
   let netbot = null;
-  if (NETBOT) {
+  const withNetbot = NETBOT && !BOT_ONLY.has(mode);
+  if (withNetbot) {
+    const enc = new SnapEncoder(); // what server/app.ts sends by default ('delta' encoding)
     const conn = {
       id: 'netbot',
       send(msg) {
         if (msg.t !== 'snap') return;
         const json = JSON.stringify(msg);
         T.snapBytes += json.length; T.snaps++;
+        T.wireBytes += encodeServerMsg(msg, enc).length;
         for (const row of msg.ents) for (const v of row) if (!Number.isFinite(v)) { T.errors.push('non-finite value in snapshot'); return; }
       },
     };
@@ -127,7 +138,7 @@ async function soakMode(mode) {
     netbot = { slot, seq: 0 };
   }
   // explicit lineup (Room.addBot) so all six kits fight; fillBots only runs on join/leave
-  if (!NETBOT) room.addBot(Team.Corgis, 'assault');
+  if (!withNetbot) room.addBot(Team.Corgis, 'assault');
   for (const [team, cls] of LINEUP[mode] ?? LINEUP['team-deathmatch']) room.addBot(team, cls);
   const attachNetbot = () => {
     const e = sim.entities.get(netbot.slot.entity);
@@ -199,7 +210,7 @@ async function soakMode(mode) {
   const top = Math.max(0, ...T.kd.values());
   const finalWinner = T.winners.length ? T.winners[T.winners.length - 1] : (room.match.score[0] === room.match.score[1] ? -1 : room.match.score[0] > room.match.score[1] ? 0 : 1);
   const session = {
-    mode, durationSec: r2(simSec), wallMs: Math.round(wallMs), players: NETBOT ? 1 : 0, bots: players.filter((p) => p.bot).length,
+    mode, durationSec: r2(simSec), wallMs: Math.round(wallMs), players: withNetbot ? 1 : 0, bots: players.filter((p) => p.bot).length,
     completed: T.matchesEnded > 0, matchesEnded: T.matchesEnded, winners: T.winners, maxWave: T.maxWave, finalScore: room.match.score,
     tickMs: { p50: r2(pct(T.tickMs, 0.5)), p95: r2(pct(T.tickMs, 0.95)), max: r2(Math.max(...T.tickMs)) },
     tickWallMs: { p50: r2(pct(T.wallMs, 0.5)), p95: r2(pct(T.wallMs, 0.95)), max: r2(Math.max(...T.wallMs)) },
@@ -215,8 +226,9 @@ async function soakMode(mode) {
     timeToFirstEngagementSec: T.firstHitTick >= 0 ? r2((T.firstHitTick - T.firstLiveTick) / TICK_HZ) : null,
     deadTimeFrac: r2(T.charTicks ? T.deadTicks / T.charTicks : 0),
     maxDowntimeSec: r2(maxGap), stuckMaxSec: r2(T.stuckMax), stuckBots: [...T.stuckBots],
-    snapshotKBps: r2(T.snaps ? T.snapBytes / 1024 / simSec : 0),
-    netbot: NETBOT ? { kills: netbot.slot.kills, deaths: netbot.slot.deaths, starves: netbot.slot.net?.starves ?? 0 } : null,
+    snapshotKBps: r2(T.snaps ? T.wireBytes / 1024 / simSec : 0),
+    snapshotRawJsonKBps: r2(T.snaps ? T.snapBytes / 1024 / simSec : 0),
+    netbot: withNetbot ? { kills: netbot.slot.kills, deaths: netbot.slot.deaths, starves: netbot.slot.net?.starves ?? 0 } : null,
     errors: T.errors.length, errorSamples: T.errors.slice(0, 3),
     topPlayerShare: r2(kdTotal ? top / kdTotal : 0),
     comeback: T.midLeader !== null && T.midLeader !== -1 && finalWinner !== -1 && finalWinner !== T.midLeader,
@@ -271,8 +283,8 @@ for (const s of sessions) {
   if (s.errors > LIMITS.maxErrors) fails.push(`${s.mode}: ${s.errors} errors (${s.errorSamples.join(' | ').slice(0, 300)})`);
   if (s.stuckMaxSec > LIMITS.maxStuckSec) fails.push(`${s.mode}: bot stuck ${s.stuckMaxSec}s (${s.stuckBots.join(', ')})`);
   if (s.tickMs.p95 > LIMITS.maxTickP95Ms) fails.push(`${s.mode}: tick p95 ${s.tickMs.p95} ms > ${LIMITS.maxTickP95Ms}`);
-  // Boss-rush (one long boss fight) and adventure (a chapter the net-bot, an AFK "human", must complete by design) can't
-  // finish inside a short soak: for them completion is reported, not required.
+  // Boss-rush (one long boss fight) and adventure (chapter 1 takes a bot squad ~65 s) needn't finish inside a short
+  // soak: for them completion is reported, not required.
   if (!FULL && !s.completed && !OPEN_ENDED.has(s.mode)) fails.push(`${s.mode}: no match completed in ${s.durationSec}s`);
 }
 mkdirSync(dirname(OUT), { recursive: true });
@@ -282,7 +294,7 @@ for (const s of sessions) {
   const sc = s.score;
   console.log(`${s.mode.padEnd(16)} score ${sc.total} (R ${sc.realism} · I ${sc.intensity} · F ${sc.fairness}) | ${s.durationSec}s sim in ${s.wallMs} ms | matches ${s.matchesEnded}: ${s.results.join(', ') || `none (wave ${s.maxWave}, ${s.finalScore.join(':')})`}`);
   console.log(`  kills ${s.kills} · hit ${Math.round(s.hitRate * 100)}% · crit ${Math.round(s.critRate * 100)}% · boom ${s.explosions} · abil ${s.abilities} · ttfe ${s.timeToFirstEngagementSec ?? '-'}s · dead ${Math.round(s.deadTimeFrac * 100)}% · downtime ${s.maxDowntimeSec}s · drama ${sc.dramaPerPlayerMinute}/p-min · top ${s.topPlayerShare}`);
-  console.log(`  tick p50 ${s.tickMs.p50} p95 ${s.tickMs.p95} max ${s.tickMs.max} ms (best of ${s.repeats}${s.deterministic ? ', deterministic' : ', NON-DETERMINISTIC'}; single run p95 ${s.tickSingleRunMs.p95} · raw wall ${s.tickWallMs.p95} · cpu ${s.tickCpuMs.p95}; nav build ${s.navBuildMs} ms) · ai p95 ${s.aiMs.p95} ms · stuck max ${s.stuckMaxSec}s · errors ${s.errors}${s.netbot ? ` · net-bot k${s.netbot.kills}/d${s.netbot.deaths} snap ${s.snapshotKBps} KB/s` : ''}`);
+  console.log(`  tick p50 ${s.tickMs.p50} p95 ${s.tickMs.p95} max ${s.tickMs.max} ms (best of ${s.repeats}${s.deterministic ? ', deterministic' : ', NON-DETERMINISTIC'}; single run p95 ${s.tickSingleRunMs.p95} · raw wall ${s.tickWallMs.p95} · cpu ${s.tickCpuMs.p95}; nav build ${s.navBuildMs} ms) · ai p95 ${s.aiMs.p95} ms · stuck max ${s.stuckMaxSec}s · errors ${s.errors}${s.netbot ? ` · net-bot k${s.netbot.kills}/d${s.netbot.deaths} snap ${s.snapshotKBps} KB/s wire (${s.snapshotRawJsonKBps} raw JSON)` : ''}`);
   const sm = s.systemMsPerTick;
   if (Object.keys(sm).length) console.log(`  avg ms/tick: L3 ${s.l3MsPerTick} (ai ${sm.ai ?? 0} · weapons ${sm.weapons ?? 0} · projectiles ${sm.projectiles ?? 0} · match ${sm.match ?? 0}) · movement ${sm.movement ?? 0} · physics ${sm['physics-step'] ?? 0} · world ${sm['world-effects'] ?? 0} · chars ${s.characters}`);
 }
