@@ -430,6 +430,15 @@ design question for a human and P2-5 (triangles in a live high-tier TDM) is open
 - **INT5 lead** ✅ — the brain hook for seated bots; `vehicle`/`airborne` steps strict for bot-only squads (with the
   grace); soak in all five modes; verify every commit.
 
+### Wave 6 — Earn your look (`docs/sprints/WAVE6_PLAN.md`)
+Meta progression that never touches stats (§7.17, §7.19): coat patterns true to each species, neckwear and taunt
+packs, unlocked by play (XP, chapter medals, first wins) in one versioned profile, and seen by everyone online.
+Class hats stay the class silhouette cue (K1), and team colours stay readable.
+- **C3 cosmetics**: content + applyLook on the procedural characters, lab.
+- **P2 profile**: versioned profile with migration, XP and unlock rules. It then does **U2 ux**: locker view and
+  reward card.
+- **Lead**: N2 (the look in hello → roster → views, validated server-side), INT6.
+
 ### Quality loop (runs forever after the slice)
 Capture bookmarks → diagnose with `game-worlds-iteration-coach` → change one thing → gate → before/after →
 `LEARNINGS.jsonl` (`game-worlds-knowledge-extractor`). Consistency check of all docs every 3 loops.
