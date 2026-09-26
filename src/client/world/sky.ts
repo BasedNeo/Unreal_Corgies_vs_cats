@@ -112,7 +112,7 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
   // below the horizon: fade to a darker horizon band (hidden by ground/fences mostly)
   sky = mix(sky, U.horizon.mul(0.75), smoothstep(0.0, -0.12, dir.y));
   const sd = max(dot(dir, U.sunDir), 0);
-  sky = sky.add(U.sunCol.mul(pow(sd, float(16)).mul(0.16).add(pow(sd, float(120)).mul(0.3))).mul(U.sunVis));
+  sky = sky.add(U.sunCol.mul(pow(sd, float(24)).mul(0.09).add(pow(sd, float(160)).mul(0.22))).mul(U.sunVis));
   // cartoon clouds: flat layer, hard-edged two-tone
   const cuv = dir.xz.div(up.add(0.12)).mul(0.9).add(vec2(time.mul(0.006), time.mul(0.002)));
   const n = mx_fractal_noise_float(cuv.mul(0.55), 3, 2.0, 0.5);
@@ -173,10 +173,12 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
     }
     setRGB(c3, ramp(YARD_RAMPS.horizon, e));
     fog.color.copy(c3).lerp(new THREE.Color().setRGB(...ramp(YARD_RAMPS.zenith, e)), 0.12);
-    fog.density = ramp(YARD_RAMPS.fogDensity, e);
+    baseFog = ramp(YARD_RAMPS.fogDensity, e);
+    fog.density = baseFog;
     (scene.background as THREE.Color).copy(fog.color);
   }
   let state = sunState(tod);
+  let baseFog = 0.003;
   apply(state);
 
   return {
@@ -185,6 +187,8 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
     setTimeOfDay(t: number) { tod = ((t % 1) + 1) % 1; state = sunState(tod); apply(state); },
     update(camera, focus) {
       dome.position.copy(camera.position);
+      // less aerial haze when looking down from high up (overviews), full haze at player height
+      fog.density = baseFog * Math.max(0.5, Math.min(1, 1 - (camera.position.y - 12) / 130));
       // shadow box centered ~35 m ahead of the camera on the ground (or at the given focus)
       const hgt = Math.max(0, camera.position.y);
       const box = Math.min(150, S + hgt * 0.9);

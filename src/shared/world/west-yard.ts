@@ -156,18 +156,18 @@ export function buildWestYard(seed = 1): WorldData {
     f.ramp('plank', [x0 - 0.3, y0 + 0.05, z], [x1 + 0.4, y1 + 0.1, z], 1.5, 0.4);
     for (const t of [0.3, 0.7]) f.box(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t - 0.35, z, 0.25, 0.6, 1.8, 'fenceDark', { roll });
   }
-  cardboardBoxes(kit);
-  jumpPads.push(miniTrampoline(kit.frame(10, 0, 76, -0.3), 'cats_mini'));
+  cardboardBoxes(kit, height);
+  jumpPads.push(miniTrampoline(at(10, 76, -0.3), 'cats_mini'));
 
   // ------------------------------------------------------------------ center
   jumpPads.push(trampoline(kit.frame(0, 0, 0, 0.2), 'center'));
   lawnChair(kit.frame(-20, height(-20, 10), 10, 0.5), 'teal');
   lawnChair(kit.frame(21, height(21, -14), -14, 2.7), 'accent');
   picnicTable(kit.frame(28, 0, -52, 0.12));
-  hedge(kit, rng, 8, -42, 18, Math.PI / 2 + 0.28);
-  hedge(kit, rng, 5, 34, 16, Math.PI / 2 - 0.35);
-  hedge(kit, rng, -32, -26, 12, 1.2);
-  hedge(kit, rng, 40, 44, 12, 1.35);
+  hedge(kit, rng, 8, -42, 18, Math.PI / 2 + 0.28, height);
+  hedge(kit, rng, 5, 34, 16, Math.PI / 2 - 0.35, height);
+  hedge(kit, rng, -32, -26, 12, 1.2, height);
+  hedge(kit, rng, 40, 44, 12, 1.35, height);
   wheelbarrow(kit.frame(22, height(22, 20), 20, 2.2));
   beachBall(kit.frame(-34, height(-34, -6), -6, 0));
   hose(kit, height);
@@ -179,14 +179,14 @@ export function buildWestYard(seed = 1): WorldData {
   bigTree(kit, rng, -52, 22, height);
   sandbox(kit.frame(-72, 0, 58, 0));
   birdbath(kit.frame(-38, height(-38, 66), 66, 0.3));
-  hedge(kit, rng, -80, 95.5, 34, Math.PI / 2);
-  hedge(kit, rng, -94.5, 80, 18, 0);
+  hedge(kit, rng, -80, 95.5, 34, Math.PI / 2, height);
+  hedge(kit, rng, -94.5, 80, 18, 0, height);
 
   // ------------------------------------------------------------------ east flank
   swingSet(kit.frame(66, 0, -36, 0));
   pond(kit, rng, height, water);
   gnome(kit.frame(76, height(76, 42), 42, -2.4));
-  hedge(kit, rng, 88, 2, 26, 0);
+  hedge(kit, rng, 88, 2, 26, 0, height);
   kiddiePool(kit.frame(-14, 0, 52, 0), water);
 
   // ------------------------------------------------------------------ neighbour strips
@@ -598,14 +598,14 @@ function catTree(f: Frame): void {
 }
 
 // ====================================================================== cardboard boxes (cats' favourite cover)
-function cardboardBoxes(kit: Kit): void {
+function cardboardBoxes(kit: Kit, height: (x: number, z: number) => number): void {
   const list: [number, number, number, number, number, number][] = [
     [30, 58, 0.3, 3.0, 2.6, 3.0], [34.2, 59, -0.2, 2.4, 2.0, 2.4], [30, 58, 0.7, 2.2, 1.8, 2.2],
     [62, 58, 0.9, 3.4, 2.8, 2.8], [8, 64, -0.6, 2.6, 2.2, 2.6],
   ];
   list.forEach(([x, z, yaw, w, h, d], i) => {
     const stacked = i === 2;
-    const y0 = stacked ? 2.6 : 0;
+    const y0 = height(x, z) + (stacked ? 2.6 : 0);
     const f = kit.frame(x, y0, z, yaw);
     f.solid('box', 0, h / 2, 0, w, h, d, 'cardboard', { bev: 0.1 });
     f.box(0, h + 0.02, 0, 0.35, 0.04, d + 0.04, 'cardboardDark', { g: 'noink', bev: 0 });       // tape
@@ -651,11 +651,13 @@ function picnicTable(f: Frame): void {
 }
 
 // ====================================================================== hedge
-function hedge(kit: Kit, rng: ReturnType<typeof createRng>, x: number, z: number, len: number, yaw: number): void {
-  const f = kit.frame(x, 0, z, yaw);
+function hedge(kit: Kit, rng: ReturnType<typeof createRng>, x: number, z: number, len: number, yaw: number, height: (x: number, z: number) => number): void {
+  // sit on the lowest ground under the hedge so no end floats on undulating lawn
+  const c = Math.sin(yaw) * len / 2, s = Math.cos(yaw) * len / 2;
+  const f = kit.frame(x, Math.min(height(x, z), height(x + c, z + s), height(x - c, z - s)), z, yaw);
   const H = 3.3, D = 2.8;
   f.colBox('hedge', 0, H / 2 - 0.4, 0, D, H + 0.8, len);
-  f.box(0, H / 2 - 0.2, 0, D - 0.2, H - 0.4, len - 0.4, 'hedge', { bev: 0.9, g: 'soft' });
+  f.box(0, H / 2 - 0.45, 0, D - 0.2, H - 0.1, len - 0.4, 'hedge', { bev: 0.9, g: 'soft' });
   const n = Math.max(3, Math.round(len / 2.4));
   for (let i = 0; i < n; i++) {
     const t = -len / 2 + 1 + (len - 2) * (i / (n - 1));
@@ -755,8 +757,8 @@ function gardenBed(f: Frame, rng: ReturnType<typeof createRng>, kind: 'veg' | 'f
 function bigTree(kit: Kit, rng: ReturnType<typeof createRng>, tx: number, tz: number, height: (x: number, z: number) => number): void {
   const f = kit.frame(tx, height(tx, tz), tz, 0);
   const TR = 4.0;
-  f.cyl(0, 10, 0, 2.7, 20, TR, 'bark', { seg: 14 });
-  f.cyl(0, 1.4, 0, TR, 2.8, 5.4, 'bark', { seg: 14 });
+  f.cyl(0, 10, 0, 2.7, 20, TR, 'bark', { seg: 16, g: 'soft' });
+  f.cyl(0, 1.4, 0, TR, 2.8, 5.4, 'bark', { seg: 16, g: 'soft' });
   f.colCyl('tree', 0, 11, 0, TR, 12);
   f.colCyl('tree', 0, 1.2, 0, 4.8, 1.2);
   // roots radiating out: visual tapered logs + walkable ramp colliders
@@ -768,8 +770,8 @@ function bigTree(kit: Kit, rng: ReturnType<typeof createRng>, tx: number, tz: nu
     const g1 = height(tx + x1, tz + z1) - f.oy;
     const pitchAng = Math.atan2(topY - g1, len);
     const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2, my = (topY + g1) / 2 - 0.3;
-    f.cyl(mx, my, mz, 0.7, Math.hypot(len, topY - g1) + 1.2, 1.6, 'bark', { yaw: Math.atan2(ca, sa), pitch: Math.PI / 2 + pitchAng, seg: 10 });
-    f.sphere(x1 + ca * 0.3, g1 + 0.1, z1 + sa * 0.3, 0.9, 0.5, 0.9, 'barkDark', { seg: 8 });
+    f.cyl(mx, my, mz, 0.7, Math.hypot(len, topY - g1) + 1.2, 1.6, 'bark', { yaw: Math.atan2(ca, sa), pitch: Math.PI / 2 + pitchAng, seg: 14, g: 'soft' });
+    f.sphere(x1 + ca * 0.3, g1 + 0.1, z1 + sa * 0.3, 0.9, 0.5, 0.9, 'barkDark', { seg: 8, g: 'soft' });
     f.ramp('root', [x0 - ca * 0.2, topY + 0.35, z0 - sa * 0.2], [x1 + ca * 0.6, g1 - 0.1, z1 + sa * 0.6], 2.0, 1.4);
   });
   // branch ladder: stub (3.9) -> limb perch (5.0), both flat-topped, both single-jump steps from a root top
@@ -777,23 +779,23 @@ function bigTree(kit: Kit, rng: ReturnType<typeof createRng>, tx: number, tz: nu
   {
     const ca = Math.cos(stubA), sa = Math.sin(stubA);
     const cx = ca * 5.8, cz = sa * 5.8;
-    f.cyl(cx, 3.5, cz, 0.9, 4.4, 1.4, 'bark', { yaw: Math.atan2(ca, sa), pitch: Math.PI / 2 - 0.08, seg: 10 });
+    f.cyl(cx, 3.5, cz, 0.9, 4.4, 1.4, 'bark', { yaw: Math.atan2(ca, sa), pitch: Math.PI / 2 - 0.08, seg: 14, g: 'soft' });
     f.colBox('branch', cx, 3.55, cz, 2.2, 0.7, 4.2, { yaw: Math.atan2(ca, sa) });
     f.box(cx, 3.93, cz, 2.0, 0.1, 4.0, 'barkDark', { yaw: Math.atan2(ca, sa), g: 'noink', bev: 0.03 });
   }
   {
     const ca = Math.cos(limbA), sa = Math.sin(limbA);
     const L = 13, cx = ca * (3.6 + L / 2), cz = sa * (3.6 + L / 2);
-    f.cyl(cx, 4.3, cz, 1.0, L + 1, 1.8, 'bark', { yaw: Math.atan2(ca, sa), pitch: Math.PI / 2 - 0.04, seg: 10 });
+    f.cyl(cx, 4.3, cz, 1.0, L + 1, 1.8, 'bark', { yaw: Math.atan2(ca, sa), pitch: Math.PI / 2 - 0.04, seg: 14, g: 'soft' });
     f.colBox('branch', cx, 4.55, cz, 2.4, 0.9, L, { yaw: Math.atan2(ca, sa) });
     f.box(cx, 5.02, cz, 2.2, 0.1, L - 0.6, 'barkDark', { yaw: Math.atan2(ca, sa), g: 'noink', bev: 0.03 });
     // limb sweeps up into the canopy at its tip
-    f.cyl(ca * (3.6 + L + 1.5), 8.5, sa * (3.6 + L + 1.5), 0.6, 9, 1.0, 'bark', { yaw: Math.atan2(ca, sa), pitch: 0.5, seg: 8 });
+    f.cyl(ca * (3.6 + L + 1.5), 8.5, sa * (3.6 + L + 1.5), 0.6, 9, 1.0, 'bark', { yaw: Math.atan2(ca, sa), pitch: 0.5, seg: 12, g: 'soft' });
   }
   // upper limbs into the canopy
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * TAU + 0.6;
-    f.cyl(Math.cos(a) * 4.5, 22, Math.sin(a) * 4.5, 0.7, 12, 1.5, 'bark', { yaw: Math.atan2(Math.cos(a), Math.sin(a)), pitch: 0.75, seg: 8 });
+    f.cyl(Math.cos(a) * 4.5, 22, Math.sin(a) * 4.5, 0.7, 12, 1.5, 'bark', { yaw: Math.atan2(Math.cos(a), Math.sin(a)), pitch: 0.75, seg: 12, g: 'soft' });
   }
   // canopy: big soft blobs (cloud-like, inked)
   const blobs: [number, number, number, number][] = [[0, 30, 0, 11]];

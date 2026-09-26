@@ -26,10 +26,16 @@ export function toonFrom(p: Params = {}): THREE.MeshToonNodeMaterial {
   return m;
 }
 
-/** Toon-lit material that the ink outline pass skips. */
+/**
+ * Toon-lit material that the ink outline pass skips. toonOutlinePass inks any material with
+ * isMeshToonMaterial OR isMeshToonNodeMaterial — and MeshToonNodeMaterial inherits
+ * isMeshToonMaterial = true through setDefaultValues(new MeshToonMaterial()), so BOTH must be cleared.
+ */
 export function toonNoInk(p: Params = {}): THREE.MeshToonNodeMaterial {
   const m = toonFrom(p);
-  (m as unknown as { isMeshToonNodeMaterial: boolean }).isMeshToonNodeMaterial = false;
+  const flags = m as unknown as { isMeshToonNodeMaterial: boolean; isMeshToonMaterial: boolean };
+  flags.isMeshToonNodeMaterial = false;
+  flags.isMeshToonMaterial = false;
   m.userData.style = 'toon-noink';
   return m;
 }

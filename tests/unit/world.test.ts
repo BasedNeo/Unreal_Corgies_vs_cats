@@ -217,6 +217,45 @@ describe('world systems', () => {
     sim.dispose();
   });
 
+  it('platforming: key corgi hops (weakest jumper) are reachable', async () => {
+    // Brute-force a few input timings per hop, like a player would; a hop counts if any lands on top.
+    const hop = async (from: [number, number, number], to: [number, number, number], sprint = false) => {
+      for (const delay of [0, 3, 6, 9, 12, 16]) for (const dbl of [false, true]) {
+        const sim = await Sim.create({ seed: 1, systems: coreSystems() });
+        const e = sim.spawnCharacter({ team: Team.Corgis, species: Species.Corgi, cls: 'assault', name: 'Hop', x: from[0], y: from[1] + 0.05, z: from[2], yaw: 0 });
+        for (let i = 0; i < 20; i++) sim.step();
+        const yaw = Math.atan2(-(to[0] - from[0]), -(to[2] - from[2]));
+        let seq = 1;
+        for (let i = 0; i < 110; i++) {
+          const jump = i < 12 || (dbl && i >= 20 && i < 32) ? Btn.Jump : 0;
+          const released = dbl && i >= 12 && i < 20;
+          const d = Math.hypot(e.pos.x - to[0], e.pos.z - to[2]);
+          const mz = i >= delay && d > 0.6 ? 1 : 0;
+          sim.setInput(e.id, { seq: seq++, mx: 0, mz, yaw, pitch: 0, buttons: (released ? 0 : jump) | (sprint ? Btn.Sprint : 0), rt: 0 });
+          sim.step();
+        }
+        const ok = e.char!.grounded && Math.abs(e.pos.y - to[1]) < 0.2 && Math.hypot(e.pos.x - to[0], e.pos.z - to[2]) < 2.2;
+        sim.dispose();
+        if (ok) return true;
+      }
+      return false;
+    };
+    expect(await hop([19.8, 0.6, 81.3], [19.6, 1.6, 84.8]), 'cat tree base -> L1').toBe(true);
+    expect(await hop([18.9, 1.6, 83.2], [22.4, 2.8, 81.0]), 'cat tree L1 -> L2').toBe(true);
+    expect(await hop([-78.5, 2.1, -95.0], [-78.5, 3.4, -97.6]), 'bricks -> AC unit').toBe(true);
+    expect(await hop([-77.2, 3.4, -97.6], [-70.5, 3.0, -97.0], true), 'AC unit -> deck (running jump)').toBe(true);
+    // big tree: root (angle 2.2) -> branch stub (1.7, ~3.9 m) -> limb perch (1.2, ~5 m)
+    const at = (a: number, r: number): [number, number, number] => {
+      const x = -52 + Math.cos(a) * r, z = 22 + Math.sin(a) * r;
+      return [x, surfaceAt(data, x, z).y, z];
+    };
+    const root = at(2.2, 5.4), stub = at(1.7, 6.2), limb = at(1.2, 8.5);
+    expect(stub[1] - root[1]).toBeGreaterThan(0.6);
+    expect(limb[1] - stub[1]).toBeGreaterThan(0.6);
+    expect(await hop(root, stub), 'tree root -> branch stub').toBe(true);
+    expect(await hop(stub, limb), 'branch stub -> limb perch').toBe(true);
+  }, 120000);
+
   it('keeps a flat test world for other lanes', () => {
     const f = createFlatWorldData(3);
     expect(f.height(10, -4)).toBe(0);

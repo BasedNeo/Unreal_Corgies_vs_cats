@@ -5,8 +5,9 @@
 // abuse score that kicks with close code 1008, hello and idle timeouts, ws-level heartbeat (also
 // used to measure RTT for the roster), backpressure (snapshots are skipped for slow consumers,
 // persistent congestion closes with 1013) and per-connection delta snapshot encoding.
-// Close codes: 1001 shutdown · 1008 policy/abuse · 1009 frame too large (ws) · 1013 full/busy ·
-//              4000 idle timeout · 4001 hello timeout.
+// Close codes: 1001 shutdown · 1008 policy/abuse · 1009 frame too large (ws) · 1011 room crashed ·
+//              1013 full/busy/too slow · 4000 idle timeout · 4001 hello timeout. Dead peers (no message
+//              and no pong for peerTimeoutMs) are terminated without a close frame.
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
@@ -41,7 +42,8 @@ interface Client {
   joining: boolean;
   connectedAt: number;
   lastMsgAt: number;
-  alive: boolean;
+  /** Last message or pong (peer liveness). */
+  lastSeenAt: number;
   pingSentAt: number;
   rttMs: number;
   msgs: TokenBucket;
@@ -170,7 +172,7 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
     const encoding: WireEncoding = url.searchParams.get('enc') === 'raw' ? 'raw' : url.searchParams.get('enc') === 'delta' ? 'delta' : cfg.encoding;
     const c: Client = {
       id, ws, ip, roomName: sanitizeRoomName(url.searchParams.get('room')), room: null, joined: false, joining: false,
-      connectedAt: now, lastMsgAt: now, alive: true, pingSentAt: 0, rttMs: 0,
+      connectedAt: now, lastMsgAt: now, lastSeenAt: now, pingSentAt: 0, rttMs: 0,
       msgs: new TokenBucket(cfg.msgBurst, cfg.msgRate, now), bytes: new TokenBucket(cfg.byteBurst, cfg.byteRate, now),
       abuse: new AbuseMeter(cfg.kickScore, 10_000, now), encoder: encoding === 'delta' ? new SnapEncoder() : null,
       bytesIn: 0, bytesOut: 0, snapsSkipped: 0, congestedSince: 0, closed: false,
@@ -207,6 +209,7 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
       if (c.closed) return;
       const t = performance.now();
       c.lastMsgAt = t;
+      c.lastSeenAt = t;
       const len = rawLength(data);
       c.bytesIn += len;
       if (!c.msgs.take(t)) { strike(0.25, 'message rate'); return; }
@@ -246,7 +249,7 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
     }
 
     ws.on('pong', () => {
-      c.alive = true;
+      c.lastSeenAt = performance.now();
       if (c.pingSentAt) {
         c.rttMs = performance.now() - c.pingSentAt;
         if (c.joined) c.room?.room.setPing(id, c.rttMs);
@@ -284,12 +287,13 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
       if (c.closed) continue;
       if (!c.joined && now - c.connectedAt > cfg.helloTimeoutMs) { kick(c, 4001, 'no hello received'); continue; }
       if (now - c.lastMsgAt > cfg.idleTimeoutMs) { kick(c, 4000, 'idle timeout'); continue; }
-      if (!c.alive) { log(`[cvc] ${c.id} heartbeat lost`); c.ws.terminate(); continue; }
-      c.alive = false;
-      c.pingSentAt = now;
-      try { c.ws.ping(); } catch { c.ws.terminate(); }
+      if (now - c.lastSeenAt > cfg.peerTimeoutMs) { log(`[cvc] ${c.id} peer timeout (no message or pong)`); c.ws.terminate(); continue; }
+      if (now - c.pingSentAt >= cfg.heartbeatMs) {
+        c.pingSentAt = now;
+        try { c.ws.ping(); } catch { c.ws.terminate(); }
+      }
     }
-  }, Math.min(cfg.heartbeatMs, Math.max(100, Math.min(cfg.helloTimeoutMs, cfg.idleTimeoutMs) / 2)));
+  }, Math.max(50, Math.min(cfg.heartbeatMs, cfg.helloTimeoutMs / 2, cfg.idleTimeoutMs / 2, cfg.peerTimeoutMs / 2)));
 
   rooms.start();
   await new Promise<void>((resolve, reject) => {

@@ -56,8 +56,8 @@ async function player(url: string, name: string) {
 }
 
 /** Raw socket client that decodes frames (for abuse tests). */
-async function raw(url: string) {
-  const ws = new WsClient(url);
+async function raw(url: string, opts: { autoPong?: boolean } = {}) {
+  const ws = new WsClient(url, { autoPong: opts.autoPong ?? true });
   const dec = new SnapDecoder();
   const msgs: ServerMsg[] = [];
   const closed: { code: number; reason: string } = { code: 0, reason: '' };
@@ -167,6 +167,18 @@ describe('server hardening', () => {
     idle.hello();
     await until(() => idle.closed.code !== 0, 3000, 'idle timeout');
     expect(idle.closed.code).toBe(4000);
+  });
+
+  it('terminates dead peers (no message, no pong) but not live-but-quiet ones', async () => {
+    const s = await start({ heartbeatMs: 100, peerTimeoutMs: 500, idleTimeoutMs: 5000 });
+    const dead = await raw(s.wsUrl, { autoPong: false });
+    dead.hello();
+    const quiet = await raw(s.wsUrl);
+    quiet.hello();
+    await until(() => dead.closed.code !== 0, 3000, 'dead peer terminated');
+    expect(dead.closed.code).toBe(1006); // terminated, no close handshake
+    await sleep(700);
+    expect(quiet.closed.code).toBe(0); // answers pings: alive until the idle timeout
   });
 
   it('shuts down gracefully (notice + 1001)', async () => {

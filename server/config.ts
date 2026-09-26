@@ -22,8 +22,14 @@ export interface ServerConfig {
   helloTimeoutMs: number;
   /** No message at all for this long closes the connection (ms). */
   idleTimeoutMs: number;
-  /** WebSocket ping period (ms); also measures RTT for the roster. Missing pong => terminated. */
+  /** WebSocket ping period (ms); also measures RTT for the roster. */
   heartbeatMs: number;
+  /**
+   * Terminate a peer not heard from (no message and no pong) for this long (ms): catches half-open
+   * TCP. Generous on purpose: a browser whose main thread stalls stops reading frames (receive flow
+   * control), so its pongs queue behind snapshots even though the client is alive.
+   */
+  peerTimeoutMs: number;
   /** Hard frame-size cap enforced by ws (bytes); larger frames close the socket with 1009. */
   maxPayload: number;
   /** Per-connection message rate (msgs/s) and burst. */
@@ -70,7 +76,7 @@ export function loadConfig(env: Env = process.env, defaults: Partial<ServerConfi
   const d: ServerConfig = {
     host: '0.0.0.0', port: 8787, mode: 'yard-skirmish', bots: [0, 4], seed: 1,
     maxRooms: 32, maxConnections: 256, maxConnectionsPerIp: 16, trustProxy: false,
-    roomTtlMs: 10_000, helloTimeoutMs: 10_000, idleTimeoutMs: 30_000, heartbeatMs: 5_000,
+    roomTtlMs: 10_000, helloTimeoutMs: 10_000, idleTimeoutMs: 30_000, heartbeatMs: 5_000, peerTimeoutMs: 20_000,
     maxPayload: 16 * 1024, msgRate: 120, msgBurst: 240, byteRate: 64 * 1024, byteBurst: 128 * 1024,
     kickScore: 20, maxBufferedBytes: 512 * 1024, congestionKickMs: 15_000,
     allowedOrigins: null, staticDir: null, wsPath: null, encoding: 'delta', log: true,
@@ -92,6 +98,7 @@ export function loadConfig(env: Env = process.env, defaults: Partial<ServerConfi
     helloTimeoutMs: num(env, 'HELLO_TIMEOUT_MS', d.helloTimeoutMs, 100),
     idleTimeoutMs: num(env, 'IDLE_TIMEOUT_MS', d.idleTimeoutMs, 1000),
     heartbeatMs: num(env, 'HEARTBEAT_MS', d.heartbeatMs, 100),
+    peerTimeoutMs: num(env, 'PEER_TIMEOUT_MS', d.peerTimeoutMs, 200),
     maxPayload: num(env, 'MAX_PAYLOAD', d.maxPayload, 1024),
     msgRate: num(env, 'MSG_RATE', d.msgRate, 1),
     msgBurst: num(env, 'MSG_BURST', d.msgBurst, 1),

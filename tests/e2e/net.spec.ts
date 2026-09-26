@@ -22,7 +22,12 @@ function freePort(): Promise<number> {
 test.beforeAll(async () => {
   port = await freePort();
   // Own process group (detached) so afterAll can stop npx + tsx + node together.
-  server = spawn('npx', ['tsx', 'server/index.ts'], { env: { ...process.env, PORT: String(port), BOTS: '0,0', MODE: 'team-deathmatch', HOST: '127.0.0.1' }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  server = spawn('npx', ['tsx', 'server/index.ts'], { env: {
+    ...process.env, PORT: String(port), BOTS: '0,0', MODE: 'team-deathmatch', HOST: '127.0.0.1', LOG: '1',
+    // This spec tests netcode, not timeouts (unit-tested in net-server.test.ts). SwiftShader frames on
+    // a busy CI box can take 10+ s, during which Chrome stops reading the socket.
+    IDLE_TIMEOUT_MS: '180000', PEER_TIMEOUT_MS: '180000', CONGESTION_KICK_MS: '180000',
+  }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`server did not start:\n${serverLog.join('')}`)), 30_000);
     const onData = (d: Buffer) => {
@@ -70,6 +75,12 @@ async function open(page: Page, name: string, team: number): Promise<number> {
   await page.goto(`/?webgl&autoplay&server=ws://127.0.0.1:${port}&name=${name}&team=${team}`);
   // Net readiness: connected with a spawned local entity and the frame loop running. (Not
   // __cvc.ready, which needs 6 rendered frames: SwiftShader on a busy CI box can take minutes.)
+  for (let i = 0; i < 8; i++) {
+    await page.waitForTimeout(4000);
+    const st = await page.evaluate(() => { const c = (globalThis as any).__cvc; return c && { frames: c.frames, localEntity: c.localEntity, fps: c.fps, errors: c.errors, net: c.net && { connected: c.net.connected, n: c.net.entities?.length, tick: c.net.tick } }; });
+    console.log(`[dbg ${name} t=${(i + 1) * 4}]`, JSON.stringify(st));
+  }
+  console.log('[dbg server]', serverLog.join('').slice(-1500));
   await page.waitForFunction(() => {
     const c = (globalThis as unknown as { __cvc?: { frames: number; localEntity: number; net?: { connected: boolean; entities: unknown[] } } }).__cvc;
     return !!c?.net?.connected && c.localEntity > 0 && c.frames >= 2 && (c.net.entities?.length ?? 0) > 0;

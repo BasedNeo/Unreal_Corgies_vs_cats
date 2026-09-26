@@ -4,6 +4,7 @@
 // Exposes window.__cvc (ready, fps, drawCalls, triangles, world stats, bookmarks) for tools/probe.mjs.
 import { debug } from '../src/client/debug/debug-hook';
 import * as THREE from 'three/webgpu';
+import * as TSL from 'three/tsl';
 import { createRenderContext } from '../src/client/engine/renderer';
 import { createWorldData } from '../src/shared/world/world-data';
 import { createWorldView } from '../src/client/world/world-view';
@@ -23,7 +24,7 @@ async function main() {
   const data = createWorldData(seed);
   const view = createWorldView(ctx.scene, data, { timeOfDay: params.has('t') ? Number(params.get('t')) : undefined });
   const buildMs = performance.now() - t0;
-  (globalThis as unknown as { __lab: unknown }).__lab = { scene: ctx.scene, view, data, renderer: ctx.renderer, THREE };
+  (globalThis as unknown as { __lab: unknown }).__lab = { scene: ctx.scene, view, data, renderer: ctx.renderer, ctx, THREE, TSL };
   const lab = debug as unknown as typeof debug & LabDebug;
   lab.buildMs = Math.round(buildMs);
   for (const b of view.bookmarks) {
