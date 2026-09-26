@@ -9,6 +9,8 @@
 //      big climbable tree · sandbox · back mound + birdbath · neighbour strip
 //   C  trampoline (jump pad) · lawn chairs · picnic table · hedge islands · wheelbarrow · hose
 //   E  swing set + slide · pond (wading water) · gnome · neighbour strip
+//   NE The Garage (D3, garage.ts): detached garage, close-quarters interior, 3 entrances · The Rooftops:
+//      its flat roof + satellite crow's nest, reached by a crate stair + lean-to roof or an alley scaffold
 //   S  red shed + cat-tree tower + plank bridge (Cats base) · kiddie pool · cardboard boxes
 // Movement reference (classes.ts): corgi jump ~1.47 m, double ~2.55 m; cat ~1.84 / ~3.1 m;
 // autostep 0.45 m; max walkable slope 52 deg.
@@ -18,6 +20,7 @@ import { bakeTerrainGrid, createYardField, gridHeight, inGrid, type SurfaceOp, t
 import { createRng, hash2 } from './noise';
 import { yawToward } from './queries';
 import { buildGarden, gardenTerrain, GARDEN_FLANK_PATH } from './garden';
+import { buildGarage, garageTerrain } from './garage';
 
 export const FENCE_H = 8;
 const HALF = 100;
@@ -31,6 +34,7 @@ export function buildWestYard(seed = 1): WorldData {
   const pathPatio = [26, -74, 28, -64, 34, -50, 48, -42, 60, -36, 68, -34];
   const pathWest = GARDEN_FLANK_PATH;   // dig hole -> through the Garden -> big tree
   const garden = gardenTerrain();
+  const garageT = garageTerrain();
   const pathEast = [98, 45, 86, 42, 74, 36, 72, 30];
   const ops: TerrainOp[] = [
     { op: 'raise', x: -38, z: 66, r: 9, falloff: 19, h: 4.2 },             // back mound (Cats-side high ground)
@@ -57,6 +61,7 @@ export function buildWestYard(seed = 1): WorldData {
     { op: 'hole', x: -30, z: -79, r: 1.6, depth: 0.45 },                    // corgi digging near the doghouse
     { op: 'hole', x: -9, z: -74, r: 1.2, depth: 0.35 },
     ...garden.ops,
+    ...garageT.ops,
   ];
   const surfaces: SurfaceOp[] = [
     { kind: 'dirt', shape: 'path', pts: pathMain, width: 3.6, soft: 0.9 },
@@ -79,6 +84,7 @@ export function buildWestYard(seed = 1): WorldData {
     { kind: 'mulch', shape: 'circle', x: -38, z: 66, r: 3.5, soft: 0.8 },                // birdbath bed
     { kind: 'mulch', shape: 'rect', x: 47, z: 98.5, hx: 14, hz: 1.4, soft: 0.5 },       // behind the shed
     ...garden.surfaces,
+    ...garageT.surfaces,
   ];
   const spec: TerrainSpec = {
     seed,
@@ -186,6 +192,8 @@ export function buildWestYard(seed = 1): WorldData {
 
   // ------------------------------------------------------------------ east flank
   swingSet(kit.frame(66, 0, -36, 0));
+  // north-east flank: The Garage + The Rooftops (D3; no rng, so the yard's random stream is unchanged)
+  const garageBuilt = buildGarage(kit, height);
   pond(kit, rng, height, water);
   gnome(kit.frame(76, height(76, 42), 42, -2.4));
   hedge(kit, rng, 88, 2, 26, 0, height);
@@ -226,6 +234,7 @@ export function buildWestYard(seed = 1): WorldData {
     { name: 'tree', pos: [-30, 3, 0], look: [-54, 8, 26], fov: 62 },
     { name: 'strip', pos: [-107, 2.2, -62], look: [-106, 2.5, 20], fov: 62 },
     ...gardenBuilt.bookmarks,
+    ...garageBuilt.bookmarks,
   ];
 
   return {
@@ -249,7 +258,9 @@ export function buildWestYard(seed = 1): WorldData {
     timeOfDay: 0.68,
     concealZones: gardenBuilt.concealZones,
     sprinklers: gardenBuilt.sprinklers,
-    districts: [gardenBuilt.district],
+    districts: [gardenBuilt.district, ...garageBuilt.districts],
+    lamps: garageBuilt.lamps,
+    perches: garageBuilt.perches,
   };
 }
 

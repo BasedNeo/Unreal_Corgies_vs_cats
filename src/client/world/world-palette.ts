@@ -71,6 +71,24 @@ export const WORLD_EXTRA: Record<string, number> = {
   corn: 0x6c9a3a,
   cornLeaf: 0x7fae45,
   cornCob: 0xf0c94a,
+  // ---- D3: The Garage + The Rooftops ----
+  garageSiding: 0xa9bcc6,
+  garageSiding2: 0x9aaeb9,
+  garageInside: 0xece3d2,
+  garageDoor: 0x7f9aa8,
+  roofTar: 0x5d5956,
+  roofGravel: 0x7a746d,
+  oilStain: 0x3b3834,
+  carBody: 0x6cc2ae,
+  carDark: 0x2f4f4a,
+  toolRed: 0xe2583a,
+  pegboard: 0xc9a877,
+  plywood: 0xdcb57c,
+  plywoodDark: 0xb98f58,
+  shedSage: 0x93b28a,
+  shedSageDark: 0x6d8c66,
+  lampTube: 0xfff1d2,
+  lampPool: 0xf6ecd6,
 };
 
 const colorCache = new Map<string, THREE.Color>();

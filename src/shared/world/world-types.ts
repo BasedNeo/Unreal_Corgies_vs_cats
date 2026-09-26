@@ -163,8 +163,40 @@ export interface Sprinkler {
   burst: number; period: number; first: number;
 }
 
-/** A named district rectangle (HUD/music/debug: "entering The Garden"). */
-export interface District { id: string; name: string; minX: number; maxX: number; minZ: number; maxZ: number }
+/** A named district rectangle (HUD/music/debug: "entering The Garden"). D3: optional height band, so
+ *  stacked districts (The Garage below, The Rooftops on its roof) share one footprint. */
+export interface District {
+  id: string; name: string; minX: number; maxX: number; minZ: number; maxZ: number;
+  /** Feet must be at or above this height (m) — checked only when the caller passes a y. */
+  minY?: number;
+  /** Feet must be at or below this height (m) — checked only when the caller passes a y. */
+  maxY?: number;
+}
+
+/**
+ * A light fixture that glows (D3: the garage's fluorescent tubes). The client draws one glowing tube per
+ * lamp (instanced, bloom); the sim ignores lamps. Center-positioned, the tube runs along `yaw`
+ * (0 = along +Z, PI/2 = along +X), `len` meters long.
+ */
+export interface Lamp {
+  x: number; y: number; z: number;
+  len: number;
+  yaw?: number;
+  /** Palette key of the glow color (default warm white). */
+  col?: string;
+}
+
+/**
+ * A named sniper perch (D3, The Rooftops): where a player (or later an Overwatch bot) stands to cover the
+ * main lanes. Feet position; `yaw` = the facing that overlooks its lanes (0 = facing -Z).
+ */
+export interface Perch {
+  id: string;
+  name: string;
+  x: number; y: number; z: number;
+  yaw: number;
+  district?: string;
+}
 
 export interface WorldData {
   seed: number;
@@ -198,4 +230,9 @@ export interface WorldData {
   /** Garden sprinklers (bursts are scheduled by weather.ts from seed + tick). */
   sprinklers?: Sprinkler[];
   districts?: District[];
+  // ---- D3 additions (optional) ----
+  /** Glowing light fixtures (visual only). */
+  lamps?: Lamp[];
+  /** Sniper perches (reachable, partial cover + an exposed side; see tests/unit/world-districts.test.ts). */
+  perches?: Perch[];
 }

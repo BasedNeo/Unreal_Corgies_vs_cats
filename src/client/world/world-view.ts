@@ -2,7 +2,7 @@
 //   terrain (grid-exact toon ground) · props (merged VisualPrims, ink + creases) · board fences ·
 //   water · near-field foliage with wind · stylized sky + time of day + fog + camera-following sun shadow
 //   · G1: The Garden's tall grass + sprinkler jets · weather (sky/fog/light ramps, rain streaks, wet
-//   ground + puddles, lightning, wind) driven by the server tick.
+//   ground + puddles, lightning, wind) driven by the server tick · D3: glowing lamps (garage tubes).
 // cameraColliders are invisible low-poly proxies (collider boxes/cylinders + a coarse terrain) so the
 // third-person camera raycasts stay cheap. Budget target: <= 250 world draw calls, <= 1 M visible tris.
 //
@@ -25,6 +25,7 @@ import { createFoliage } from './foliage';
 import { createYardSky, type SkyWeather } from './sky';
 import { createRain } from './weather-view';
 import { createGardenView } from './garden-view';
+import { createLampsView } from './lamps-view';
 
 /** Post grade uniforms (createComicPipeline(...).grade.uniforms) the weather may desaturate. */
 export interface GradeUniforms { saturation: { value: number } }
@@ -96,6 +97,8 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
 
   const garden = createGardenView(data);
   root.add(garden.group);
+  const lamps = createLampsView(data);
+  root.add(lamps.group);
   const rain = createRain({ capacity: opts.rainDrops ?? (q === 'low' ? 2000 : q === 'med' ? 3500 : 6000) });
   root.add(rain.mesh);
 
@@ -188,6 +191,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
         rainCpuMs: +rainMs.toFixed(4),
         weatherCpuMs: +weatherMs.toFixed(4),
         ...garden.stats(),
+        ...lamps.stats(),
         ...(foliage?.stats() ?? {}),
       };
     },
@@ -201,6 +205,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
       water.dispose();
       foliage?.dispose();
       garden.dispose();
+      lamps.dispose();
       rain.dispose();
       proxy.dispose();
       sky.dispose();

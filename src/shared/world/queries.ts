@@ -254,9 +254,14 @@ export function concealZoneAt(data: WorldData, x: number, z: number): ConcealZon
   return best;
 }
 
-/** The district rectangle containing (x, z), or null. */
-export function districtAt(data: WorldData, x: number, z: number): District | null {
-  for (const d of data.districts ?? []) if (x >= d.minX && x <= d.maxX && z >= d.minZ && z <= d.maxZ) return d;
+/** The district containing (x, z) — and, when `y` (feet) is given, whose optional height band holds it —
+ *  or null. Without `y` the height bands are ignored (first footprint match wins). */
+export function districtAt(data: WorldData, x: number, z: number, y?: number): District | null {
+  for (const d of data.districts ?? []) {
+    if (x < d.minX || x > d.maxX || z < d.minZ || z > d.maxZ) continue;
+    if (y !== undefined && ((d.minY !== undefined && y < d.minY) || (d.maxY !== undefined && y > d.maxY))) continue;
+    return d;
+  }
   return null;
 }
 
