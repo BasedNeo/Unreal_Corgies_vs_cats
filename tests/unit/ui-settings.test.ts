@@ -52,6 +52,18 @@ describe('settings', () => {
     expect(m.name).toBe(DEFAULT_SETTINGS.name);
   });
 
+  it('screen shake and field of view: defaults, clamped, older saves get the defaults', () => {
+    expect(DEFAULT_SETTINGS.shake).toBe(1);
+    expect(DEFAULT_SETTINGS.fov).toBe(62);
+    const m = migrateSettings({ v: 1, shake: -2, fov: 200 });
+    expect(m.shake).toBe(0);
+    expect(m.fov).toBe(80);
+    const old = migrateSettings({ v: 1, sensitivity: 1.5 }); // saved before these existed
+    expect(old.shake).toBe(1);
+    expect(old.fov).toBe(62);
+    expect(migrateSettings({ v: 1, shake: 'lots', fov: NaN }).fov).toBe(62);
+  });
+
   it('survives corrupt JSON and throwing storage', () => {
     const kv = new MemKV();
     kv.map.set(SETTINGS_KEY, '{not json');

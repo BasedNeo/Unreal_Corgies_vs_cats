@@ -12,6 +12,10 @@ export interface Settings {
   /** Look sensitivity multiplier (1 = the input default 0.0022 rad/px). Range 0.2..3. */
   sensitivity: number;
   invertY: boolean;
+  /** Camera shake strength 0..1 (0 = none: reduce motion). */
+  shake: number;
+  /** On-foot field of view (degrees, 55..80); aiming and vehicles zoom relative to it. */
+  fov: number;
   /** 0..1 linear slider positions (the audio engine applies a perceptual curve). */
   masterVolume: number;
   musicVolume: number;
@@ -30,6 +34,8 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   v: SETTINGS_VERSION,
   sensitivity: 1,
   invertY: false,
+  shake: 1,
+  fov: 62,
   masterVolume: 0.8,
   musicVolume: 0.55,
   sfxVolume: 0.9,
@@ -61,6 +67,8 @@ export function sanitizeSettings(o: Record<string, unknown>): Settings {
     v: SETTINGS_VERSION,
     sensitivity: clamp(o.sensitivity, 0.2, 3, d.sensitivity),
     invertY: typeof o.invertY === 'boolean' ? o.invertY : d.invertY,
+    shake: clamp(o.shake, 0, 1, d.shake),
+    fov: clamp(o.fov, 55, 80, d.fov),
     masterVolume: clamp(o.masterVolume, 0, 1, d.masterVolume),
     musicVolume: clamp(o.musicVolume, 0, 1, d.musicVolume),
     sfxVolume: clamp(o.sfxVolume, 0, 1, d.sfxVolume),

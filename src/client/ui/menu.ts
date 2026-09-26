@@ -119,8 +119,10 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 // ---------------------------------------------------------------- settings panel
 export interface SettingsPanel { el: HTMLElement; refresh(): void }
 
-const SLIDERS: Array<{ key: 'sensitivity' | 'masterVolume' | 'musicVolume' | 'sfxVolume'; label: string; min: number; max: number; step: number; fmt(v: number): string }> = [
+const SLIDERS: Array<{ key: 'sensitivity' | 'fov' | 'shake' | 'masterVolume' | 'musicVolume' | 'sfxVolume'; label: string; min: number; max: number; step: number; fmt(v: number): string }> = [
   { key: 'sensitivity', label: 'LOOK SPEED', min: 0.2, max: 3, step: 0.05, fmt: (v) => `${v.toFixed(2)}×` },
+  { key: 'fov', label: 'FIELD OF VIEW', min: 55, max: 80, step: 1, fmt: (v) => `${Math.round(v)}°` },
+  { key: 'shake', label: 'SCREEN SHAKE', min: 0, max: 1, step: 0.05, fmt: (v) => (v <= 0 ? 'OFF' : `${Math.round(v * 100)}%`) },
   { key: 'masterVolume', label: 'MASTER', min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
   { key: 'musicVolume', label: 'MUSIC', min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
   { key: 'sfxVolume', label: 'SOUND FX', min: 0, max: 1, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
@@ -416,6 +418,8 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
     chaptersView.classList.toggle('hidden', v !== 'main' || match !== 'adventure');
     settingsView.classList.toggle('hidden', v !== 'settings');
     roomsView.classList.toggle('hidden', v !== 'rooms');
+    // the controls strip belongs to the main card; the taller settings panel needs the room
+    el.querySelector<HTMLElement>('.mm-foot')?.classList.toggle('hidden', v === 'settings');
     if (v === 'rooms' && open) rooms.open(); else rooms.close();
     const first = (v === 'settings' ? settingsView : v === 'rooms' ? roomsView : el.querySelector('[data-play]')) as HTMLElement | null;
     (v === 'main' ? first : first?.querySelector<HTMLElement>('[data-nav]'))?.focus();

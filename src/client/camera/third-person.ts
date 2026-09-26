@@ -9,6 +9,9 @@ export interface CameraVehicleParams { distance: number; height: number; fov: nu
 export interface CameraRig {
   update(target: THREE.Vector3, yaw: number, pitch: number, aiming: boolean, dt: number, speed: number, vehicle?: CameraVehicleParams | null): void;
   shake(amount: number): void;
+  /** Settings: shake strength 0..1 (0 = reduce motion) and the on-foot field of view (degrees; aiming zooms from it). */
+  setShakeScale(k: number): void;
+  setBaseFov(deg: number): void;
   /** Current boom length (m) after collision — callers fade the local avatar when it gets very short. */
   readonly boom: number;
   /** Objects the camera must not pass through (terrain, props). Only solid meshes are tested. */
@@ -22,6 +25,7 @@ const MIN_BOOM = 0.2;
 export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): CameraRig {
   const pivot = new THREE.Vector3();
   let dist = 4.2, shoulder: number = AIM_RAY.shoulderHip, fov = 62, aimK = 0, speedFov = 0, trauma = 0, first = true;
+  let shakeScale = 1, baseFov = 62;
   const ray = new THREE.Raycaster();
   const hits: THREE.Intersection[] = []; // reused: 6 casts per frame would otherwise allocate 6 arrays
   const tmp = new THREE.Vector3(), dir = new THREE.Vector3(), want = new THREE.Vector3();
@@ -39,7 +43,9 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
         if (m.isMesh && !m.isLineSegments2 && !m.userData.styleInk && !m.userData.noCameraCollide) solids.push(m);
       });
     },
-    shake(a) { trauma = Math.min(1, trauma + a); },
+    shake(a) { trauma = Math.min(1, trauma + a * shakeScale); },
+    setShakeScale(k) { shakeScale = Math.max(0, Math.min(1, k)); if (shakeScale === 0) trauma = 0; },
+    setBaseFov(deg) { baseFov = Math.max(55, Math.min(80, deg)); },
     get boom() { return boom; },
     update(target, yaw, pitch, aiming, dt, speed, vehicle) {
       if (vehicle) Object.assign(lastVeh, vehicle);
@@ -61,7 +67,7 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
       // aim zoom lands in ~0.12 s (QA W1: λ8 felt sluggish); the speed kick stays gentle
       aimK = damp(aimK, aiming ? 1 : 0, 26, dt);
       speedFov = damp(speedFov, Math.min(8, speed * 0.5), 8, dt);
-      const footFov = (62 + speedFov) * (1 - aimK) + 48 * aimK;
+      const footFov = (baseFov + speedFov) * (1 - aimK) + (48 + (baseFov - 62) * 0.5) * aimK;
       dist = damp(dist, mix(footDist, lastVeh.distance), 10, dt);
       shoulder = damp(shoulder, mix(footShoulder, lastVeh.shoulder), 18, dt);
       fov = mix(footFov, lastVeh.fov);

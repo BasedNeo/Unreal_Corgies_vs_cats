@@ -131,6 +131,8 @@ async function main(): Promise<void> {
   const applySettings = (st: Settings) => {
     input.sensitivity = 0.0022 * st.sensitivity;
     input.invertY = st.invertY;
+    cam.setShakeScale(st.shake);
+    cam.setBaseFov(st.fov);
     audio.setVolumes({ master: st.masterVolume, music: st.musicVolume, sfx: st.sfxVolume });
     fx.setQuality(st.quality);
     if (toQualityTier(st.quality) !== settingTier) {

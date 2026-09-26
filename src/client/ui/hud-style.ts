@@ -216,6 +216,8 @@ export const HUD_CSS = `
 #cvc-hud .mm-tag{position:absolute;left:50%;top:${u(152)};transform:translateX(-50%) rotate(-1deg);font:italic 800 ${u(15)} ${FONT_BODY};color:var(--paper);background:var(--ink);padding:${u(3)} ${u(14)};border-radius:${u(4)};white-space:nowrap}
 #cvc-hud .mm-main{position:absolute;left:50%;top:${u(206)};transform:translateX(-50%);display:grid;grid-template-columns:${u(360)} ${u(640)};gap:${u(24)}}
 #cvc-hud .mm-card{padding:${u(14)} ${u(16)} ${u(16)}}
+#cvc-hud .mm-settings{max-height:calc(100vh - ${u(250)});overflow-y:auto;overscroll-behavior:contain}
+#cvc-hud .mm-settings .st-actions{position:sticky;bottom:0;background:var(--paper,#f6ecd8);padding-top:${u(6)};z-index:1}
 #cvc-hud .mm-h{font-size:${u(20)};letter-spacing:.06em;margin:0 0 ${u(8)};display:flex;align-items:center;gap:${u(8)}}
 #cvc-hud .mm-h small{font:700 ${u(11.5)} ${FONT_BODY};opacity:.55;letter-spacing:0}
 #cvc-hud .mm-field{display:flex;flex-direction:column;gap:${u(5)};margin-bottom:${u(12)}}
