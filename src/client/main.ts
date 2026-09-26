@@ -30,12 +30,18 @@ import { CLASS_IDS, EFlag, type ClassId, type TeamId } from '../shared/types';
 
 const params = new URLSearchParams(location.search);
 
+const loadingStep = (text: string) => { const el = document.getElementById('loading-step'); if (el) el.textContent = text; };
+const hideLoading = () => document.getElementById('loading')?.remove();
+
 async function main(): Promise<void> {
   const app = document.getElementById('app')!;
+  loadingStep('Warming up the renderer…');
   const ui = document.getElementById('ui')!;
   const ctx = await createRenderContext(app, { forceWebGL: params.has('webgl') });
   debug.backend = ctx.backend;
 
+  loadingStep('Mowing West Yard…');
+  await new Promise((r) => setTimeout(r, 0)); // let the step text paint before the blocking world build
   const seed = Number(params.get('seed') ?? 1);
   const worldData = createWorldData(seed);
   const boot = loadSettings();
@@ -48,6 +54,7 @@ async function main(): Promise<void> {
   const mode = params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish';
   // Skirmish: a corgi squad of bots with you; cat waves come from the match rules. TDM: bot-filled teams.
   const bots = (params.get('bots') ?? (mode === 'team-deathmatch' ? '4,5' : '3,0')).split(',').map(Number) as [number, number];
+  loadingStep(serverUrl ? 'Calling the server…' : 'Waking up the squad…');
   const transport = serverUrl
     ? await createWebSocketTransport(serverUrl, em)
     : createWorkerTransport({ seed, mode, bots }, em);
@@ -173,6 +180,7 @@ async function main(): Promise<void> {
     debug.entities = states.size;
     debug.local = local ? { x: local.x, y: local.y, z: local.z, hp: local.hp } : null;
     debug.ready = !!local && debug.frames > 5;
+    if (local && debug.frames > 2) hideLoading();
     hud.update({ local, match: net.match, roster: net.roster, fps: debug.fps, rttMs: net.stats.rttMs, locked: input.locked || params.has('autoplay'), backend: ctx.backend, transport: transport.kind, states });
   });
 }
@@ -180,6 +188,7 @@ async function main(): Promise<void> {
 main().catch((err) => {
   console.error(err);
   debug.errors.push(String(err?.stack ?? err));
+  hideLoading();
   const ui = document.getElementById('ui');
   if (ui) ui.innerHTML = `<pre style="color:#f88;padding:20px;white-space:pre-wrap">Failed to start: ${String(err?.message ?? err)}</pre>`;
 });
