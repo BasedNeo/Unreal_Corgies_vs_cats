@@ -105,8 +105,10 @@ export function createTankAvatar(opts: BossAvatarOptions & { def?: BossDef } = {
   const asset = acquireMech(def);
   const rig = new RigInstance(asset.rig);
   const b = asset.rig.index;
-  const bodyMat = toon({ color: 0xffffff, vertexColors: true });
-  const flashMat = toon({ color: 0xffffff, vertexColors: true, emissive: 0x5a2a1e, emissiveIntensity: 1 });
+  // HARDENED (K2): the weathered style material (grime, chipped edges, mud on the treads); older factories ignore it.
+  const tough = { surface: 'armor', mud: 0.5 } as Record<string, unknown>;
+  const bodyMat = toon({ color: 0xffffff, vertexColors: true, ...tough } as Parameters<typeof toon>[0]);
+  const flashMat = toon({ color: 0xffffff, vertexColors: true, emissive: 0x5a2a1e, emissiveIntensity: 1, ...tough } as Parameters<typeof toon>[0]);
   const mech = new THREE.SkinnedMesh(asset.geo.body, bodyMat);
   mech.name = 'boss_vactank';
   mech.add(rig.root);

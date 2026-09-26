@@ -5,9 +5,39 @@
 // of the toon outline pass never tears.
 import * as THREE from 'three/webgpu';
 import { smoothNormalsByPosition } from '../../style/style-utils.js';
+import * as TOKENS from '../../style/style-tokens.js';
 import type { RigTemplate } from '../../anim/rig';
 
 export type V3 = [number, number, number];
+
+/**
+ * Style surface of a vertex: [rough, metal, grime, wear] (0..1), written as the `surface` vec4 attribute that the style
+ * factory reads with toon({ surfaceAttr: true }) (S4, HARDENED): one material, per-part roughness, metal, grime and
+ * edge wear (fur is rough and never chips, armour plates are semi-metal and wear at the edges, eyes and noses are wet).
+ */
+export type Surf = readonly [number, number, number, number];
+type SurfPreset = { rough: number; metal: number; grime: number; wear: number };
+const PRESETS = ((TOKENS as unknown as { SURFACES?: Record<string, SurfPreset> }).SURFACES ?? {}) as Record<string, SurfPreset>;
+const surf = (name: string, fb: Surf, o: Partial<SurfPreset> = {}): Surf => {
+  const p = { ...(PRESETS[name] ?? { rough: fb[0], metal: fb[1], grime: fb[2], wear: fb[3] }), ...o };
+  return [p.rough, p.metal, p.grime, p.wear];
+};
+/** Surfaces of the character kit (style presets where the style lane has them). */
+export const SURF = {
+  default: surf('default', [0.62, 0, 0.3, 0.3]),
+  fur: surf('fur', [0.85, 0, 0.22, 0]),
+  cloth: surf('cloth', [0.9, 0, 0.4, 0.15]),
+  armor: surf('armor', [0.42, 0.25, 0.45, 0.65]),
+  metal: surf('metal', [0.38, 0.85, 0.35, 0.5]),
+  /** Small bright fittings (brass buckles, tags, rank insignia): half metal, so they keep their colour at dusk. */
+  fitting: surf('metal', [0.34, 0.45, 0.25, 0.5], { metal: 0.45, rough: 0.34 }),
+  plastic: surf('plastic', [0.35, 0, 0.3, 0.25]),
+  leather: surf('cloth', [0.6, 0, 0.45, 0.3], { rough: 0.6, wear: 0.3 }),
+  /** Wet noses, eyes and teeth: glossy (the lights glint in them). */
+  eye: surf('default', [0.14, 0, 0, 0], { rough: 0.14, grime: 0, wear: 0 }),
+  nose: surf('default', [0.3, 0, 0.05, 0], { rough: 0.3, grime: 0.05, wear: 0 }),
+  skin: surf('fur', [0.6, 0, 0.15, 0], { rough: 0.6, wear: 0 }),
+} as const;
 
 /** Raw primitive: positions + indices + a (u,v) parameter per vertex for patterns. */
 export interface Prim {
@@ -329,7 +359,10 @@ export class MeshBuilder {
   private col: number[] = [];
   private si: number[] = [];
   private sw: number[] = [];
+  private sf: number[] = [];
   private idx: number[] = [];
+  private curSurf: Surf = SURF.default;
+  private anySurf = false;
   triangles = 0;
   /** Triangles per named section (budget accounting). */
   readonly sections = new Map<string, number>();
@@ -339,6 +372,9 @@ export class MeshBuilder {
 
   /** Name the section subsequent primitives are counted under. */
   begin(name: string): this { this.section = name; return this; }
+
+  /** Style surface for subsequent primitives; once used, build() adds the `surface` attribute (see Surf). */
+  surface(s: Surf): this { this.curSurf = s; this.anySurf = true; return this; }
 
   add(p: Prim, color: number | ColorFn, skin?: SkinSpec, opts: AddOpts = {}): this {
     // Outline-safe normals per primitive (welds seams/poles, averages by position).
@@ -366,6 +402,7 @@ export class MeshBuilder {
       const hex = typeof color === 'number' ? color : color(x, y, z, p.uv[2 * i], p.uv[2 * i + 1]);
       const c = linear(hex);
       this.col.push(c.r, c.g, c.b);
+      this.sf.push(this.curSurf[0], this.curSurf[1], this.curSurf[2], this.curSurf[3]);
       if (this.rig) this.pushSkin(x, y, z, skin, p.uv[2 * i], p.uv[2 * i + 1]);
     }
     g.dispose();
@@ -413,6 +450,7 @@ export class MeshBuilder {
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    if (this.anySurf) g.setAttribute('surface', new THREE.Float32BufferAttribute(this.sf, 4));
     if (this.rig) {
       g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(this.si, 4));
       g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(this.sw, 4));

@@ -80,7 +80,8 @@ function buildSniperAsset(key: string): SniperAsset {
   const template = buildRigTemplate(plan);
   const j = computeJoints(plan);
   const mb = new MeshBuilder(template);
-  const face = buildBody(mb, plan, coat, SNIPER_DETAIL, SNIPER_FACE_DETAIL);
+  // HARDENED (K2): a scar through her left eye and a bitten ear (the marks of an elite), wet fur.
+  const face = buildBody(mb, plan, coat, SNIPER_DETAIL, SNIPER_FACE_DETAIL, { weathered: true, scars: 1, scarSide: 'L', notch: true });
   const H = plan.headY;
 
   mb.begin('pointille');
@@ -192,7 +193,7 @@ export function createSniperAvatar(def: SniperDef, seed: number): SniperAvatar {
   const asset = acquire();
   const rig = new RigInstance(asset.template);
   const bi = asset.template.index;
-  const bodyMat = toon({ color: 0xffffff, vertexColors: true });
+  const bodyMat = toon({ color: 0xffffff, vertexColors: true, surfaceAttr: true, surface: 'fur' } as Parameters<typeof toon>[0]);
   const skinned = new THREE.SkinnedMesh(asset.body, bodyMat);
   skinned.name = 'boss_sniper_body';
   skinned.add(rig.root);
@@ -201,7 +202,7 @@ export function createSniperAvatar(def: SniperDef, seed: number): SniperAvatar {
   skinned.boundingBox = new THREE.Box3(new THREE.Vector3(-1.2, -0.2, -1.2), new THREE.Vector3(1.2, 1.9, 1.2));
   skinned.castShadow = true;
   // rifle (rigid, crease-inked) + emitter glow, like the character lane's weapons
-  const weapon = new THREE.Mesh(asset.weapon.geometry, bodyMat);
+  const weapon = new THREE.Mesh(asset.weapon.geometry, toon({ color: 0xffffff, vertexColors: true, surface: 'weapon', ...asset.weapon.finish } as Parameters<typeof toon>[0])); // X3: the Longshot's paint finish
   weapon.name = 'boss_sniper_rifle';
   weapon.castShadow = true;
   rig.bones[bi.weapon].add(weapon);

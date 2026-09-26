@@ -33,11 +33,18 @@ export interface FaceParams {
 
 const base = (): FaceParams => ({ lidUp: 0.14, lidLo: 0.05, slant: 0.05, browY: -0.05, browTilt: -0.2, browAsym: 0, jaw: 0, tongue: 0, pupil: 1, slit: 0.6, lookX: 0, lookY: 0, cross: 0, earsBack: 0, earsDroop: 0, tilt: 0, lidAsym: 0, browIn: 0, smile: 0.15, smirk: 0, snarl: 0, chin: 0 });
 
+/**
+ * HARDENED resting face (K2, docs/design/HARDENED.md): a veteran's steady squint. Lids low (the upper lid cuts the top
+ * of the iris, the lower lid lifts: weariness), brows down and a little knit, the mouth set flat, chin a touch down.
+ * The comedy stays in the other expressions: the smug kill grin, the derp, the terrified wide eyes, the knockout.
+ */
+const veteranRest = (): FaceParams => ({ ...base(), lidUp: 0.38, lidLo: 0.24, slant: 0.24, browY: -0.34, browTilt: -0.42, browIn: 0.32, smile: -0.08, chin: 0.05, pupil: 0.92 });
+
 // K1 attitude pass: combat faces read determined / scrappy / mischievous, never cute-startled and
 // never horror. Lids really cover the iris now (body.ts), brows knit down and in, the mouth line
 // bends at its corners, and cats narrow to slits.
 export const PRESETS: Record<Expression, FaceParams> = {
-  neutral: base(),
+  neutral: veteranRest(),
   smug: { ...base(), lidUp: 0.5, lidLo: 0.3, slant: 0.1, browY: 0.1, browTilt: 0, browAsym: 0.75, pupil: 0.85, slit: 0.3, lookX: 0.35, tilt: 0.16, earsBack: 0.1, smile: 0.8, smirk: 0.7, jaw: 0.1 },
   furious: { ...base(), lidUp: 0.48, lidLo: 0.36, slant: 0.9, browY: -1, browTilt: -1.2, browIn: 1, jaw: 0.34, pupil: 0.68, slit: 0.06, earsBack: 0.8, smile: -0.35, snarl: 1, chin: 0.1 },
   terrified: { ...base(), lidUp: 0, lidLo: 0, slant: -0.35, browY: 1, browTilt: 1, jaw: 0.62, pupil: 0.45, slit: 1, earsBack: 0.85, earsDroop: 0.7, smile: -0.8 },
@@ -116,10 +123,10 @@ export class FaceController {
     this.moodTimer -= dt;
     if (this.moodTimer <= 0) {
       const r = this.rng();
-      // Cats lean smug, corgis lean earnest/happy.
+      // Cats lean smug, corgis lean stoic (HARDENED: mostly the veteran squint, a rare derp or grin between fights).
       this.idleMood = this.isCat
-        ? (r < 0.45 ? 'neutral' : r < 0.88 ? 'smug' : r < 0.95 ? 'derp' : 'happy')
-        : (r < 0.55 ? 'neutral' : r < 0.72 ? 'smug' : r < 0.8 ? 'derp' : 'happy');
+        ? (r < 0.5 ? 'neutral' : r < 0.9 ? 'smug' : r < 0.96 ? 'derp' : 'happy')
+        : (r < 0.68 ? 'neutral' : r < 0.84 ? 'smug' : r < 0.92 ? 'derp' : 'happy');
       this.moodTimer = 3.5 + this.rng() * 5;
     }
     this.mood = this.choose(i);

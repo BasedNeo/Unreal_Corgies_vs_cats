@@ -62,7 +62,8 @@ export function buildPilotAsset(q = PILOT_DETAIL): PilotAsset {
   const template = buildRigTemplate(plan);
   const j = computeJoints(plan);
   const mb = new MeshBuilder(template);
-  const face = buildBody(mb, plan, coat, q);
+  // HARDENED (K2): wet, matted fur, a duelling scar and a bitten ear on the Baron (his head is what pokes out).
+  const face = buildBody(mb, plan, coat, q, q, { weathered: true, scars: 1, scarSide: 'R', notch: true });
   const H = plan.headY;
   const crimson = P.teamCats, gold = P.accentHot, goldDark = mixHex(P.accentHot, P.accent, 0.5);
 
@@ -182,7 +183,7 @@ function releasePilotAsset(): void {
 export function createPilot(seed: number): Pilot {
   const asset = acquirePilotAsset();
   const rig = new RigInstance(asset.template);
-  const skinned = new THREE.SkinnedMesh(asset.body, toon({ color: 0xffffff, vertexColors: true }));
+  const skinned = new THREE.SkinnedMesh(asset.body, toon({ color: 0xffffff, vertexColors: true, surfaceAttr: true, surface: 'fur' } as Parameters<typeof toon>[0]));
   skinned.name = 'boss_pilot';
   skinned.add(rig.root);
   skinned.bind(new THREE.Skeleton(rig.bones, asset.boneInverses), new THREE.Matrix4());

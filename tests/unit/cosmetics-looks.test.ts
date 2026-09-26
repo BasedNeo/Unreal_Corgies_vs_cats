@@ -1,6 +1,6 @@
 // C3 looks on the procedural characters: budgets + style audit for every coat × class × team × tier and every
 // neckwear, K1 class silhouettes and team-colour readability unchanged by any look, applyLook idempotent and leak-free.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as THREE from 'three/webgpu';
 import {
   createCharacter, characterCacheSize, variantFor, breedFor, prewarmCharacters, releasePrewarmedCharacters, HERO_TRI_BUDGET, NPC_TRI_BUDGET, type CharacterAvatar,
@@ -12,6 +12,9 @@ import { createBossAvatar } from '../../src/client/procgen/boss';
 import { cosmeticsFor, defaultLook, randomLook, type Look } from '../../src/shared/content/cosmetics';
 import { Anim, CLASS_IDS, Species, Team, type AnimId, type ClassId, type SpeciesId, type TeamId } from '../../src/shared/types';
 import type { AvatarFrame } from '../../src/client/views/avatar';
+
+// These build dozens of kits: 4–9 s alone, past the default 30 s under a loaded parallel run (load 16–21 on 4 cores, W7).
+vi.setConfig({ testTimeout: 120_000 });
 
 const SPECIES: [string, SpeciesId][] = [['corgi', Species.Corgi], ['cat', Species.Cat]];
 const TEAMS: TeamId[] = [Team.Corgis, Team.Cats];

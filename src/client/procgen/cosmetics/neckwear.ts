@@ -10,9 +10,10 @@
 import type * as THREE from 'three/webgpu';
 import { PALETTE } from '../../style/style-tokens.js';
 import { mixHex } from '../characters/colors';
-import { MeshBuilder, ellipsoid, sweep, ring, type Prim, type V3 } from '../characters/mesh-builder';
+import { MeshBuilder, ellipsoid, sweep, ring, SURF, type Prim, type V3 } from '../characters/mesh-builder';
 import { buildRigTemplate } from '../characters/skeleton';
-import { chestPlateFront } from '../characters/gear';
+import { armourCollar, chestPlateFront } from '../characters/gear';
+import { neckTube, ruffShape } from '../characters/body';
 import type { BodyPlan } from '../characters/species';
 import type { ClassId } from '../../../shared/types';
 
@@ -52,35 +53,42 @@ function rayEllipse(ox: number, oz: number, dx: number, dz: number, cx: number, 
 
 /**
  * Loop of `n` points around the neck at height `y` (model space, first point at the front, -Z), clearing the neck
- * tube and the chest ruff (body.ts) by `margin`: a band that sits on the fluffy bib instead of sinking into it.
+ * tube, the chest ruff (body.ts) and, on HARDENED plans, the armour collar (gear.ts) by `margin`: a band that sits on
+ * the fluffy ruff instead of sinking into it. The shapes come from the character builders, so a thicker neck or a new
+ * ruff moves the neckwear with them.
  */
 export function hugLoop(plan: BodyPlan, y: number, margin: number, n: number): V3[] {
-  // Neck tube (body.ts): from (0, chestY + 0.06, 0) r [0.1, 0.095] to (0, headY + 0.1, -0.015) r [0.1, 0.1].
-  const n0 = plan.chestY + 0.06, n1 = plan.headY + 0.1;
-  const t = Math.min(1, Math.max(0, (y - n0) / (n1 - n0)));
-  const nz = -0.015 * t, nrz = 0.095 + 0.005 * t;
-  // Chest ruff (body.ts): ellipsoid (0, neckY - 0.005, -0.1) r [0.15, 0.1, 0.085]; no tufts on its upper half.
-  const ry = (y - (plan.neckY - 0.005)) / 0.1;
+  const nt = neckTube(plan);
+  const t = Math.min(1, Math.max(0, (y - nt.y0) / (nt.y1 - nt.y0)));
+  const nz = nt.z1 * t, nrx = nt.r0[0] + (nt.r1[0] - nt.r0[0]) * t, nrz = nt.r0[1] + (nt.r1[1] - nt.r0[1]) * t;
+  // Chest ruff: no tufts on its upper half.
+  const ru = ruffShape(plan);
+  const ry = (y - ru.c[1]) / ru.r[1];
   const s = Math.abs(ry) < 1 ? Math.sqrt(1 - ry * ry) : 0;
+  const ac = plan.hardened ? armourCollar(plan) : null;
+  const inCollar = ac && Math.abs(y - ac.y) < ac.h;
   const cz = -0.04;
   const out: V3[] = [];
   for (let i = 0; i < n; i++) {
     const th = (i / n) * Math.PI * 2, dx = Math.sin(th), dz = -Math.cos(th);
-    let r = rayEllipse(0, cz, dx, dz, 0, nz, 0.1, nrz);
-    if (s > 0) r = Math.max(r, rayEllipse(0, cz, dx, dz, 0, -0.1, 0.15 * s, 0.085 * s));
+    let r = rayEllipse(0, cz, dx, dz, 0, nz, nrx, nrz);
+    if (s > 0) r = Math.max(r, rayEllipse(0, cz, dx, dz, 0, ru.c[2], ru.r[0] * s, ru.r[2] * s));
+    if (ac && inCollar) r = Math.max(r, rayEllipse(0, cz, dx, dz, 0, ac.cz, ac.rx + ac.t, ac.rz + ac.t));
     r += margin;
     out.push([dx * r, y, cz + dz * r]);
   }
   return out;
 }
 
-/** Front of the chest ruff at height y (the most forward z, x = 0), with the fur tufts of its lower half. */
+/** Front of the chest ruff (and the armour collar) at height y (the most forward z, x = 0), with the ruff's tufts. */
 function ruffFrontZ(plan: BodyPlan, y: number): number {
-  const ry = (y - (plan.neckY - 0.005)) / 0.1;
-  if (Math.abs(ry) >= 1) return -0.02;
-  const s = Math.sqrt(1 - ry * ry);
-  const tuft = ry < 0 && !plan.hairless ? 1.2 : 1;
-  return -0.1 - 0.085 * s * tuft;
+  const ru = ruffShape(plan);
+  const ry = (y - ru.c[1]) / ru.r[1];
+  let z = -0.02;
+  if (Math.abs(ry) < 1) z = ru.c[2] - ru.r[2] * Math.sqrt(1 - ry * ry) * (ry < 0 ? 1 + ru.tuft : 1);
+  const ac = plan.hardened ? armourCollar(plan) : null;
+  if (ac && Math.abs(y - ac.y) < ac.h) z = Math.min(z, ac.cz - ac.rz - ac.t);
+  return z;
 }
 
 // --- primitives ---------------------------------------------------------------------------------------------
@@ -190,7 +198,7 @@ const spiked: Builder = (mb, plan) => {
   const up = 0.55, k = 1 / Math.hypot(1, up);
   for (const p of loop) {
     const [dx, dz] = norm2(p[0], p[2] + 0.04);
-    mb.add(spike([p[0] + dx * 0.008, p[1] + 0.004, p[2] + dz * 0.008], [dx * k, up * k, dz * k], 0.0135, 0.046), STEEL_LIGHT, NECK);
+    mb.surface(SURF.metal).add(spike([p[0] + dx * 0.008, p[1] + 0.004, p[2] + dz * 0.008], [dx * k, up * k, dz * k], 0.0135, 0.046), STEEL_LIGHT, NECK);
   }
 };
 
@@ -203,6 +211,7 @@ const nametag: Builder = (mb, plan) => {
   // The tag hangs right under the strap (its top tucks behind it): no separate link, 12 triangles of margin.
   const ty = yb - (plan.species === 'corgi' ? 0.036 : 0.032);
   const tz = Math.min(f[2], ruffFrontZ(plan, ty)) - 0.012;
+  mb.surface(SURF.metal);
   if (plan.species === 'corgi') {
     // Bone: a short bar between two knobby ends.
     mb.add(box([0, ty, tz], [0.03, 0.009, 0.005]), STEEL, NECK);
@@ -237,7 +246,8 @@ export function acquireNeckwear(id: NeckwearId, plan: BodyPlan, planKey: string,
   let a = cache.get(key);
   if (a) { a.refs++; return a; }
   const mb = new MeshBuilder(buildRigTemplate(plan));
-  mb.begin(id);
+  // Style surface (the body's toon material reads it with surfaceAttr): cloth and leather, steel studs and tags.
+  mb.begin(id).surface(plan.hardened ? SURF.leather : SURF.cloth);
   BUILDERS[id](mb, plan, cls);
   const geometry = mb.build();
   geometry.name = `neckwear_${id}`;

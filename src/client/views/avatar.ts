@@ -11,6 +11,8 @@ export interface AvatarOptions {
   isLocal: boolean;
   /** C3/N2: coat + neckwear (null = the seed's classic coat and the team collar). */
   look?: Look | null;
+  /** K2 elite variant (sergeant / commander): heavier plates, rank stripe, crest, second scar (cats: an eye patch). */
+  veteran?: boolean;
 }
 
 /** Everything an avatar needs each render frame to animate itself. */

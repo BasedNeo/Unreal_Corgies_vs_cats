@@ -1,20 +1,20 @@
-// OWNER: L1 characters lane (C3 added looks). Procedural corgi + cat characters: one parameterized anthropomorphic
-// body plan, a shared 47-bone skeleton, automatic skin weights, a face rig with expressions, team armor + class kit,
-// and code-authored animation (src/client/anim).
+// OWNER: L1 characters lane (C3 added looks, K2 the HARDENED veterans). Procedural corgi + cat characters: one
+// parameterized anthropomorphic body plan, a shared 47-bone skeleton, automatic skin weights, a face rig with
+// expressions, faction armour + team signal + class kit, and code-authored animation (src/client/anim).
 //
-// Draw calls per character: 1 skinned body (fur + face + gear, vertex colors) + 1 rigid weapon
-// (+ its crease ink) + 1 weapon glow (+ 1 skinned kit glow for Overwatch: monocle + mast beacon)
-// (+ 1 skinned neckwear with a C3 look) ≤ 6.
+// Draw calls per character: 1 skinned body (fur + face + suit + armour, vertex colors) + 1 rigid weapon
+// (+ its crease ink) + 1 weapon glow + 1 skinned team-lamp glow (helmet / visor / goggle lamps, the Overwatch
+// monocle + mast beacon) (+ 1 skinned neckwear with a C3 look) ≤ 6.
 // Geometry is cached and shared: a kit (rig template, weapon, glow parts) per (species, breed, class, team, tier), and
 // under it a body (fur + gear) per (coat paint, team collar or not). Every avatar gets its own skeleton and animator.
 // Seeds drive the breed (body shape), per-instance proportions (bone scales), blink timing, idle moods and ear
 // twitches, so two bots with the same kit still look and act differently. Without a look the seed also picks the
 // coat; with a look (C3, `look` option or setLook) the look's coat repaints the fur and its neckwear replaces the
-// team collar. Looks never change the breed, the rig or the class gear.
+// team collar. Looks never change the breed, the rig or the class gear. `veteran` (K2) builds the elite variant of a
+// kit: heavier armour, a crest or rank badge, extra scars, and an eye patch on cats.
 import * as THREE from 'three/webgpu';
 import type { Avatar, AvatarFrame, AvatarOptions } from '../../views/avatar';
 import { toon, glow, addCreaseInk } from '../../style/style-webgpu.js';
-import { PALETTE } from '../../style/style-tokens.js';
 import { releaseObject3D } from '../../engine/release';
 import { Species, type ClassId, type SpeciesId, type TeamId } from '../../../shared/types';
 import { mulberry32 } from '../../../shared/rng';
@@ -22,9 +22,9 @@ import { resolveLook, type Look } from '../../../shared/content/cosmetics';
 import { RigInstance, type RigTemplate } from '../../anim/rig';
 import { CharacterAnimator } from '../../anim/character-animator';
 import type { Expression } from '../../anim/face';
-import { MeshBuilder, ellipsoid } from './mesh-builder';
+import { MeshBuilder } from './mesh-builder';
 import { buildBody, faceInfo } from './body';
-import { buildGear, monoclePos, mastPath } from './gear';
+import { buildGear, buildGearGlow, dressFor, teamColors } from './gear';
 import { buildWeapon, type WeaponGeo } from './weapons';
 import { buildRigTemplate } from './skeleton';
 import { breedOfCoat, coatsFor, planForBreed, type BodyPlan, type Breed, type Coat } from './species';
@@ -40,8 +40,8 @@ export const NPC_TRI_BUDGET = 3500;
  */
 export const DETAIL = { hero: 0.86, npc: 0.66 } as const;
 export const FACE_DETAIL = { hero: 1.12, npc: 0.66 } as const;
-/** Bump when existing seeds change appearance (seeds are save data). */
-export const CHARACTER_VERSION = 1;
+/** Bump when existing seeds change appearance (seeds are save data). v2: K2 HARDENED veterans. */
+export const CHARACTER_VERSION = 2;
 
 /** Rig, weapon and glow parts: everything a look never changes. */
 interface KitAsset {
@@ -52,13 +52,14 @@ interface KitAsset {
   boneInverses: THREE.Matrix4[];
   weapon: WeaponGeo;
   weaponInk: THREE.Object3D | null;
-  /** Skinned glow parts on the shared skeleton (Overwatch monocle lens + mast beacon). */
+  /** Skinned team-lamp glow parts on the shared skeleton (helmet / visor / goggle lamps, Overwatch monocle + beacon). */
   kitGlow: THREE.BufferGeometry | null;
   kitTriangles: number;
   plan: BodyPlan;
   cls: ClassId;
   team: TeamId;
   hero: boolean;
+  veteran: boolean;
   headTop: number;
   snoutTip: [number, number, number];
   bodies: Map<string, BodyAsset>;
@@ -88,10 +89,15 @@ export interface CharacterStats {
   version: number;
   /** The look being worn (every slot resolved), or null for the seeded classic look (no look applied). */
   look: Required<Look> | null;
+  /** Elite / veteran variant (K2). */
+  veteran: boolean;
 }
 
-/** createAvatar options plus an optional look (C3). null / absent = the seeded classic look. */
-export type CharacterOptions = AvatarOptions & { look?: Look | null };
+/**
+ * createAvatar options plus an optional look (C3; null / absent = the seeded classic look) and the elite / veteran
+ * variant (K2: a scarred corgi sergeant, a one-eyed cat commander; any class).
+ */
+export type CharacterOptions = AvatarOptions & { look?: Look | null; veteran?: boolean };
 
 /** Avatar plus lab/test extras (not part of the shared contract). */
 export interface CharacterAvatar extends Avatar {
@@ -115,17 +121,25 @@ export function variantFor(species: SpeciesId, seed: number): Coat {
   return coats[Math.floor(r * coats.length) % coats.length];
 }
 
+/**
+ * A deterministic pick of veteran bots from the seed (K2): about one bot in `oneIn` is a sergeant / commander. No
+ * network needed, every client agrees. Players' veteran status is the lead's call (e.g. a profile level via the roster).
+ */
+export function isVeteranSeed(seed: number, oneIn = 6): boolean {
+  return mulberry32((seed >>> 0) ^ 0x7e7e7e1)() * oneIn < 1;
+}
+
 /** Body shape family chosen from the seed (a look never changes it). */
 export function breedFor(species: SpeciesId, seed: number): Breed {
   return breedOfCoat(species, variantFor(species, seed));
 }
 
-function getKit(species: SpeciesId, breed: Breed, cls: ClassId, team: TeamId, hero: boolean): KitAsset {
-  const key = `${species}:${breed}:${cls}:${team}:${hero ? 'hero' : 'npc'}:v${CHARACTER_VERSION}`;
+function getKit(species: SpeciesId, breed: Breed, cls: ClassId, team: TeamId, hero: boolean, veteran = false): KitAsset {
+  const key = `${species}:${breed}:${cls}:${team}:${hero ? 'hero' : 'npc'}${veteran ? ':vet' : ''}:v${CHARACTER_VERSION}`;
   let a = kits.get(key);
   if (a) { a.refs++; return a; }
   const q = hero ? DETAIL.hero : DETAIL.npc;
-  const plan = planForBreed(species, breed, cls);
+  const plan = planForBreed(species, breed, cls, true);
   const template = buildRigTemplate(plan);
   const weapon = buildWeapon(cls, team, q);
   // Crease ink for the rigid weapon, made once by the style system and cloned per instance.
@@ -136,17 +150,16 @@ function getKit(species: SpeciesId, breed: Breed, cls: ClassId, team: TeamId, he
     if (weaponInk) tmp.remove(weaponInk);
   }
   let kitGlow: THREE.BufferGeometry | null = null;
-  if (cls === 'overwatch') {
+  {
     const g = new MeshBuilder(template);
-    if (hero) g.add(ellipsoid(monoclePos(plan), [0.03, 0.03, 0.008], 10, 4), 0, { rigid: 'head' });
-    const tip = mastPath(plan)[3];
-    g.add(ellipsoid([tip[0], tip[1] + 0.03, tip[2]], [0.036, 0.036, 0.036], hero ? 8 : 6, hero ? 6 : 4), 0, { rigid: 'chest' });
-    kitGlow = g.build();
+    // Vertex colours = the lamp colour (the glow material ignores them; colour readability checks count them right).
+    buildGearGlow(g, plan, cls, hero, teamColors(team).main);
+    if (g.triangles > 0) kitGlow = g.build();
   }
   const boneInverses = RigInstance.bindMatrices(template).map((m) => m.invert());
   const face = faceInfo(plan);
   const kitTriangles = weapon.triangles + (kitGlow ? (kitGlow.index!.count / 3) : 0);
-  a = { key, planKey: `${species}:${breed}:${cls}`, template, boneInverses, weapon, weaponInk, kitGlow, kitTriangles, plan, cls, team, hero, headTop: face.headTop, snoutTip: face.snoutTip, bodies: new Map(), refs: 1 };
+  a = { key, planKey: `${species}:${breed}:${cls}`, template, boneInverses, weapon, weaponInk, kitGlow, kitTriangles, plan, cls, team, hero, veteran, headTop: face.headTop, snoutTip: face.snoutTip, bodies: new Map(), refs: 1 };
   kits.set(key, a);
   return a;
 }
@@ -173,8 +186,8 @@ function getBody(kit: KitAsset, coat: Coat, collar: boolean): BodyAsset {
   const q = kit.hero ? DETAIL.hero : DETAIL.npc;
   const qf = kit.hero ? FACE_DETAIL.hero : FACE_DETAIL.npc;
   const mb = new MeshBuilder(kit.template);
-  buildBody(mb, kit.plan, coat, q, qf);
-  buildGear(mb, kit.plan, kit.cls, kit.team, q, qf, collar);
+  buildBody(mb, kit.plan, coat, q, qf, dressFor(kit.plan, kit.cls, kit.team, kit.veteran));
+  buildGear(mb, kit.plan, kit.cls, kit.team, q, qf, collar, { veteran: kit.veteran });
   b = { key, kit, coat, collar, geometry: mb.build(), triangles: mb.triangles, refs: 1 };
   kit.bodies.set(key, b);
   return b;
@@ -204,10 +217,10 @@ const pinned: Pinned[] = [];
  * so the first spawn of each kit does not pay the ~20 ms build. Pinned kits stay cached until
  * `releasePrewarmedCharacters()`. Pass the roster's looks so the right coats and neckwear are built.
  */
-export function prewarmCharacters(list: (Omit<AvatarOptions, 'isLocal'> & { isLocal?: boolean; look?: Look | null })[]): void {
+export function prewarmCharacters(list: (Omit<AvatarOptions, 'isLocal'> & { isLocal?: boolean; look?: Look | null; veteran?: boolean })[]): void {
   for (const k of list) {
     const seeded = variantFor(k.species, k.seed >>> 0);
-    const kit = getKit(k.species, breedOfCoat(k.species, seeded), k.cls, k.team, !!k.isLocal);
+    const kit = getKit(k.species, breedOfCoat(k.species, seeded), k.cls, k.team, !!k.isLocal, !!k.veteran);
     const p = paintFor(k.species, seeded, k.look);
     pinned.push({ kit, body: getBody(kit, p.coat, p.collar), neck: p.neck ? acquireNeckwear(p.neck, kit.plan, kit.planKey, kit.cls) : null });
   }
@@ -238,12 +251,17 @@ const IDENTITY = new THREE.Matrix4();
 export function createCharacter(o: CharacterOptions): CharacterAvatar {
   const seed = o.seed >>> 0;
   const seeded = variantFor(o.species, seed);
-  const kit = getKit(o.species, breedOfCoat(o.species, seeded), o.cls, o.team, o.isLocal);
+  const kit = getKit(o.species, breedOfCoat(o.species, seeded), o.cls, o.team, o.isLocal, !!o.veteran);
   let paint = paintFor(o.species, seeded, o.look);
   let body = getBody(kit, paint.coat, paint.collar);
   const rng = mulberry32(seed ^ 0x51ed);
   const rig = new RigInstance(kit.template);
-  const bodyMat = toon({ color: 0xffffff, vertexColors: true });
+  // HARDENED (S4 style v2): one weathered toon material for fur, suit and armour, reading per-vertex roughness / metal /
+  // grime / edge wear from the `surface` attribute (MeshBuilder.surface); a light mud band at the boots. The weapon gets
+  // its own weathered material from its finish (X3). Older style factories ignore these params.
+  const bodyMat = toon({ color: 0xffffff, vertexColors: true, surfaceAttr: true, surface: 'fur', mud: 0.3 } as Parameters<typeof toon>[0]);
+  const finish = (kit.weapon as { finish?: { metal: number; wear: number; grime: number } }).finish;
+  const weaponMat = toon({ color: 0xffffff, vertexColors: true, surface: 'weapon', ...(finish ?? {}) } as Parameters<typeof toon>[0]);
   // Generous static bounds: poses (zoomies, death flop, flips) leave the bind-pose box.
   const sphere = new THREE.Sphere(new THREE.Vector3(0, 0.6, 0), 1.7);
   const box = new THREE.Box3(new THREE.Vector3(-1.2, -0.2, -1.2), new THREE.Vector3(1.2, 1.9, 1.2));
@@ -277,7 +295,7 @@ export function createCharacter(o: CharacterOptions): CharacterAvatar {
   // Weapon (rigid, crease-inked) + glow parts.
   let fixedDraws = 1; // weapon
   const weaponBone = rig.bones[bi.weapon];
-  const weapon = new THREE.Mesh(kit.weapon.geometry, bodyMat);
+  const weapon = new THREE.Mesh(kit.weapon.geometry, weaponMat);
   weapon.name = `weapon_${kit.weapon.id}`;
   weapon.castShadow = true;
   weaponBone.add(weapon);
@@ -289,8 +307,8 @@ export function createCharacter(o: CharacterOptions): CharacterAvatar {
     fixedDraws++;
   }
   if (kit.kitGlow) {
-    // Shares the body's skeleton: one draw for glow parts riding different bones.
-    const g = new THREE.SkinnedMesh(kit.kitGlow, glow(PALETTE.laserRed, 2.2));
+    // Team lamps: share the body's skeleton, one draw for glow parts riding different bones.
+    const g = new THREE.SkinnedMesh(kit.kitGlow, glow(teamColors(kit.team).main, 2.2));
     g.name = 'kit_glow';
     g.bind(skeleton, IDENTITY);
     g.boundingSphere = sphere;
@@ -343,7 +361,7 @@ export function createCharacter(o: CharacterOptions): CharacterAvatar {
   const height = (headY + (headTop - headY) * rig.baseScale[bi.head * 3]) * bodyScale;
   const stats: CharacterStats = {
     key: '', variant: '', triangles: 0, drawCalls: 0, bones: kit.template.names.length,
-    snoutTip: kit.snoutTip, version: CHARACTER_VERSION, look: null,
+    snoutTip: kit.snoutTip, version: CHARACTER_VERSION, look: null, veteran: kit.veteran,
   };
   const refresh = () => {
     stats.key = `${kit.key}:${body.key}${neck ? ':' + neck.asset.id : ''}`;

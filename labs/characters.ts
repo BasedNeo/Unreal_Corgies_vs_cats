@@ -2,7 +2,11 @@
 // rendered through the real comic pipeline (toon bands, ink outline pass, bloom, grade).
 //
 // URL params
-//   view=grid|front|side|back|action|face|portrait|turntable|ots|lineup   camera + layout preset (default grid)
+//   view=grid|front|side|back|action|face|portrait|turntable|ots|lineup|roster|vets|closeup   camera + layout preset (default grid)
+//   K2 (HARDENED): roster = every class, corgis (team Corgis) in front, cats (team Cats) behind, the two veterans on
+//     the right, at ~5 m (`facing=back` turns them round); vets = the corgi sergeant + the cat commander, front and
+//     back; closeup = one character's head + chest at 3/4 (species, cls, vet=1, yaw=deg). vet=1 makes every
+//     character a veteran; swap=1 puts each species in the other team's signal colours (the tests' mixed case).
 //   anim=idle|walk|run|sprint|jump|fall|glide|aim|aimfwd|fire|hit|kill|death|emote|slide|swim|cycle   (default: per view)
 //   lineup: every class x both species at `dist` m (default 35) from a gameplay camera (`fov`, default 62 =
 //     hip-fire), groups facing the camera / away (`facing=front,back,side`). sil=1 renders flat ink silhouettes.
@@ -11,7 +15,7 @@
 //              thins like world-space lines (the proposal for the style lane, see docs/handoff/K1.md)
 //   species=corgi|cat  cls=assault  coat=red|tabby|…  team=0|1  expr=smug|…  npc (NPC tier)
 //   t=1.5   pre-simulate 1.5 s at 60 Hz, then freeze (deterministic screenshots); live=1 keeps running
-//   webgl   force the WebGL2 backend (headless probe)        labels=0   hide name tags
+//   webgl   force the WebGL2 backend (headless probe)        labels=0   hide name tags     bare=1   hide the weapons
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { createRenderContext } from '../src/client/engine/renderer';
@@ -30,7 +34,7 @@ const labelsEl = document.getElementById('labels')!;
 type AnimName = 'idle' | 'walk' | 'run' | 'sprint' | 'jump' | 'fall' | 'glide' | 'aim' | 'aimfwd' | 'fire' | 'hit' | 'kill' | 'death' | 'emote' | 'slide' | 'swim' | 'cycle';
 const CYCLE: AnimName[] = ['idle', 'walk', 'run', 'sprint', 'jump', 'aim', 'fire', 'hit', 'death', 'emote'];
 
-interface Spec { species: SpeciesId; coat?: string; cls: ClassId; team: TeamId; anim: AnimName; expr?: Expression; x: number; z: number; yaw: number }
+interface Spec { species: SpeciesId; coat?: string; cls: ClassId; team: TeamId; anim: AnimName; expr?: Expression; x: number; z: number; yaw: number; vet?: boolean }
 
 /** Smallest seed ≥ 1 whose variant is `coat`. */
 function seedFor(species: SpeciesId, coat: string | undefined, salt = 0): number {
@@ -107,6 +111,28 @@ function layout(): Spec[] {
       });
       break;
     }
+    case 'roster': {
+      // Every class: corgis (team Corgis) in front, cats (team Cats) behind, the veterans on the right.
+      const back = P.get('facing') === 'back' ? Math.PI : 0;
+      CLASS_IDS.forEach((c, i) => add({ species: Species.Corgi, coat: corgiCoats[i % 3], cls: c, x: -3.3 + i * 1.08, z: -0.7, yaw: back }));
+      CLASS_IDS.forEach((c, i) => add({ species: Species.Cat, coat: catCoats[i], cls: c, x: -2.76 + i * 1.08, z: 2.2, yaw: back }));
+      add({ species: Species.Corgi, coat: 'red', cls: 'assault', x: 3.35, z: -0.7, yaw: back, vet: true });
+      add({ species: Species.Cat, coat: 'tabby', cls: 'overwatch', x: 3.9, z: 2.2, yaw: back, vet: true });
+      break;
+    }
+    case 'vets': {
+      // The corgi sergeant and the cat commander, from the front and from behind.
+      const vc = (clsParam as ClassId) ?? 'assault';
+      add({ species: Species.Corgi, coat: 'red', cls: vc, x: -1.7, z: 0, vet: true, yaw: 0.25 });
+      add({ species: Species.Cat, coat: 'tabby', cls: vc, x: -0.55, z: 0, vet: true, yaw: -0.25 });
+      add({ species: Species.Corgi, coat: 'red', cls: vc, x: 0.6, z: 0, vet: true, yaw: Math.PI - 0.3 });
+      add({ species: Species.Cat, coat: 'tabby', cls: vc, x: 1.75, z: 0, vet: true, yaw: Math.PI + 0.3 });
+      break;
+    }
+    case 'closeup': {
+      add({ species: only === 'cat' ? Species.Cat : Species.Corgi, coat: P.get('coat') ?? undefined, cls: (clsParam as ClassId) ?? 'assault', yaw: (num('yaw', 20) * Math.PI) / 180 });
+      break;
+    }
     case 'ots':
     case 'portrait':
     case 'turntable': {
@@ -119,9 +145,11 @@ function layout(): Spec[] {
     }
   }
   let list = out;
-  if (view !== 'face' && only === 'corgi') list = list.filter((s) => s.species === Species.Corgi);
-  if (view !== 'face' && only === 'cat') list = list.filter((s) => s.species === Species.Cat);
-  if (clsParam && view !== 'turntable') list = list.map((s) => ({ ...s, cls: clsParam as ClassId }));
+  if (view !== 'face' && view !== 'closeup' && only === 'corgi') list = list.filter((s) => s.species === Species.Corgi);
+  if (view !== 'face' && view !== 'closeup' && only === 'cat') list = list.filter((s) => s.species === Species.Cat);
+  if (clsParam && view !== 'turntable' && view !== 'roster') list = list.map((s) => ({ ...s, cls: clsParam as ClassId }));
+  if (P.get('vet') === '1') list = list.map((s) => ({ ...s, vet: true }));
+  if (P.get('swap') === '1') list = list.map((s) => ({ ...s, team: (s.team === Team.Cats ? Team.Corgis : Team.Cats) as TeamId }));
   if (P.has('team')) list = list.map((s) => ({ ...s, team: Number(P.get('team')) as TeamId }));
   if (forcedAnim) list = list.map((s) => ({ ...s, anim: forcedAnim }));
   if (forcedExpr) list = list.map((s) => ({ ...s, expr: forcedExpr }));
@@ -219,10 +247,11 @@ async function main(): Promise<void> {
   const npc = P.has('npc');
   specs.forEach((s, i) => {
     const seed = seedFor(s.species, s.coat, i);
-    const av = createCharacter({ species: s.species, cls: s.cls, team: s.team, seed, isLocal: !npc });
+    const av = createCharacter({ species: s.species, cls: s.cls, team: s.team, seed, isLocal: !npc, veteran: !!s.vet });
     av.root.position.set(s.x, 0, s.z);
     av.root.rotation.y = s.yaw;
     if (s.expr) av.setExpression(s.expr);
+    if (P.get('bare') === '1') av.root.traverse((o) => { if (o.name.startsWith('weapon')) o.visible = false; }); // inspect the armour
     if (P.get('sil') === '1') {
       // Flat ink silhouettes (style-system material): judge class shapes without color or face detail.
       silMat ??= toon({ color: PALETTE.ink });
@@ -230,10 +259,10 @@ async function main(): Promise<void> {
     }
     scene.add(av.root);
     drivers.push(new Driver(av, s.anim, i * 0.9));
-    if (P.get('labels') !== '0' && (view === 'grid' || view === 'face' || view === 'action')) {
+    if (P.get('labels') !== '0' && (view === 'grid' || view === 'face' || view === 'action' || view === 'roster' || view === 'vets')) {
       const el = document.createElement('div');
       el.className = 'lbl';
-      el.textContent = `${av.stats.variant} ${s.cls}${s.expr ? ' · ' + s.expr : s.anim !== 'idle' ? ' · ' + s.anim : ''}`;
+      el.textContent = `${s.vet ? (s.species === Species.Cat ? 'commander ' : 'sergeant ') : ''}${av.stats.variant} ${s.cls}${s.expr ? ' · ' + s.expr : s.anim !== 'idle' ? ' · ' + s.anim : ''}`;
       labelsEl.appendChild(el);
       tags.push({ el, av });
     }
@@ -251,6 +280,10 @@ async function main(): Promise<void> {
     case 'action': setCam(-1.2, 1.5, -7.6, -0.05, 0.5, 0, 40); break;
     case 'face': setCam(0, 1.12, -4.2, 0, 1.0, 0, 26); break;
     case 'turntable': setCam(-1.1, 1.05, -2.9, 0, 0.66, 0, 34); break;
+    // K2: the roster at ~5 m from a standing eye height (read as veterans at 5 m), the veterans, a head + chest close-up.
+    case 'roster': if (only) setCam(0.25, 1.5, only === 'cat' ? -3.4 : -5.6, 0.25, 0.62, only === 'cat' ? 2.2 : -0.7, 52); else setCam(0.25, 4.2, -6.4, 0.25, 0.3, 0.9, 50); break;
+    case 'vets': setCam(0, 1.2, -4.3, 0, 0.62, 0, 34); break;
+    case 'closeup': setCam(-0.35, 1.02, -1.75, 0, 0.84, 0, 32); break;
     // Over-the-shoulder aim camera (third-person.ts: pivot +1.25 m, shoulder 0.75 m, 2.3 m back, fov 48).
     case 'ots': setCam(0.75, 1.3, 2.3, 0.75, 1.1, -20, 48); break;
     case 'lineup': setCam(LINEUP_CAM[0], LINEUP_CAM[1], LINEUP_CAM[2], 0, 0.6, LINEUP_CAM[2] - num('dist', 35), 62); break;
@@ -268,7 +301,7 @@ async function main(): Promise<void> {
     for (let k = 0; k < n; k++) for (const d of drivers) d.step(1 / 60);
   }
 
-  let last = performance.now(), frames = 0, fpsT = last, fps = 0;
+  let last = performance.now(), frames = 0, fpsT = last, fps = 0, rendered = 0;
   const v = new THREE.Vector3();
   const totalTris = drivers.reduce((a, d) => a + d.av.stats.triangles, 0);
   const maxDraws = Math.max(...drivers.map((d) => d.av.stats.drawCalls));
@@ -279,6 +312,7 @@ async function main(): Promise<void> {
     if (!freeze) for (const d of drivers) d.step(dt);
     if (view === 'turntable' && !freeze) drivers[0].av.root.rotation.y += dt * 0.6;
     ctx.render();
+    rendered++;
     for (const tg of tags) {
       v.set(0, tg.av.height + 0.42, 0).applyMatrix4(tg.av.root.matrixWorld).project(camera);
       tg.el.style.left = `${((v.x + 1) / 2) * innerWidth}px`;
@@ -290,7 +324,7 @@ async function main(): Promise<void> {
     info.textContent = `character lab · view=${view} · ${ctx.backend} · ${fps.toFixed(0)} fps\n` +
       `${drivers.length} characters · ${npc ? 'NPC' : 'hero'} tier · ${totalTris} tris (≤ ${Math.max(...drivers.map((d) => d.av.stats.triangles))} each) · ≤ ${maxDraws} draws each\n` +
       `frame: ${inf.drawCalls ?? inf.calls ?? '?'} draw calls (incl. ink + shadow passes)` + (freeze ? ` · frozen at t=${P.get('t')}s` : '');
-    (globalThis as unknown as { __lab: unknown }).__lab = { ready: true, characters: drivers.length, fps, scene, THREE, TSL };
+    (globalThis as unknown as { __lab: unknown }).__lab = { ready: true, frames: rendered, characters: drivers.length, fps, scene, THREE, TSL };
   });
 }
 

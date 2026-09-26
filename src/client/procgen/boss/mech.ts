@@ -9,7 +9,7 @@
 import * as THREE from 'three/webgpu';
 import type { RigTemplate } from '../../anim/rig';
 import { PALETTE } from '../../style/style-tokens.js';
-import { mixHex } from '../characters/colors';
+import { mixHex, valueNoise3 } from '../characters/colors';
 import { MeshBuilder, ellipsoid, sweep, ring, mirrorX, xform, ellipseLoop, type ColorFn, type Prim, type V3 } from '../characters/mesh-builder';
 import { puck, rbox, tube, lathe, wedge } from './prims';
 import type { VacTankDef as BossDef } from '../../../shared/content/bosses';
@@ -306,12 +306,32 @@ export function buildMechGeometry(rig: RigTemplate, def: BossDef): MechGeometry 
     mb.add(rbox([0.9 * side, 3.2, 0.1], [0.2, 0.06, 0.015], 4, 3, 4, [0, 0, -0.9 * side]), COL.tape, { rigid: 'lid' }); // taped on
   }
 
-  const body = mb.build();
+  const body = batter(mb.build());
   const glowRed = red.build();
   const glowGold = gold.build();
   const bound = new THREE.Sphere(new THREE.Vector3(0, R * 0.95, 0), R * 2.1);
   for (const g of [body, glowRed, glowGold]) g.boundingSphere = bound.clone();
   return { body, glowRed, glowGold, triangles: mb.triangles + red.triangles + gold.triangles, sections: mb.sections };
+}
+
+/**
+ * HARDENED (K2): the Vac-Tank has been through the war. Scorch blotches and worn, lighter chips painted into the vertex
+ * colours from model-space noise (no triangles, no draw calls); the glowing telegraph parts are separate meshes and
+ * stay clean, so every attack still reads. The weathered style material adds grime, edge wear and mud on top.
+ */
+function batter(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  const pos = g.getAttribute('position'), col = g.getAttribute('color');
+  const soot = new THREE.Color(P.ink), worn = new THREE.Color(mixHex(P.concrete, P.catWhite, 0.2)), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    c.setRGB(col.getX(i), col.getY(i), col.getZ(i));
+    const scorch = valueNoise3(x * 1.6 + 3, y * 1.6, z * 1.6, 61);
+    if (scorch > 0.66) c.lerp(soot, Math.min(0.6, (scorch - 0.66) * 2.4));
+    if (valueNoise3(x * 7, y * 7 + 1, z * 7, 67) > 0.8) c.lerp(worn, 0.45);
+    col.setXYZ(i, c.r, c.g, c.b);
+  }
+  col.needsUpdate = true;
+  return g;
 }
 
 export type { Prim };

@@ -61,7 +61,12 @@ src/host/                          Room (players, bots, input buffers, snapshots
 src/client/
   main.ts                          boot + frame loop (lead)
   engine/                          renderer (WebGPU → WebGL2 + comic pipeline), adaptive quality, quality tiers
-  style/                           toon/comic style system (tokens, toon/glow/stylize, outline + bloom + grade)
+  style/                           toon/comic style system (tokens, toon/glow/stylize, outline + bloom + grade).
+                                   W7 S4 v2: toon() returns HardenedToonMaterial (a MeshToonNodeMaterial with its own
+                                   lighting model and TSL weathering); toonMaterial() is uncached; the sky drives the
+                                   shared uniforms STYLE_ENV (reflection) and STYLE_WEATHER (wet, rain, dark); material
+                                   detail is a build-time tier knob (setStyleDetail); floodlights.js has a fixed
+                                   real-light budget per tier plus instanced fake pools
   core/events.ts                   typed client event bus
   input/  camera/                  keyboard/mouse/gamepad → InputCmd · third-person camera (AIM_RAY-aligned)
   net/                             transports (+ emulation), NetClient (interpolation, prediction, reconnect),
@@ -69,6 +74,10 @@ src/client/
   views/                           Avatar contract, entity-views (entity → avatar), nameplates
   procgen/characters/  anim/       procedural corgi/cat bodies, skeleton (47 bones), class silhouette gear, weapons ·
                                    animator (glide pose, kill grin), face, springs; silhouette.ts = range-readability check
+                                   W7 K2: armoured veterans (gear.ts splits faction armour from team signal);
+                                   MeshBuilder.surface is a per-vertex weathering channel for S4's material; the
+                                   `veteran` variant is picked for bots by isVeteranSeed (≈ 1 in 6); X3 weapons are
+                                   hard-surface kits with a `finish`
   procgen/cosmetics/               C3: applyLook (coats repaint the fur, neckwear replaces the team collar), readability
   profile/                         P2: `cvc.profile` (schema + migration from `cvc.adventure`), XP + level curve, unlock
                                    rules, MatchTally (events → result), store; currentLook / recordMatch

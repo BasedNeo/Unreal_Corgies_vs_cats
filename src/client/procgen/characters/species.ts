@@ -15,7 +15,7 @@ export interface Coat {
   pattern: CoatPattern;
   nose: number;
   innerEar: number;
-  iris: number;       // cats: iris color; corgis: pupil color
+  iris: number;       // iris colour (HARDENED corgis: amber / copper; merle: ice blue)
   brow: number;
   socks: boolean;     // light paws
   tongue: number;
@@ -62,6 +62,10 @@ export interface BodyPlan {
   tail: { base: [number, number, number]; pts: [number, number, number][]; r: number[]; fluffy: boolean };
   /** Hairless body (sphynx): no fur tufts on the ruff / pants, whatever the coat paint. */
   hairless?: boolean;
+  /** Neck radii [x, z] at the chest (default 0.1 × 0.095); HARDENED veterans have thicker necks. */
+  neckR?: [number, number];
+  /** HARDENED (K2) proportions: veteran build, collar ruff, armour collar. */
+  hardened?: boolean;
 }
 
 // --- coats -------------------------------------------------------------------------------------
@@ -69,11 +73,14 @@ const P = PALETTE;
 const pink = mixHex(P.catWhite, P.danger, 0.32);
 const darkPink = mixHex(P.corgiTri, P.danger, 0.55);
 const tonguePink = mixHex(P.danger, P.catWhite, 0.38);
+/** HARDENED corgi eyes: amber irises (the mood board's squint), not black buttons. */
+const amber = mixHex(P.corgiOrange, P.accentHot, 0.3);
+const copper = mixHex(P.corgiOrange, P.corgiRed, 0.3);
 
 export const CORGI_COATS: Coat[] = [
-  { name: 'red', base: P.corgiOrange, light: P.corgiCream, dark: P.corgiRed, pattern: 'plain', nose: P.corgiTri, innerEar: mixHex(P.corgiCream, P.danger, 0.12), iris: P.corgiTri, brow: mixHex(P.corgiRed, P.corgiTri, 0.55), socks: true, tongue: tonguePink },
-  { name: 'sable', base: mixHex(P.corgiOrange, P.corgiRed, 0.35), light: P.corgiCream, dark: mixHex(P.corgiRed, P.corgiTri, 0.45), pattern: 'sable', nose: P.corgiTri, innerEar: mixHex(P.corgiCream, P.danger, 0.12), iris: P.corgiTri, brow: mixHex(P.corgiRed, P.corgiTri, 0.75), socks: true, tongue: tonguePink },
-  { name: 'tri', base: P.corgiOrange, light: P.corgiCream, dark: P.corgiTri, pattern: 'tri', nose: P.corgiTri, innerEar: mixHex(P.corgiCream, P.danger, 0.1), iris: P.corgiTri, brow: mixHex(P.corgiOrange, P.corgiCream, 0.35), socks: true, tongue: tonguePink },
+  { name: 'red', base: P.corgiOrange, light: P.corgiCream, dark: P.corgiRed, pattern: 'plain', nose: P.corgiTri, innerEar: mixHex(P.corgiCream, P.danger, 0.12), iris: amber, brow: mixHex(P.corgiRed, P.corgiTri, 0.55), socks: true, tongue: tonguePink },
+  { name: 'sable', base: mixHex(P.corgiOrange, P.corgiRed, 0.35), light: P.corgiCream, dark: mixHex(P.corgiRed, P.corgiTri, 0.45), pattern: 'sable', nose: P.corgiTri, innerEar: mixHex(P.corgiCream, P.danger, 0.12), iris: copper, brow: mixHex(P.corgiRed, P.corgiTri, 0.75), socks: true, tongue: tonguePink },
+  { name: 'tri', base: P.corgiOrange, light: P.corgiCream, dark: P.corgiTri, pattern: 'tri', nose: P.corgiTri, innerEar: mixHex(P.corgiCream, P.danger, 0.1), iris: copper, brow: mixHex(P.corgiOrange, P.corgiCream, 0.35), socks: true, tongue: tonguePink },
 ];
 
 export const CAT_COATS: Coat[] = [
@@ -89,7 +96,7 @@ export function coatsFor(species: SpeciesId): Coat[] { return species === Specie
 
 // Earned coats (C3 cosmetics) that no seed rolls: they only come from a look.
 /** Blue merle: silver-grey fur marbled with black, white blaze/bib/socks, copper brows. */
-export const MERLE_COAT: Coat = { name: 'merle', base: mixHex(P.catGrey, P.catWhite, 0.2), light: P.catWhite, dark: mixHex(P.catBlack, P.corgiTri, 0.5), pattern: 'merle', nose: P.corgiTri, innerEar: mixHex(P.corgiCream, P.danger, 0.12), iris: P.corgiTri, brow: mixHex(P.corgiOrange, P.corgiRed, 0.35), socks: true, tongue: tonguePink };
+export const MERLE_COAT: Coat = { name: 'merle', base: mixHex(P.catGrey, P.catWhite, 0.2), light: P.catWhite, dark: mixHex(P.catBlack, P.corgiTri, 0.5), pattern: 'merle', nose: P.corgiTri, innerEar: mixHex(P.corgiCream, P.danger, 0.12), iris: mixHex(P.glowCyan, P.catGrey, 0.55), brow: mixHex(P.corgiOrange, P.corgiRed, 0.35), socks: true, tongue: tonguePink };
 /** Calico: white with big ginger and black patches (white muzzle, bib and paws). */
 export const CALICO_COAT: Coat = { name: 'calico', base: P.catWhite, light: P.catWhite, dark: P.catBlack, accent: P.catGinger, pattern: 'calico', nose: pink, innerEar: pink, iris: mixHex(P.accentHot, P.grass, 0.45), brow: mixHex(P.catGrey, P.catBlack, 0.7), socks: true, tongue: tonguePink };
 
@@ -190,12 +197,63 @@ function applyBuild(p: BodyPlan, cls: ClassId | undefined): BodyPlan {
   return p;
 }
 
-export function planFor(species: SpeciesId, coat: Coat, cls?: ClassId): BodyPlan {
-  return planForBreed(species, breedOfCoat(species, coat), cls);
+/**
+ * Scale every head-local measure (cranium, cheeks, muzzle / pads, nose, jaw, eyes, brows, ears) about the head bone,
+ * so the face stays in proportion. seatFace re-seats the eyes and brows afterwards.
+ */
+function scaleHead(p: BodyPlan, s: number): void {
+  const v = (a: [number, number, number]): [number, number, number] => [a[0] * s, a[1] * s, a[2] * s];
+  const r2 = (a: [number, number]): [number, number] => [a[0] * s, a[1] * s];
+  p.cranium = { c: v(p.cranium.c), r: v(p.cranium.r) };
+  p.cheek = { ...p.cheek, c: v(p.cheek.c), r: v(p.cheek.r) };
+  if (p.muzzle) p.muzzle = { base: v(p.muzzle.base), tip: v(p.muzzle.tip), rBase: r2(p.muzzle.rBase), rTip: r2(p.muzzle.rTip) };
+  if (p.pads) p.pads = { c: v(p.pads.c), r: p.pads.r * s };
+  p.nose = { c: v(p.nose.c), r: v(p.nose.r) };
+  p.jaw = { pivot: v(p.jaw.pivot), a: v(p.jaw.a), b: v(p.jaw.b), r: r2(p.jaw.r) };
+  p.eye = { ...p.eye, c: v(p.eye.c), r: p.eye.r * s };
+  p.brow = { c: v(p.brow.c), r: v(p.brow.r) };
+  p.ear = { ...p.ear, base: v(p.ear.base), tip: v(p.ear.tip), w: p.ear.w * s, d: p.ear.d * s };
 }
 
-export function planForBreed(species: SpeciesId, breed: Breed, cls?: ClassId): BodyPlan {
-  return seatFace(applyBuild(planForRaw(species, breed), cls));
+/**
+ * HARDENED proportions (docs/design/HARDENED.md › Pillars 1): veterans, not mascots. A slightly smaller head on a
+ * heavier frame: broader chest and shoulders, a thick neck, thick forearms, a wider planted stance, and heavy low
+ * brows (the squint lives in the face rig). Corgis keep their short legs, big ears and fox muzzle; cats get about
+ * half the bulk, so they stay lithe.
+ */
+function harden(p: BodyPlan): BodyPlan {
+  const k = p.species === 'cat' ? 0.55 : 1;
+  const chest = [0, 0, 0.01, 0.03, 0.06, 0.09, 0.12, 0.2];
+  const depth = [0, 0, 0.01, 0.02, 0.04, 0.06, 0.08, 0.14];
+  p.torso = { ...p.torso, rx: p.torso.rx.map((r, i) => r * (1 + k * chest[i])), rz: p.torso.rz.map((r, i) => r * (1 + k * depth[i])) };
+  p.neckR = [0.1 * (1 + 0.18 * k), 0.095 * (1 + 0.16 * k)];
+  p.shoulder = [p.shoulder[0] + 0.014 * k, p.shoulder[1], p.shoulder[2]];
+  p.armR = [p.armR[0] * (1 + 0.06 * k), p.armR[1] * (1 + 0.16 * k)];
+  p.handR *= 1 + 0.04 * k;
+  p.thighR *= 1 + 0.05 * k;
+  p.shinR *= 1 + 0.08 * k;
+  p.hipX *= 1 + 0.08 * k;
+  scaleHead(p, 1 - 0.05 * (p.species === 'cat' ? 0.7 : 1));
+  // Leaner cheeks (less baby-fat round, more jaw; the fluff stays, tufted) and smaller eyes (less mascot, more squint).
+  p.cheek = { ...p.cheek, r: [p.cheek.r[0] * 0.88, p.cheek.r[1] * 0.92, p.cheek.r[2] * 0.95] };
+  p.eye = { ...p.eye, r: p.eye.r * 0.9 };
+  p.hardened = true;
+  // Heavy brow ridge, set low over the eyes.
+  p.brow = { c: [p.brow.c[0] * 1.02, p.brow.c[1] - 0.012, p.brow.c[2]], r: [p.brow.r[0] * 1.14, p.brow.r[1] * 1.45, p.brow.r[2] * 1.3] };
+  return p;
+}
+
+export function planFor(species: SpeciesId, coat: Coat, cls?: ClassId, hardened = false): BodyPlan {
+  return planForBreed(species, breedOfCoat(species, coat), cls, hardened);
+}
+
+/**
+ * `hardened` (the playable cast since K2) applies the HARDENED veteran proportions. Bosses built from these plans
+ * (boss/pilot.ts, boss/sniper.ts) keep the classic ones their outfits were fitted to.
+ */
+export function planForBreed(species: SpeciesId, breed: Breed, cls?: ClassId, hardened = false): BodyPlan {
+  const raw = planForRaw(species, breed);
+  return seatFace(applyBuild(hardened ? harden(raw) : raw, cls));
 }
 
 function planForRaw(species: SpeciesId, breed: Breed): BodyPlan {

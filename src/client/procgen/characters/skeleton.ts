@@ -130,6 +130,18 @@ export function muzzlePoint(p: BodyPlan, th: number, z: number, out = 0): P3 {
   return [(rh + lip) * Math.sin(th), cy - (rv + lip) * Math.cos(th), z];
 }
 
+/**
+ * Headgear cut over the cranium, as polar angles in units of π (0 = the top of the head): the front edge sits
+ * above the brows, the sides above the cheeks (ears poke through), the back drops over the nape.
+ */
+export interface HeadCut { front: number; back: number; side?: number }
+
+/** Polar angle (radians) of a headgear cut at azimuth ph (0 = front, -Z). */
+export function cutAngle(ph: number, front: number, backA: number, sideA?: number): number {
+  const c = Math.cos(ph), side = sideA ?? Math.min(0.43, (front + backA) / 2);
+  return (side + (front - side) * Math.max(0, c) + (backA - side) * Math.max(0, -c)) * Math.PI;
+}
+
 export function norm(v: P3): P3 { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
 export function scale(v: P3, s: number): P3 { return [v[0] * s, v[1] * s, v[2] * s]; }
 
