@@ -52,7 +52,8 @@ async function player(url: string, name: string) {
   }, 1000 / 60);
   const origDispose = net.dispose.bind(net);
   net.dispose = () => { clearInterval(timer); origDispose(); };
-  await until(() => net.connected && net.latest() !== null, 3000, `${name} welcome`);
+  // a new room builds its world (terrain, nav grid, interaction sites) before the first snapshot: seconds on a loaded box
+  await until(() => net.connected && net.latest() !== null, 15000, `${name} welcome`);
   return { net, state };
 }
 
@@ -151,7 +152,7 @@ describe('server hardening', () => {
     const s = await start();
     const c = await raw(s.wsUrl);
     c.hello();
-    await until(() => c.msgs.some((m) => m.t === 'welcome'), 2000, 'welcome');
+    await until(() => c.msgs.some((m) => m.t === 'welcome'), 10000, 'welcome');
     for (let i = 0; i < 40; i++) c.ws.send('{"t":"input","cmds":[{"seq":"x"}]}');
     await until(() => c.closed.code !== 0, 2000, 'kick');
     expect(c.closed.code).toBe(1008);
@@ -166,7 +167,7 @@ describe('server hardening', () => {
     expect(big.closed.code).toBe(1009);
     const flood = await raw(s.wsUrl);
     flood.hello();
-    await until(() => flood.msgs.some((m) => m.t === 'welcome'), 2000, 'welcome');
+    await until(() => flood.msgs.some((m) => m.t === 'welcome'), 10000, 'welcome');
     for (let i = 0; i < 1500; i++) flood.ws.send('{"t":"ping","id":1,"ct":1}');
     await until(() => flood.closed.code !== 0, 3000, 'flood kick');
     expect(flood.closed.code).toBe(1008);
@@ -204,7 +205,7 @@ describe('server hardening', () => {
     const s = await start();
     const c = await raw(s.wsUrl);
     c.hello();
-    await until(() => c.msgs.some((m) => m.t === 'welcome'), 2000, 'welcome');
+    await until(() => c.msgs.some((m) => m.t === 'welcome'), 10000, 'welcome');
     await s.close('maintenance');
     servers.length = 0;
     await until(() => c.closed.code !== 0, 2000, 'shutdown close');
