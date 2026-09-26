@@ -40,11 +40,19 @@ npm run dev                 # http://localhost:5173 → main menu → pick a MAT
 | Mouse, RMB | aim and fire, aim down |
 | Q | class ability |
 | R | reload |
-| E | interact (kiosks, karts, mission) |
+| E | interact (kiosks, karts, the RC plane, mission steps); in a vehicle: hop out, or bail out in the air |
 | C | slide while sprinting; in the air, ground-pound |
 | Enter | chat |
 | B | taunt (a voiced comic line) |
 | Tab | scoreboard |
+
+In the RC plane (from the Rooftop Hangar on the garage roof): the mouse steers, W/S is the throttle, Shift is the
+boost, LMB fires the squeaky gun, and E bails out.
+
+In the yard:
+- a Dig Charge planted against the boarded wall in the Garage's alley blows it open;
+- tuna-can and crate stacks break under fire, blasts and hard kart rams;
+- the RC plane rams whoever it flies into.
 
 Six classes can be swapped at your base's Ordnance Kiosk:
 - **Assault**: Bark Blast.
