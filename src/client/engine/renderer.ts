@@ -1,7 +1,9 @@
 // WebGPU renderer (auto-falls back to WebGL2) + the comic post pipeline + adaptive resolution + quality tiers.
+// W7 S4: the tier also fixes the style's material detail (setStyleDetail: weathering masks, per-light specular) at
+// build time — like the world knobs it needs a reload to change; engine knobs (resolution, shadows, bloom) stay live.
 import * as THREE from 'three/webgpu';
 import { renderOutput } from 'three/tsl';
-import { createComicPipeline, createStyleLights } from '../style/style-webgpu.js';
+import { createComicPipeline, createStyleLights, setStyleDetail, DETAIL_BY_TIER } from '../style/style-webgpu.js';
 import { STYLE } from '../style/style-tokens.js';
 import { createAdaptiveQuality, type AdaptiveQuality } from './adaptive-quality';
 import { QUALITY, type QualityTier, type QualityProfile } from './quality';
@@ -16,6 +18,8 @@ export interface RenderContext {
   adaptive: AdaptiveQuality;
   /** The tier whose engine knobs are applied. */
   readonly quality: QualityTier;
+  /** Style material detail fixed at creation (0 low, 1 medium, 2 high; see style-webgpu.js). */
+  readonly styleDetail: number;
   /** Applies a tier's engine knobs live: pixel-ratio bounds, the shadow pass, bloom (see engine/quality.ts). World
    *  knobs (foliage, garden density, shadow-map size...) are read when the world view is built. */
   setQuality(tier: QualityTier): void;
@@ -52,6 +56,9 @@ export function applyEngineQuality(t: QualityTarget, profile: QualityProfile, no
 }
 
 export async function createRenderContext(container: HTMLElement, opts: { forceWebGL?: boolean; quality?: QualityTier } = {}): Promise<RenderContext> {
+  // before any toon() material exists: the world, characters and props built after this share the tier's detail
+  const styleDetail = DETAIL_BY_TIER[opts.quality ?? 'high'];
+  setStyleDetail(styleDetail);
   const renderer = new THREE.WebGPURenderer({ antialias: false, forceWebGL: !!opts.forceWebGL, powerPreference: 'high-performance' });
   await renderer.init();
   renderer.setSize(container.clientWidth || innerWidth, container.clientHeight || innerHeight);
@@ -77,7 +84,7 @@ export async function createRenderContext(container: HTMLElement, opts: { forceW
   window.addEventListener('resize', onResize);
   let tier: QualityTier = opts.quality ?? 'high';
   const ctx: RenderContext = {
-    renderer, scene, camera, pipeline, backend, adaptive,
+    renderer, scene, camera, pipeline, backend, adaptive, styleDetail,
     get quality() { return tier; },
     setQuality(next: QualityTier) {
       tier = next;

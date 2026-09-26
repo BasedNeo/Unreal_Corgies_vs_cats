@@ -7,12 +7,18 @@
 // dimmed), thickens the cartoon cloud layer, hides the sun disc, dims + cools the key light, flattens
 // light into the hemisphere, thickens and greys the fog, and draws lightning: a whole-sky flash plus
 // a jagged comic bolt at the strike's bearing (bloom-bright). All smooth: inputs are blended values.
+// W7 S4 (HARDENED): the battle mood. Ramps re-keyed to a desaturated dusk (warm low key, cool rim, slate sky, haze);
+// the sun arc tops out at STYLE.mood.sunMaxElevation so the light always rakes; clear weather keeps broken cloud
+// (STYLE.mood.minCloud); clouds are soft layered billows with dark undersides instead of flat cartoon puffs; the fog is
+// a node (distance exp² + a ground haze that pools in low ground, thicker in rain); and the sky drives the style's
+// shared uniforms: STYLE_ENV (reflection colours for wet ground/metal) and STYLE_WEATHER (wet, rain, dark).
 import * as THREE from 'three/webgpu';
 import {
   positionLocal, normalize, uniform, vec3, vec2, float, mix, smoothstep, max, dot, pow, step, fract, sin,
-  mx_fractal_noise_float, time, floor, clamp, abs,
+  mx_fractal_noise_float, time, floor, clamp, abs, positionWorld, cameraPosition, length, exp, fog as fogOf,
 } from 'three/tsl';
 import { STYLE } from '../style/style-tokens.js';
+import { STYLE_ENV, STYLE_WEATHER } from '../style/style-webgpu.js';
 
 type RGB = [number, number, number];
 const hex = (h: number): RGB => { const c = new THREE.Color(h); return [c.r, c.g, c.b]; };
@@ -26,20 +32,20 @@ function ramp<T extends number | RGB>(keys: [number, T][], x: number): T {
   return keys[keys.length - 1][1];
 }
 
-/** Keyed by sun elevation (deg). Colors are linear (from sRGB hex). */
+/** Keyed by sun elevation (deg). Colors are linear (from sRGB hex). HARDENED: a desaturated dusk at every hour. */
 export const YARD_RAMPS = {
-  zenith: [[-14, hex(0x0b1430)], [-4, hex(0x26356b)], [2, hex(0x4a67a8)], [12, hex(0x3f86d8)], [40, hex(0x2f7fe0)]] as [number, RGB][],
-  horizon: [[-14, hex(0x1b2a50)], [-4, hex(0x8a6f9e)], [2, hex(0xf2a37a)], [9, hex(0xf3cfa0)], [20, hex(0xb4dcf0)], [50, hex(0xa6d6f2)]] as [number, RGB][],
-  sun: [[-4, hex(0xff8a4a)], [4, hex(0xffb070)], [14, hex(0xffdcae)], [30, hex(0xfff0d6)], [60, hex(0xfff6e8)]] as [number, RGB][],
-  sunI: [[-5, 0], [0, 0.35], [8, 0.8], [20, 1.0], [60, 1.05]] as [number, number][],
-  rim: [[-10, hex(0x6f8cff)], [0, hex(0xff9ab0)], [12, hex(0xb8d8ff)], [40, hex(0x9fd8ff)]] as [number, RGB][],
-  rimI: [[-10, 0.45], [0, 0.8], [20, 1.0]] as [number, number][],
-  hemiSky: [[-12, hex(0x31457a)], [0, hex(0x9d8fc4)], [12, hex(0xa8d0ea)], [40, hex(0xa8d8f0)]] as [number, RGB][],
-  hemiGround: [[-12, hex(0x262018)], [0, hex(0x4c3a2c)], [20, hex(0x5a4a30)]] as [number, RGB][],
-  hemiI: [[-12, 0.62], [0, 0.85], [20, 1.0]] as [number, number][],
-  fogDensity: [[-12, 0.0036], [0, 0.0032], [12, 0.0024], [40, 0.0021]] as [number, number][],
-  cloud: [[-12, hex(0x3a4670)], [0, hex(0xffc3a8)], [10, hex(0xfff1dc)], [30, hex(0xffffff)]] as [number, RGB][],
-  cloudShade: [[-12, hex(0x222b4f)], [0, hex(0xa98bb0)], [10, hex(0xc9cfe6)], [30, hex(0xd6e4f2)]] as [number, RGB][],
+  zenith: [[-14, hex(0x080c18)], [-4, hex(0x1a2238)], [2, hex(0x2e3a52)], [12, hex(0x3d5068)], [40, hex(0x46607c)]] as [number, RGB][],
+  horizon: [[-14, hex(0x121828)], [-4, hex(0x4a4658)], [2, hex(0xb07a58)], [9, hex(0xb89274)], [20, hex(0x98a0a4)], [50, hex(0x9aa8b2)]] as [number, RGB][],
+  sun: [[-4, hex(0xff7a3e)], [4, hex(0xff9c58)], [14, hex(0xffbe84)], [30, hex(0xffd8ae)], [60, hex(0xffe8cc)]] as [number, RGB][],
+  sunI: [[-5, 0], [0, 0.4], [8, 0.85], [20, 1.0], [60, 1.02]] as [number, number][],
+  rim: [[-10, hex(0x4e64a8)], [0, hex(0x8a8cc8)], [12, hex(0x86a6d8)], [40, hex(0x8fb0da)]] as [number, RGB][],
+  rimI: [[-10, 0.5], [0, 0.9], [20, 1.0]] as [number, number][],
+  hemiSky: [[-12, hex(0x243052)], [0, hex(0x6a6a8c)], [12, hex(0x74849c)], [40, hex(0x8092a8)]] as [number, RGB][],
+  hemiGround: [[-12, hex(0x16130f)], [0, hex(0x2c241b)], [20, hex(0x3a3024)]] as [number, RGB][],
+  hemiI: [[-12, 0.6], [0, 0.82], [20, 0.95]] as [number, number][],
+  fogDensity: [[-12, 0.0042], [0, 0.0042], [12, 0.0036], [40, 0.0034]] as [number, number][],
+  cloud: [[-12, hex(0x262c44)], [0, hex(0xb07e6c)], [10, hex(0xb8a494)], [30, hex(0xa9b0b8)]] as [number, RGB][],
+  cloudShade: [[-12, hex(0x10142a)], [0, hex(0x3e3548)], [10, hex(0x505662)], [30, hex(0x5a6470)]] as [number, RGB][],
 };
 
 export interface SunState {
@@ -49,7 +55,8 @@ export interface SunState {
   night: boolean;
 }
 
-const MAX_ELEV = 68, AZ_OFFSET = 0.35;
+// HARDENED: the sun never climbs above STYLE.mood.sunMaxElevation (was 68): raking light, long shadows, all day.
+const MAX_ELEV = STYLE.mood.sunMaxElevation, AZ_OFFSET = 0.35;
 /** t in [0,1): 0 midnight, 0.25 sunrise (east), 0.5 noon (south-ish, +z), 0.75 sunset (west). */
 export function sunState(t: number): SunState {
   const phi = (((t % 1) + 1) % 1 - 0.25) * Math.PI * 2;
@@ -72,10 +79,13 @@ export interface SkyWeather {
   /** Lightning flash 0..1 and the bearing (math angle in XZ) + power of the bolt, if any. */
   flash: number; boltBearing: number; boltPower: number; boltSeed: number;
 }
+/** setWeather() input: the sky weather plus, optionally, the ground wetness (the style's wet sheen; without it the
+ *  look estimates wetness from rain). */
+export type SkyWeatherIn = SkyWeather & { wet?: number };
 export const CLEAR_SKY: SkyWeather = { cloud: 0.18, rain: 0, storm: 0, fog: 0, dark: 0, flash: 0, boltBearing: 0, boltPower: 0, boltSeed: 0 };
 
-const OVERCAST_ZENITH = hex(0x8795a3), OVERCAST_HORIZON = hex(0xb9c0c4);
-const STORM_ZENITH = hex(0x39424d), STORM_HORIZON = hex(0x5f6870);
+const OVERCAST_ZENITH = hex(0x5a6572), OVERCAST_HORIZON = hex(0x8c949c);
+const STORM_ZENITH = hex(0x222932), STORM_HORIZON = hex(0x444c56);
 const lum = (c: RGB) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
 /** Blend `base` toward a grey of the same luminance (tinted by `tint`), then dim. */
 function weatherTint(base: RGB, tint: RGB, amount: number, dim: number): RGB {
@@ -91,7 +101,7 @@ export interface YardSky {
   setTimeOfDay(t: number): void;
   readonly timeOfDay: number;
   /** G1: weather look (cloud cover, greys, fog, lightning). */
-  setWeather(w: SkyWeather): void;
+  setWeather(w: SkyWeatherIn): void;
   update(camera: THREE.Camera, focus?: THREE.Vector3): SunState;
   dispose(): void;
 }
@@ -144,10 +154,12 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
   const withClouds = opts.clouds !== false;
   const n = withClouds ? mx_fractal_noise_float(cuv.mul(0.55), 3, 2.0, 0.5) : float(-1);
   const n2 = withClouds ? mx_fractal_noise_float(cuv.mul(0.55).add(vec2(U.sunDir.x, U.sunDir.z).mul(0.05)), 3, 2.0, 0.5) : float(-1);
-  const cover = withClouds ? smoothstep(0.03, 0.06, n.add(U.coverBias)).mul(smoothstep(0.04, 0.22, dir.y)) : float(0);
-  const shade = step(n2, n.sub(0.035));
-  const cloudCol = mix(U.cloudShade, U.cloud, shade);
-  if (withClouds) sky = mix(sky, cloudCol, cover.mul(0.92));
+  // HARDENED: soft-edged billows (wider coverage ramp) lit on the sun side, dark undersides, a second darker scud layer
+  const cover = withClouds ? smoothstep(-0.02, 0.1, n.add(U.coverBias)).mul(smoothstep(0.02, 0.2, dir.y)) : float(0);
+  const shade = smoothstep(-0.05, 0.05, n.sub(n2).sub(0.012));
+  const thick = smoothstep(0.02, 0.3, n.add(U.coverBias));
+  const cloudCol = mix(mix(U.cloudShade, U.cloud, shade), U.cloudShade.mul(0.7), thick.mul(0.55));
+  if (withClouds) sky = mix(sky, cloudCol, cover.mul(0.95));
   // sun disc (bright -> bloom) drawn over clouds' gaps
   const disc = smoothstep(0.9993, 0.99965, sd).mul(U.sunVis);
   sky = mix(sky, U.sunCol.mul(2.1), disc.mul(float(1).sub(cover.mul(0.85))));
@@ -181,19 +193,33 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
   dome.userData.noCameraCollide = true;
   scene.add(dome);
 
-  const fog = new THREE.FogExp2(0xbfe3f4, 0.003);
+  const fog = new THREE.FogExp2(0x6b7482, 0.004);
   scene.fog = fog;
-  scene.background = new THREE.Color(0xbfe3f4);
+  scene.background = new THREE.Color(0x6b7482);
+  // Fog node (HARDENED): distance exp² (the FogExp2 above holds colour + density) plus a ground haze that pools in
+  // low ground and thickens with rain/fog, so depth reads in layers. Every fogged material evaluates it (a few ALU).
+  const FU = { color: uniform(fog.color), density: uniform(0.004), haze: uniform(STYLE.mood.haze), hazeTop: uniform(STYLE.mood.hazeHeight) };
+  const dist = length(positionWorld.sub(cameraPosition));
+  const fExp = float(1).sub(exp(FU.density.mul(dist).pow(2).negate()));
+  // haze layer density exp(-y/H), integrated along the view ray (camera at hc, surface at y0): the mean layer density on
+  // the path is H * |e(y0) - e(hc)| / |hc - y0|, so a high camera looks down THROUGH the layer (overviews stay readable)
+  // while ground-level views get the full mist between them and the far side of the yard.
+  const y0 = max(positionWorld.y, float(0)), hc = max(cameraPosition.y, float(0));
+  const e0 = exp(y0.div(FU.hazeTop).negate()), e1 = exp(hc.div(FU.hazeTop).negate());
+  const layer = FU.hazeTop.mul(abs(e0.sub(e1))).div(max(abs(hc.sub(y0)), float(0.05)));
+  const hazeF = float(1).sub(exp(dist.mul(FU.density).mul(2).mul(layer).negate())).mul(FU.haze);
+  scene.fogNode = fogOf(FU.color, float(1).sub(float(1).sub(fExp).mul(float(1).sub(hazeF))).clamp(0, 1));
 
   let tod = opts.timeOfDay ?? 0.68;
-  let wx: SkyWeather = { ...CLEAR_SKY };
+  let wx: SkyWeatherIn = { ...CLEAR_SKY };
   const tmp = new THREE.Vector3(), fwd = new THREE.Vector3(), lightSpace = new THREE.Matrix4(), inv = new THREE.Matrix4();
   const c3 = new THREE.Color();
   const setRGB = (c: THREE.Color, v: RGB) => c.setRGB(v[0], v[1], v[2]);
 
   function apply(s: SunState) {
     const e = s.elevation;
-    const W = wx;
+    // battle mood: clear weather still keeps broken cloud (visual only; gameplay weather is untouched)
+    const W = { ...wx, cloud: Math.max(wx.cloud, STYLE.mood.minCloud) };
     const grey = Math.min(1, Math.max(0, (W.cloud - 0.2) / 0.7));              // overcast amount
     const storm = W.storm;
     const tintZ = STORM_ZENITH.map((v, i) => lerp(OVERCAST_ZENITH[i], v, storm)) as RGB;
@@ -232,7 +258,19 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
     fog.color.lerp(new THREE.Color(0xc9d0e4), Math.min(1, W.flash * 0.3));
     baseFog = ramp(YARD_RAMPS.fogDensity, e) * (1 + 1.5 * W.fog + 0.8 * W.rain);
     fog.density = baseFog;
+    (FU.density as { value: number }).value = baseFog;
     (scene.background as THREE.Color).copy(fog.color);
+    (FU.color.value as THREE.Color).copy(fog.color);
+    (FU.haze as { value: number }).value = Math.min(0.8, STYLE.mood.haze * (1 + 1.2 * W.fog + 0.8 * W.rain) * (s.night ? 0.6 : 1));
+    // style uniforms: reflection colours (what wet ground and metal mirror) and the weather of the look
+    const zc = STYLE_ENV.zenith.value as THREE.Color, hc = STYLE_ENV.horizon.value as THREE.Color, gc = STYLE_ENV.ground.value as THREE.Color;
+    zc.setRGB(zen[0], zen[1], zen[2]);
+    hc.setRGB(horizon[0], horizon[1], horizon[2]).lerp(new THREE.Color(0xc9d0e4), Math.min(1, W.flash * 0.6));
+    const hg = ramp(YARD_RAMPS.hemiGround, e);
+    gc.setRGB(hg[0], hg[1], hg[2]).multiplyScalar(0.6);
+    (STYLE_WEATHER.wet as { value: number }).value = W.wet ?? Math.min(1, W.rain * 2.5);
+    (STYLE_WEATHER.rain as { value: number }).value = W.rain;
+    (STYLE_WEATHER.dark as { value: number }).value = W.dark;
     (U.flash as { value: number }).value = W.flash;
     (U.bolt as { value: number }).value = W.boltPower;
     (U.boltDir.value as THREE.Vector2).set(Math.cos(W.boltBearing), Math.sin(W.boltBearing));
@@ -246,11 +284,12 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
     dome, sun,
     get timeOfDay() { return tod; },
     setTimeOfDay(t: number) { tod = ((t % 1) + 1) % 1; state = sunState(tod); apply(state); },
-    setWeather(w: SkyWeather) { wx = w; apply(state); },
+    setWeather(w: SkyWeatherIn) { wx = w; apply(state); },
     update(camera, focus) {
       dome.position.copy(camera.position);
       // less aerial haze when looking down from high up (overviews), full haze at player height
       fog.density = baseFog * Math.max(0.5, Math.min(1, 1 - (camera.position.y - 12) / 130));
+      (FU.density as { value: number }).value = fog.density;
       // shadow box centered ~35 m ahead of the camera on the ground (or at the given focus)
       const hgt = Math.max(0, camera.position.y);
       const box = Math.min(150, S + hgt * 0.9);
@@ -286,6 +325,7 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
       if (ownRig) scene.remove(rig!);
       sun.castShadow = false;
       if (scene.fog === fog) scene.fog = null;
+      if (scene.fogNode) scene.fogNode = null;
     },
   };
 }

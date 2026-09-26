@@ -3,7 +3,60 @@
 
 import { STYLE } from './style-tokens.js';
 
-/** Stepped lighting ramp for MeshToonMaterial / MeshToonNodeMaterial `gradientMap`. */
+/**
+ * Soft multi-band ramp value at half-lambert coordinate x = N.L * 0.5 + 0.5 (pure, testable).
+ * `steps` bands from `floor` to 1; band edges sit from just before the terminator (x = 0.5, N.L = 0) to x ≈ 0.84, each
+ * edge a smoothstep of half-width `softness`, and the lit band keeps a slight slope so big faces still read as form.
+ */
+export function rampValue(x, steps = STYLE.toonSteps, floor = STYLE.bandFloor, softness = STYLE.ramp.softness, terminator = STYLE.ramp.terminator) {
+  const n = Math.max(1, steps - 1);
+  const e0 = terminator - 0.06, e1 = terminator + 0.34;
+  const ss = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+  let v = floor;
+  for (let i = 0; i < n; i++) {
+    const e = n === 1 ? terminator : e0 + ((e1 - e0) * i) / (n - 1);
+    v += ((1 - floor) / n) * ss(e - softness, e + softness, x) * (i === n - 1 ? 0.92 : 1);
+  }
+  // top band: keep a gentle slope up to 1 (stylized-real, not a flat plateau)
+  v += (1 - floor) / n * 0.08 * ss(e1, 1, x);
+  return Math.min(1, v);
+}
+
+/** Soft-banded lighting ramp (HARDENED): linear-filtered, `texels` wide. Used as `gradientMap` by every toon material. */
+export function createRampTexture(THREE, { steps = STYLE.toonSteps, floor = STYLE.bandFloor, softness = STYLE.ramp.softness, texels = STYLE.ramp.texels } = {}) {
+  const data = new Uint8Array(texels);
+  for (let i = 0; i < texels; i++) data[i] = Math.round(255 * rampValue((i + 0.5) / texels, steps, floor, softness));
+  const tex = new THREE.DataTexture(data, texels, 1, THREE.RedFormat);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  tex.name = `style_ramp_${steps}`;
+  return tex;
+}
+
+/**
+ * Per-vertex surface for merged meshes that mix materials in one draw (fur + armor plates + a steel buckle):
+ * writes/extends a `surface` vec4 attribute (rough, metal, grime, wear) for vertices [start, end). Use it with
+ * toon({ surfaceAttr: true }); every vertex of such a geometry needs a value (unpainted ones read 0 = mirror-smooth).
+ * `s` is a SURFACES preset object or any { rough, metal, grime, wear }.
+ */
+export function paintSurface(THREE, geometry, s, start = 0, end = geometry.getAttribute('position').count) {
+  const count = geometry.getAttribute('position').count;
+  let attr = geometry.getAttribute('surface');
+  if (!attr || attr.count !== count) {
+    const arr = new Float32Array(count * 4);
+    for (let i = 0; i < count; i++) { arr[i * 4] = 0.62; arr[i * 4 + 2] = 0.3; arr[i * 4 + 3] = 0.3; }
+    attr = new THREE.BufferAttribute(arr, 4);
+    geometry.setAttribute('surface', attr);
+  }
+  for (let i = start; i < end; i++) attr.setXYZW(i, s.rough ?? 0.62, s.metal ?? 0, s.grime ?? 0.3, s.wear ?? 0.3);
+  attr.needsUpdate = true;
+  return geometry;
+}
+
+/** Stepped lighting ramp (v1, hard bands, nearest-filtered). Kept for labs that want the old flat comic read. */
 export function createToonGradient(THREE, steps = STYLE.toonSteps, floor = STYLE.bandFloor) {
   const data = new Uint8Array(steps);
   for (let i = 0; i < steps; i++) {

@@ -5,12 +5,15 @@
 // count (rain intensity scales how many of the pre-shuffled seeds draw): ~0.01 ms.
 // Streaks are pale, translucent and not inked (an FX material like L5's particles: non-toon, so the
 // outline pass skips it); they fade out with distance and near the camera so nothing strobes.
+// W7 S4 (HARDENED): thin, long, sky-lit streaks (their colour follows the sky's horizon, so dusk rain is steel-grey and
+// a lightning flash lights every drop), with per-drop brightness jitter; the post grade adds a faint far rain sheet.
 import * as THREE from 'three/webgpu';
 import {
   float, vec2, vec3, vec4, uniform, positionGeometry, cameraViewMatrix, cameraProjectionMatrix, instancedBufferAttribute,
   fract, length, max, smoothstep, uv, abs, clamp,
 } from 'three/tsl';
 import { hash2 } from '../../shared/world/noise';
+import { STYLE_ENV } from '../style/style-webgpu.js';
 
 export interface RainView {
   mesh: THREE.Mesh;
@@ -56,11 +59,11 @@ export function createRain(opts: { capacity?: number } = {}): RainView {
   // stretched quad along the fall direction in view space (like the FX 'stretched' mode)
   const q = positionGeometry.xy;
   const viewCenter = cameraViewMatrix.mul(vec4(center, 1));
-  const axV = cameraViewMatrix.mul(vec4(U.vel.mul(0.05), 0)).xy;       // ~0.85 m streak
+  const axV = cameraViewMatrix.mul(vec4(U.vel.mul(0.062), 0)).xy;      // ~1.1 m streak
   const axLen = max(length(axV), 0.0001);
   const along = axV.div(axLen);
   const perp = vec2(along.y, along.x.negate());
-  const width = float(0.02);
+  const width = float(0.011);
   const view = viewCenter.add(vec4(along.mul(q.y.mul(axLen.add(width))).add(perp.mul(q.x.mul(width))), 0, 0));
   const mat = new THREE.MeshBasicNodeMaterial();
   mat.name = 'fx_rain';
@@ -73,7 +76,9 @@ export function createRain(opts: { capacity?: number } = {}): RainView {
   const dist = length(wrapped);
   const fade = smoothstep(19, 12, dist).mul(smoothstep(0.8, 2.2, dist));
   const ends = clamp(float(1).sub(abs(uv().y.sub(0.5)).mul(2)).mul(1.4), 0, 1);
-  mat.colorNode = vec3(0.8, 0.86, 0.95);
+  // sky-lit: the horizon colour lifted (drops catch the brightest part of the sky), jittered per drop
+  const jitter = float(0.7).add(fract(aSeed.x.mul(91.7).add(aSeed.z.mul(37.3))).mul(0.6));
+  mat.colorNode = clamp(STYLE_ENV.horizon.mul(1.9).add(vec3(0.08, 0.09, 0.11)), 0, 1.4).mul(jitter);
   mat.opacityNode = U.alpha.mul(fade).mul(ends);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'fx_rain';
@@ -102,7 +107,7 @@ export function createRain(opts: { capacity?: number } = {}): RainView {
       d.set(((d.x + dx * ws * dt) % (BOX.x * 1000)), ((d.y + dz * ws * dt) % (BOX.z * 1000)));
       // high cameras (overviews, spectators) see thinner rain: near-camera streaks would fill the frame
       const high = Math.min(1, Math.max(0, (camera.position.y - 25) / 30));
-      (U.alpha as { value: number }).value = (0.2 + 0.14 * rain) * (1 - 0.6 * high);
+      (U.alpha as { value: number }).value = (0.18 + 0.16 * rain) * (1 - 0.6 * high);
     },
     dispose() { geo.dispose(); plane.dispose(); mat.dispose(); },
   };
