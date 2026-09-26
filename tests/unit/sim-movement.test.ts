@@ -2,13 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { Sim } from '../../src/sim/sim';
 import { Btn } from '../../src/shared/input';
 import { Team, Species, EFlag } from '../../src/shared/types';
-import { createFlatWorldData } from '../../src/shared/world/world-data';
+import type { WorldData } from '../../src/shared/world/world-data';
 import { movementSystem } from '../../src/sim/systems/movement';
 import { physicsStepSystem } from '../../src/sim/systems/core';
 
 // Movement is tested in isolation: a flat yard with crates on a 12 m ring, only movement + physics.
+function flatWorld(seed: number): WorldData {
+  const props = Array.from({ length: 6 }, (_, i) => {
+    const a = (i / 6) * Math.PI * 2;
+    return { type: 'crate', x: Math.cos(a) * 12, y: 1, z: Math.sin(a) * 12, hx: 1, hy: 1, hz: 1, rotY: a };
+  });
+  return { seed, name: 'flat', height: () => 0, halfExtent: 60, props, spawns: [{ x: 0, y: 1, z: 6, yaw: 0, team: 0 }], killY: -30 };
+}
 async function makeSim() {
-  const sim = await Sim.create({ seed: 7, world: createFlatWorldData(7), systems: [movementSystem, physicsStepSystem] });
+  const sim = await Sim.create({ seed: 7, world: flatWorld(7), systems: [movementSystem, physicsStepSystem] });
   const e = sim.spawnCharacter({ team: Team.Corgis, species: Species.Corgi, cls: 'assault', name: 'T', x: 0, y: 0.5, z: 0, yaw: 0 });
   return { sim, e };
 }
