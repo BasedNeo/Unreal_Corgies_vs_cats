@@ -10,6 +10,7 @@
 import type { Object3D } from 'three/webgpu';
 import type { EntityState, GameEvent } from '../../shared/protocol';
 import { EFlag, EntityKind, Species } from '../../shared/types';
+import { planeByIndex } from '../../shared/content/vehicles';
 import { AudioEngine, type PlayOptions, type Volumes } from './engine';
 import { CombatIntensity, intensityFor, type IntensityContext } from './intensity';
 import { Music } from './music';
@@ -226,9 +227,15 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
         case 'spawn':
           engine.play(S.sparkle, at(ev.id, { gain: ev.id === localId ? 0.8 : 0.6, priority: 1, category: 'fx' }));
           break;
-        case 'jump':
+        case 'jump': {
+          const v = states.get(ev.id);
+          if (v?.kind === EntityKind.Vehicle && planeByIndex(v.cls)) { // a plane's lift-off: a rising whoosh, not a pet's boing
+            engine.play(S.whoosh, at(ev.id, { gain: 0.55, priority: 1, category: 'fx', maxDist: 45 }));
+            break;
+          }
           engine.play(S.boing, at(ev.id, { k: ev.double ? 1 : 0, gain: ev.id === localId ? 0.6 : 0.7, priority: ev.id === localId ? 2 : 0, category: 'fx', maxDist: 35 }));
           break;
+        }
         case 'land':
           if (ev.impact > 3) engine.play(S.thud, at(ev.id, { k: ev.impact, gain: ev.id === localId ? 0.8 : 0.7, priority: ev.id === localId ? 2 : 0, category: 'impact', maxDist: 35 }));
           break;

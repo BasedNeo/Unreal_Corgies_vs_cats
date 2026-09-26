@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { EntityState, GameEvent } from '../../src/shared/protocol';
 import { EFlag, EntityKind } from '../../src/shared/types';
-import { packPlaneAux, unpackPlaneAux } from '../../src/shared/content/vehicles';
+import { packPlaneAux, unpackPlaneAux, vehicleIndex } from '../../src/shared/content/vehicles';
 import { VoiceLimiter } from '../../src/client/audio/voice-limiter';
 import { LOOPS, VehicleLoops, planeThrottle } from '../../src/client/audio/vehicle-loops';
 import { KART_ENGINE, PLANE_ENGINE, kartEngine, planeEngine, type EngineParams } from '../../src/client/audio/presets-engines';
@@ -348,6 +348,16 @@ describe('S2 event voices and adventure stingers', () => {
       expect(plays[0].o.x).toBeUndefined();
       expect(plays[1].o).toMatchObject({ x: 0, z: 20, category: 'fx' });
       expect(plays[2].o).toMatchObject({ x: 4, y: 1, z: 9, category: 'impact', priority: 2 });
+      audio.dispose();
+    });
+
+    it("a plane's lift-off whooshes; a pet's jump still boings", async () => {
+      const { audio, plays, listener } = await rig();
+      const plane = vehicle(20, { cls: vehicleIndex('rc_plane'), z: 12 });
+      audio.update(listener, byId([me(), plane]), 1, 1 / 60);
+      audio.onGameEvent({ e: 'jump', id: 20, double: false });
+      audio.onGameEvent({ e: 'jump', id: 1, double: false });
+      expect(plays.map((x) => x.r)).toEqual([S.whoosh, S.boing]);
       audio.dispose();
     });
 
