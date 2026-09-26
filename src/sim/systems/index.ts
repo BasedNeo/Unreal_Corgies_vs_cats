@@ -10,7 +10,8 @@ import { bossSystems } from '../boss';
 import { vehicleSystems } from '../vehicles';
 import { interactSystems } from '../interact';
 import { emoteSystem } from './emote';
+import { destructSystems } from '../destruct';
 
 export function createDefaultSystems(): SimSystem[] {
-  return [...aiSystems(), movementSystem, ...worldSystems(), physicsStepSystem, ...combatSystems(), killPlaneSystem, ...matchSystems(), ...bossSystems(), ...vehicleSystems(), ...interactSystems(), emoteSystem];
+  return [...aiSystems(), movementSystem, ...worldSystems(), physicsStepSystem, ...combatSystems(), ...destructSystems(), killPlaneSystem, ...matchSystems(), ...bossSystems(), ...vehicleSystems(), ...interactSystems(), emoteSystem];
 }

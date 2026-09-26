@@ -14,13 +14,14 @@
 //   S  red shed + cat-tree tower + plank bridge (Cats base) · kiddie pool · cardboard boxes
 // Movement reference (classes.ts): corgi jump ~1.47 m, double ~2.55 m; cat ~1.84 / ~3.1 m;
 // autostep 0.45 m; max walkable slope 52 deg.
-import type { Bookmark, FenceRun, JumpPad, ScatterZone, SpawnPoint, WaterZone, WorldData } from './world-types';
+import type { Bookmark, Destructible, FenceRun, JumpPad, ScatterZone, SpawnPoint, WaterZone, WorldData } from './world-types';
 import { Kit, type Frame } from './kit';
 import { bakeTerrainGrid, createYardField, gridHeight, inGrid, type SurfaceOp, type TerrainOp, type TerrainSpec } from './terrain';
 import { createRng, hash2 } from './noise';
 import { yawToward } from './queries';
 import { buildGarden, gardenTerrain, GARDEN_FLANK_PATH } from './garden';
 import { buildGarage, garageTerrain } from './garage';
+import { crateStack } from './destructibles';
 
 export const FENCE_H = 8;
 const HALF = 100;
@@ -261,7 +262,20 @@ export function buildWestYard(seed = 1): WorldData {
     districts: [gardenBuilt.district, ...garageBuilt.districts],
     lamps: garageBuilt.lamps,
     perches: garageBuilt.perches,
+    destructibles: [...garageBuilt.destructibles, ...yardCrates(height)],
   };
+}
+
+// ====================================================================== X1: crate stacks (destructible)
+/** Breakable crate stacks on open lawn (x, z, yaw): clear of spawns, pickups, routes, pads and the hold zone. */
+export const YARD_CRATES: readonly (readonly [number, number, number])[] = [
+  [50, -58, 0.3],      // west of the lean-to, on the patio's way to the garage
+  [68, -24, -0.5],     // east lawn, between the swing set and the pond meadow
+  [70, -78, 1.1],      // north-east corner lawn, by the pet door
+];
+
+function yardCrates(height: (x: number, z: number) => number): Destructible[] {
+  return YARD_CRATES.map(([x, z, yaw], i) => crateStack(`crate_stack_${i + 1}`, x, height(x, z), z, yaw, 51 + i));
 }
 
 // ====================================================================== fences

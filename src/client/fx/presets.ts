@@ -166,6 +166,38 @@ export function worldHit(p: FxPools, x: number, y: number, z: number, groundY: n
   p.solid.spawn(S);
 }
 
+/**
+ * X1: a destructible breaking (the 3D planks/cans are the world view's debris): a ground shock ring, a billowing
+ * dust cloud over its footprint and a spray of splinters. `size` ~ half its width (m); `plaster` for a wall.
+ */
+export function destructDust(p: FxPools, x: number, y: number, z: number, groundY: number, size: number, plaster: boolean): void {
+  const R = p.rng;
+  const k = Math.max(0.7, Math.min(2.2, size));
+  resetSpec(S);
+  S.x = x; S.y = groundY + 0.05; S.z = z; S.mode = Mode.Ground; S.shape = Shape.Ring; S.param = 0.08;
+  S.life = 0.45; S.size0 = 0.6 * k; S.size1 = 3.2 * k; color(S, C.dust);
+  p.solid.spawn(S);
+  for (let i = 0, c = n(p, 12); i < c; i++) {
+    resetSpec(S);
+    const a = R.range(0, Math.PI * 2), r = R.range(0.2, 1) * k;
+    S.x = x + Math.cos(a) * r; S.y = groundY + R.range(0.3, 1.2) * Math.max(1, y - groundY); S.z = z + Math.sin(a) * r;
+    S.vx = Math.cos(a) * R.range(0.6, 2.2); S.vz = Math.sin(a) * R.range(0.6, 2.2); S.vy = R.range(0.4, 1.8);
+    S.gravity = -0.4; S.drag = 1.6; S.life = R.range(0.9, 1.6); S.size0 = 0.25 * k; S.size1 = R.range(0.55, 0.9) * k; S.curve = Curve.HoldShrink;
+    S.shape = Shape.Puff; S.rot = R.sym(3); S.spin = R.sym(0.8); S.param = 0.1;
+    color(S, plaster ? (i % 3 ? C.white : C.dust) : i % 3 ? C.dust : C.dustDark);
+    p.solid.spawn(S);
+  }
+  for (let i = 0, c = n(p, 14); i < c; i++) {
+    resetSpec(S);
+    const a = R.range(0, Math.PI * 2), sp = R.range(3, 8);
+    S.x = x; S.y = y; S.z = z; S.vx = Math.cos(a) * sp; S.vz = Math.sin(a) * sp; S.vy = R.range(3, 8);
+    S.gravity = 18; S.life = R.range(0.7, 1.1); S.size0 = R.range(0.07, 0.14); S.size1 = 0.05; S.curve = Curve.HoldShrink;
+    S.shape = Shape.Chunk; S.rot = R.sym(3); S.spin = R.sym(18); S.param = 0.3; S.floorY = groundY; S.bounce = 0.35;
+    color(S, i % 2 ? C.dustDark : C.dust);
+    p.solid.spawn(S);
+  }
+}
+
 /** Landing: a flat dust ring + radial puffs, scaled by impact speed. */
 export function landDust(p: FxPools, x: number, y: number, z: number, impact: number): void {
   const k = Math.min(1.6, Math.max(0.35, impact / 12));

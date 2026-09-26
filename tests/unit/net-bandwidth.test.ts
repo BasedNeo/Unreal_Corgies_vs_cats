@@ -47,7 +47,7 @@ async function measure(encoding: WireEncoding, combat: boolean): Promise<{ kbs: 
   const c = clients[0].link.stats;
   const b0 = c.snapBytes, s0 = c.snaps;
   await session.run(SECONDS * 1000);
-  const res = { kbs: (c.snapBytes - b0) / 1024 / SECONDS, bytesPerSnap: (c.snapBytes - b0) / (c.snaps - s0), entities: sim.entities.size };
+  const res = { kbs: (c.snapBytes - b0) / 1024 / SECONDS, bytesPerSnap: (c.snapBytes - b0) / (c.snaps - s0), entities: [...sim.entities.values()].filter((e) => e.char).length }; // players only (X1 destructibles are entities too)
   for (const cl of [...session.clients]) session.removeClient(cl);
   room.dispose();
   return res;

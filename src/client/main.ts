@@ -197,6 +197,7 @@ async function main(): Promise<void> {
     bossFx.onGameEvent(ev);
     interact.onGameEvent(ev);
     abilityViews.onGameEvent(ev);
+    worldView.destruct.onGameEvent(ev); // X1: breaks (rubble + debris at once)
     prompts.onGameEvent(ev, net?.localEntity ?? -1);
     const r = fx.onGameEvent(ev);
     if (r.shake > 0) cam.shake(r.shake);
@@ -232,6 +233,8 @@ async function main(): Promise<void> {
     prompts.update(states, localId, dt);
     rush.sync(states, states.get(localId)?.team ?? 0, ctx.camera, dt);
     abilityViews.sync(states, (states.get(localId)?.team ?? -1) as TeamId | -1, pdt);
+    worldView.destruct.sync(states); // X1: broken/standing from snapshots (late joins, resets)
+    worldView.destruct.update(pdt); // X1: debris
     bossFx.update(dt, states);
     bossBar.update(states, dt);
     const local = states.get(localId) ?? null;

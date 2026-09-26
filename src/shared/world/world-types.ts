@@ -198,6 +198,36 @@ export interface Perch {
   district?: string;
 }
 
+/** X1: kinds of breakable props (gameplay rules: DESTRUCT_KINDS in destructibles.ts). */
+export type DestructKind = 'wall_boards' | 'tuna_stack' | 'crate_stack';
+
+/**
+ * A breakable world prop (X1). Its colliders (`boxes`) are NOT in `WorldData.props` and its visuals are NOT in
+ * `WorldData.prims`: the sim's destruct system owns the colliders (created intact, removed on break, restored on
+ * reset) and the nav grid treats them as dynamic blockers; the client's destructible view draws `prims` while it
+ * stands and `rubble` once it is broken. World space, same conventions as PropBox / VisualPrim.
+ */
+export interface Destructible {
+  /** Unique id, e.g. 'garage_breach_wall', 'tuna_stack_2'. */
+  id: string;
+  /** Group counted by objectives (adventure `destroy` triggers): 'garage_breach_wall', 'tuna_stack', 'crate_stack'. */
+  tag: string;
+  kind: DestructKind;
+  /** Anchor: the ground point under its center. */
+  x: number; y: number; z: number;
+  yaw: number;
+  /** Hit points (defaults from DESTRUCT_KINDS). */
+  hp: number;
+  /** Solid colliders while intact. */
+  boxes: PropBox[];
+  /** Intact look. */
+  prims: VisualPrim[];
+  /** Broken look: low rubble, visual only (no colliders). */
+  rubble: VisualPrim[];
+  /** Center of mass: FX origin and where the break is reported. */
+  cx: number; cy: number; cz: number;
+}
+
 export interface WorldData {
   seed: number;
   name: string;
@@ -235,4 +265,7 @@ export interface WorldData {
   lamps?: Lamp[];
   /** Sniper perches (reachable, partial cover + an exposed side; see tests/unit/world-districts.test.ts). */
   perches?: Perch[];
+  // ---- X1 additions (optional) ----
+  /** Breakable props (the Garage breach wall, tuna-can stacks, crate stacks). Order = snapshot index (EntityState.seed). */
+  destructibles?: Destructible[];
 }

@@ -27,6 +27,8 @@ import { createRain } from './weather-view';
 import { createGardenView } from './garden-view';
 import { QUALITY, toQualityTier, type QualityTier } from '../engine/quality';
 import { createLampsView } from './lamps-view';
+import { createDestructView, type DestructView } from './destruct-view';
+import { surfaceAt } from '../../shared/world/queries';
 
 /** Post grade uniforms (createComicPipeline(...).grade.uniforms) the weather may desaturate. */
 export interface GradeUniforms { saturation: { value: number } }
@@ -73,6 +75,9 @@ export interface WorldView {
   pinTimeOfDay(pinned: boolean): void;
   /** P2: live part of a quality-tier change (garden density, prop crease ink); the rest of the world knobs apply after a reload. */
   setQuality(tier: QualityTier): void;
+  // ---- X1 additions ----
+  /** Breakable props (breach wall, tuna/crate stacks): feed it snapshot states (sync) and game events (onGameEvent). */
+  destruct: DestructView;
 }
 
 const EPS = 0.0015;
@@ -106,6 +111,10 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
   root.add(garden.group);
   const lamps = createLampsView(data);
   root.add(lamps.group);
+  // X1: destructibles (their looks are not in data.prims; debris lands on whatever surface is below it)
+  const destruct = createDestructView(data, { surfaceAt: (x, z, below) => surfaceAt(data, x, z, below).y });
+  destruct.setCreases(P.propCreases);
+  root.add(destruct.group, destruct.cameraGroup);
   const rain = createRain({ capacity: opts.rainDrops ?? P.rainDrops });
   root.add(rain.mesh);
 
@@ -162,14 +171,15 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
 
   return {
     root,
-    cameraColliders: [terrain.proxy, proxy.group],
+    cameraColliders: [terrain.proxy, proxy.group, destruct.cameraGroup],
+    destruct,
     bookmarks: data.bookmarks ?? [],
     get timeOfDay() { return sky.timeOfDay; },
     get weather() { return sample; },
     get tick() { return clock; },
     setTimeOfDay(t: number) { pinned = true; sky.setTimeOfDay(t); },
     pinTimeOfDay(p: boolean) { pinned = p; },
-    setQuality(tier: QualityTier) { garden.setDensity(QUALITY[tier].gardenDensity); setPropCreases(QUALITY[tier].propCreases); },
+    setQuality(tier: QualityTier) { garden.setDensity(QUALITY[tier].gardenDensity); setPropCreases(QUALITY[tier].propCreases); destruct.setCreases(QUALITY[tier].propCreases); },
     setWeather(w) { override = w; },
     update(dt, camera, tick) {
       if (tick !== undefined && Number.isFinite(tick)) clock = tick;
@@ -200,6 +210,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
         weatherCpuMs: +weatherMs.toFixed(4),
         ...garden.stats(),
         ...lamps.stats(),
+        ...destruct.stats(),
         ...(foliage?.stats() ?? {}),
       };
     },
@@ -214,6 +225,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
       foliage?.dispose();
       garden.dispose();
       lamps.dispose();
+      destruct.dispose();
       rain.dispose();
       proxy.dispose();
       sky.dispose();

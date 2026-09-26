@@ -56,6 +56,12 @@ export function reactionFor(ev: GameEvent, c: ReactionContext, out: FxReaction =
       break;
     case 'ability':
       if (ev.id === me && ev.ability === 'bark_blast') out.shake = 0.18;
+      else if (c.hasLocal && ev.ability.startsWith('destruct:')) {
+        // X1: a destructible breaking nearby rattles the camera (the breach wall hardest)
+        const d = Math.hypot(ev.x - c.lx, ev.y - c.ly, ev.z - c.lz);
+        const k = 1 - d / (ev.ability === 'destruct:wall_boards' ? 16 : 10);
+        if (k > 0) out.shake = (ev.ability === 'destruct:wall_boards' ? 0.45 : 0.25) * k * k;
+      }
       break;
     default:
       break;

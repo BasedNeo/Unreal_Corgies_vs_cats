@@ -24,6 +24,7 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 | W3 K1 character polish | ✅ merged | silhouette distance 0.033 → 0.122; 24/24 kits in budget; `9d8b11f` |
 | W3 lead M1 Ear Glide · M2 buff bits | ✅ | prediction parity 0 cm while gliding; Zoomies+ corrections 1182 → ≤ 2 |
 | Deploy prep (not deployed) | ✅ | docs/ops/DEPLOY.md; bundled server runs on an --omit=dev install |
+| W4 X1 destructibles | ✅ merged + wired | 17 tests (destruct 11, view 5, perf 1); a Dig Charge breaches the Garage wall (walk, nav and prediction open); tuna + crate stacks break; break ≤ 0.3 ms authority / ~0.2 ms client; artifacts/x1/*.png |
 | W4 R1 RC plane + Rooftop Hangar | ✅ merged + wired | 25 new tests (flight, crash + eject + stun, no tunnelling, ceiling/box, Skyraider, own-plane gun, PvP, determinism, Rooftops→shed 8.8 s); stun predicted; artifacts/r1-*.png |
 | **Wave 1 integration** | ⚠️ corrected | first claim was false (did not boot); fixed + verified in `3d2de26` — see log |
 | Q1 verification | ✅ | docs/qa/W1_VERIFICATION.md — 55/100, P0/P1 fixes landed |
@@ -32,6 +33,10 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 ### 2026-09-26 — Wave 4 in flight (lead)
 - Lanes A1 (adventure framework, chapters 1–2), X1 (destructibles), R1 (RC plane), E1 (Siamese sniper elite) are
   building against `docs/design/ADVENTURE.md`; A2 (chapters 3–6) and INT4 follow.
+- **X1 integrated**: the Garage's east wall has a boarded breach (a Dig Charge planted there blows it 2.5 s later;
+  explosions only), 4 tuna-can stacks inside and 3 crate stacks in the yard (shots and blasts). Breaks open nav cells
+  in place and drop the predictor's mirrored colliders; everything stands again on a match restart. Lead: system
+  registration, prediction mirror, view/FX wiring; net-bandwidth now counts players only.
 - **R1 integrated**: the RC plane ("Fetch Flyer" / "Pounce Plane") and one neutral Rooftop Hangar on the garage roof,
   in every PvP and co-op mode. Mouse-aim flight, squeaky gun, crashes explode and throw the pilot out stunned. Lead
   edits: camera pitch follow, pilot tilt, the hangar's E prompt ("launch a plane", "bail out" in the air), and the
@@ -147,6 +152,8 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 - `EntityState.cls` carries content indexes through `CLASS_IDS`: 6 entries per content table at most (S1, B1).
 - Bots don't climb to the Rooftops perches (they fight in the Garage fine) (D3/C2).
 - Ability entities: shotgun damage to drones/barriers is estimated from the first pellet (C2).
+- Destructibles (X1): bots don't breach on their own yet (A2); kart rams don't break stacks (kart wrecks do); a match
+  reset relabels nav regions once (~5–9 ms).
 - RC plane (R1):
   - there is no engine sound yet (the cockpit strip `ui/plane-hud.ts` shows hull, throttle, airspeed, height, boost,
     gun heat and STALL!);

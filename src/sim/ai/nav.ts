@@ -3,12 +3,19 @@
 // WorldData.height + step clearance), so props, walls, steep terrain and anything else the world
 // lane builds are respected without knowing their shapes. Built once per world (cached by a
 // content signature) after the first physics step, when Rapier's query structures exist.
+//
+// X1 dynamic blockers: the shared (cached) grid ignores destructible colliders — it is the world with every
+// destructible broken. A sim that registers blockers (setNavBlocker: the destruct system does, for every standing
+// destructible) gets its OWN grid from navGridFor(): a copy of the shared walk/region arrays with the blockers' cells
+// closed, updated IN PLACE when a blocker is added or removed (bots hold on to the grid object they got at tick 1).
+// Ground, costs and the A* scratch stay shared (searches are synchronous; the search stamp is a global counter).
 import type { Collider } from '@dimforge/rapier3d-compat';
 import type { Sim } from '../sim';
-import type { WorldData } from '../../shared/world/world-data';
+import type { PropBox, WorldData } from '../../shared/world/world-data';
 import { WORLD_RAY_FILTER } from '../combat/geometry';
 import { Layer } from '../rapier';
 import { isTerrainCollider } from '../world/build';
+import { isDestructibleCollider } from '../destruct/tag';
 
 export const NAV_CELL = 1;
 /** Capsule tested per cell: bottom at ground + CLEARANCE (the KCC autostep height). */
@@ -62,11 +69,193 @@ function signature(d: WorldData): string {
   return `${d.name}|${d.seed}|${e}|${d.props.length}|${h}`;
 }
 
-export function navGridFor(sim: Sim): NavGrid {
+/** The shared grid of a sim's world (destructibles ignored: as if every one were broken). */
+function sharedGridFor(sim: Sim): NavGrid {
   const key = signature(sim.worldData);
   let g = cache.get(key);
   if (!g) { g = buildNavGrid(sim); cache.set(key, g); }
   return g;
+}
+
+/** The nav grid bots of this sim path on: the shared grid, or the sim's own copy when it has dynamic blockers. */
+export function navGridFor(sim: Sim): NavGrid {
+  const base = sharedGridFor(sim);
+  const o = overlays.get(sim);
+  if (!o) return base;
+  if (!o.grid || o.base !== base) {
+    o.base = base;
+    o.grid = {
+      ...base, walk: new Uint8Array(base.walk), region: new Int32Array(base.region), regionSize: [...base.regionSize],
+    };
+    o.count = new Uint8Array(base.walk.length);
+    const t0 = performance.now();
+    for (const boxes of o.blockers.values()) for (const i of blockedCells(base, boxes)) o.count[i]++;
+    relabelAll(o);
+    o.applyMs = performance.now() - t0;
+  }
+  return o.grid;
+}
+
+// ------------------------------------------------------------------------------------------ X1 dynamic blockers
+
+interface NavOverlay {
+  blockers: Map<string, readonly PropBox[]>;
+  base: NavGrid | null;
+  grid: NavGrid | null;
+  /** Blockers covering each cell. */
+  count: Uint8Array | null;
+  /** Cells closed now (stats/tests) and the cost of the last update (ms). */
+  closed: number;
+  applyMs: number;
+  /** batchNavBlockers() depth, and whether a relabel is pending at its end. */
+  batch: number;
+  dirty: boolean;
+}
+const overlays = new WeakMap<Sim, NavOverlay>();
+const cellCache = new WeakMap<NavGrid, WeakMap<readonly PropBox[], Int32Array>>();
+
+/**
+ * Close (boxes) or re-open (null) the nav cells under a dynamic obstacle of this sim, keyed by `key` (X1: one per
+ * destructible). The sim's grid is updated in place right away if it exists, else on first use. Re-opening merges
+ * the freed cells into the regions they touch (cheap, runs on a break); closing relabels every region (a split is
+ * possible; runs on a reset). Other sims of the same world are unaffected.
+ */
+export function setNavBlocker(sim: Sim, key: string, boxes: readonly PropBox[] | null): void {
+  let o = overlays.get(sim);
+  if (!o) { o = { blockers: new Map(), base: null, grid: null, count: null, closed: 0, applyMs: 0, batch: 0, dirty: false }; overlays.set(sim, o); }
+  const prev = o.blockers.get(key);
+  if (boxes) {
+    if (prev === boxes) return;
+    o.blockers.set(key, boxes);
+  } else {
+    if (!prev) return;
+    o.blockers.delete(key);
+  }
+  const g = o.grid, base = o.base, count = o.count;
+  if (!g || !base || !count) return;
+  const t0 = performance.now();
+  if (prev) for (const i of blockedCells(base, prev)) count[i]--;
+  if (boxes) for (const i of blockedCells(base, boxes)) count[i]++;
+  if (o.batch > 0) { o.dirty = true; return; }
+  if (prev && !boxes) {
+    const opened: number[] = [];
+    for (const i of blockedCells(base, prev)) if (count[i] === 0 && base.walk[i] && !g.walk[i]) { g.walk[i] = 1; opened.push(i); }
+    o.closed -= opened.length;
+    g.walkable += opened.length;
+    mergeOpened(g, opened);
+  } else relabelAll(o);
+  o.applyMs = performance.now() - t0;
+}
+
+/** Apply several blocker changes of a sim with one region relabel at the end (X1: resetting every destructible). */
+export function batchNavBlockers(sim: Sim, fn: () => void): void {
+  const o = overlays.get(sim);
+  if (!o) { fn(); return; }
+  o.batch++;
+  try { fn(); } finally {
+    if (--o.batch === 0 && o.dirty) {
+      o.dirty = false;
+      if (o.grid) { const t0 = performance.now(); relabelAll(o); o.applyMs = performance.now() - t0; }
+    }
+  }
+}
+
+/** Blocker bookkeeping of a sim (tests/debug): cells closed now, last update cost (ms), blocker count. */
+export function navBlockerStats(sim: Sim): { closed: number; applyMs: number; blockers: number } {
+  const o = overlays.get(sim);
+  return { closed: o?.closed ?? 0, applyMs: o?.applyMs ?? 0, blockers: o?.blockers.size ?? 0 };
+}
+
+/** Cells of `g` whose character probe would touch the boxes (the build's probe: a capsule 0.45 m over the ground). */
+export function blockedCells(g: NavGrid, boxes: readonly PropBox[]): Int32Array {
+  let byBoxes = cellCache.get(g);
+  if (!byBoxes) { byBoxes = new WeakMap(); cellCache.set(g, byBoxes); }
+  const hit = byBoxes.get(boxes);
+  if (hit) return hit;
+  const out = new Set<number>();
+  const R = PROBE_RADIUS, span = 2 * (PROBE_RADIUS + PROBE_HALF);
+  for (const b of boxes) {
+    const yawOnly = !b.pitch && !b.roll;
+    const a = propAabbs({ props: [b] } as unknown as WorldData)[0];
+    const ix0 = Math.max(0, Math.floor((a.x0 - R - g.ox) / g.cell)), ix1 = Math.min(g.w - 1, Math.floor((a.x1 + R - g.ox) / g.cell));
+    const iz0 = Math.max(0, Math.floor((a.z0 - R - g.oz) / g.cell)), iz1 = Math.min(g.h - 1, Math.floor((a.z1 + R - g.oz) / g.cell));
+    const c = Math.cos(b.rotY), s = Math.sin(b.rotY);
+    for (let iz = iz0; iz <= iz1; iz++) for (let ix = ix0; ix <= ix1; ix++) {
+      const i = iz * g.w + ix;
+      const x = g.ox + (ix + 0.5) * g.cell, z = g.oz + (iz + 0.5) * g.cell;
+      const y0 = g.ground[i] + CLEARANCE, y1 = y0 + span;
+      let touch: boolean;
+      if (yawOnly) {
+        // vertical probe segment vs a yawed box: distance to the footprint rectangle (+) the vertical gap
+        const dx = x - b.x, dz = z - b.z;
+        const lx = dx * c - dz * s, lz = dx * s + dz * c;
+        const ex = Math.max(0, Math.abs(lx) - b.hx), ez = Math.max(0, Math.abs(lz) - b.hz);
+        const sy0 = y0 + R, sy1 = y1 - R;                      // the capsule's segment
+        const ey = Math.max(0, b.y - b.hy - sy1, sy0 - (b.y + b.hy));
+        touch = ex * ex + ez * ez + ey * ey <= R * R;
+      } else {
+        touch = x + R >= a.x0 && x - R <= a.x1 && z + R >= a.z0 && z - R <= a.z1 && y1 >= a.y0 && y0 <= a.y1;
+      }
+      if (touch) out.add(i);
+    }
+  }
+  const cells = Int32Array.from([...out].sort((p, q) => p - q));
+  byBoxes.set(boxes, cells);
+  return cells;
+}
+
+/** Walk = shared walk minus every covered cell; full region labelling. */
+function relabelAll(o: NavOverlay): void {
+  const g = o.grid!, base = o.base!, count = o.count!;
+  let closed = 0;
+  for (let i = 0; i < g.walk.length; i++) {
+    const w = base.walk[i] && count[i] === 0 ? 1 : 0;
+    if (base.walk[i] && !w) closed++;
+    g.walk[i] = w;
+  }
+  g.walkable = base.walkable - closed;
+  g.region.fill(-1);
+  g.regionSize.length = 0;
+  labelRegions(g);
+  o.closed = closed;
+}
+
+/**
+ * Freed cells join the regions they touch: flood each connected group of freed cells, then fold every region it
+ * touches into the largest one (a relabel of the smaller regions' cells only). New connections always run through a
+ * freed cell or its neighbourhood (diagonals included), so this equals a full relabel.
+ */
+function mergeOpened(g: NavGrid, opened: number[]): void {
+  const n = g.walk.length;
+  for (const s of opened) {
+    if (g.region[s] >= 0) continue;
+    const comp: number[] = [s];
+    const touched = new Set<number>();
+    g.region[s] = -2;
+    for (let h = 0; h < comp.length; h++) {
+      const i = comp[h];
+      for (let k = 0; k < 8; k++) {
+        const j = neighbour(g, i, k);
+        if (j < 0) continue;
+        const r = g.region[j];
+        if (r === -1) { g.region[j] = -2; comp.push(j); } else if (r >= 0) touched.add(r);
+      }
+    }
+    let target = -1;
+    for (const r of touched) if (target < 0 || g.regionSize[r] > g.regionSize[target]) target = r;
+    if (target < 0) { target = g.regionSize.length; g.regionSize.push(0); }
+    for (const i of comp) g.region[i] = target;
+    g.regionSize[target] += comp.length;
+    for (const r of touched) {
+      if (r === target) continue;
+      for (let i = 0; i < n; i++) if (g.region[i] === r) g.region[i] = target;
+      g.regionSize[target] += g.regionSize[r];
+      g.regionSize[r] = 0;
+    }
+  }
+  let best = g.mainRegion;
+  for (let r = 0; r < g.regionSize.length; r++) if (best < 0 || g.regionSize[r] > g.regionSize[best]) best = r;
+  g.mainRegion = best;
 }
 
 interface Aabb { x0: number; x1: number; z0: number; z1: number; y0: number; y1: number }
@@ -89,11 +278,12 @@ function propAabbs(d: WorldData): Aabb[] {
   return out;
 }
 
-/** Static (World-layer) collider count and the terrain collider (trimesh or heightfield), if any. */
+/** Static (World-layer) collider count and the terrain collider (trimesh or heightfield), if any. Destructible
+ *  colliders are not static (X1): the shared grid ignores them (setNavBlocker closes their cells per sim). */
 function staticColliders(sim: Sim): { count: number; terrain: Collider | undefined } {
   let count = 0, terrain: Collider | undefined;
   sim.world.forEachCollider((c) => {
-    if (((c.collisionGroups() >>> 16) & Layer.World) === 0) return;
+    if (((c.collisionGroups() >>> 16) & Layer.World) === 0 || isDestructibleCollider(c)) return;
     count++;
     if (isTerrainCollider(c)) terrain = c;
   });
@@ -111,6 +301,8 @@ function onPad(d: WorldData, x: number, z: number): boolean {
   for (const p of d.jumpPads ?? []) if (Math.hypot(x - p.x, z - p.z) <= p.r + 0.6) return true;
   return false;
 }
+
+const notDestructible = (c: Collider): boolean => !isDestructibleCollider(c);
 
 export function buildNavGrid(sim: Sim): NavGrid {
   const t0 = performance.now();
@@ -173,7 +365,7 @@ export function buildNavGrid(sim: Sim): NavGrid {
       if (near) {
         queries++;
         pos.x = x; pos.y = y0 + R + PROBE_HALF; pos.z = z;
-        if (sim.world.intersectionWithShape(pos, rot, shape, undefined, WORLD_RAY_FILTER, exact ? undefined : statics.terrain)) continue;
+        if (sim.world.intersectionWithShape(pos, rot, shape, undefined, WORLD_RAY_FILTER, exact ? undefined : statics.terrain, undefined, notDestructible)) continue;
       }
       walk[i] = 1;
       walkable++;
@@ -207,18 +399,29 @@ function neighbour(g: NavGrid, i: number, k: number): number {
   return j;
 }
 
+let labelQueue = new Int32Array(0);
+/** Connected components under neighbour()'s rules (inlined: X1 relabels a sim's grid on resets). */
 function labelRegions(g: NavGrid): void {
-  const queue = new Int32Array(g.w * g.h);
+  const w = g.w, h = g.h, walk = g.walk, ground = g.ground, region = g.region;
+  if (labelQueue.length < w * h) labelQueue = new Int32Array(w * h);
+  const queue = labelQueue;
   let id = 0, best = -1, bestSize = 0;
-  for (let s = 0; s < g.walk.length; s++) {
-    if (!g.walk[s] || g.region[s] >= 0) continue;
+  for (let s = 0; s < walk.length; s++) {
+    if (!walk[s] || region[s] >= 0) continue;
     let head = 0, tail = 0;
-    queue[tail++] = s; g.region[s] = id;
+    queue[tail++] = s; region[s] = id;
     while (head < tail) {
       const i = queue[head++];
+      const ix = i % w, iz = (i - ix) / w, gi = ground[i];
       for (let k = 0; k < 8; k++) {
-        const j = neighbour(g, i, k);
-        if (j >= 0 && g.region[j] < 0) { g.region[j] = id; queue[tail++] = j; }
+        const nx = ix + DX[k], nz = iz + DZ[k];
+        if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue;
+        const j = nz * w + nx;
+        if (!walk[j] || region[j] >= 0) continue;
+        const dg = ground[j] - gi;
+        if (dg > MAX_STEP || dg < -MAX_STEP) continue;
+        if (k >= 4 && (!walk[iz * w + nx] || !walk[nz * w + ix])) continue;
+        region[j] = id; queue[tail++] = j;
       }
     }
     g.regionSize.push(tail);
@@ -324,6 +527,9 @@ function octile(g: NavGrid, a: number, b: number): number {
   return (dx + dz) + (Math.SQRT2 - 2) * Math.min(dx, dz);
 }
 
+/** Search stamp shared by every grid (per-sim X1 copies share the A* scratch arrays with their shared grid). */
+let searchSeq = 0;
+
 export interface PathStats { searches: number; expansions: number }
 export const pathStats: PathStats = { searches: 0, expansions: 0 };
 
@@ -343,7 +549,8 @@ export function findPath(g: NavGrid, sx: number, sz: number, gx: number, gz: num
   if (goal < 0) return false;
   pathStats.searches++;
   if (s === goal) { out.push(cellX(g, goal), cellZ(g, goal)); return true; }
-  const id = ++g.search;
+  const id = ++searchSeq;
+  g.search = id;
   let size = heapPush(g, 0, s, 0);
   g.g[s] = 0; g.parent[s] = -1; g.open[s] = id;
   let reached = -1, closest = s, closestH = octile(g, s, goal), exp = 0;

@@ -7,7 +7,9 @@
 //     door (2.8 m, west, toward the patio path) and a big pet door (2.6 m, north, from the NE-corner lawn).
 //     Cover: a parked hatchback (hood 2.4 / cabin roof 3.9 m), workbench + pegboard, a wall of shelving,
 //     a rolling tool chest, a paint-can pyramid, a chest freezer, cardboard boxes and a lawn mower. A
-//     boarded-up, cracked wall section (east, facing the alley) is the future breach point (visual only).
+//     boarded-up, cracked wall section (east, facing the alley) is the breach point: X1 made it a destructible
+//     (garageDestructibles(): the section is a gap in the wall, filled by a breakable board wall), and the
+//     cats' hoard of four tuna-can stacks sits inside.
 //     Light: 4 hanging fluorescent tubes (WorldData.lamps -> glow tubes), two slatted skylights and the
 //     roof hatch let sun stripes in, a pale interior paint keeps the shade readable.
 //
@@ -29,8 +31,9 @@
 // Everything solid goes through the Kit (visual prim + a collider with the same box); thin dressing
 // (tools, pipes, antenna, decals) is visual only. Pure data: no rng (so adding the district does not shift
 // the West Yard's random stream), no three, no Math.random.
-import type { Bookmark, District, Lamp, Perch } from './world-types';
+import type { Bookmark, Destructible, District, Lamp, Perch } from './world-types';
 import type { Kit, Frame, PrimOpts } from './kit';
+import { makeDestructible, tunaStack } from './destructibles';
 import type { SurfaceOp, TerrainOp } from './terrain';
 
 type HeightFn = (x: number, z: number) => number;
@@ -51,6 +54,9 @@ const F0 = GARAGE_FLOOR, WALL = GARAGE_WALL, ROOF = GARAGE_ROOF;
 const ROLLUP = { a: -6, b: 6, top: 3.8 };      // south wall (x span): the half-open roll-up door
 const SIDE = { a: 4.4, b: 7.2, top: 3.4 };     // west wall (z span)
 const PET = { a: 7.4, b: 10.0, top: 2.4 };     // north wall (x span): a giant pet door
+/** X1: the breach section of the east wall (z span): a gap under a lintel, filled by the breakable board wall.
+ *  top 4.4 = four siding boards, so the lintel's board seams line up with the rest of the wall. */
+const BREACH = { a: -9.4, b: -3.6, top: 4.4 };
 /** Parapet gaps where the climb routes arrive (local, along the wall). */
 const GAP_W = { a: -7.4, b: -4.4 };            // west parapet (z span): from the lean-to roof
 const GAP_E = { a: -2.4, b: 0.6 };             // east parapet (z span): from the scaffold
@@ -159,6 +165,8 @@ export interface GarageBuild {
   bookmarks: Bookmark[];
   lamps: Lamp[];
   perches: Perch[];
+  /** X1: the breach wall + the tuna-can stacks (their colliders/looks are not in the kit). */
+  destructibles: Destructible[];
 }
 
 /** Builds the Garage + Rooftops props (visual prims + colliders) into the kit. */
@@ -176,6 +184,7 @@ export function buildGarage(kit: Kit, height: HeightFn): GarageBuild {
     bookmarks: GARAGE_BOOKMARKS.map((b) => ({ ...b })),
     lamps: GARAGE_LAMPS.map((l) => ({ ...l })),
     perches: ROOF_PERCHES.map((p) => ({ ...p })),
+    destructibles: garageDestructibles(),
   };
 }
 
@@ -272,7 +281,7 @@ function shell(f: Frame): void {
   wallWithGaps(f, 'x', HZ - T / 2, -HX + T, HX - T, 1, [ROLLUP]);
   wallWithGaps(f, 'x', -HZ + T / 2, -HX + T, HX - T, -1, [PET]);
   wallWithGaps(f, 'z', -HX + T / 2, -HZ, HZ, -1, [SIDE]);
-  wallWithGaps(f, 'z', HX - T / 2, -HZ, HZ, 1, []);
+  wallWithGaps(f, 'z', HX - T / 2, -HZ, HZ, 1, [BREACH]);          // X1: the breach section is a destructible
   // corner trims (solid)
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) f.solid('garage', sx * (HX - 0.3), WALL / 2, sz * (HZ - 0.3), 0.9, WALL, 0.9, 'trim', { bev: 0.1 });
   // foundation band (visual, flush with the siding)
@@ -331,25 +340,89 @@ function shell(f: Frame): void {
   }
 }
 
+/** What stays of the breach section when the board wall is gone: cracks on the lintel (outside and in) and flat
+ *  plaster dust at the foot of the wall. The boards, plywood, hazard X, target and studs are the destructible. */
 function breachSection(f: Frame): void {
-  const x = HX, z0 = -9.4, z1 = -3.6, zc = (z0 + z1) / 2;
-  // outside: two plywood sheets nailed over a hole, hazard-tape X, a spray-painted target, cracks
-  f.box(x + 0.05, 2.6, zc - 1.3, 0.08, 4.2, 2.9, 'plywood', { roll: 0, yaw: 0, bev: 0.03 });
-  f.box(x + 0.09, 3.0, zc + 1.4, 0.08, 3.6, 2.7, 'plywoodDark', { bev: 0.03, pitch: 0.06 });
-  for (const s of [-1, 1]) f.box(x + 0.14, 2.9, zc, 0.04, 0.34, 6.8, 'accentHot', { pitch: s * 0.62, g: 'noink', bev: 0 });
-  f.torus(x + 0.16, 2.9, zc, 1.35, 0.1, 'danger', { yaw: Math.PI / 2, seg: 20, g: 'noink' });
-  f.torus(x + 0.16, 2.9, zc, 0.5, 0.09, 'danger', { yaw: Math.PI / 2, seg: 14, g: 'noink' });
-  const cracks: [number, number, number, number][] = [[4.6, zc - 2.6, 0.9, 1.4], [4.9, zc + 2.8, 1.2, -1.2], [0.9, zc - 2.5, 0.8, 0.5], [0.7, zc + 2.7, 1.0, -0.8], [5.4, zc + 0.3, 1.1, 0.3]];
-  for (const [y, z, len, rot] of cracks) f.box(x + 0.03, y, z, 0.04, 0.08, len, 'underDeck', { pitch: rot, g: 'noink', bev: 0 });
-  // inside: exposed studs where the plaster broke off + cracked drywall
-  const xi = HX - T;
-  boxRect(f, xi - 0.02, xi + 0.02, 1.2, 4.8, z0 + 0.6, z1 - 0.6, 'underDeck', { g: 'noink', bev: 0 });
-  for (const z of [z0 + 1.0, zc, z1 - 1.0]) f.box(xi - 0.08, 3.0, z, 0.16, 3.6, 0.3, 'fenceWood', { bev: 0.03 });
-  f.box(xi - 0.06, 1.2, zc, 0.12, 0.2, z1 - z0 - 1.0, 'fenceWood', { bev: 0.03 });
-  for (const [y, z, len, rot] of [[5.3, zc - 2.2, 1.0, 0.8], [0.8, zc + 2.3, 0.9, -0.6], [5.1, zc + 2.4, 0.8, -1.1]] as const) f.box(xi - 0.03, y, z, 0.04, 0.07, len, 'underDeck', { pitch: rot, g: 'noink', bev: 0 });
-  // rubble at the foot of the wall (visual, low)
-  for (let i = 0; i < 4; i++) f.cyl(xi - 0.7 - (i % 2) * 0.4, F0 + 0.005, z0 + 1.2 + i * 1.1, 0.5, 0.01, 0.35, i % 2 ? 'garageInside' : 'stone', { seg: 9, g: 'noink' });
+  const x = HX, zc = (BREACH.a + BREACH.b) / 2, xi = HX - T;
+  for (const [y, z, len, rot] of [[5.05, zc - 2.6, 0.9, 1.4], [5.05, zc + 2.8, 1.2, -1.2], [5.4, zc + 0.3, 1.1, 0.3]] as const) {
+    f.box(x + 0.03, y, z, 0.04, 0.08, len, 'underDeck', { pitch: rot, g: 'noink', bev: 0 });
+  }
+  for (const [y, z, len, rot] of [[5.3, zc - 2.2, 1.0, 0.8], [5.1, zc + 2.4, 0.8, -1.1]] as const) f.box(xi - 0.03, y, z, 0.04, 0.07, len, 'underDeck', { pitch: rot, g: 'noink', bev: 0 });
+  for (let i = 0; i < 4; i++) f.cyl(xi - 0.7 - (i % 2) * 0.4, F0 + 0.005, BREACH.a + 1.2 + i * 1.1, 0.5, 0.01, 0.35, i % 2 ? 'garageInside' : 'stone', { seg: 9, g: 'noink' });
 }
+
+/** The breakable board wall that fills the breach gap (local frame = the garage's). Collider: the wall section. */
+function breachBoards(f: Frame): void {
+  const x = HX, z0 = BREACH.a, z1 = BREACH.b, zc = (z0 + z1) / 2, xi = HX - T, top = BREACH.top;
+  wallPiece(f, 'z', HX - T / 2, z0, z1, 0, top, 1);                        // siding + interior core + the collider box
+  // outside: two plywood sheets nailed over a hole, hazard-tape X, a spray-painted target, cracks
+  f.box(x + 0.05, 2.35, zc - 1.3, 0.08, 3.9, 2.9, 'plywood', { bev: 0.03 });
+  f.box(x + 0.09, 2.62, zc + 1.4, 0.08, 3.4, 2.7, 'plywoodDark', { bev: 0.03, pitch: 0.06 });
+  for (const s of [-1, 1]) f.box(x + 0.14, 2.55, zc, 0.04, 0.34, 6.0, 'accentHot', { pitch: s * 0.62, g: 'noink', bev: 0 });
+  f.torus(x + 0.16, 2.6, zc, 1.35, 0.1, 'danger', { yaw: Math.PI / 2, seg: 20, g: 'noink' });
+  f.torus(x + 0.16, 2.6, zc, 0.5, 0.09, 'danger', { yaw: Math.PI / 2, seg: 14, g: 'noink' });
+  for (const [y, z, len, rot] of [[0.9, zc - 2.5, 0.8, 0.5], [0.7, zc + 2.6, 1.0, -0.8]] as const) f.box(x + 0.03, y, z, 0.04, 0.08, len, 'underDeck', { pitch: rot, g: 'noink', bev: 0 });
+  // inside: exposed studs where the plaster broke off + cracked drywall
+  f.box(xi - 0.02, 2.75, zc, 0.04, 3.1, z1 - z0 - 1.2, 'underDeck', { g: 'noink', bev: 0 });
+  for (const z of [z0 + 1.0, zc, z1 - 1.0]) f.box(xi - 0.08, 2.6, z, 0.16, 3.4, 0.3, 'fenceWood', { bev: 0.03 });
+  f.box(xi - 0.06, 1.2, zc, 0.12, 0.2, z1 - z0 - 1.0, 'fenceWood', { bev: 0.03 });
+  f.box(xi - 0.03, 0.8, zc + 2.2, 0.04, 0.07, 0.9, 'underDeck', { pitch: -0.6, g: 'noink', bev: 0 });
+}
+
+/** The breach once blown: splintered board stubs on the jambs and under the lintel, planks and plaster on the floor
+ *  on both sides, scorch marks. Everything low or attached to the remaining wall (visual only). */
+function breachRubble(f: Frame): void {
+  const x = HX, z0 = BREACH.a, z1 = BREACH.b, zc = (z0 + z1) / 2, xi = HX - T, top = BREACH.top;
+  const j = (i: number, k: number) => ((Math.imul(i + 11, 2654435761) ^ Math.imul(k + 3, 40503)) >>> 0) / 4294967296;
+  // jamb stubs: each siding board snapped off at a different length, sticking into the hole
+  for (const [edge, dir] of [[z0, 1], [z1, -1]] as const) {
+    for (let b = 0; b < 4; b++) {
+      const len = 0.25 + j(b, edge > zc ? 1 : 2) * 0.7, y = 0.2 + b * 1.1 + 0.5;
+      f.box(x - 0.07, y, edge + dir * len / 2, 0.14, 0.9, len, b % 2 ? 'garageSiding2' : 'garageSiding', { yaw: dir * 0.06, roll: (j(b, 5) - 0.5) * 0.12, bev: 0.03 });
+      f.box(x - 0.08, y + 0.3, edge + dir * (len + 0.08), 0.1, 0.18, 0.18, 'splinter', { yaw: 0.6, pitch: 0.5, bev: 0.02 });
+    }
+    f.box(xi + 0.3, top / 2 + 0.2, edge + dir * 0.12, 0.5, top - 0.4, 0.24, 'garageInside', { bev: 0.03 });           // torn plaster edge
+  }
+  // under the lintel: board ends hanging down
+  for (let k = 0; k < 5; k++) {
+    const z = z0 + 0.6 + k * ((z1 - z0 - 1.2) / 4), len = 0.2 + j(k, 7) * 0.45;
+    f.box(x - 0.07, top - len / 2, z, 0.14, len, 0.7 + j(k, 8) * 0.4, k % 2 ? 'garageSiding' : 'garageSiding2', { pitch: (j(k, 9) - 0.5) * 0.3, bev: 0.03 });
+  }
+  // a plywood sheet hanging off one nail on the south jamb
+  f.box(x + 0.35, 3.2, z1 - 0.5, 0.08, 1.6, 1.3, 'plywoodDark', { yaw: -0.5, pitch: 0.35, bev: 0.03 });
+  // floor debris: planks, plaster lumps, splinters (inside on the slab, outside on the ground)
+  for (let k = 0; k < 12; k++) {
+    const inside = k % 2 === 0, gx = inside ? xi - 0.3 - j(k, 10) * 1.6 : x + 0.4 + j(k, 10) * 2.4;
+    const gy = (inside ? F0 : 0) + 0.04 + (k % 3) * 0.03, gz = z0 + 0.4 + j(k, 11) * (z1 - z0 - 0.8);
+    if (k % 4 === 3) f.box(gx, gy + 0.06, gz, 0.4, 0.2, 0.35, 'garageInside', { yaw: j(k, 12) * 3, bev: 0.06 });
+    else f.box(gx, gy, gz, 1.0 + j(k, 13) * 0.9, 0.07, 0.24, k % 3 === 0 ? 'plywood' : k % 3 === 1 ? 'garageSiding' : 'splinter', { yaw: (j(k, 12) - 0.5) * 2.4, bev: 0.02 });
+  }
+  f.cyl(x + 1.6, 0.012, zc, 2.2, 0.01, 1.9, 'scorch', { seg: 14, g: 'noink' });
+  f.cyl(xi - 1.2, F0 + 0.008, zc, 1.8, 0.01, 1.5, 'scorch', { seg: 14, g: 'noink' });
+}
+
+/** X1: the Garage's destructibles — the breach wall and the cats' hoard of four tuna-can stacks inside. */
+export function garageDestructibles(): Destructible[] {
+  const wall = makeDestructible({
+    id: 'garage_breach_wall', tag: 'garage_breach_wall', kind: 'wall_boards',
+    x: GARAGE.x, y: 0, z: GARAGE.z, yaw: 0, build: breachBoards, rubble: breachRubble,
+  });
+  wall.x = GARAGE.x + HX - T / 2; wall.z = GARAGE.z + (BREACH.a + BREACH.b) / 2;   // anchor: the foot of the section
+  const tuna = TUNA_SPOTS.map(([lx, lz, yaw], i) => tunaStack(`tuna_stack_${i + 1}`, GARAGE.x + lx, F0, GARAGE.z + lz, yaw, 31 + i));
+  return [wall, ...tuna];
+}
+
+/** The breach gap (world): the destructible fills x 93.4..94, z -68.4..-62.6, y 0..4.4 (tests, bookmarks). */
+export const GARAGE_BREACH = {
+  x0: GARAGE.x + HX - T, x1: GARAGE.x + HX, z0: GARAGE.z + BREACH.a, z1: GARAGE.z + BREACH.b, top: BREACH.top,
+} as const;
+
+/** Tuna-can stacks inside the garage (local x, z, yaw): the middle of the floor west of the car (seen through the
+ *  breach down the lane between the car and the boxes), mid-west, and one each side of the roll-up door. Clear of the
+ *  doors' approach lines, the breach lane, the car, the kibble route onto the car and D3's nav probe points. */
+export const TUNA_SPOTS: readonly (readonly [number, number, number])[] = [
+  [-0.6, 0.8, 0.12], [-6.2, -4.6, -0.2], [-5.6, 7.8, 0.3], [4.8, 8.8, -0.12],
+];
 
 // ============================================================================ roof: slab, parapet, features
 

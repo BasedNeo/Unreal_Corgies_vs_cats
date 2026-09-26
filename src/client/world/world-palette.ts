@@ -89,6 +89,15 @@ export const WORLD_EXTRA: Record<string, number> = {
   shedSageDark: 0x6d8c66,
   lampTube: 0xfff1d2,
   lampPool: 0xf6ecd6,
+  // ---- X1: destructibles (tuna-can stacks, crate stacks, the breach wall's rubble) ----
+  tin: 0xc9ced6,
+  tinDark: 0x8e959f,
+  tunaLabel: 0x2f86cf,
+  tunaLabel2: 0xe5683a,
+  tunaFish: 0xf3e2b8,
+  splinter: 0xf0cf94,
+  scorch: 0x6a5e52,
+  crateStencil: 0x5a3b1f,
 };
 
 const colorCache = new Map<string, THREE.Color>();

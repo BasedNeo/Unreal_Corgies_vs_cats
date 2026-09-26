@@ -9,6 +9,7 @@ import type { WeaponFxId } from './weapon-fx';
 export const WORDS = [
   'POW!', 'BARK!', 'HISS!', 'SQUEAK!', 'BOING!', 'KA-BOOM!', 'SPLAT!', 'BONK!', 'POOF!', 'ZAP!',
   'THWUMP!', 'WHOOSH!', 'SNAP!', 'YOINK!', 'WOOF!', 'MROW!', 'FSSHH!', 'KO!',
+  'CRASH!', 'CLANG!', 'CRUNCH!',
 ] as const;
 export type Word = (typeof WORDS)[number];
 
@@ -36,7 +37,11 @@ const FIRE_WORDS: Partial<Record<WeaponFxId, { word: Word; cooldown: number; cha
 
 const ABILITY_WORDS: Record<string, Word> = {
   bark_blast: 'BARK!', shadow_cloak: 'POOF!', spotter_drone: 'ZAP!', dig_charge: 'BONK!', squeak_barrier: 'SQUEAK!', ear_glide: 'WHOOSH!',
+  // X1: a destructible breaking (`ability { id: destructible, ability: 'destruct:<kind>' }`)
+  'destruct:wall_boards': 'CRASH!', 'destruct:tuna_stack': 'CLANG!', 'destruct:crate_stack': 'CRUNCH!',
 };
+/** X1: breaks read bigger than ability words (the breach wall biggest). */
+const ABILITY_SCALE: Record<string, number> = { bark_blast: 1.5, 'destruct:wall_boards': 1.7, 'destruct:tuna_stack': 1.35, 'destruct:crate_stack': 1.25 };
 
 export class OnomatopoeiaPicker {
   /** key = category * 2^20 + entity id → next allowed time. Map reuse keeps this allocation-free per event. */
@@ -82,7 +87,7 @@ export class OnomatopoeiaPicker {
         return ev.id === c.localId ? { word: 'YOINK!', scale: 0.85 } : null;
       case 'ability': {
         const w = ABILITY_WORDS[ev.ability];
-        return w && this.ready(7, ev.id, c.now, 0.5) ? { word: w, scale: ev.ability === 'bark_blast' ? 1.5 : 1.1 } : null;
+        return w && this.ready(7, ev.id, c.now, 0.5) ? { word: w, scale: ABILITY_SCALE[ev.ability] ?? 1.1 } : null;
       }
       default:
         return null; // spawn, score, reload: HUD + audio carry these

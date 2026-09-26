@@ -230,6 +230,15 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
         }
         case 'ability': {
           if (!near(ev.x, ev.y, ev.z)) break;
+          if (ev.ability.startsWith('destruct:')) {
+            // X1: a destructible broke (its planks/cans fly in the world view): dust, splinters, the comic word
+            const wall = ev.ability === 'destruct:wall_boards';
+            P.destructDust(pools, ev.x, ev.y, ev.z, ground(ev.x, ev.y - 1, ev.z), wall ? 2.4 : 1.4, wall);
+            // the word pops on the viewer's side of the prop (a wall's center sits inside the wall plane)
+            const dx = camPos.x - ev.x, dz = camPos.z - ev.z, l = Math.hypot(dx, dz) || 1, off = wall ? 1.4 : 0.8;
+            word(ev, ev.x + (dx / l) * off, ev.y + (wall ? 2.4 : 1.6), ev.z + (dz / l) * off);
+            break;
+          }
           const s = states.get(ev.id);
           P.abilityRing(pools, ev.x, ev.y, ev.z, s?.team ?? 0, ev.ability === 'bark_blast');
           word(ev, ev.x, ev.y + 2, ev.z);

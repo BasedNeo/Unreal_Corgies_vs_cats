@@ -16,7 +16,7 @@ import { worldColor } from './world-palette';
 
 const edgeCache = new WeakMap<THREE.BufferGeometry, Float32Array>();
 /** Crease edges (style crease angle) of one source geometry, computed once per unique geometry. */
-function creaseEdges(g: THREE.BufferGeometry): Float32Array {
+export function creaseEdges(g: THREE.BufferGeometry): Float32Array {
   let e = edgeCache.get(g);
   if (!e) {
     const eg = new THREE.EdgesGeometry(g, STYLE.crease.angleDeg);
@@ -27,7 +27,7 @@ function creaseEdges(g: THREE.BufferGeometry): Float32Array {
   return e;
 }
 
-class Builder {
+export class Builder {
   pos: number[] = []; nor: number[] = []; col: number[] = []; idx: number[] = []; lines: number[] = [];
   addLines(e: Float32Array, m: THREE.Matrix4): void {
     const v = new THREE.Vector3();
@@ -69,7 +69,7 @@ function strip(g: THREE.BufferGeometry): THREE.BufferGeometry {
 }
 
 /** Unit-ish source geometry for a prim (cached by shape+dims). Ink groups get outline-safe normals. */
-function primGeometry(p: VisualPrim, inked: boolean): THREE.BufferGeometry {
+export function primGeometry(p: VisualPrim, inked: boolean): THREE.BufferGeometry {
   const r3 = (v: number) => Math.round(v * 1000) / 1000;
   const key = `${p.s}|${r3(p.a)}|${r3(p.b)}|${r3(p.c)}|${r3(p.bev ?? 0)}|${p.seg ?? ''}|${inked}|${p.g === 'soft' && p.s === 'sphere' ? 'blob' : ''}`;
   let g = geoCache.get(key);
@@ -201,7 +201,7 @@ function blobify(g: THREE.BufferGeometry, p: VisualPrim): void {
 }
 
 let inkMat: THREE.Line2NodeMaterial | null = null;
-function inkMaterial(): THREE.Line2NodeMaterial {
+export function inkMaterial(): THREE.Line2NodeMaterial {
   inkMat ??= new THREE.Line2NodeMaterial({ color: PALETTE.ink, linewidth: STYLE.crease.widthPx, worldUnits: false });
   return inkMat;
 }

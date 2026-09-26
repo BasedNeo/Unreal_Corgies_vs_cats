@@ -6,7 +6,7 @@ import { buildWestYard } from './west-yard';
 
 export type {
   PropBox, PropCylinder, SpawnPoint, WorldData, JumpPad, WaterZone, Bookmark, VisualPrim, PrimShape, PrimGroup,
-  TerrainGrid, SurfaceSample, ScatterZone, FenceRun, ConcealZone, Sprinkler, District, Lamp, Perch,
+  TerrainGrid, SurfaceSample, ScatterZone, FenceRun, ConcealZone, Sprinkler, District, Lamp, Perch, Destructible, DestructKind,
 } from './world-types';
 
 /** Cache: the yard is a pure function of the seed, and building it (terrain bake + catalog) costs

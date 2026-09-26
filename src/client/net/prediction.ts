@@ -23,6 +23,7 @@ import { BUFF_FLAGS, CLASS_IDS, EFlag } from '../../shared/types';
 import { PICKUPS } from '../../shared/content/pickups';
 import type { Collider } from '@dimforge/rapier3d-compat';
 import { mirrorBarriers } from '../../sim/combat/ability-barrier';
+import { mirrorDestructibles } from '../../sim/destruct/mirror';
 import { TICK_DT, TICK_HZ } from '../../shared/constants';
 import { quantizeMotion } from '../../host/quantize';
 
@@ -67,6 +68,8 @@ export class LocalPredictor {
   private key = '';
   /** Squeak Barriers mirrored from snapshots: predicted movement collides with them like the authority's (C2). */
   private barriers = new Map<number, Collider>();
+  /** X1: standing destructibles mirrored from snapshots (broken ones drop out, so the predicted player walks through). */
+  private destructibles = new Map<number, Collider[]>();
   /** Class move speeds before buffs (Zoomies+ scales walk/run/sprint exactly as the authority's buff does). */
   private baseMove = { walkSpeed: 0, runSpeed: 0, sprintSpeed: 0 };
   /** The last snapshot said Stunned (R1 crash ejection): inputs are applied with no movement and no buttons. */
@@ -224,9 +227,11 @@ export class LocalPredictor {
     };
   }
 
-  /** Mirror the authority's barrier colliders into the predictor's world. Call with each snapshot, before reconcile. */
+  /** Mirror the authority's barrier and destructible colliders into the predictor's world. Call with each snapshot, before reconcile. */
   syncWorld(states: Iterable<EntityState>): void {
-    mirrorBarriers(this.sim, states, this.barriers);
+    const list = Array.isArray(states) ? states : [...states]; // a one-shot iterator (ents.values()): read it once
+    mirrorBarriers(this.sim, list, this.barriers);
+    mirrorDestructibles(this.sim, list, this.destructibles);
   }
 
   /** Take the authority's buff bits; returns true when Zoomies+ turned on/off (movement speeds changed). */

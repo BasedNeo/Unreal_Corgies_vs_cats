@@ -55,6 +55,17 @@ function despawn(sim: Sim, e: SimEntity): void {
   if (pool && pool.length < POOL_MAX) pool.push(e);
 }
 
+/**
+ * Blast listeners (X1: destructibles take blast damage). Called at the end of every explode(), after the characters
+ * were hit — so a wall the blast breaks still shielded whoever stood behind it — with the blast's exact profile.
+ * Module-level (every Sim): a listener ignores sims it has no state for. Register once (duplicates are ignored).
+ */
+export type BlastListener = (sim: Sim, x: number, y: number, z: number, pdef: ProjectileDef, owner: EntityId, ownerTeam: TeamId, weapon: number) => void;
+const blastListeners: BlastListener[] = [];
+export function addBlastListener(f: BlastListener): void {
+  if (!blastListeners.includes(f)) blastListeners.push(f);
+}
+
 /** Radius-falloff explosion: damage (LOS-checked, self-damage reduced), knockback, `explode` event. */
 export function explode(sim: Sim, x: number, y: number, z: number, pdef: ProjectileDef, owner: EntityId, ownerTeam: TeamId, weapon: number): void {
   const R = pdef.explodeRadius;
@@ -80,6 +91,7 @@ export function explode(sim: Sim, x: number, y: number, z: number, pdef: Project
       knockback(t, kx * k, k * 0.55, kz * k);
     }
   }
+  for (let i = 0; i < blastListeners.length; i++) blastListeners[i](sim, x, y, z, pdef, owner, ownerTeam, weapon);
 }
 
 const wh: WorldHit = { t: 0, nx: 0, ny: 0, nz: 0 };
