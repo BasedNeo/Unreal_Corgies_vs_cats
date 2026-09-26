@@ -60,6 +60,8 @@ export interface AdventureConfig {
   interact?: boolean;
   /** After the result hold, load the next chapter (default true; false replays the same one). */
   advance?: boolean;
+  /** Keep the result up until the page moves on (offline: the card's NEXT CHAPTER / REPLAY / MAIN MENU); no timer. */
+  holdResult?: boolean;
 }
 
 /** A cat the chapter spawned (e.adv). */

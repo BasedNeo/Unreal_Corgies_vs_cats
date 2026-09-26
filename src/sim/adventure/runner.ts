@@ -737,6 +737,7 @@ function update(sim: Sim, dt: number): void {
       break;
     }
     case 'complete': {
+      if (adventureConfig(sim).holdResult) break; // offline: the player picks what's next on the card
       st.timer = Math.max(0, st.timer - dt);
       if (st.timer <= 0) {
         const next = adventureConfig(sim).advance === false ? def : roomChapterAfter(def);

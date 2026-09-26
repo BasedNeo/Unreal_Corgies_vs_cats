@@ -493,6 +493,19 @@ describe('adventure: chapter complete', () => {
     expect(sim.state.match).not.toBe(oldMatch);
     expect(h.dead).toBe(false);
   });
+
+  it('offline (holdResult) the result stays up until the page moves on: no timer runs out under the card', async () => {
+    const def = chapter([{ id: 'go', text: 'Go', trigger: { type: 'reach', params: { x: 10, z: 0, radius: 3 } } }], { par: 2 });
+    const sim = await advSim(def, { completeHold: 1, holdResult: true });
+    const h = human(sim);
+    live(sim);
+    teleport(sim, h, 10, 0);
+    run(sim, 2 / TICK_HZ);
+    expect(st(sim).phase).toBe('complete');
+    run(sim, 5);
+    expect(st(sim).phase).toBe('complete');
+    expect(ms(sim).phase).toBe('ended');
+  });
 });
 
 describe('adventure: bots', () => {

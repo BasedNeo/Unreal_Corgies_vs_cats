@@ -76,7 +76,8 @@ one class kit (§5). The finale is the Vac-Tank.
   room flow (`?mode=adventure&chapter=…`). The server keeps only known chapter ids (unknown or missing → chapter 1),
   so a room lists the chapter it really runs.
 - **After a chapter** (`afterChapter` / `roomChapterAfter` in chapters.ts): offline, the card offers NEXT CHAPTER and
-  REPLAY; after the finale it reads THE END with MAIN MENU and REPLAY. An online room moves on by itself after the
+  REPLAY and waits for the choice (the worker sets `holdResult`); after the finale it reads THE END with MAIN MENU
+  and REPLAY. An online room moves on by itself after the
   card's countdown, and after the finale it goes back to chapter 1.
 
 ## Design rules (game-design-psychology)
