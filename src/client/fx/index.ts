@@ -29,6 +29,7 @@ import { SurfaceMap, Surface, makeSurfaceHit, type SurfaceWorld } from './surfac
 import { impactDelay } from './delays';
 import * as P from './presets';
 import * as W from './presets-weapons';
+import { ordnanceByWire } from '../../shared/content/ordnance';
 
 export type { FxReaction } from './reactions';
 
@@ -136,6 +137,7 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
     const cx = s.x - camPos.x, cy = s.y - camPos.y, cz = s.z - camPos.z;
     if (cx * cx + cy * cy + cz * cz > 50 * 50) return;
     if (s.kind === EntityKind.Projectile) {
+      if (ordnanceByWire(s.weapon)) return; // W9 X4: throwables draw their own trail (fx/ordnance-view.ts)
       const a = (trailAcc.get(id) ?? 0) + frameDt;
       if (a >= 0.035) { P.ballTrail(pools, s.x, s.y, s.z); trailAcc.set(id, 0); } else trailAcc.set(id, a);
       return;

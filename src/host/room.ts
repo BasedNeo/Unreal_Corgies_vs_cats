@@ -139,7 +139,7 @@ export const CATCHUP_MIN_DEPTH = 3;
  */
 export const INPUT_CREDIT_CAP = FREEZE_MAX_TICKS; // a whole freeze can be caught up; never faster than real time
 /** Buttons whose presses only count in a regular tick (combat systems don't run for catch-up inputs). */
-const COMBAT_BUTTONS = Btn.Fire | Btn.Ability | Btn.Interact | Btn.Reload | Btn.Melee | Btn.NextWeapon;
+const COMBAT_BUTTONS = Btn.Fire | Btn.Ability | Btn.Interact | Btn.Reload | Btn.Melee | Btn.NextWeapon | Btn.Throw; // W9 X4: a throw tap never hides in a catch-up batch
 
 export function defaultMatchState(mode: string): MatchState {
   return { mode, phase: 'live', timeLeft: 0, score: [0, 0], objective: 'Explore West Yard', wave: 0, winner: -1 };

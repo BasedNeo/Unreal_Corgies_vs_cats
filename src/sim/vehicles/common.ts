@@ -11,6 +11,7 @@ import type { GameEvent } from '../../shared/protocol';
 import { WEAPONS, type ProjectileDef } from '../../shared/content/weapons';
 import type { KartExplosionDef } from '../../shared/content/vehicles';
 import { CAPSULE_CLEAR_FILTER, STATIC_RAY_FILTER, capsuleShape, vehicleRuntime } from './state';
+import { ordnanceBlastOf } from '../combat/ordnance';
 
 const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
 export const ticks = (s: number) => Math.round(s * TICK_HZ);
@@ -131,6 +132,8 @@ export function blastDef(x: KartExplosionDef): ProjectileDef {
 /** Damage numbers of an `explode` event (a vehicle's own blast, the owner's weapon, or a generic default). */
 export function blastDamageOf(sim: Sim, ev: Extract<GameEvent, { e: 'explode' }>, own: KartExplosionDef | null): { damage: number; inner: number; edge: number; self: number } {
   if (own) return { damage: own.damage, inner: own.inner, edge: own.edgeFrac, self: 0.5 };
+  const od = ordnanceBlastOf(sim, ev); // W9 X4: a throwable's own numbers, not the thrower's gun
+  if (od) return { damage: od.explodeDamage, inner: od.explodeInner, edge: od.explodeEdgeFrac, self: od.selfDamageMult };
   const owner = sim.entities.get(ev.by);
   const p = owner?.wpn ? WEAPONS[owner.wpn.id].projectile : undefined;
   if (p && p.explodeRadius > 0) return { damage: p.explodeDamage, inner: p.explodeInner, edge: p.explodeEdgeFrac, self: p.selfDamageMult };

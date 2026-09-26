@@ -43,6 +43,10 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
   interact/                        order 150: Ordnance kiosk kit swaps, Upgrade Cores + buffs, Golden Kibble,
                                    Squeaker mission chain (folded into MatchState by match/)
   combat/ability-*.ts              Spotter Drone / Dig Charge / Squeak Barrier entities (EntityKind.Ability)
+  combat/ordnance.ts               W9 X4 throwables (order 455 flight + blast, 805 lifecycle): one carried (EFlag.Ordnance),
+                                   launched from the sim's own aim on the Throw release; one integrator step shared with the
+                                   client preview (shared/content/ordnance.ts); interact/ordnance-kiosk.ts restock;
+                                   ai/ordnance-ai.ts a pure bot throw planner (wired into brain.ts after G4b)
   match/core-rush.ts               core-rush: fair Core Pad placement, capture, hold scoring (EntityKind.Zone)
   match/base-assault.ts            W9 G4a base-assault: a ball, stand and capture ring per team (props in the snapshot),
                                    steal / carry (EFlag.Carrier: 0.75× speed, no glide, no rides) / drop / return /
@@ -107,6 +111,8 @@ src/client/
                                    plane-hud.ts cockpit strip
   vehicles/                        kart + terminal views (Wave 2) · RC plane + Rooftop Hangar views (R1)
   interact/                        kiosk/core/kibble/beacon views · E prompt, kit picker, buff chips, mission card
+  fx/ordnance-view.ts              W9 X4 throwable meshes, arc preview + landing ring, fuse telegraph, faction blast layer ·
+                                   ui/ordnance-hud.ts the throwable slot · audio/presets-ordnance.ts
   abilities/                       drone, charge, barrier views + spotted markers
   modes/core-rush-view.ts          Core Pads, A·B·C markers and strip
   modes/base-assault-view.ts       W9 G4a balls, stands, rings, beacons · ui/base-assault-hud.ts ball strip, banners

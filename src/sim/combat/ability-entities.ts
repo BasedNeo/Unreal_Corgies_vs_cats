@@ -26,6 +26,7 @@ import {
 import { droneSpot, flyDrone } from './ability-drone';
 import { chargeDue, detonateCharge } from './ability-charge';
 import { CHARGE } from './ability-tuning';
+import { ordnanceBlastOf } from './ordnance';
 
 type FireEv = Extract<GameEvent, { e: 'fire' }>;
 type ExplodeEv = Extract<GameEvent, { e: 'explode' }>;
@@ -71,6 +72,8 @@ function onFire(sim: Sim, list: SimEntity[], ev: FireEv): void {
 
 /** Damage profile of a blast event: the source's explosive projectile, the dig charge, or a generic blast. */
 function blastProfile(sim: Sim, ev: ExplodeEv): { dmg: number; inner: number; edge: number } {
+  const od = ordnanceBlastOf(sim, ev); // W9 X4: a throwable's own numbers, not the thrower's gun
+  if (od) return { dmg: od.explodeDamage, inner: od.explodeInner, edge: od.explodeEdgeFrac };
   const by = sim.entities.get(ev.by);
   const pd = by?.wpn ? WEAPONS[by.wpn.id].projectile : undefined;
   if (pd && pd.explodeRadius === ev.r) return { dmg: pd.explodeDamage, inner: pd.explodeInner, edge: pd.explodeEdgeFrac };

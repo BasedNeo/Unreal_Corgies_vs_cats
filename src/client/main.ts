@@ -38,12 +38,16 @@ import { createInteractViews, createInteractPrompts } from './interact';
 import { createCoreRushView } from './modes/core-rush-view';
 import { createBaseAssaultView } from './modes/base-assault-view'; // W9 G4a: balls, stands, capture rings
 import { createBaseAssaultHud } from './ui/base-assault-hud'; // W9 G4a: ball strip, banners, markers, carrier cue
+import { createOrdnanceView, type OrdnanceAim } from './fx/ordnance-view'; // W9 X4: throwables, arc preview, telegraph
+import { createOrdnanceAudio } from './audio/presets-ordnance'; // W9 X4
+import { createOrdnanceHud } from './ui/ordnance-hud'; // W9 X4: the throwable slot
+import { Btn } from '../shared/input';
 import { createAbilityViews } from './abilities';
 import { loadSettings, type Settings } from './ui/settings';
 import { bus } from './core/events';
 import { TICK_DT } from '../shared/constants';
 import { damp, lerpAngle } from '../shared/math';
-import { CLASS_IDS, EFlag, EntityKind, type ClassId, type TeamId } from '../shared/types';
+import { CLASS_IDS, EFlag, EntityKind, type ClassId, type SpeciesId, type TeamId } from '../shared/types';
 import { sniperPainting } from '../shared/content/bosses';
 import type { EntityState } from '../shared/protocol';
 
@@ -145,6 +149,12 @@ async function main(): Promise<void> {
   const weatherAudio = createWeatherAudio(audio.engine, worldData);
   // X3: FX + audio know the world, so impacts classify by surface (metal, wood, water…) and mark props, not just terrain
   const fx = createFx(ctx.scene, ctx.camera, views, { heightAt: (x, z) => worldData.height(x, z), world: worldData });
+  // X4: throwables (the authority throws on the Throw release; the view draws them from snapshots + the arc preview)
+  const ordAudio = createOrdnanceAudio(audio.engine);
+  const ordView = createOrdnanceView(ctx.scene, { world: worldData, onCue: (c) => ordAudio.cue(c) });
+  const ordAim: OrdnanceAim = { holding: false, yaw: 0, pitch: 0 };
+  let ordButtons = 0;
+  let ordLocal: EntityState | null = null;
   audio.setWorld(worldData);
   const applySettings = (st: Settings) => {
     input.sensitivity = 0.0022 * st.sensitivity;
@@ -153,6 +163,7 @@ async function main(): Promise<void> {
     cam.setBaseFov(st.fov);
     audio.setVolumes({ master: st.masterVolume, music: st.musicVolume, sfx: st.sfxVolume });
     fx.setQuality(st.quality);
+    ordView.setQuality(st.quality);
     if (toQualityTier(st.quality) !== settingTier) {
       settingTier = toQualityTier(st.quality);
       ctx.setQuality(settingTier);
@@ -198,6 +209,7 @@ async function main(): Promise<void> {
   const prompts = createInteractPrompts(ui, { send: (msg) => net?.transport.send(msg), sound: (k) => audio.ui(k) });
   const planeHud = createPlaneHud(ui);
   const assaultHud = createBaseAssaultHud(ui, { audio }); // G4a (idle in other modes)
+  const ordHud = createOrdnanceHud(document.getElementById('cvc-hud') ?? ui); // X4
   // A1: intro/outro captions, step barks, the squad-down beat, the chapter-complete card (+ device progress)
   const adventureUrl = (id: string) => {
     const p = new URLSearchParams(location.search);
@@ -267,6 +279,7 @@ async function main(): Promise<void> {
     adventure.onGameEvent(ev); // A1
     prompts.onGameEvent(ev, net?.localEntity ?? -1);
     const r = fx.onGameEvent(ev);
+    ordView.onGameEvent(ev); // X4
     if (r.shake > 0) cam.shake(r.shake);
     if (r.kickPitch !== 0 || r.kickYaw !== 0) cam.kick(r.kickPitch, r.kickYaw, r.kickRecover); // X3: visual recoil (view only)
     if (r.fovPunch > 0) cam.punch(r.fovPunch); // X3: kill / crit confirm
@@ -291,7 +304,16 @@ async function main(): Promise<void> {
     acc += dt;
     while (acc >= TICK_DT) {
       acc -= TICK_DT;
-      if (net?.connected && !net.awaitingSpawn) { const cmd = input.sample(++seq, TICK_DT); cmd.rt = Math.max(0, Math.round(net.renderTime(now) * net.tickHz)); net.pushInput(cmd); }
+      if (net?.connected && !net.awaitingSpawn) {
+        const cmd = input.sample(++seq, TICK_DT);
+        cmd.rt = Math.max(0, Math.round(net.renderTime(now) * net.tickHz));
+        // X4: the throw sound on release, the same edge the authority throws on (last frame's local state)
+        const me = ordLocal;
+        if ((ordButtons & Btn.Throw) && !(cmd.buttons & Btn.Throw) && me && (me.flags & EFlag.Ordnance) && !(me.flags & (EFlag.Dead | EFlag.Mounted | EFlag.Stunned)))
+          ordView.localThrow(me.species as SpeciesId, me.x, me.y + 1.2, me.z);
+        ordButtons = cmd.buttons;
+        net.pushInput(cmd);
+      }
     }
     net?.flush();
 
@@ -315,6 +337,10 @@ async function main(): Promise<void> {
     bossFx.update(dt, states);
     bossBar.update(states, dt);
     const local = states.get(localId) ?? null;
+    ordLocal = local; // X4: arc preview while G is held, the HUD slot
+    ordAim.holding = (ordButtons & Btn.Throw) !== 0; ordAim.yaw = input.yaw; ordAim.pitch = input.pitch;
+    ordView.update(pdt, states, localId, ordAim);
+    ordHud.update(local, now / 1000);
     const kart = local ? mountedVehicle(local, states) : null;
     planeHud.update(kart, kart ? surfaceAt(worldData, kart.x, kart.z, kart.y + 0.5).y : 0); // the surface under it (a roof too); shows itself only for a plane
     if (kart) {
