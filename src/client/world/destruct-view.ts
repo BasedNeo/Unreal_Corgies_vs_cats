@@ -20,7 +20,7 @@ import type { Destructible, PrimGroup, WorldData } from '../../shared/world/worl
 import { boxAabb } from '../../shared/world/destructibles';
 import { quatYXZ } from '../../shared/world/queries';
 import { hash2 } from '../../shared/world/noise';
-import { Builder, creaseEdges, inkMaterial, primGeometry } from './prim-mesh';
+import { Builder, CREASE_DRAW_DISTANCE, creaseEdges, inkMaterial, primGeometry } from './prim-mesh';
 import { toonFrom, toonNoInk } from './materials';
 import { worldColor } from './world-palette';
 import { createDebris, type DebrisSystem } from './destruct-debris';
@@ -165,6 +165,9 @@ export function createDestructView(data: WorldData, opts: { creases?: boolean; s
       lines.name = `${mesh.name}_crease`;
       lines.userData.styleInk = true;
       lines.frustumCulled = false;
+      // P3: all destructibles' creases are one line set (the stacks sit in and around the Garage): drawn only near
+      // them. Its bounds are the standing + rubble segments where they stand (computed before any is parked).
+      lines.userData.drawDistance = CREASE_DRAW_DISTANCE;
       lineBuf = (lg.getAttribute('instanceStart') as THREE.InterleavedBufferAttribute).data;
       lineBuf.setUsage(THREE.DynamicDrawUsage);
       lineOrig = (lineBuf.array as Float32Array).slice();

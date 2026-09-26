@@ -1,5 +1,6 @@
 // World lab: renders the West Yard with the real style pipeline and a free camera.
 //   /labs/world.html?bm=overview&t=0.68&webgl&seed=1&hud=0&dummies=0
+//   &inkmin=0   P3 A/B: every ink hull drawn (default: the renderer's ink LOD skips hulls under 0.3 px)
 //   G1 clock/weather: &tick=N (server tick) · &wx=clear|overcast|rain|storm|clearing (jump the clock to the
 //   middle of that state) · &bolt=1 (jump to the next nearby lightning flash) · &spr=meadow|veg (jump into
 //   a sprinkler burst) · &freeze (clock stops: deterministic shots) · &look=... &pos=... as before.
@@ -24,7 +25,7 @@ const hudEl = document.getElementById('hud')!;
 interface LabDebug { drawCalls: number; triangles: number; world: Record<string, number>; bookmark: string; timeOfDay: number; buildMs: number }
 
 async function main() {
-  const ctx = await createRenderContext(document.getElementById('app')!, { forceWebGL: params.has('webgl') });
+  const ctx = await createRenderContext(document.getElementById('app')!, { forceWebGL: params.has('webgl'), inkMinPx: params.has('inkmin') ? Number(params.get('inkmin')) : undefined });
   debug.backend = ctx.backend;
   const seed = Number(params.get('seed') ?? 1);
   const t0 = performance.now();

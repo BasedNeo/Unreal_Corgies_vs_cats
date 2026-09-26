@@ -6,6 +6,10 @@
 // E4: every vertex also carries its prim's weathering (rough, metal, grime, wear) from the palette key
 // (world-palette worldSurface) as a `surface` attribute, read by the hardened style material (surfaceAttr), so
 // one merged mesh holds sacks (cloth), crates (wood), poles (metal) and paint with their own wear.
+// W7 P3: a cell's crease ink is split into tiles (a third of the cell) that carry `userData.drawDistance`
+// (CREASE_DRAW_DISTANCE): the scene pass (engine/renderer.ts ink LOD) draws only the tiles near the camera. Crease lines
+// are 1.1 px at every distance (6 triangles per segment), so a whole yard of them was ~160 k triangles a frame; far
+// props keep their fills and hulls, like the far scenery that never had creases.
 import * as THREE from 'three/webgpu';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { PrimGroup, VisualPrim } from '../../shared/world/world-data';
@@ -261,6 +265,26 @@ export function inkMaterial(): THREE.Line2NodeMaterial {
   return inkMat;
 }
 
+/** Crease-ink tiles are drawn only within this distance (m, camera to the tile's bounds). */
+export const CREASE_DRAW_DISTANCE = 40;
+
+/**
+ * Splits crease segments (flat xyz pairs, as Builder.lines) into square tiles of `tile` m by segment midpoint (XZ).
+ * Returns the tiles' segment arrays keyed "ix,iz" (tile indices), in first-seen order.
+ */
+export function creaseTiles(lines: readonly number[], tile: number): Map<string, Float32Array> {
+  const lists = new Map<string, number[]>();
+  for (let i = 0; i + 5 < lines.length; i += 6) {
+    const k = `${Math.floor((lines[i] + lines[i + 3]) / 2 / tile)},${Math.floor((lines[i + 2] + lines[i + 5]) / 2 / tile)}`;
+    let l = lists.get(k);
+    if (!l) { l = []; lists.set(k, l); }
+    for (let j = 0; j < 6; j++) l.push(lines[i + j]);
+  }
+  const out = new Map<string, Float32Array>();
+  for (const [k, l] of lists) out.set(k, new Float32Array(l));
+  return out;
+}
+
 export interface PrimMeshes {
   group: THREE.Group;
   /** Solid meshes (for shadows/debug); crease lines are children flagged styleInk. */
@@ -312,13 +336,15 @@ export function buildPrimMeshes(prims: readonly VisualPrim[], opts: { cell?: num
     mesh.castShadow = !far;
     mesh.receiveShadow = true;
     mesh.userData.noCameraCollide = true;          // camera uses collider proxies instead (cheap raycasts)
-    if (b.lines.length) {
-      // one LineSegments2 of crease ink per merged mesh (same look as style addCreaseInk)
+    // crease ink (same look as style addCreaseInk) in distance-culled tiles, a third of a cell each, so tiles never
+    // straddle cells
+    for (const [tk, seg] of creaseTiles(b.lines, cell / 3)) {
       const lg = new LineSegmentsGeometry();
-      lg.setPositions(new Float32Array(b.lines));
+      lg.setPositions(seg);
       const lines = new LineSegments2(lg, inkMaterial());
-      lines.name = `${mesh.name}_crease`;
+      lines.name = `${mesh.name}_crease_${tk}`;
       lines.userData.styleInk = true;
+      lines.userData.drawDistance = CREASE_DRAW_DISTANCE;
       mesh.add(lines);
     }
     group.add(mesh);

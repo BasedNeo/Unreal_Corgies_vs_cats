@@ -4,7 +4,10 @@
 //
 // Draw calls per character: 1 skinned body (fur + face + suit + armour, vertex colors) + 1 rigid weapon
 // (+ its crease ink) + 1 weapon glow + 1 skinned team-lamp glow (helmet / visor / goggle lamps, the Overwatch
-// monocle + mast beacon) (+ 1 skinned neckwear with a C3 look) ≤ 6.
+// monocle + mast beacon) (+ 1 skinned neckwear with a C3 look) ≤ 6. W7 P3 distance LOD: past
+// CHARACTER_DETAIL_DISTANCE the weapon ink and glow hide and only the body casts a shadow (4 draws + 1 shadow). The
+// body and weapon keep their ink hulls at every distance (`keepInk`: a whip mast or a barrel at 35 m is mostly its
+// hull); the neckwear's goes by the renderer's sub-pixel rule. The tree (and stats.drawCalls) never changes.
 // Geometry is cached and shared: a kit (rig template, weapon, glow parts) per (species, breed, class, team, tier), and
 // under it a body (fur + gear) per (coat paint, team collar or not). Every avatar gets its own skeleton and animator.
 // Seeds drive the breed (body shape), per-instance proportions (bone scales), blink timing, idle moods and ear
@@ -42,6 +45,23 @@ export const DETAIL = { hero: 0.86, npc: 0.66 } as const;
 export const FACE_DETAIL = { hero: 1.12, npc: 0.66 } as const;
 /** Bump when existing seeds change appearance (seeds are save data). v2: K2 HARDENED veterans. */
 export const CHARACTER_VERSION = 2;
+
+/**
+ * W7 P3 distance LOD. Beyond this camera distance (m) a character drops its small detail: the weapon's crease ink
+ * (≈ 1.2 k triangles of 1.1 px lines on a gun ~25 px long), the weapon glow (sight / emitter, a pixel or two) and the
+ * weapon's and neckwear's shadows. The body, the weapon, the neckwear, the team lamps, the body's shadow and the body
+ * and weapon ink hulls stay, so team, class and look read the same. The neckwear's hull goes by the renderer's
+ * sub-pixel rule (engine/renderer.ts ink LOD, ~19 m at a 720 px buffer). Nothing changes within 18.5 m.
+ */
+export const CHARACTER_DETAIL_DISTANCE = 20;
+/** Half-width (m) of the band where the detail level holds, so a character at the threshold never flickers. */
+export const CHARACTER_DETAIL_BAND = 1.5;
+
+/** Detail level at `dist` m given the current one (hysteresis): true = far (detail dropped). */
+export function characterFarAt(dist: number, far: boolean): boolean {
+  return far ? dist > CHARACTER_DETAIL_DISTANCE - CHARACTER_DETAIL_BAND : dist > CHARACTER_DETAIL_DISTANCE + CHARACTER_DETAIL_BAND;
+}
+const _lodP = new THREE.Vector3(), _lodE = new THREE.Vector3();
 
 /** Rig, weapon and glow parts: everything a look never changes. */
 interface KitAsset {
@@ -112,6 +132,12 @@ export interface CharacterAvatar extends Avatar {
    * to the species default; null restores the seeded classic look. Returns whether anything changed.
    */
   setLook(look: Look | null | undefined): boolean;
+  /**
+   * P3 distance LOD: 'far' hides the weapon's crease ink and glow and stops the weapon and neckwear casting shadows
+   * (CHARACTER_DETAIL_DISTANCE). Set automatically from the rendering camera each frame the body is drawn; tests
+   * and labs may force it (the next rendered frame re-evaluates it).
+   */
+  detail: 'near' | 'far';
 }
 
 /** Variant (coat / breed) chosen from the seed. */
@@ -265,12 +291,22 @@ export function createCharacter(o: CharacterOptions): CharacterAvatar {
   // Generous static bounds: poses (zoomies, death flop, flips) leave the bind-pose box.
   const sphere = new THREE.Sphere(new THREE.Vector3(0, 0.6, 0), 1.7);
   const box = new THREE.Box3(new THREE.Vector3(-1.2, -0.2, -1.2), new THREE.Vector3(1.2, 1.9, 1.2));
+  // P3: the body picks the detail level from the camera that draws it (main pass only: the sun's shadow camera is
+  // orthographic). A culled body keeps its last level, which is fine: its detail is off-screen too.
+  const lodHook = (_r: unknown, scene: THREE.Scene, camera: THREE.Camera) => {
+    if (!(camera as THREE.PerspectiveCamera).isPerspectiveCamera || scene.overrideMaterial) return;
+    const d = _lodP.setFromMatrixPosition(root.matrixWorld).distanceTo(_lodE.setFromMatrixPosition(camera.matrixWorld));
+    const next = characterFarAt(d, far);
+    if (next !== far) { far = next; applyDetail(); }
+  };
   const bodyMesh = (g: THREE.BufferGeometry): THREE.SkinnedMesh => {
     const m = new THREE.SkinnedMesh(g, bodyMat);
     m.name = 'character_body';
     m.boundingSphere = sphere;
     m.boundingBox = box;
     m.castShadow = true;
+    m.userData.keepInk = true;         // P3: the renderer's ink LOD keeps this hull at range (masts, ears, tails)
+    m.onBeforeRender = lodHook as unknown as THREE.Object3D['onBeforeRender'];
     return m;
   };
   let skinned = bodyMesh(body.geometry);
@@ -298,12 +334,15 @@ export function createCharacter(o: CharacterOptions): CharacterAvatar {
   const weapon = new THREE.Mesh(kit.weapon.geometry, weaponMat);
   weapon.name = `weapon_${kit.weapon.id}`;
   weapon.castShadow = true;
+  weapon.userData.keepInk = true;      // P3: a barrel at range is mostly its hull (the class read, like the body)
   weaponBone.add(weapon);
-  if (kit.weaponInk) { weapon.add(kit.weaponInk.clone()); fixedDraws++; }
+  let weaponInk: THREE.Object3D | null = null, weaponGlow: THREE.Mesh | null = null;
+  if (kit.weaponInk) { weaponInk = kit.weaponInk.clone(); weapon.add(weaponInk); fixedDraws++; }
   if (kit.weapon.glow) {
     const g = new THREE.Mesh(kit.weapon.glow, glow(kit.weapon.glowColor, 2.6));
     g.name = 'weapon_glow';
     weapon.add(g);
+    weaponGlow = g;
     fixedDraws++;
   }
   if (kit.kitGlow) {
@@ -338,9 +377,17 @@ export function createCharacter(o: CharacterOptions): CharacterAvatar {
     mesh.bind(skeleton, IDENTITY);
     mesh.boundingSphere = sphere;
     mesh.boundingBox = box;
-    mesh.castShadow = true;
+    mesh.castShadow = !far;
     root.add(mesh);
     neck = { asset, mesh };
+  };
+  // P3 distance LOD (CHARACTER_DETAIL_DISTANCE): the small detail a far character drops.
+  let far = false;
+  const applyDetail = () => {
+    if (weaponInk) weaponInk.visible = !far;
+    if (weaponGlow) weaponGlow.visible = !far;
+    weapon.castShadow = !far;
+    if (neck) neck.mesh.castShadow = !far;
   };
   setNeck(paint.neck);
 
@@ -410,6 +457,8 @@ export function createCharacter(o: CharacterOptions): CharacterAvatar {
       return muzzle.getWorldPosition(target);
     },
     setExpression(e) { animator.setExpression(e); },
+    get detail() { return far ? 'far' : 'near'; },
+    set detail(d) { const next = d === 'far'; if (next !== far) { far = next; applyDetail(); } },
     setLook(look) {
       if (disposed) return false;
       const next = paintFor(o.species, seeded, look);

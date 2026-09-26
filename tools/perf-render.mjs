@@ -1,6 +1,6 @@
 // Render cost per quality tier at the same view: draw calls and triangles per frame, split by pass.
 //   PROBE_URL=http://localhost:5175/ node tools/perf-render.mjs [--tiers high,medium,low] [--query '&mode=free&bots=0,0']
-//        [--frames 6] [--out artifacts/p2] [--size 1280x720]
+//        [--frames 6] [--out artifacts/p2] [--size 1280x720] [--objects]
 // Headless Chromium renders with SwiftShader (WebGL2 backend, ~1 fps): judge cost by draws/triangles, not fps.
 // Counting wraps the WebGL2 draw calls (harness-only, like tools/qa-play.mjs perf). A draw is attributed to
 //   shadow      the viewport is square and not the canvas (the sun's shadow map: 1024/1536/2048)
@@ -8,8 +8,11 @@
 //   scene       everything else (the main colour pass incl. the toon outline hulls)
 // The default query is free mode without bots (spawn, camera and time of day are deterministic): the same view for
 // every tier. Use --query '&mode=team-deathmatch' for a firefight (bots move, so frames differ a little).
+// --objects (W7 P3): also attribute one frame's draws to the objects that issued them (a hook on the page's own
+// WebGPURenderer.renderObject; each GL draw counts for the innermost object being rendered) and split the scene pass
+// into the ink hulls (toon outline pass) and the rest: <out>/objects-<tier>.txt, and `hull` in the printed row.
 import { chromium } from '@playwright/test';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
@@ -17,6 +20,7 @@ const tiers = opt('tiers', 'high,low').split(',');
 const query = opt('query', '&mode=free&bots=0,0&t=0.45');
 const frames = Number(opt('frames', 6));
 const out = opt('out', 'artifacts/p2');
+const objects = argv.includes('--objects');
 const [W, H] = opt('size', '1280x720').split('x').map(Number);
 const base = process.env.PROBE_URL ?? 'http://localhost:5173/';
 const exe = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -33,6 +37,12 @@ const GLCOUNT = () => {
     const tris = mode === 4 ? (count / 3) * inst : mode === 5 || mode === 6 ? Math.max(0, count - 2) * inst : 0;
     const pass = isShadow(vw, vh) ? 'shadow' : tris > 0 && tris <= 2 ? 'fullscreen' : 'scene';
     cur[pass][0]++; cur[pass][1] += tris;
+    const o = window.__perfObj;                              // --objects: attribute to the innermost rendered object
+    if (o?.on && o.cur) {
+      const key = `${pass === 'scene' && o.cur.hull ? 'hull' : pass}|${o.cur.key}`;
+      const e = o.rec.get(key) ?? { calls: 0, tris: 0, ids: new Set() };
+      e.calls++; e.tris += tris; e.ids.add(o.cur.id); o.rec.set(key, e);
+    }
   };
   const wrap = (name, f) => { const o = P[name]; P[name] = function (...a) { f(a); return o.apply(this, a); }; };
   wrap('drawArrays', (a) => add(a[0], a[2]));
@@ -68,8 +78,45 @@ for (const tier of tiers) {
   await page.waitForFunction((n) => globalThis.__cvc.frames >= n, f0 + frames + 2, { timeout: 600000, polling: 500 });
   const fr = await page.evaluate((n) => window.__perf.frames.slice(-n), frames);
   const info = await page.evaluate(() => ({ ratio: globalThis.__cvc.pixelRatio ?? null, quality: globalThis.__cvc.quality ?? null, errors: globalThis.__cvc.errors }));
+  let hull = null;
+  if (objects) {
+    const rows = await page.evaluate(async () => {
+      // the page's own three module (Vite's pre-bundled dep), so the hook sees the renderer the game uses
+      const url = performance.getEntriesByType('resource').map((e) => e.name).find((n) => /three_webgpu\.js/.test(n));
+      const THREE = await import(url);
+      const R = THREE.WebGPURenderer.prototype, orig = R.renderObject;
+      const o = window.__perfObj = { on: false, cur: null, rec: new Map() };
+      const label = (obj) => {
+        const chain = [];
+        for (let p = obj; p && !p.isScene; p = p.parent) chain.push(p.name || p.type);
+        chain.reverse();
+        return `${chain.some((n) => n.startsWith('character_')) ? 'characters' : chain[0] ?? '?'}/${obj.name || obj.type}`;
+      };
+      R.renderObject = function (obj, scene, camera, geometry, material, ...rest) {
+        const prev = o.cur;
+        o.cur = { key: `${label(obj)}|${material.type}`, hull: !!material.isMeshToonOutlineMaterial, id: obj.id };
+        try { return orig.call(this, obj, scene, camera, geometry, material, ...rest); } finally { o.cur = prev; }
+      };
+      await new Promise((res) => requestAnimationFrame(() => { o.on = true; requestAnimationFrame(() => { o.on = false; res(); }); }));
+      R.renderObject = orig;
+      return [...o.rec.entries()].map(([k, v]) => ({ k, calls: v.calls, tris: Math.round(v.tris), objs: v.ids.size }));
+    });
+    const tot = {}, grp = {};
+    for (const r of rows) {
+      const [pass, who] = r.k.split('|');
+      const g = `${pass} ${who.split('/')[0]}`;
+      (tot[pass] ??= [0, 0]); tot[pass][0] += r.calls; tot[pass][1] += r.tris;
+      (grp[g] ??= [0, 0]); grp[g][0] += r.calls; grp[g][1] += r.tris;
+    }
+    hull = tot.hull ? `${tot.hull[0]} / ${tot.hull[1]}` : '0 / 0';
+    const lines = [`${query} · ${tier} · one frame`, `passes: ${JSON.stringify(tot)}`, '', 'by pass and group (draws, triangles):',
+      ...Object.entries(grp).sort((a, b) => b[1][1] - a[1][1]).map(([g, v]) => `${String(v[0]).padStart(5)} ${String(v[1]).padStart(9)}  ${g}`),
+      '', 'by object (draws, triangles, objects):',
+      ...rows.sort((a, b) => b.tris - a.tris).map((r) => `${String(r.calls).padStart(5)} ${String(r.tris).padStart(9)} ${String(r.objs).padStart(4)}  ${r.k}`)];
+    writeFileSync(`${out}/objects-${tier}.txt`, lines.join('\n'));
+  }
   const shot = `${out}/p2-${tier}.png`;
-  await page.screenshot({ path: shot });
+  await page.screenshot({ path: shot, timeout: 300000 }); // 1080p SwiftShader frames can take > 30 s
   await page.close();
   const med = (get) => { const v = fr.map(get).sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
   const row = {
@@ -77,6 +124,7 @@ for (const tier of tiers) {
     shadow: `${med((f) => f.shadow.calls)} / ${med((f) => f.shadow.tris)}`,
     scene: `${med((f) => f.scene.calls)} / ${med((f) => f.scene.tris)}`,
     fullscreen: `${med((f) => f.fullscreen.calls)} / ${med((f) => f.fullscreen.tris)}`,
+    ...(hull ? { hull: `${hull} (one frame, inside scene)` } : {}),
     engine: info, errors: [...errors, ...info.errors].length, shot,
   };
   rows.push(row);

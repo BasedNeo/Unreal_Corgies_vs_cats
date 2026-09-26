@@ -67,6 +67,8 @@ src/host/                          Room (players, bots, input buffers, snapshots
 src/client/
   main.ts                          boot + frame loop (lead)
   engine/                          renderer (WebGPU → WebGL2 + comic pipeline), adaptive quality, quality tiers
+                                   W7 P3 ink LOD (renderer.ts installInkLod): the outline pass skips hulls under 0.3 px
+                                   (userData.keepInk opts out: characters) and objects past userData.drawDistance
   style/                           toon/comic style system (tokens, toon/glow/stylize, outline + bloom + grade).
                                    W7 S4 v2: toon() returns HardenedToonMaterial (a MeshToonNodeMaterial with its own
                                    lighting model and TSL weathering); toonMaterial() is uncached; the sky drives the
@@ -84,6 +86,7 @@ src/client/
                                    MeshBuilder.surface is a per-vertex weathering channel for S4's material; the
                                    `veteran` variant is picked for bots by isVeteranSeed (≈ 1 in 6); X3 weapons are
                                    hard-surface kits with a `finish`
+                                   W7 P3: a detail LOD past 20 m (CharacterAvatar.detail, set by the body's onBeforeRender)
   procgen/cosmetics/               C3: applyLook (coats repaint the fur, neckwear replaces the team collar), readability
   profile/                         P2: `cvc.profile` (schema + migration from `cvc.adventure`), XP + level curve, unlock
                                    rules, MatchTally (events → result), store; currentLook / recordMatch
@@ -93,6 +96,7 @@ src/client/
                                    battle-dressing.ts (W7 E4): banners + nets (cloth, TSL icons), S4 floodlights with
                                    real lights (world-view calls lamps.update), instanced battle clutter; terrain-view
                                    bakes the `battle` ground channels (scorch, mud, puddles, ruts)
+                                   W7 P3: prim-mesh crease ink in 33 m tiles, drawn within 40 m (CREASE_DRAW_DISTANCE)
   ui/  audio/  fx/                 comic HUD + menus (MATCH selector, room browser, LOCKER) + chat + tips + settings ·
                                    reward card (rewards.ts, never interactive) ·
                                    procedural audio + music (S2: vehicle-loops.ts engine loops from snapshot states,

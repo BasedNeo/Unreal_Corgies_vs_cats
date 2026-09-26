@@ -18,7 +18,7 @@ export interface QualityProfile {
   shadows: boolean;
   /** Bloom post pass (glow() materials still read bright without it). */
   bloom: boolean;
-  /** Ink hull outlines — on in every tier. */
+  /** Ink hull outlines — on in every tier (W7 P3: the renderer skips a hull only where it would be under 0.3 px). */
   outlines: boolean;
   // ---- world (at build; reload to change) ----
   shadowMapSize: number;

@@ -4,6 +4,7 @@
 //   &quality=low|medium|high   engine + world + material detail of that tier (default high)
 //   &wx=clear|overcast|rain|storm|clearing   weather override (default: clock tick 0 = clear)
 //   &chars=0   no character lineup · &flood=0   no demo floodlights · &harden=0   world keeps its own materials
+//   &inkmin=0   P3 A/B: every ink hull drawn (default: the renderer's ink LOD skips hulls under 0.3 px)
 //   &harden=1 (default): world materials are rebuilt with toonMaterial() + a surface preset IN THIS LAB ONLY — the
 //   preview of the materials.ts snippet in docs/handoff/S4.md (toonFrom -> toonMaterial).
 // Keys: 1-9 bookmarks · T/G time of day · R cycle weather · WASD/QE fly · drag to look.
@@ -57,7 +58,7 @@ function hardenWorld(root: THREE.Object3D): number {
 
 async function main() {
   const tier = toQualityTier(params.get('quality'));
-  const ctx = await createRenderContext(document.getElementById('app')!, { forceWebGL: params.has('webgl'), quality: tier });
+  const ctx = await createRenderContext(document.getElementById('app')!, { forceWebGL: params.has('webgl'), quality: tier, inkMinPx: params.has('inkmin') ? Number(params.get('inkmin')) : undefined });
   debug.backend = ctx.backend;
   const seed = Number(params.get('seed') ?? 1);
   const data = createWorldData(seed);

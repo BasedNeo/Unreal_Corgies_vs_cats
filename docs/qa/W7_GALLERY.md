@@ -88,4 +88,17 @@ and a comic splat.
 | live 12v12 TDM (24 characters) | **512 ✗** | **1.69 M ✗** |
 | low tier, live 4v4 TDM | 217 | 0.87 M |
 
-The budget pass that fixes these rows is the lead's next item.
+### Budgets after the P3 budget pass (tools/perf-render.mjs, 1280×720, same queries; docs/handoff/P3.md)
+| View | Draws (≤ 400) | Triangles (≤ 1.5 M) |
+|---|---|---|
+| free view (no bots) | 138 → 120 | 1.29 M → 0.98 M |
+| live 4v4 TDM | 328 → 262 | 1.52 M → 1.19 M ✓ |
+| live 12v12 TDM (24 characters) | 514 → 373 ✓ | 1.69 M → 1.32 M ✓ |
+| The Lot, live 14v14 | 449 → 331 ✓ | 0.84 M → 0.69 M |
+| low tier, live 4v4 TDM | 217 → 168 | 0.87 M → 0.71 M |
+
+- The "before" column is P3's own re-measurement on the clean tree, so it differs by a few draws from the table above.
+- Nothing changes within 18.5 m of the camera.
+- The visible change: props 40–100 m away lose their 1.1 px crease hatching. It is subtle side by side; compare on a real
+  GPU with `&inkmin=0` in `labs/look.html`.
+- Still to measure: real-GPU frame times.
