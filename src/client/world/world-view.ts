@@ -25,6 +25,7 @@ import { createFoliage } from './foliage';
 import { createYardSky, type SkyWeather } from './sky';
 import { createRain } from './weather-view';
 import { createGardenView } from './garden-view';
+import { QUALITY, toQualityTier, type QualityTier } from '../engine/quality';
 import { createLampsView } from './lamps-view';
 
 /** Post grade uniforms (createComicPipeline(...).grade.uniforms) the weather may desaturate. */
@@ -70,6 +71,8 @@ export interface WorldView {
   /** The tick the view last rendered (NaN before the first tick-driven update). */
   readonly tick: number;
   pinTimeOfDay(pinned: boolean): void;
+  /** P2: live part of a quality-tier change (garden density, prop crease ink); the rest of the world knobs apply after a reload. */
+  setQuality(tier: QualityTier): void;
 }
 
 const EPS = 0.0015;
@@ -79,7 +82,8 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
   root.name = 'world';
 
   const q = opts.quality ?? 'high';
-  const terrainMat = createTerrainMaterial({ ink: opts.terrainInk ?? false, detail: q !== 'low' });
+  const P = QUALITY[toQualityTier(q)];                  // world knobs of the tier (engine/quality.ts)
+  const terrainMat = createTerrainMaterial({ ink: opts.terrainInk ?? false, detail: P.terrainDetail });
   const terrain = createTerrainView(data, terrainMat.material);
   root.add(terrain.group);
 
@@ -87,19 +91,22 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
   if (fence) root.add(fence.boards);
   const props = buildPrimMeshes([...(data.prims ?? []), ...(fence?.prims ?? [])]);
   root.add(props.group);
+  // crease ink is built in every tier and only hidden on low, so the tier can switch live
+  const setPropCreases = (on: boolean) => { for (const m of props.meshes) for (const c of m.children) if (c.userData.styleInk) c.visible = on; };
+  setPropCreases(P.propCreases);
 
   const water = createWaterView(data);
   root.add(water.group);
 
-  const density = opts.foliageDensity ?? (q === 'low' ? 0 : q === 'med' ? 0.6 : 1);
+  const density = opts.foliageDensity ?? P.foliageDensity;
   const foliage = data.surface && density > 0 ? createFoliage(data, { density }) : null;
   if (foliage) root.add(foliage.group);
 
-  const garden = createGardenView(data);
+  const garden = createGardenView(data, { density: P.gardenDensity });
   root.add(garden.group);
   const lamps = createLampsView(data);
   root.add(lamps.group);
-  const rain = createRain({ capacity: opts.rainDrops ?? (q === 'low' ? 2000 : q === 'med' ? 3500 : 6000) });
+  const rain = createRain({ capacity: opts.rainDrops ?? P.rainDrops });
   root.add(rain.mesh);
 
   const proxy = createColliderProxy(data);
@@ -107,8 +114,8 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
 
   const sky = createYardSky(scene, {
     timeOfDay: opts.timeOfDay ?? data.timeOfDay ?? 0.68,
-    shadowMap: opts.shadowMapSize ?? (q === 'low' ? 1024 : q === 'med' ? 1536 : 2048),
-    clouds: q !== 'low',
+    shadowMap: opts.shadowMapSize ?? P.shadowMapSize,
+    clouds: P.clouds,
   });
   scene.add(root);
 
@@ -162,6 +169,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
     get tick() { return clock; },
     setTimeOfDay(t: number) { pinned = true; sky.setTimeOfDay(t); },
     pinTimeOfDay(p: boolean) { pinned = p; },
+    setQuality(tier: QualityTier) { garden.setDensity(QUALITY[tier].gardenDensity); setPropCreases(QUALITY[tier].propCreases); },
     setWeather(w) { override = w; },
     update(dt, camera, tick) {
       if (tick !== undefined && Number.isFinite(tick)) clock = tick;

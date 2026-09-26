@@ -12,6 +12,7 @@ import { ABILITIES } from '../../shared/content/abilities';
 import { CLASSES } from '../../shared/content/classes';
 import { PICKUPS } from '../../shared/content/pickups';
 import { CHARACTER_MOVE_FILTER } from '../rapier';
+import { terrainFastMove } from '../world/build';
 import type { GameEvent } from '../../shared/protocol';
 
 const SLIDE_TIME = 0.65;
@@ -38,6 +39,8 @@ const SQUEAKY_RATE = 1 / (PICKUPS.squeaky_clean.buff.abilityCooldown ?? 1);
 
 /** Reused result object for KCC collision queries (no per-tick allocation). */
 let collisionScratch: CharacterCollision | undefined;
+/** Reused output of terrainFastMove (no per-tick allocation). */
+const fastMove = { x: 0, y: 0, z: 0 };
 
 export interface MoveContext {
   world: World;
@@ -161,10 +164,16 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
 
   // --- collide & slide ---
   const desired = { x: e.vel.x * dt, y: e.vel.y * dt, z: e.vel.z * dt };
-  ctx.kcc.computeColliderMovement(e.collider, desired, undefined, CHARACTER_MOVE_FILTER);
-  const mv = ctx.kcc.computedMovement();
+  // Perf P1: grounded moves over open terrain skip Rapier's controller (~90 % of calls in a full room);
+  // terrainFastMove() replays the controller's rules on the exact terrain triangles, or returns false.
+  const fast = c.grounded && !c.pounding && terrainFastMove(ctx.world, ctx.kcc, e.collider, CHARACTER_MOVE_FILTER, desired, fastMove);
+  let mv: { x: number; y: number; z: number } = fastMove;
+  if (!fast) {
+    ctx.kcc.computeColliderMovement(e.collider, desired, undefined, CHARACTER_MOVE_FILTER);
+    mv = ctx.kcc.computedMovement();
+  }
   const wasGrounded = c.grounded;
-  c.grounded = ctx.kcc.computedGrounded();
+  c.grounded = fast || ctx.kcc.computedGrounded();
   const t = e.collider.translation();
   const nx = t.x + mv.x, ny = t.y + mv.y, nz = t.z + mv.z;
   e.collider.setTranslation({ x: nx, y: ny, z: nz });
@@ -175,7 +184,7 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
   // Only a step that came up short horizontally can have hit a wall; the floor contact alone needs no response.
   const hBlocked = Math.abs(mv.x - desired.x) + Math.abs(mv.z - desired.z) > 1e-5;
   if (!hBlocked && e.vel.y > 0 && mv.y < desired.y * 0.5) e.vel.y = 0; // head bump without a wall
-  const n = hBlocked ? ctx.kcc.numComputedCollisions() : 0;
+  const n = hBlocked && !fast ? ctx.kcc.numComputedCollisions() : 0;
   const feetBefore = t.y - (m.capsuleHalfHeight + m.capsuleRadius);
   for (let i = 0; i < n; i++) {
     const col = ctx.kcc.computedCollision(i, collisionScratch);

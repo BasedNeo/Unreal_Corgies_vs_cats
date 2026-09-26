@@ -89,7 +89,7 @@ export const ROOM_STRINGS = {
 
 export const QUALITY_STRINGS = {
   /** World detail is built once at load: foliage, shadow map, clouds, ground shading, rain. */
-  reload: 'Grass, shadows and sky change after a reload. Effects and sound switched already.',
+  reload: 'Shadows, glow, resolution, tall grass, effects and sound switched already. Lawn detail and sky change after a reload.',
   reloadInMatch: 'Reloading leaves this match.',
   reloadButton: 'RELOAD NOW',
 };

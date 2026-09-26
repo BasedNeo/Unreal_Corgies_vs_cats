@@ -27,6 +27,8 @@ export interface GardenView {
   /** tick: the same (server) tick the authority uses for sprinklers; dt for visual drying. */
   update(tick: number, dt: number): void;
   stats(): Record<string, number>;
+  /** Visible share of the tall grass/flower instances, 0..1 (quality tier; live, no rebuild). */
+  setDensity(d: number): void;
   dispose(): void;
 }
 
@@ -103,7 +105,7 @@ export function tallGrassPlacements(data: WorldData, zn: ConcealZone, spacing = 
   return out;
 }
 
-export function createGardenView(data: WorldData): GardenView {
+export function createGardenView(data: WorldData, opts: { density?: number } = {}): GardenView {
   const group = new THREE.Group();
   group.name = 'garden';
   const disposables: { dispose(): void }[] = [];
@@ -135,9 +137,18 @@ export function createGardenView(data: WorldData): GardenView {
   };
   // mix two tuft shapes in one geometry set: alternate seeds via separate instances would cost draws;
   // one grass tuft + one flower tuft keep it at 2 draws.
-  const grassList = all.filter((p) => !p.flower), flowerList = all.filter((p) => p.flower);
+  // Instances sorted by a per-tuft hash, so any prefix (mesh.count) is a uniform thinning: density is live.
+  const thinKey = (p: Placement) => hash2(Math.round(p.x * 16), Math.round(p.z * 16), 0x2b);
+  const byThin = (a: Placement, b: Placement) => thinKey(a) - thinKey(b);
+  const grassList = all.filter((p) => !p.flower).sort(byThin), flowerList = all.filter((p) => p.flower).sort(byThin);
   const grassMesh = grassList.length ? mkInst(tallTuft(3, false), grassList, 'garden_tallgrass') : null;
   const flowerMesh = flowerList.length ? mkInst(flowerTuft(5), flowerList, 'garden_tallflowers') : null;
+  const setDensity = (d: number) => {
+    const k = Math.max(0, Math.min(1, d));
+    if (grassMesh) grassMesh.count = Math.round(grassList.length * k);
+    if (flowerMesh) flowerMesh.count = Math.round(flowerList.length * k);
+  };
+  setDensity(opts.density ?? 1);
 
   // ---- sprinkler jets ----
   interface Jet { sp: Sprinkler; st: SprinklerState; mesh: THREE.Mesh; U: { nozzle: { value: THREE.Vector3 }; dir: { value: THREE.Vector2 }; on: { value: number } }; wetVis: number }
@@ -195,6 +206,7 @@ export function createGardenView(data: WorldData): GardenView {
 
   let live = 0;
   return {
+    setDensity,
     group,
     update(tick, dt) {
       live = 0;

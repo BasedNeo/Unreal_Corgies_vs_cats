@@ -7,7 +7,7 @@
 import { debug } from './debug/debug-hook';
 import * as THREE from 'three/webgpu';
 import { createRenderContext } from './engine/renderer';
-import { createAdaptiveQuality } from './engine/adaptive-quality';
+import { toQualityTier } from './engine/quality';
 import { createWorldData } from '../shared/world/world-data';
 import { createWorldView } from './world/world-view';
 import { districtAt } from '../shared/world/queries';
@@ -42,15 +42,16 @@ async function main(): Promise<void> {
   const app = document.getElementById('app')!;
   loadingStep('Warming up the renderer…');
   const ui = document.getElementById('ui')!;
-  const ctx = await createRenderContext(app, { forceWebGL: params.has('webgl') });
+  const boot = loadSettings();
+  const q = (params.get('quality') as Settings['quality'] | null) ?? boot.quality;
+  // P2: the tier's engine knobs (pixel-ratio bounds, shadow pass, bloom) apply from the first frame and live on change
+  const ctx = await createRenderContext(app, { forceWebGL: params.has('webgl'), quality: toQualityTier(q) });
   debug.backend = ctx.backend;
 
   loadingStep('Mowing West Yard…');
   await new Promise((r) => setTimeout(r, 0)); // let the step text paint before the blocking world build
   const seed = Number(params.get('seed') ?? 1);
   const worldData = createWorldData(seed);
-  const boot = loadSettings();
-  const q = (params.get('quality') as Settings['quality'] | null) ?? boot.quality;
   const worldView = createWorldView(ctx.scene, worldData, { quality: q === 'medium' ? 'med' : q, grade: ctx.pipeline.grade.uniforms });
   if (params.has('t')) worldView.setTimeOfDay(Number(params.get('t')));
 
@@ -96,7 +97,8 @@ async function main(): Promise<void> {
   ui.appendChild(hiddenCue);
   const cam = createThirdPersonCamera(ctx.camera);
   cam.setColliders(worldView.cameraColliders);
-  const quality = createAdaptiveQuality(ctx.renderer);
+  const quality = ctx.adaptive;
+  let settingTier = toQualityTier(boot.quality); // ?quality= wins at boot; a Settings change applies live
   const nameplates = new Nameplates(ui);
   const audio = createAudio();
   const weatherAudio = createWeatherAudio(audio.engine, worldData);
@@ -106,6 +108,11 @@ async function main(): Promise<void> {
     input.invertY = st.invertY;
     audio.setVolumes({ master: st.masterVolume, music: st.musicVolume, sfx: st.sfxVolume });
     fx.setQuality(st.quality);
+    if (toQualityTier(st.quality) !== settingTier) {
+      settingTier = toQualityTier(st.quality);
+      ctx.setQuality(settingTier);
+      worldView.setQuality(settingTier);
+    }
     audio.setQuality(st.quality);
   };
   const hud = createHud(ui, {
