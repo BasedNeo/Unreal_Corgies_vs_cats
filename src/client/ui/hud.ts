@@ -129,6 +129,8 @@ export interface HudOptions {
   tipsStorage?: KV | null;
   /** Room list poller for the menu's room browser (tests/labs inject a fake fetch). */
   roomPoller?: RoomPoller;
+  /** Offline match type pre-selected in the menu (the page's ?mode=). */
+  match?: string;
 }
 
 export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts: HudOptions = {}): Hud {
@@ -244,6 +246,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
     onReload: () => { if (actions?.reload) actions.reload(); else location.replace(reloadUrl(location.href)); },
     onResetTips: tips ? () => tips.reset() : undefined,
     roomPoller: opts.roomPoller,
+    match: opts.match,
   };
   const menu: Menu = createMenu(el, deps);
   const pauseSettings = createSettingsPanel(deps, () => { lkSettings.classList.add('hidden'); lkMain.classList.remove('hidden'); }, 'RESUME ▸');
@@ -688,7 +691,8 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
           if (ev.id === localId) hud.notice(`Picked up ${ev.item.replace(/_/g, ' ')}`);
           break;
         case 'score':
-          if (ev.reason && ev.reason !== 'kill') hud.notice(`+${ev.pts} ${ev.team === 0 || ev.team === 1 ? TEAM_NAMES[ev.team] : ''} · ${ev.reason.replace(/_/g, ' ')}`);
+          // 0-point events (win, reset) are bookkeeping, not rewards: no "+0" toast
+          if (ev.reason && ev.reason !== 'kill' && ev.pts > 0) hud.notice(`+${ev.pts} ${ev.team === 0 || ev.team === 1 ? TEAM_NAMES[ev.team] : ''} · ${ev.reason.replace(/_/g, ' ')}`);
           break;
         default:
           break;

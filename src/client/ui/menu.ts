@@ -10,8 +10,18 @@ import { qualityNote } from './quality-note';
 import { createRoomBrowser, type RoomBrowser } from './room-browser';
 import { serverBase, type RoomPoller } from './rooms';
 
+/** Offline match types the menu offers (the online server decides its own). */
+export type MatchMode = 'yard-skirmish' | 'team-deathmatch' | 'core-rush';
+export const MATCH_MODES: ReadonlyArray<{ id: MatchMode; label: string; hint: string }> = [
+  { id: 'yard-skirmish', label: 'SKIRMISH', hint: 'Co-op: your squad vs five waves of cats and the Vac-Tank' },
+  { id: 'team-deathmatch', label: 'DEATHMATCH', hint: '4 vs 4: first team to 30 knockouts' },
+  { id: 'core-rush', label: 'CORE RUSH', hint: '4 vs 4: hold the three Core Pads, first to 250' },
+];
+
 export interface PlayOptions {
   mode: 'offline' | 'online';
+  /** Offline match type (MATCH selector). */
+  match?: MatchMode;
   /** WebSocket URL when mode = 'online'. */
   server?: string;
   /** Online room to join or create (U1 room browser). Absent = the server's default room. */
@@ -45,6 +55,8 @@ export interface MenuDeps {
   onResetTips?(): void;
   /** Room list poller (tests/labs inject one with a fake fetch). */
   roomPoller?: RoomPoller;
+  /** The offline match type pre-selected in the MATCH selector (the page's ?mode=). */
+  match?: string;
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -231,6 +243,11 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
             <button class="auto" data-nav data-team="-1" role="radio">AUTO</button>
             <button class="t1" data-nav data-team="1" role="radio">CATS</button>
           </div></div>
+        <div class="mm-field"><span class="mm-label">MATCH</span>
+          <div class="seg" role="radiogroup" aria-label="Match">
+            ${MATCH_MODES.map((m) => `<button data-nav data-match="${m.id}" role="radio">${m.label}</button>`).join('')}
+          </div>
+          <span class="mm-label" data-match-hint style="opacity:.8;letter-spacing:0;text-transform:none;margin-top:.3em"></span></div>
         <div class="mm-play">
           <button class="btn primary" data-nav data-play>PLAY OFFLINE ▸</button>
           <div class="mm-join"><input type="text" data-nav data-server spellcheck="false" autocomplete="off" aria-label="Server URL"><button class="btn small" data-nav data-join>JOIN</button></div>
@@ -262,6 +279,9 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
   const serverIn = el.querySelector<HTMLInputElement>('[data-server]')!;
   const teamBtns = [...el.querySelectorAll<HTMLButtonElement>('[data-team]')];
   const clsBtns = [...el.querySelectorAll<HTMLButtonElement>('[data-cls]')];
+  const matchBtns = [...el.querySelectorAll<HTMLButtonElement>('[data-match]')];
+  const matchHint = el.querySelector<HTMLElement>('[data-match-hint]')!;
+  let match: MatchMode = MATCH_MODES.some((m) => m.id === deps.match) ? (deps.match as MatchMode) : 'yard-skirmish';
   const classesView = el.querySelector<HTMLElement>('.mm-classes')!;
   const settingsView = el.querySelector<HTMLElement>('.mm-settings')!;
   const roomsView = el.querySelector<HTMLElement>('.mm-rooms')!;
@@ -289,6 +309,8 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
     if (document.activeElement !== serverIn) serverIn.value = pageServer ?? s.server;
     for (const b of teamBtns) b.setAttribute('aria-checked', String(Number(b.dataset.team) === s.team));
     for (const b of clsBtns) b.setAttribute('aria-checked', String(b.dataset.cls === s.cls));
+    for (const b of matchBtns) b.setAttribute('aria-checked', String(b.dataset.match === match));
+    matchHint.textContent = MATCH_MODES.find((m) => m.id === match)?.hint ?? '';
     // Class icons take the chosen team's colors (auto → corgis).
     right.classList.toggle('t1', s.team === 1);
     right.classList.toggle('t0', s.team !== 1);
@@ -317,6 +339,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
     rooms.serverChanged();
   });
   for (const b of teamBtns) b.addEventListener('click', () => { s.team = Number(b.dataset.team) as -1 | 0 | 1; deps.onSetting('team', s.team); deps.onTeam(s.team); deps.sound?.('click'); paint(); });
+  for (const b of matchBtns) b.addEventListener('click', () => { match = b.dataset.match as MatchMode; deps.sound?.('click'); paint(); });
   for (const b of clsBtns) b.addEventListener('click', () => { s.cls = b.dataset.cls as ClassId; deps.onSetting('cls', s.cls); deps.onClass(s.cls); deps.sound?.('click'); paint(); });
   const play = (mode: 'offline' | 'online', room?: string) => {
     commitName();
@@ -330,7 +353,7 @@ export function createMenu(parent: HTMLElement, deps: MenuDeps): Menu {
       if (room === undefined) { try { room = new URL(v).searchParams.get('room') ?? undefined; } catch { /* not a URL */ } }
     }
     deps.sound?.('open');
-    deps.onPlay({ mode, server, room: mode === 'online' ? room : undefined, name: s.name, team: s.team, cls: s.cls });
+    deps.onPlay({ mode, server, room: mode === 'online' ? room : undefined, match: mode === 'offline' ? match : undefined, name: s.name, team: s.team, cls: s.cls });
   };
   el.querySelector('[data-play]')!.addEventListener('click', () => play('offline'));
   el.querySelector('[data-join]')!.addEventListener('click', () => play('online'));

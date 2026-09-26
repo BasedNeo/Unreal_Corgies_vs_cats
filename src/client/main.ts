@@ -25,6 +25,7 @@ import { BossBar } from './views/boss-bar';
 import { createBossTelegraphFx } from './procgen/boss';
 import { createVehicleViews, vehicleCameraFor, mountedVehicle, followYaw } from './vehicles';
 import { createInteractViews, createInteractPrompts } from './interact';
+import { createCoreRushView } from './modes/core-rush-view';
 import { loadSettings, type Settings } from './ui/settings';
 import { bus } from './core/events';
 import { TICK_DT } from '../shared/constants';
@@ -54,17 +55,19 @@ async function main(): Promise<void> {
 
   const em: NetEmulation = { lagMs: Number(params.get('lag') ?? 0), jitterMs: Number(params.get('jitter') ?? 0), lossPct: Number(params.get('loss') ?? 0) };
   const serverUrl = serverUrlForPage(); // ?server / ?online / ?room / page served by server/prod.ts
-  const mode = params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish';
-  // Skirmish: a corgi squad of bots with you; cat waves come from the match rules. TDM: bot-filled teams.
-  const bots = (params.get('bots') ?? (mode === 'team-deathmatch' ? '4,4' : '3,0')).split(',').map(Number) as [number, number];
+  let mode = params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish';
+  // Skirmish: a corgi squad of bots with you; cat waves come from the match rules. TDM / core-rush: bot-filled teams.
+  const botsFor = (m: string) => (params.get('bots') ?? (m === 'team-deathmatch' || m === 'core-rush' ? '4,4' : '3,0')).split(',').map(Number) as [number, number];
   // The session (authority + connection) starts only when the player presses PLAY — or immediately for
   // ?autoplay / online links — so an offline match never runs behind the menu (QA W1 FTUE finding).
   let net: NetClient | null = null;
   let transport: Transport | null = null;
   let starting = false;
-  const startSession = async (name: string, cls: ClassId, team: TeamId | -1): Promise<void> => {
+  const startSession = async (name: string, cls: ClassId, team: TeamId | -1, match?: string): Promise<void> => {
     if (net || starting) return;
     starting = true;
+    if (match && !params.has('boss')) mode = match; // the menu's MATCH selector (offline only)
+    const bots = botsFor(mode);
     loadingStep(serverUrl ? 'Calling the server…' : 'Waking up the squad…');
     transport = serverUrl ? await createWebSocketTransport(serverUrl, em) : createWorkerTransport({ seed, mode, bots }, em);
     debug.transport = transport.kind;
@@ -84,6 +87,7 @@ async function main(): Promise<void> {
   const bossBar = new BossBar(ui);
   // S1: Ordnance kiosks, Upgrade Cores, Golden Kibble, the mission beacon (3D) + E prompt, kit picker, buffs, mission card
   const interact = createInteractViews(ctx.scene, { world: worldData, camera: ctx.camera });
+  const rush = createCoreRushView(ctx.scene, ui); // core-rush pads + A·B·C strip (idle in other modes)
   // Concealment cue: the sim sets EFlag.Stealthed while the local corgi is hidden in tall grass.
   const hiddenCue = document.createElement('div');
   hiddenCue.textContent = 'HIDDEN';
@@ -112,7 +116,12 @@ async function main(): Promise<void> {
         location.search = `?server=${encodeURIComponent(o.server)}&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}${room}`;
         return;
       }
-      if (!net) { void startSession(o.name, o.cls, o.team); return; }
+      if (!net) { void startSession(o.name, o.cls, o.team, o.match); return; }
+      if (!serverUrl && o.match && o.match !== mode) {
+        // a different offline match type needs a fresh authority: restart the page straight into it
+        location.search = `?mode=${o.match}&autoplay&name=${encodeURIComponent(o.name)}&cls=${o.cls}&team=${o.team}`;
+        return;
+      }
       net.transport.send({ t: 'class', cls: o.cls });
       if (o.team !== -1) net.transport.send({ t: 'team', team: o.team });
     },
@@ -122,7 +131,7 @@ async function main(): Promise<void> {
     // U1 chat: the authority echoes every line (rate-limited); the game sees no keys while chat is open
     sendChat: (text) => { if (!net?.connected) return false; net.transport.send({ t: 'chat', text }); return true; },
     chatOpenChanged: (open) => { input.suspended = open; },
-  });
+  }, { match: mode });
   hud.setUiSound((k) => audio.ui(k));
   const prompts = createInteractPrompts(ui, { send: (msg) => net?.transport.send(msg), sound: (k) => audio.ui(k) });
   applySettings(hud.settings);
@@ -185,6 +194,7 @@ async function main(): Promise<void> {
     vehicles.sync(states, pdt);
     interact.sync(states, pdt);
     prompts.update(states, localId, dt);
+    rush.sync(states, states.get(localId)?.team ?? 0, ctx.camera, dt);
     bossFx.update(dt, states);
     bossBar.update(states, dt);
     const local = states.get(localId) ?? null;

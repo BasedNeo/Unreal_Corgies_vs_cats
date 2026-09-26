@@ -7,6 +7,8 @@
 //                    when the whole squad is down at once more than `wipeLives` times → restart.
 //   team-deathmatch  warmup → live (first to killLimit or timeLimit) → ended (winner shown) → restart
 //                    with reset scores.
+//   core-rush        PvP domination over three Core Pads (core-rush.ts): hold pads for points, first to
+//                    scoreLimit or the leader at the horn.
 import type { Sim, SimSystem } from '../sim';
 import type { SimEntity } from '../entity';
 import type { MatchState } from '../../shared/protocol';
@@ -19,10 +21,13 @@ import { nearestWalkable, cellX, cellZ } from '../ai/nav';
 import { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type MatchConfigOverrides } from './config';
 import { spawnBoss, bossWaveStatus } from '../boss'; // B1 hook: boss waves
 import { objectiveState, takeObjectiveScore, foldObjectiveText } from '../interact'; // S1: mission chain
+import { coreRushConfig, setupCorePads, stepCorePads } from './core-rush';
+import { CORE_PAD_LABELS } from '../../shared/content/modes';
 
 export { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type WaveDef, type MatchConfigOverrides } from './config';
 
-export const MODES = ['yard-skirmish', 'team-deathmatch'] as const;
+export const MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush'] as const;
+export { coreRushPads, corePadSpots, type CorePadInfo } from './core-rush';
 
 /** Match runtime bookkeeping (plain data in sim.state.matchRt). */
 interface MatchRuntime {
@@ -39,6 +44,9 @@ interface MatchRuntime {
   bannerTime: number;
   /** B1 hook: entity id of the current wave's boss (0 = none). */
   boss: EntityId;
+  /** core-rush: pads placed for this match; fractional hold points not yet in the score. */
+  padsReady: boolean;
+  holdAcc: [number, number];
 }
 
 function roomMode(sim: Sim): string | undefined {
@@ -66,13 +74,13 @@ function rulesOf(sim: Sim): MatchRules {
 }
 
 function init(sim: Sim, mode: string): MatchRuntime {
-  const rt: MatchRuntime = { mode, clock: 0, intermission: false, queue: [], spawnTimer: 0, spawned: 0, wipes: 0, squadAlive: false, banner: '', bannerTime: 0, boss: 0 };
+  const rt: MatchRuntime = { mode, clock: 0, intermission: false, queue: [], spawnTimer: 0, spawned: 0, wipes: 0, squadAlive: false, banner: '', bannerTime: 0, boss: 0, padsReady: false, holdAcc: [0, 0] };
   sim.state.matchRt = rt;
   const ms: MatchState = { mode, phase: 'warmup', timeLeft: 0, score: [0, 0], objective: '', wave: 0, winner: -1 };
   sim.state.match = ms;
   const rules: MatchRules = { combatLive: false, respawn: [true, mode !== 'yard-skirmish', true] };
   sim.state.rules = rules;
-  rt.clock = mode === 'team-deathmatch' ? tdmConfig(sim).warmup : skirmishConfig(sim).warmup;
+  rt.clock = mode === 'team-deathmatch' ? tdmConfig(sim).warmup : mode === 'core-rush' ? coreRushConfig(sim).warmup : skirmishConfig(sim).warmup;
   ms.timeLeft = rt.clock;
   return rt;
 }
@@ -145,6 +153,47 @@ function updateTdm(sim: Sim, rt: MatchRuntime, dt: number, kills: KillRecord[]):
     }
   } else if (rt.clock <= 0) {
     restart(sim, rt);
+    return;
+  }
+  ms.timeLeft = Math.max(0, rt.clock);
+}
+
+// ------------------------------------------------------------------ core rush
+
+function updateCoreRush(sim: Sim, rt: MatchRuntime, dt: number): void {
+  const cfg = coreRushConfig(sim);
+  const ms = stateOf(sim);
+  const rules = rulesOf(sim);
+  if (!rt.padsReady) { setupCorePads(sim); rt.padsReady = true; } // a restart re-inits rt: pads go back to neutral
+  rt.clock -= dt;
+  if (ms.phase === 'warmup') {
+    rules.combatLive = false;
+    ms.objective = `Core Rush — take the pads in ${Math.max(1, Math.ceil(rt.clock))}`;
+    if (rt.clock <= 0) {
+      ms.phase = 'live';
+      rt.clock = cfg.timeLimit;
+      rules.combatLive = true;
+    }
+  } else if (ms.phase === 'live') {
+    const r = stepCorePads(sim, dt, cfg);
+    for (const [t, i] of r.captured) addScore(sim, t, cfg.captureBonus, `took pad ${CORE_PAD_LABELS[i] ?? i}`);
+    for (const t of [Team.Corgis, Team.Cats] as const) {
+      // held pads trickle points in silently (the HUD score counter shows them; no toast per point)
+      rt.holdAcc[t] += r.held[t] * cfg.holdRate * dt;
+      const whole = Math.floor(rt.holdAcc[t]);
+      if (whole > 0) { ms.score[t] += whole; rt.holdAcc[t] -= whole; }
+    }
+    ms.objective = `Core Rush — hold the pads · first to ${cfg.scoreLimit}`;
+    const [c, k] = ms.score;
+    if (c >= cfg.scoreLimit || k >= cfg.scoreLimit || rt.clock <= 0) {
+      const winner: TeamId | -1 = c > k ? Team.Corgis : k > c ? Team.Cats : -1;
+      const text = winner === Team.Corgis ? `Corgis hold the yard ${c}–${k}!` : winner === Team.Cats ? `Cats hold the yard ${k}–${c}!` : `Draw ${c}–${k}!`;
+      endMatch(sim, rt, winner, text, cfg.endedHold);
+    }
+  } else if (rt.clock <= 0) {
+    restart(sim, rt);
+    setupCorePads(sim); // back to neutral on the restart tick itself
+    rt.padsReady = true;
     return;
   }
   ms.timeLeft = Math.max(0, rt.clock);
@@ -318,11 +367,12 @@ export const matchSystem: SimSystem = {
       (sim.state.room as { mode: string }).mode = mode = 'yard-skirmish';
     }
     const kills = combatBus(sim).kills;
-    if (mode !== 'yard-skirmish' && mode !== 'team-deathmatch') return;
+    if (mode !== 'yard-skirmish' && mode !== 'team-deathmatch' && mode !== 'core-rush') return;
     let rt = sim.state.matchRt as MatchRuntime | undefined;
     if (!rt || rt.mode !== mode) rt = init(sim, mode);
     const batch = kills.splice(0);
     if (mode === 'team-deathmatch') updateTdm(sim, rt, dt, batch);
+    else if (mode === 'core-rush') updateCoreRush(sim, rt, dt);
     else updateSkirmish(sim, rt, dt, batch);
     // S1 mission chain: its points join the team score; its current step rides the objective line
     // ("Wave 2/5 — 6 cats left · ▶ Hold the trampoline 12/20s (2/3)"). The fold is idempotent.
