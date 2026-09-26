@@ -9,7 +9,10 @@ export interface EntityState {
   kind: EntityKindId;
   team: TeamId;
   species: SpeciesId;
-  /** Index into CLASS_IDS (-1 = none). */
+  /**
+   * Characters: index into CLASS_IDS (-1 = none). Non-character entities (vehicles, pickups, terminals,
+   * projectiles, bosses): index into that kind's content table (e.g. VEHICLES, PICKUPS, TERMINALS, WEAPONS).
+   */
   cls: number;
   /** Appearance seed (procedural character variation). */
   seed: number;

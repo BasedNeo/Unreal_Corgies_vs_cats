@@ -16,7 +16,7 @@ export type SpeciesId = (typeof Species)[keyof typeof Species];
 export const CLASS_IDS = ['assault', 'infiltrator', 'overwatch', 'breacher', 'warden', 'skyraider'] as const;
 export type ClassId = (typeof CLASS_IDS)[number];
 
-export const EntityKind = { Player: 0, Bot: 1, Projectile: 2, Pickup: 3, Vehicle: 4, Prop: 5 } as const;
+export const EntityKind = { Player: 0, Bot: 1, Projectile: 2, Pickup: 3, Vehicle: 4, Prop: 5, Boss: 6, Terminal: 7 } as const;
 export type EntityKindId = (typeof EntityKind)[keyof typeof EntityKind];
 
 /** Locomotion/presentation state the client animates from. Derived by the sim, never trusted from clients. */
@@ -35,6 +35,10 @@ export const EFlag = {
   Invulnerable: 1 << 7,
   Stealthed: 1 << 8,
   Alerted: 1 << 9,
+  /** Character is seated in a vehicle (the sim moves it with the vehicle; movement skips it). */
+  Mounted: 1 << 10,
+  /** Vehicle/terminal/pickup is in use or unavailable (cooldown). */
+  Busy: 1 << 11,
 } as const;
 
 export interface Vec3 { x: number; y: number; z: number }
