@@ -1,6 +1,7 @@
 // V1 vehicles on the real West Yard (createWorldData): terminals placed at runtime from world data,
 // vending + driving out of the base, safe dismounts among real props, and a long random drive.
 import { describe, it, expect } from 'vitest';
+import os from 'node:os';
 import { Sim } from '../../src/sim/sim';
 import type { SimEntity } from '../../src/sim/entity';
 import { Btn } from '../../src/shared/input';
@@ -210,8 +211,10 @@ describe('vehicles on the West Yard', () => {
     }
     const perTick = vehicleMs / ticks;
     console.log(`[vehicles] full sim, 16 bots + 1 kart: vehicle systems ${perTick.toFixed(3)} ms/tick; hits on/by kart: ${evs.filter((e) => e.e === 'hit' && (e.dst === kart.id || e.src === p.id)).length}; kart hp ${kart.health!.hp}${kart.removed ? ' (destroyed)' : ''}`);
-    // Budget check is informative on shared/loaded machines; hard-fail only on a gross regression.
-    expect(perTick).toBeLessThan(process.env.CI ? 0.6 : 2.5);
+    // Budget check is informative on shared/loaded machines; hard-fail only on a gross regression (the budget scales
+    // with CPU oversubscription: load 12 on 4 cores measured 2.96 ms for a 0.3 ms idle cost).
+    const load = Math.max(1, os.loadavg()[0] / Math.max(1, os.cpus().length));
+    expect(perTick).toBeLessThan(process.env.CI ? 0.6 : 2.5 * load);
     expect([...sim.entities.values()].filter((e) => e.kind === EntityKind.Terminal && e.terminal)).toHaveLength(2); // Kart-O-Matics only
   });
 });

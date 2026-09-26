@@ -10,6 +10,7 @@ import { createRenderContext } from './engine/renderer';
 import { createAdaptiveQuality } from './engine/adaptive-quality';
 import { createWorldData } from '../shared/world/world-data';
 import { createWorldView } from './world/world-view';
+import { districtAt } from '../shared/world/queries';
 import { createWorkerTransport, createWebSocketTransport, type NetEmulation, type Transport } from './net/transport';
 import { NetClient } from './net/net-client';
 import { serverUrlForPage } from './net/server-url';
@@ -173,6 +174,10 @@ async function main(): Promise<void> {
   });
 
   let acc = 0, seq = 0, last = performance.now(), fpsFrames = 0, fpsStart = last, menuT = 0;
+  // District name toast ("The Garage", "The Rooftops", "The Garden"): once you've been in a new one for 0.6 s, and not
+  // again for the same district within 30 s, so walking along a border doesn't spam it.
+  let districtCur = '', districtSince = 0, districtShown = '';
+  const districtToastAt = new Map<string, number>();
   const EMPTY = new Map<number, EntityState>();
   const focus = new THREE.Vector3();
   ctx.renderer.setAnimationLoop(() => {
@@ -214,6 +219,15 @@ async function main(): Promise<void> {
       ctx.camera.lookAt(0, 2, 0);
     }
     hiddenCue.style.display = local && (local.flags & EFlag.Stealthed) && !(local.flags & EFlag.Dead) ? 'block' : 'none';
+    if (local && !(local.flags & EFlag.Dead)) {
+      const d = districtAt(worldData, local.x, local.z, local.y)?.name ?? '';
+      if (d !== districtCur) { districtCur = d; districtSince = now; }
+      else if (d && d !== districtShown && now - districtSince > 600 && now - (districtToastAt.get(d) ?? -1e9) > 30_000) {
+        districtShown = d; districtToastAt.set(d, now);
+        hud.notice(`— ${d.toUpperCase()} —`);
+      }
+      if (!d) districtShown = '';
+    }
     const lv = views.get(localId); // hide our own avatar when a wall squeezes the camera into it
     if (lv) lv.avatar.root.visible = !!kart || cam.boom > 0.75;
     // Weather/time of day are pure functions of (seed, tick): drive them from the same server timebase as entities.

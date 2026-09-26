@@ -52,7 +52,7 @@ describe('West Yard: Ordnance Terminal sites', () => {
 
 describe('West Yard: pickup layout', () => {
   it('20 Golden Kibble + 4 core spots, sane data (surfaces, open-lawn starts, clear of colliders, spread out)', () => {
-    expect(LAYOUT.kibble.length).toBe(20);
+    expect(LAYOUT.kibble.length).toBe(22); // 20 from S1 + the crow's nest and the garage car roof (D3)
     expect(LAYOUT.cores.length).toBe(4);
     const all: PickupSpot[] = [...LAYOUT.cores, ...LAYOUT.kibble];
     expect(new Set(all.map((s) => s.id)).size).toBe(all.length);
@@ -112,7 +112,7 @@ describe('West Yard: objective chain + the full system list', () => {
     const states = sim.snapshotEntities();
     const kiosks = states.filter((s) => s.kind === EntityKind.Terminal && s.cls === terminalIndex('ordnance_terminal'));
     expect(kiosks.map((k) => k.team).sort()).toEqual([Team.Corgis, Team.Cats]);
-    expect(states.filter((s) => s.kind === EntityKind.Pickup).length).toBe(24);
+    expect(states.filter((s) => s.kind === EntityKind.Pickup).length).toBe(LAYOUT.kibble.length + LAYOUT.cores.length);
     for (const s of states) for (const v of [s.x, s.y, s.z, s.hp, s.ammo]) expect(Number.isFinite(v)).toBe(true);
     expect(objectiveState(sim)).toBeNull(); // the Squeaker chain is a skirmish chain
     const avg = ms / (ticks - 1);

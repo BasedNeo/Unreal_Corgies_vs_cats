@@ -244,7 +244,8 @@ describe('The Rooftops: every perch is reachable by both teams over both routes'
   it('D3 kibble proposals: clear of colliders, >= 2.5 m from every S1 pickup, next to a proven standing point', () => {
     for (const k of KIBBLE_PROPOSALS) {
       expect(occupiedAt(data, k.x, k.y, k.z), k.id).toBe(false);
-      for (const s of [...PICKUP_LAYOUTS['West Yard'].kibble, ...PICKUP_LAYOUTS['West Yard'].cores]) expect(Math.hypot(s.x - k.x, s.y - k.y, s.z - k.z), `${k.id} vs ${s.id}`).toBeGreaterThan(2.5);
+      // (the lead adopted these proposals into S1's layout: skip the spot's own entry)
+      for (const s of [...PICKUP_LAYOUTS['West Yard'].kibble, ...PICKUP_LAYOUTS['West Yard'].cores].filter((p) => p.id !== k.id)) expect(Math.hypot(s.x - k.x, s.y - k.y, s.z - k.z), `${k.id} vs ${s.id}`).toBeGreaterThan(2.5);
       const [sx, sy, sz] = k.stand();
       expect(Math.abs(surfaceAt(data, k.x, k.z, k.y).y + 0.55 - k.y), `${k.id} floats 0.55 m over its surface`).toBeLessThan(0.02);
       expect(Math.hypot(sx - k.x, sz - k.z), `${k.id} within a step of its route end`).toBeLessThan(2.5);

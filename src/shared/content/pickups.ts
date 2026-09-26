@@ -134,7 +134,7 @@ export interface PickupLayout {
 // West Yard (WorldData.name 'West Yard'). Heights from surfaceAt(); the tests re-derive them.
 // Cores sit at four contested spots roughly equidistant from both bases (corgi spawn centroid ≈ (-34, -72),
 // cat ≈ (51, 71)): under the two lawn chairs, the big tree's limb perch, the slide tower deck.
-// Kibble: 20 hideouts — easy ones near each base (first success within a minute), parkour ones on the
+// Kibble: 22 hideouts — easy ones near each base (first success within a minute), parkour ones on the
 // deck rail, cat tree, shed roof and bean teepee, and secrets behind the neighbour-strip fence gaps.
 const CAT_TREE: RoutePoint[] = [[15.5, 0, 84], [19.4, 0.6, 81.2], [19.6, 1.6, 84.8], [22.4, 2.8, 81.0], [24.8, 4.0, 84.0], [22.0, 5.2, 87.4], [22.2, 6.4, 84.3]];
 
@@ -193,6 +193,11 @@ export const PICKUP_LAYOUTS: Record<string, PickupLayout> = {
         route: [...CAT_TREE, [26.5, 7.16, 82.7], [35.4, 9.1, 82.7]] },
       { id: 'cardboard_fort', x: 30, y: 4.86, z: 58.1, hint: 'on top of the cardboard fort', side: 1,
         route: [[37.2, -0.3, 59.4], [34.2, 1.7, 59], [31.5, 2.5, 58.4]] },
+      // W3 D3: the Garage + Rooftops (routes proven with the hop search in tests/unit/interact-yard.test.ts)
+      { id: 'crows_nest', x: 69.7, y: 10.15, z: -56.5, hint: "on the garage roof's satellite crow's nest", side: -1,
+        route: [[59, 0, -57.4], [59.2, 1.2, -61.2], [59.2, 2.4, -63.8], [59.2, 3.6, -66.4], [61.4, 4.87, -66.4], [67.55, 5.92, -64.9], [69.6, 7.2, -64.9], [70.6, 8.4, -61.2]] },
+      { id: 'garage_car_roof', x: 86.2, y: 4.65, z: -59.6, hint: 'on the parked car in the garage (or drop in through the roof hatch)', side: -1,
+        route: [[81.5, -0.03, -40.5], [81.5, 0.2, -54.5], [86.2, 2.4, -54.8], [86.2, 4.1, -57.6]] },
     ],
   },
 };
