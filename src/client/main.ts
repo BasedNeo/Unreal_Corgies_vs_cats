@@ -20,6 +20,8 @@ import { createHud } from './ui/hud';
 import { createFx } from './fx';
 import { createAudio } from './audio';
 import { Nameplates } from './views/nameplates';
+import { BossBar } from './views/boss-bar';
+import { createBossTelegraphFx } from './procgen/boss';
 import { createVehicleViews, vehicleCameraFor, mountedVehicle, followYaw } from './vehicles';
 import { loadSettings, type Settings } from './ui/settings';
 import { bus } from './core/events';
@@ -43,7 +45,7 @@ async function main(): Promise<void> {
 
   const em: NetEmulation = { lagMs: Number(params.get('lag') ?? 0), jitterMs: Number(params.get('jitter') ?? 0), lossPct: Number(params.get('loss') ?? 0) };
   const serverUrl = serverUrlForPage(); // ?server / ?online / ?room / page served by server/prod.ts
-  const mode = params.get('mode') ?? 'yard-skirmish';
+  const mode = params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish';
   // Skirmish: a corgi squad of bots with you; cat waves come from the match rules. TDM: bot-filled teams.
   const bots = (params.get('bots') ?? (mode === 'team-deathmatch' ? '4,5' : '3,0')).split(',').map(Number) as [number, number];
   const transport = serverUrl
@@ -60,6 +62,8 @@ async function main(): Promise<void> {
   input.bind(ctx.renderer.domElement);
   const views = new EntityViews(ctx.scene);
   const vehicles = createVehicleViews(ctx.scene, { world: worldData, camera: ctx.camera });
+  const bossFx = createBossTelegraphFx(ctx.scene, { heightAt: (x, z) => worldData.height(x, z) });
+  const bossBar = new BossBar(ui);
   const cam = createThirdPersonCamera(ctx.camera);
   cam.setColliders(worldView.cameraColliders);
   const quality = createAdaptiveQuality(ctx.renderer);
@@ -115,6 +119,8 @@ async function main(): Promise<void> {
     if (ev.e === 'fire') views.trigger(ev.id, 'fire');
     if (ev.e === 'death') views.trigger(ev.id, 'death');
     if (ev.e === 'spawn') views.trigger(ev.id, 'spawn');
+    if (ev.e === 'ability') views.trigger(ev.id, ev.ability);
+    bossFx.onGameEvent(ev);
     const r = fx.onGameEvent(ev);
     if (r.shake > 0) cam.shake(r.shake);
     audio.onGameEvent(ev);
@@ -139,6 +145,8 @@ async function main(): Promise<void> {
     const pdt = dt * fx.hitStop(); // hit-stop slows presentation only, never the sim
     views.sync(states, net.localEntity, pdt);
     vehicles.sync(states, pdt);
+    bossFx.update(dt, states);
+    bossBar.update(states, dt);
     const local = states.get(net.localEntity) ?? null;
     const kart = local ? mountedVehicle(local, states) : null;
     if (kart) {

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Boss Lab — The Vac-Tank</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #9ccfe6; overflow: hidden; font-family: "Trebuchet MS", system-ui, sans-serif; }
+      #app { position: fixed; inset: 0; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #info { position: fixed; left: 10px; top: 8px; color: #1a120c; font-size: 12px; line-height: 1.35; white-space: pre;
+        background: rgba(246, 231, 207, 0.8); border: 2px solid #1a120c; border-radius: 6px; padding: 6px 9px; pointer-events: none; }
+      #bar { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); width: 420px; pointer-events: none; text-align: center;
+        font: bold 15px "Trebuchet MS", system-ui, sans-serif; color: #f6e7cf; text-shadow: 2px 2px 0 #1a120c; }
+      #bar .track { margin-top: 3px; height: 14px; border: 2px solid #1a120c; border-radius: 4px; background: #2b2a33; overflow: hidden; }
+      #bar .fill { height: 100%; background: #c9344a; width: 100%; }
+      #bark { position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%); max-width: 70%; pointer-events: none; text-align: center;
+        font: bold 16px "Trebuchet MS", system-ui, sans-serif; color: #1a120c; background: rgba(246, 231, 207, 0.9);
+        border: 2px solid #1a120c; border-radius: 10px; padding: 5px 12px; display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="bar"><div id="bossname">THE VAC-TANK</div><div class="track"><div class="fill" id="hp"></div></div></div>
+    <div id="bark"></div>
+    <div id="info">loading…</div>
+    <script type="module" src="/labs/boss.ts"></script>
+  </body>
+</html>

@@ -63,10 +63,14 @@ function regrade(sim: Sim, ev: HitEv, boss: SimEntity, fire: FireEv | null): voi
       weak = rayHitsWeakPoint(def, b.phase2, p.x, p.y, p.z, fire.x, fire.y, fire.z, dx, dy, dz);
     }
   } else {
-    const blast = ev.x === boss.pos.x && ev.z === boss.pos.z; // explode()/bark blast report the target centre
-    if (ev.crit && shooter?.wpn) headMult = WEAPONS[shooter.wpn.id].headMult;
+    // projectile direct hits only (blasts and bark blast report the target's centre; anything else —
+    // abilities, scripted damage — is left exactly as the combat lane applied it)
+    const blast = ev.x === boss.pos.x && ev.z === boss.pos.z;
+    const pdef = shooter?.wpn ? WEAPONS[shooter.wpn.id] : null;
+    if (blast || !pdef || pdef.kind !== 'projectile') { noteHit(sim, boss, b, ev, shooter, false); return; }
+    if (ev.crit) headMult = pdef.headMult;
     const w = weakZone(def, b.phase2);
-    weak = !blast && ev.y - boss.pos.y >= w.y0 - 0.3;
+    weak = ev.y - boss.pos.y >= w.y0 - 0.3;
   }
   const base = ev.dmg / headMult;
   const want = Math.max(1, Math.round(base * (weak ? def.weak.mult : def.hullMult)));
@@ -79,14 +83,19 @@ function regrade(sim: Sim, ev: HitEv, boss: SimEntity, fire: FireEv | null): voi
   }
   ev.dmg = dealt;
   ev.crit = weak;
-  b.stats.dmgTaken += dealt;
-  if (weak) b.stats.weakHits++; else b.stats.hullHits++;
-  if (shooter && shooter.team !== boss.team) { b.aggroId = shooter.id; b.aggroAt = sim.time; }
-  if (weak && sim.time >= b.hurtBarkAt && !boss.dead) { b.hurtBarkAt = sim.time + 14; bossBark(sim, boss, b, 'hurt'); }
+  noteHit(sim, boss, b, ev, shooter, weak);
   if (!boss.dead && h.hp <= 0) {
     h.hp = 0;
     kill(sim, boss, { id: ev.src, team: shooter?.team ?? (boss.team === 0 ? 1 : 0), weapon: fire ? fire.wpn : -1 });
   }
+}
+
+/** Stats, aggro and the "ouch" taunt for a (regraded) hit on a boss. */
+function noteHit(sim: Sim, boss: SimEntity, b: BossState, ev: HitEv, shooter: SimEntity | undefined, weak: boolean): void {
+  b.stats.dmgTaken += ev.dmg;
+  if (weak) b.stats.weakHits++; else b.stats.hullHits++;
+  if (shooter && shooter.team !== boss.team) { b.aggroId = shooter.id; b.aggroAt = sim.time; }
+  if (weak && sim.time >= b.hurtBarkAt && !boss.dead) { b.hurtBarkAt = sim.time + 14; bossBark(sim, boss, b, 'hurt'); }
 }
 
 const bossIds = new Set<number>();

@@ -309,7 +309,12 @@ export const matchSystem: SimSystem = {
   name: 'match',
   order: 800,
   update(sim, dt) {
-    const mode = roomMode(sim);
+    let mode = roomMode(sim);
+    if (mode === 'boss-rush') {
+      // Test/showcase mode: a skirmish whose only wave is the boss (?mode=boss-rush or ?boss=1).
+      sim.state.matchConfig ??= { skirmish: { warmup: 5, waves: [{ counts: {}, boss: 'vac_tank', label: 'BOSS' }] } };
+      (sim.state.room as { mode: string }).mode = mode = 'yard-skirmish';
+    }
     const kills = combatBus(sim).kills;
     if (mode !== 'yard-skirmish' && mode !== 'team-deathmatch') return;
     let rt = sim.state.matchRt as MatchRuntime | undefined;
