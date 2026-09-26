@@ -38,10 +38,12 @@ async function main(): Promise<void> {
 
   const em: NetEmulation = { lagMs: Number(params.get('lag') ?? 0), jitterMs: Number(params.get('jitter') ?? 0), lossPct: Number(params.get('loss') ?? 0) };
   const serverUrl = params.get('server');
-  const bots = (params.get('bots') ?? '0,4').split(',').map(Number) as [number, number];
+  const mode = params.get('mode') ?? 'yard-skirmish';
+  // Skirmish: a corgi squad of bots with you; cat waves come from the match rules. TDM: bot-filled teams.
+  const bots = (params.get('bots') ?? (mode === 'team-deathmatch' ? '4,5' : '3,0')).split(',').map(Number) as [number, number];
   const transport = serverUrl
     ? await createWebSocketTransport(serverUrl, em)
-    : createWorkerTransport({ seed, mode: params.get('mode') ?? 'yard-skirmish', bots }, em);
+    : createWorkerTransport({ seed, mode, bots }, em);
   debug.transport = transport.kind;
 
   const net = new NetClient(transport);

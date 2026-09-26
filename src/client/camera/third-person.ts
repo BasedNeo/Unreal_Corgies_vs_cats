@@ -1,6 +1,7 @@
 // Third-person follow camera: spring-damped pivot, over-the-shoulder aim mode, wall avoidance.
 import * as THREE from 'three/webgpu';
 import { damp } from '../../shared/math';
+import { AIM_RAY } from '../../shared/content/weapons';
 
 export interface CameraRig {
   update(target: THREE.Vector3, yaw: number, pitch: number, aiming: boolean, dt: number, speed: number): void;
@@ -11,7 +12,7 @@ export interface CameraRig {
 
 export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): CameraRig {
   const pivot = new THREE.Vector3();
-  let dist = 4.2, shoulder = 0.55, fov = 62, trauma = 0, first = true;
+  let dist = 4.2, shoulder: number = AIM_RAY.shoulderHip, fov = 62, trauma = 0, first = true;
   const ray = new THREE.Raycaster();
   const tmp = new THREE.Vector3(), dir = new THREE.Vector3(), want = new THREE.Vector3();
   let solids: THREE.Object3D[] = [];
@@ -25,14 +26,14 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
     },
     shake(a) { trauma = Math.min(1, trauma + a); },
     update(target, yaw, pitch, aiming, dt, speed) {
-      const pivotTarget = tmp.set(target.x, target.y + 1.25, target.z);
+      const pivotTarget = tmp.set(target.x, target.y + AIM_RAY.pivotHeight, target.z); // must match the authority's crosshair ray
       if (first) { pivot.copy(pivotTarget); first = false; }
       // Follow tightly horizontally, softer vertically (hides jump bob).
       pivot.x = damp(pivot.x, pivotTarget.x, 22, dt);
       pivot.z = damp(pivot.z, pivotTarget.z, 22, dt);
       pivot.y = damp(pivot.y, pivotTarget.y, 10, dt);
       dist = damp(dist, aiming ? 2.3 : 4.2 + Math.min(1.2, speed * 0.06), 10, dt);
-      shoulder = damp(shoulder, aiming ? 0.75 : 0.55, 10, dt);
+      shoulder = damp(shoulder, aiming ? AIM_RAY.shoulderAim : AIM_RAY.shoulderHip, 14, dt);
       fov = damp(fov, aiming ? 48 : 62 + Math.min(8, speed * 0.5), 8, dt);
       camera.fov = fov; camera.updateProjectionMatrix();
       const cp = Math.cos(pitch), sp = Math.sin(pitch);

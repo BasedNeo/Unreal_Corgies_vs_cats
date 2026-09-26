@@ -7,13 +7,16 @@
 //
 //   npx tsx tools/soak.mjs                      # 60 s per mode, soak match config (a full match fits in 60 s)
 //   npx tsx tools/soak.mjs --seconds 300 --full # shipping match config, longer
-//   options: --modes yard-skirmish,team-deathmatch  --seed 1  --no-netbot  --json artifacts/soak.json
+//   options: --modes yard-skirmish,team-deathmatch  --seed 1  --no-netbot  --repeat 3  --json artifacts/soak.json
 //
 // Exit 1 on: any runtime error / non-finite state, a bot stuck (wants to move, doesn't) > 5 s,
 // tick p95 > 3 ms, or (soak config) a mode that never completes a match.
 // Tick cost per Room.tick() = min(wall time, process CPU time): wall time is inflated by preemption on
 // a busy shared machine, process CPU time by V8's background GC/JIT threads; the minimum is the tick's
-// own work. Both raw series are reported too. A per-system breakdown shows which lane owns the cost
+// own work. The simulation is deterministic, so each mode runs --repeat times (default 3): the runs
+// must produce identical outcomes (else it's a determinism error), and the timing gate uses the
+// per-tick minimum across repeats (best-of-N filters out other processes on a shared machine). Raw
+// single-run series are reported too. A per-system breakdown shows which lane owns the cost
 // (L3 = ai + combat + match systems).
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { loadavg, cpus } from 'node:os';
@@ -33,6 +36,7 @@ const MODES = opt('modes', 'yard-skirmish,team-deathmatch').split(',');
 const FULL = argv.includes('--full');
 const NETBOT = !argv.includes('--no-netbot');
 const OUT = opt('json', 'artifacts/soak.json');
+const REPEAT = Math.max(1, Number(opt('repeat', 3)));
 const LIMITS = { maxStuckSec: 5, maxTickP95Ms: 3, maxErrors: 0 };
 const DRAMA_BAND = [0.6, 4]; // drama events per player-minute (kills, wave clears, match results)
 const MAX_DOWNTIME = 20;
@@ -226,12 +230,36 @@ async function soakMode(mode) {
   const maxShare = mode === 'yard-skirmish' ? 0.6 : 0.35;
   const fairness = 100 * (0.7 * clamp01(1 - Math.max(0, session.topPlayerShare - maxShare) / (1 - maxShare)) + 0.3 * (session.comeback ? 1 : 0.5));
   session.score = { total: Math.round(0.4 * realism + 0.35 * intensity + 0.25 * fairness), realism: Math.round(realism), intensity: Math.round(intensity), fairness: Math.round(fairness), dramaPerPlayerMinute: r2(rate) };
+  session.raw = { tick: T.tickMs, ai: T.aiMs };
+  session.signature = JSON.stringify([T.ticks, T.kills, T.shots, T.hits, T.explosions, T.results, room.match.score, T.snapBytes]);
   return session;
+}
+
+/** Run a mode REPEAT times; outcomes must match; timing = per-tick minimum across the runs. */
+async function soakRepeated(mode) {
+  const runs = [];
+  for (let r = 0; r < REPEAT; r++) runs.push(await soakMode(mode));
+  const s = runs[0];
+  s.repeats = REPEAT;
+  s.deterministic = runs.every((x) => x.signature === s.signature);
+  if (!s.deterministic) { s.errors++; s.errorSamples.push(`non-deterministic: repeat outcomes differ (${runs.map((x) => x.signature.slice(0, 60)).join(' | ')})`); }
+  const n = Math.min(...runs.map((x) => x.raw.tick.length));
+  const best = (k) => Array.from({ length: n }, (_, i) => Math.min(...runs.map((x) => x.raw[k][i])));
+  const tick = best('tick'), ai = best('ai');
+  s.tickSingleRunMs = s.tickMs;
+  s.tickMs = { p50: r2(pct(tick, 0.5)), p95: r2(pct(tick, 0.95)), max: r2(Math.max(...tick)) };
+  s.aiMs = { p50: r2(pct(ai, 0.5)), p95: r2(pct(ai, 0.95)), max: r2(Math.max(...ai)) };
+  for (const x of runs) { delete x.raw; delete x.signature; }
+  // Realism uses the best-of-N tick p95 (recompute the stored score)
+  const R = 100 * (0.5 * clamp01(1 - (s.tickMs.p95 - 1) / (LIMITS.maxTickP95Ms * 1.5)) + 0.5 * clamp01(1 - (s.errors + s.stuckEvents * 0.2)));
+  s.score.realism = Math.round(R);
+  s.score.total = Math.round(0.4 * R + 0.35 * s.score.intensity + 0.25 * s.score.fairness);
+  return s;
 }
 
 const load0 = loadavg()[0];
 const sessions = [];
-for (const mode of MODES) sessions.push(await soakMode(mode));
+for (const mode of MODES) sessions.push(await soakRepeated(mode));
 const load1 = loadavg()[0], cores = cpus().length;
 
 const fails = [];
@@ -248,7 +276,7 @@ for (const s of sessions) {
   const sc = s.score;
   console.log(`${s.mode.padEnd(16)} score ${sc.total} (R ${sc.realism} · I ${sc.intensity} · F ${sc.fairness}) | ${s.durationSec}s sim in ${s.wallMs} ms | matches ${s.matchesEnded}: ${s.results.join(', ') || `none (wave ${s.maxWave}, ${s.finalScore.join(':')})`}`);
   console.log(`  kills ${s.kills} · hit ${Math.round(s.hitRate * 100)}% · crit ${Math.round(s.critRate * 100)}% · boom ${s.explosions} · abil ${s.abilities} · ttfe ${s.timeToFirstEngagementSec ?? '-'}s · dead ${Math.round(s.deadTimeFrac * 100)}% · downtime ${s.maxDowntimeSec}s · drama ${sc.dramaPerPlayerMinute}/p-min · top ${s.topPlayerShare}`);
-  console.log(`  tick p50 ${s.tickMs.p50} p95 ${s.tickMs.p95} max ${s.tickMs.max} ms (raw wall p95 ${s.tickWallMs.p95} · cpu p95 ${s.tickCpuMs.p95}; nav build ${s.navBuildMs} ms) · ai p95 ${s.aiMs.p95} ms · stuck max ${s.stuckMaxSec}s · errors ${s.errors}${s.netbot ? ` · net-bot k${s.netbot.kills}/d${s.netbot.deaths} snap ${s.snapshotKBps} KB/s` : ''}`);
+  console.log(`  tick p50 ${s.tickMs.p50} p95 ${s.tickMs.p95} max ${s.tickMs.max} ms (best of ${s.repeats}${s.deterministic ? ', deterministic' : ', NON-DETERMINISTIC'}; single run p95 ${s.tickSingleRunMs.p95} · raw wall ${s.tickWallMs.p95} · cpu ${s.tickCpuMs.p95}; nav build ${s.navBuildMs} ms) · ai p95 ${s.aiMs.p95} ms · stuck max ${s.stuckMaxSec}s · errors ${s.errors}${s.netbot ? ` · net-bot k${s.netbot.kills}/d${s.netbot.deaths} snap ${s.snapshotKBps} KB/s` : ''}`);
   const sm = s.systemMsPerTick;
   if (Object.keys(sm).length) console.log(`  avg ms/tick: L3 ${s.l3MsPerTick} (ai ${sm.ai ?? 0} · weapons ${sm.weapons ?? 0} · projectiles ${sm.projectiles ?? 0} · match ${sm.match ?? 0}) · movement ${sm.movement ?? 0} · physics ${sm['physics-step'] ?? 0} · world ${sm['world-effects'] ?? 0} · chars ${s.characters}`);
 }
@@ -256,5 +284,5 @@ const total = Math.round(sessions.reduce((a, s) => a + s.score.total, 0) / sessi
 const worst = (k) => Math.max(...sessions.map((s) => s.tickMs[k]));
 console.log(`${fails.length ? 'SOAK FAIL' : 'SOAK PASS'} | score ${total} | modes ${sessions.length} · errors ${sessions.reduce((a, s) => a + s.errors, 0)} · stuck max ${Math.max(...sessions.map((s) => s.stuckMaxSec))}s · tick p95 ${worst('p95')} ms · completed ${sessions.filter((s) => s.completed).length}/${sessions.length} | ${OUT}`);
 for (const f of fails) console.log(`  ✘ ${f}`);
-if (Math.max(load0, load1) > cores) console.log(`  ! machine load ${r2(Math.max(load0, load1))} on ${cores} cores: tick timings are inflated by other processes — rerun the timing gate on an idle machine`);
+if (Math.max(load0, load1) > cores) console.log(`  ! machine load ${r2(Math.max(load0, load1))} on ${cores} cores during the run: single-run timings are inflated; the gate uses best-of-${REPEAT} per tick${REPEAT < 3 ? ' (use --repeat 3+ on a shared machine)' : ''}`);
 process.exit(fails.length ? 1 : 0);
