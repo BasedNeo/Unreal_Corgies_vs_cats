@@ -24,6 +24,8 @@ import { quatYXZ, surfaceAt } from '../../shared/world/queries';
 import { COMBAT_RULES, WEAPONS, weaponByIndex, type ProjectileDef } from '../../shared/content/weapons';
 import { TERMINALS, VEHICLES, terminalIndex, type KartExplosionDef, type KartId, type TerminalId } from '../../shared/content/vehicles';
 import { applyDamage, knockback, explode, combatLive, capsuleOf } from '../combat';
+import { damageDestructible } from '../destruct';
+import { destructibleOfCollider } from '../destruct/tag';
 import { falloff } from '../combat/weapon-system';
 import { reportNoiseAt } from '../combat/state';
 import { groups, Layer } from '../rapier';
@@ -648,6 +650,16 @@ export const kartStepSystem: SimSystem = {
           other.vel.x -= res.wallNx * imp * 0.55; other.vel.z -= res.wallNz * imp * 0.55;
           const src = { id: rider?.id ?? kart.id, team: kartTeam(sim, kart) as TeamId | -1, weapon: -1 };
           damageKart(sim, other, (imp - d.ramMinSpeed) * d.ramDamagePerMs * 0.6 + 8, src, other.pos.x, other.pos.y + 0.4, other.pos.z);
+        }
+      }
+      // Kart vs a destructible (X1): a hard enough ram knocks a tuna or crate stack over (the breach wall is
+      // explosions-only: ramMult 0). The kart still bounces off this tick; the collider is gone on the next.
+      if (res.wallHandle >= 0 && res.wallImpact > d.ramMinSpeed) {
+        const c = sim.world.getCollider(res.wallHandle);
+        const prop = c ? sim.entities.get(destructibleOfCollider(c)) : undefined;
+        const rule = prop?.dsx?.rule;
+        if (prop && rule && rule.ramMult > 0) {
+          damageDestructible(sim, prop, (d.ramDamageBase + (res.wallImpact - d.ramMinSpeed) * d.ramDamagePerMs) * rule.ramMult, rider?.id ?? kart.id);
         }
       }
       if (kart.removed) continue;

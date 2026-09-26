@@ -25,6 +25,7 @@ import { createWorldData, type WorldData } from '../../src/shared/world/world-da
 import { occupiedAt, surfaceAt, districtAt } from '../../src/shared/world/queries';
 import { DESTRUCT_KINDS, boxAabb, crateStack, destructDistance } from '../../src/shared/world/destructibles';
 import { GARAGE, GARAGE_BREACH, GARAGE_DOORS, ROOF_ROUTES } from '../../src/shared/world/garage';
+import { mountKart, spawnKart, vehicleSystems } from '../../src/sim/vehicles';
 import { TICK_HZ } from '../../src/shared/constants';
 
 const systems = () => [movementSystem, ...worldSystems(), physicsStepSystem, ...combatSystems(), killPlaneSystem, ...destructSystems()];
@@ -231,6 +232,42 @@ describe('X1 destructibles: the breach', () => {
     expect(breaks(ev2)).toEqual([expect.objectContaining({ id: crate.id, ability: 'destruct:crate_stack' })]);
     expect(crate.dsx!.brokeBy).toBe(c.id);
     sim.dispose();
+  });
+
+  it('a kart rammed hard into a crate stack flattens it (credited to the driver); a gentle bump does nothing', async () => {
+    const run = async (throttle: number, runUp: number, boost: boolean) => {
+      const sim = await Sim.create({ seed: 1, systems: [...systems(), ...vehicleSystems()] });
+      sim.state.vehicleConfig = { autoTerminals: false };
+      sim.step();
+      const crate = byId(sim, 'crate_stack_2');
+      const cx = crate.dsx!.def.cx, cz = crate.dsx!.def.cz;
+      // a straight, clear run-up toward the stack's center
+      let start: { x: number; z: number } | null = null;
+      for (let k = 0; k < 16 && !start; k++) {
+        const a = (k / 16) * Math.PI * 2, x = cx + Math.cos(a) * runUp, z = cz + Math.sin(a) * runUp;
+        const y = surfaceAt(sim.worldData, x, z).y;
+        if (Math.abs(y - sim.worldData.height(x, z)) > 0.05) continue; // on the lawn, not on a prop
+        const sx = cx + Math.cos(a) * 2.2, sz = cz + Math.sin(a) * 2.2;
+        if (worldLineClear(sim, x, y + 0.5, z, sx, sim.worldData.height(sx, sz) + 0.5, sz)) start = { x, z };
+      }
+      expect(start).toBeTruthy();
+      const yaw = Math.atan2(-(cx - start!.x), -(cz - start!.z));
+      const kart = spawnKart(sim, 'mower_kart', Team.Corgis, start!.x, surfaceAt(sim.worldData, start!.x, start!.z).y, start!.z, yaw);
+      const driver = spawn(sim, Team.Corgis, 'assault', start!.x + 1.5, start!.z);
+      hold(sim, driver, 0.1);
+      expect(mountKart(sim, kart, driver)).toBe(true);
+      const evs = hold(sim, driver, 3.5, { mz: throttle, yaw, buttons: boost ? Btn.Sprint : 0 });
+      const out = { broken: crate.dsx!.broken, by: crate.dsx!.brokeBy, driver: driver.id, events: breaks(evs).length, hp: crate.health!.hp };
+      sim.dispose();
+      return out;
+    };
+    const hard = await run(1, 18, true);
+    expect(hard.broken).toBe(true);
+    expect(hard.by).toBe(hard.driver);
+    expect(hard.events).toBe(1);
+    const soft = await run(0.3, 4, false);
+    expect(soft.broken).toBe(false);
+    expect(soft.hp).toBe(DESTRUCT_KINDS.crate_stack.hp);
   });
 
   it('a tennis-mortar blast breaks tuna and crate stacks; it only scratches the wall', async () => {

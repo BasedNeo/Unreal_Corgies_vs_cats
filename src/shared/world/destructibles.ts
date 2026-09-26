@@ -23,6 +23,8 @@ export interface DestructRule {
   blastMult: number;
   /** Damage multiplier for the Breacher's Dig Charge. */
   chargeMult: number;
+  /** Damage multiplier for a kart ramming it (the kart's ram damage; 0 = karts just bounce off). */
+  ramMult: number;
   /** A Dig Charge planted within BREACH.reach of it (while it stands) blows BREACH.fuse s after arming. */
   breach: boolean;
   /** How far bots hear it break (m). */
@@ -34,9 +36,10 @@ export interface DestructRule {
  * blast does <= 34 (five direct hits), rifles nothing. Stacks: a mortar landing within ~2.3 m, 6 rifle shots.
  */
 export const DESTRUCT_KINDS: Record<DestructKind, DestructRule> = {
-  wall_boards: { hp: 150, shotMult: 0, blastMult: 0.4, chargeMult: 3, breach: true, noise: 60 },
-  tuna_stack: { hp: 80, shotMult: 1, blastMult: 1.5, chargeMult: 2, breach: false, noise: 35 },
-  crate_stack: { hp: 60, shotMult: 1, blastMult: 1.5, chargeMult: 2, breach: false, noise: 30 },
+  wall_boards: { hp: 150, shotMult: 0, blastMult: 0.4, chargeMult: 3, ramMult: 0, breach: true, noise: 60 },
+  // A kart at ~10 m/s flattens a crate stack; the heavier tuna hoard needs ~11.5 m/s (a boosted run-up).
+  tuna_stack: { hp: 80, shotMult: 1, blastMult: 1.5, chargeMult: 2, ramMult: 1.5, breach: false, noise: 35 },
+  crate_stack: { hp: 60, shotMult: 1, blastMult: 1.5, chargeMult: 2, ramMult: 1.5, breach: false, noise: 30 },
 };
 
 /** Breaching: a Dig Charge planted within `reach` m of a standing breach wall blows `fuse` s after it arms. */

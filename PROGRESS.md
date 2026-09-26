@@ -168,11 +168,10 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 - Ability entities: shotgun damage to drones/barriers is estimated from the first pellet (C2).
 - Adventure (A1): sentries jog their patrol loops (no walk intent); bots can't shoot destructibles or drive/glide on
   purpose (A2); one adventure chapter per page on the client; picker locks are cosmetic; sentry cones draw through
-  walls (intended readability); the spawn-facing race is patched per mode, not at its root.
+  walls (intended readability).
 - Sniper elite (E1): perches are hard-coded West Yard spots (tests catch lost sightlines, not looks); L3 bots don't
   dodge the dot; a human must confirm the 2–4 minute duel target.
-- Destructibles (X1): bots don't breach on their own yet (A2); kart rams don't break stacks (kart wrecks do); a match
-  reset relabels nav regions once (~5–9 ms).
+- Destructibles (X1): bots don't breach on their own yet (A2); a match reset relabels nav regions once (~5–9 ms).
 - RC plane (R1):
   - there is no engine sound yet (the cockpit strip `ui/plane-hud.ts` shows hull, throttle, airspeed, height, boost,
     gun heat and STALL!);
@@ -188,6 +187,9 @@ Newest first. Every task appends: what changed, proof (command + result + screen
   - faces are smoother, with attitude expressions (K1).
   - your team's shots, and your bots' sight lines, now pass through your own Squeak Barriers and drones; they still
     stop the other team's shots (lead).
+  - a kart rammed hard into a tuna or crate stack flattens it (the breach wall stays explosions-only) (lead);
+  - spawn facing: the client holds inputs until its entity is in a snapshot, so a fresh spawn keeps the sim's facing
+    in every mode (lead; found by A1).
 
 ## Human verdicts
 _(none yet — first human session after Wave 1 integration)_
