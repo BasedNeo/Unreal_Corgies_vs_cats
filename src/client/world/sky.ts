@@ -227,7 +227,8 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
     }
     setRGB(c3, horizon);
     const zen = weatherTint(ramp(YARD_RAMPS.zenith, e), tintZ, grey * 0.92, dimSky);
-    fog.color.copy(c3).lerp(new THREE.Color().setRGB(...zen), 0.12).multiplyScalar(1 - 0.3 * storm);
+    // aerial perspective: distance tints toward the sky's blue, not a beige-green wall (L2 critique)
+    fog.color.copy(c3).lerp(new THREE.Color().setRGB(...zen), 0.3).multiplyScalar(1 - 0.3 * storm);
     fog.color.lerp(new THREE.Color(0xc9d0e4), Math.min(1, W.flash * 0.3));
     baseFog = ramp(YARD_RAMPS.fogDensity, e) * (1 + 1.5 * W.fog + 0.8 * W.rain);
     fog.density = baseFog;

@@ -279,7 +279,10 @@ export interface SprinklerState {
 
 const RAMP = 1.5 * TICK_HZ;
 
-/** Burst + sweep state of a sprinkler at a tick. Pure; + - * / floor only. */
+const rainScratch: WeatherParams = { ...WEATHER_PARAMS.clear };
+
+/** Burst + sweep state of a sprinkler at a tick. Pure; + - * / floor only. The garden's sprinklers
+ *  have a rain sensor: pressure fades out while it rains (and comes back as the rain clears). */
 export function sprinklerAt(seed: number, sp: Sprinkler, tick: number, out?: SprinklerState): SprinklerState {
   const o = out ?? { on: 0, angle: sp.a0, dirX: 1, dirZ: 0, t: -1 };
   o.on = 0; o.t = -1; o.angle = sp.a0;
@@ -292,7 +295,7 @@ export function sprinklerAt(seed: number, sp: Sprinkler, tick: number, out?: Spr
     const start = first + m * period + Math.floor(hash2(m, 7, s) * slack);
     const local = t - start;
     if (local >= 0 && local <= burst) {
-      o.on = smooth(0, RAMP, local) * (1 - smooth(burst - RAMP, burst, local));
+      o.on = smooth(0, RAMP, local) * (1 - smooth(burst - RAMP, burst, local)) * (1 - smooth(0.05, 0.4, weatherParamsAt(seed, t, rainScratch).rain));
       o.t = local / TICK_HZ;
       let u = local / (sp.sweep * TICK_HZ);
       u -= Math.floor(u);

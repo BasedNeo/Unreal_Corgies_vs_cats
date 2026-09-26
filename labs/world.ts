@@ -13,6 +13,8 @@ import { createRenderContext } from '../src/client/engine/renderer';
 import { createWorldData } from '../src/shared/world/world-data';
 import { createWorldView } from '../src/client/world/world-view';
 import { findWeather, forEachStrike, sprinklerAt, WEATHER_KINDS, type WeatherKind } from '../src/shared/world/weather';
+import { AudioEngine } from '../src/client/audio/engine';
+import { createWeatherAudio } from '../src/client/audio/weather';
 import { toon } from '../src/client/style/style-webgpu.js';
 import { PALETTE } from '../src/client/style/style-tokens.js';
 
@@ -44,13 +46,18 @@ async function main() {
     for (let t = from; t < from + 60 * 60 * 40 && hit < 0; t += 600) forEachStrike(seed, t, t + 600, (s) => { if (hit < 0 && s.dist < 700 && s.tick > from && inWin(s.bearing)) hit = s.tick; });
     return hit;
   };
-  if (params.get('bolt') === '1') { const b = nextBolt(clock); if (b >= 0) clock = b + 2; }
+  // &bolt=1: the next near strike whose bolt is in front of the camera (bearing within +-20 deg of the view)
+  const boltParam = params.get('bolt') === '1';
   const sprId = params.get('spr');
   if (sprId) {
     const sp = data.sprinklers?.find((s) => s.id === sprId);
     if (sp) for (let t = clock; t < clock + 60 * 600; t += 30) if (sprinklerAt(seed, sp, t).on >= 1) { clock = t + 60 * 4; break; }
   }
   let overrideIdx = -1;
+  // &audio: weather ambience through the L5 audio engine (unlocks on the first click/key)
+  const audioEngine = params.has('audio') ? new AudioEngine() : null;
+  if (audioEngine) audioEngine.attachUnlock(window);
+  const weatherAudio = audioEngine ? createWeatherAudio(audioEngine, data) : null;
   const buildMs = performance.now() - t0;
   (globalThis as unknown as { __lab: unknown }).__lab = { scene: ctx.scene, view, data, renderer: ctx.renderer, ctx, THREE, TSL };
   const lab = debug as unknown as typeof debug & LabDebug;
@@ -95,6 +102,11 @@ async function main() {
     lab.bookmark = b.name;
   };
   applyBookmark(params.get('bm') ?? 'overview');
+  if (boltParam) {
+    const bearing = Math.atan2(-Math.cos(pose.yaw), -Math.sin(pose.yaw));
+    const b = nextBolt(clock, bearing - 0.35, bearing + 0.35);
+    if (b >= 0) clock = b + 2;
+  }
   // ad-hoc camera: &pos=x,y,z&look=x,y,z
   if (params.has('pos') && params.has('look')) {
     const [px, py, pz] = params.get('pos')!.split(',').map(Number), [lx, ly, lz] = params.get('look')!.split(',').map(Number);
@@ -116,6 +128,7 @@ async function main() {
     frames: () => frames,
     nextBolt,
     findWeather: (k: WeatherKind, from = 0) => findWeather(seed, k, from),
+    audioEngine, weatherAudio,
   });
 
   const keys = new Set<string>();
@@ -156,6 +169,7 @@ async function main() {
     cam.updateMatrixWorld();
     if (!frozen) clock += dt * 60;
     view.update(dt, cam, clock);
+    weatherAudio?.update(view.weather, clock, cam, dt);
     ctx.renderer.info.reset();
     ctx.render();
     frames++; fpsN++;

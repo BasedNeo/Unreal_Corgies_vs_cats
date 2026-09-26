@@ -19,6 +19,7 @@ import { createThirdPersonCamera } from './camera/third-person';
 import { createHud } from './ui/hud';
 import { createFx } from './fx';
 import { createAudio } from './audio';
+import { createWeatherAudio } from './audio/weather';
 import { Nameplates } from './views/nameplates';
 import { BossBar } from './views/boss-bar';
 import { createBossTelegraphFx } from './procgen/boss';
@@ -47,7 +48,7 @@ async function main(): Promise<void> {
   const worldData = createWorldData(seed);
   const boot = loadSettings();
   const q = (params.get('quality') as Settings['quality'] | null) ?? boot.quality;
-  const worldView = createWorldView(ctx.scene, worldData, { quality: q === 'medium' ? 'med' : q });
+  const worldView = createWorldView(ctx.scene, worldData, { quality: q === 'medium' ? 'med' : q, grade: ctx.pipeline.grade.uniforms });
   if (params.has('t')) worldView.setTimeOfDay(Number(params.get('t')));
 
   const em: NetEmulation = { lagMs: Number(params.get('lag') ?? 0), jitterMs: Number(params.get('jitter') ?? 0), lossPct: Number(params.get('loss') ?? 0) };
@@ -80,11 +81,17 @@ async function main(): Promise<void> {
   const vehicles = createVehicleViews(ctx.scene, { world: worldData, camera: ctx.camera });
   const bossFx = createBossTelegraphFx(ctx.scene, { heightAt: (x, z) => worldData.height(x, z) });
   const bossBar = new BossBar(ui);
+  // Concealment cue: the sim sets EFlag.Stealthed while the local corgi is hidden in tall grass.
+  const hiddenCue = document.createElement('div');
+  hiddenCue.textContent = 'HIDDEN';
+  hiddenCue.style.cssText = 'position:absolute;left:50%;bottom:92px;transform:translateX(-50%);padding:4px 12px;border:3px solid #1a120c;border-radius:10px;background:#3f6e2acc;color:#e9f7d2;font:900 14px/1 "Lilita One",system-ui,sans-serif;letter-spacing:.12em;box-shadow:2px 2px 0 #1a120c;display:none;pointer-events:none';
+  ui.appendChild(hiddenCue);
   const cam = createThirdPersonCamera(ctx.camera);
   cam.setColliders(worldView.cameraColliders);
   const quality = createAdaptiveQuality(ctx.renderer);
   const nameplates = new Nameplates(ui);
   const audio = createAudio();
+  const weatherAudio = createWeatherAudio(audio.engine, worldData);
   const fx = createFx(ctx.scene, ctx.camera, views, { heightAt: (x, z) => worldData.height(x, z) });
   const applySettings = (st: Settings) => {
     input.sensitivity = 0.0022 * st.sensitivity;
@@ -183,9 +190,13 @@ async function main(): Promise<void> {
       ctx.camera.position.set(Math.sin(menuT) * 55, 18 + Math.sin(menuT * 0.7) * 4, Math.cos(menuT) * 55);
       ctx.camera.lookAt(0, 2, 0);
     }
+    hiddenCue.style.display = local && (local.flags & EFlag.Stealthed) && !(local.flags & EFlag.Dead) ? 'block' : 'none';
     const lv = views.get(localId); // hide our own avatar when a wall squeezes the camera into it
     if (lv) lv.avatar.root.visible = !!kart || cam.boom > 0.75;
-    worldView.update(dt, ctx.camera);
+    // Weather/time of day are pure functions of (seed, tick): drive them from the same server timebase as entities.
+    const wTick = net?.connected ? net.renderTime(now) * net.tickHz : undefined;
+    worldView.update(dt, ctx.camera, wTick);
+    weatherAudio.update(worldView.weather, worldView.tick, ctx.camera, dt);
     fx.update(dt, states, localId);
     audio.update(ctx.camera, states, localId, dt);
     nameplates.update(states, localId, local?.team ?? 0, ctx.camera, (id) => views.get(id)?.avatar.height ?? 1.4);

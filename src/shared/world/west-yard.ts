@@ -508,6 +508,7 @@ function trampoline(f: Frame, id: string): JumpPad {
   const R = 6.6, TOP = 1.25;
   f.colCyl('trampoline', 0, (TOP - 0.6) / 2, 0, R + 0.4, (TOP + 0.6) / 2);
   f.cyl(0, TOP - 0.08, 0, R - 0.9, 0.12, R - 0.9, 'trampMat', { seg: 32, g: 'noink' });
+  for (const rr of [0.3, 0.62]) f.torus(0, TOP - 0.01, 0, (R - 0.9) * rr, 0.07, 'trampRing', { pitch: Math.PI / 2, seg: 28, g: 'noink' });   // G1: target rings read "bouncy"
   f.torus(0, TOP - 0.02, 0, R - 0.3, 0.55, 'accentHot', { pitch: Math.PI / 2, seg: 28 });   // padded rim
   f.torus(0, TOP - 0.35, 0, R + 0.1, 0.14, 'metal', { pitch: Math.PI / 2, seg: 28 });        // frame ring
   for (let i = 0; i < 6; i++) {
@@ -529,6 +530,7 @@ function miniTrampoline(f: Frame, id: string): JumpPad {
   const R = 2.4, TOP = 0.42;
   f.colCyl('trampoline', 0, (TOP - 0.6) / 2, 0, R + 0.2, (TOP + 0.6) / 2);
   f.cyl(0, TOP - 0.05, 0, R - 0.35, 0.1, R - 0.35, 'trampMat', { seg: 24, g: 'noink' });
+  f.torus(0, TOP + 0.01, 0, (R - 0.35) * 0.5, 0.05, 'trampRing', { pitch: Math.PI / 2, seg: 20, g: 'noink' });
   f.torus(0, TOP, 0, R - 0.1, 0.28, id.startsWith('corgi') ? 'teamCorgis' : 'teamCats', { pitch: Math.PI / 2, seg: 22 });
   const [x, y, z] = f.w(0, TOP, 0);
   return { id, x, y, z, r: R - 0.3, vy: 15.5 };

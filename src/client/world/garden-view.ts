@@ -37,8 +37,15 @@ function tallTuft(seed: number, dry: boolean): THREE.BufferGeometry {
   for (let b = 0; b < 9; b++) {
     const r = hash2(b, seed, 21);
     const yaw = (b / 9) * Math.PI * 2 + r * 0.7;
-    const h = 2.0 + 0.8 * hash2(b, seed, 22);
+    const h = 1.7 + 1.2 * hash2(b, seed, 22);
     parts.push(...blade(h, 0.13, 0.45 + 0.45 * r, yaw, b % 3 === 0 ? tip.clone().lerp(worldColor('grassDry'), 0.35) : tip, base));
+  }
+  // seed-head stalks poke above the blades: a ragged, readable silhouette instead of a flat top
+  {
+    const a = 2.6 + seed, h = 2.8 + 0.4 * hash2(1, seed, 23), x = Math.cos(a) * 0.18, z = Math.sin(a) * 0.18;
+    const head = worldColor(dry ? 'grassDry' : 'tallGrassDry').clone().lerp(worldColor('tallGrass'), dry ? 0.2 : 0.55);
+    parts.push({ geo: new THREE.CylinderGeometry(0.02, 0.03, h, 3).translate(x, h / 2, z), color: worldColor('grassDark') });
+    parts.push({ geo: new THREE.ConeGeometry(0.075, 0.55, 4).rotateX(Math.PI).translate(x, h + 0.22, z), color: head });
   }
   return finish(parts);
 }

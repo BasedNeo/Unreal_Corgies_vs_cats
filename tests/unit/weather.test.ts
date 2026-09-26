@@ -30,7 +30,7 @@ describe('weather: determinism', () => {
     for (const sp of d.sprinklers!) for (let t = 4000; t < 40000; t += 37) { const s = sprinklerAt(1, sp, t); parts.push(`${s.on},${s.dirX},${s.dirZ}`); }
     for (let a2 = -20; a2 < 20; a2 += 0.37) parts.push(String(dsin(a2)));
     expect(parts.length).toBe(2620);
-    expect(fnv(parts.join('|'))).toBe('4e887dda');
+    expect(fnv(parts.join('|'))).toBe('1649d429');
   });
 
   it('different seeds give different skies', () => {
@@ -172,28 +172,40 @@ describe('sprinklers', () => {
 
   it('bursts on a seeded schedule: never before `first`, `burst` seconds long, ramped pressure, sweep inside the arc', () => {
     for (let t = 0; t < sp.first * TICK; t += 10) expect(sprinklerAt(1, sp, t).on).toBe(0);
-    let onTicks = 0, bursts = 0, was = false, minA = Infinity, maxA = -Infinity, jump = 0, prevOn = 0;
-    const span = sp.period * 6 * TICK;
+    let bursts = 0, dryBursts = 0, onTicks = 0, burstDry = true, was = false, minA = Infinity, maxA = -Infinity, jump = 0, prevOn = 0;
+    const span = sp.period * 8 * TICK;
     for (let t = sp.first * TICK; t < sp.first * TICK + span; t++) {
       const s = sprinklerAt(1, sp, t);
       jump = Math.max(jump, Math.abs(s.on - prevOn));
       prevOn = s.on;
-      if (s.on > 0) {
-        onTicks++;
-        minA = Math.min(minA, s.angle); maxA = Math.max(maxA, s.angle);
-        expect(Math.hypot(s.dirX, s.dirZ)).toBeCloseTo(1, 6);
-        expect(s.dirX).toBeCloseTo(Math.cos(s.angle), 6);
-        expect(s.dirZ).toBeCloseTo(Math.sin(s.angle), 6);
+      const active = s.t >= 0;                             // inside a scheduled burst (even if the rain sensor holds it)
+      if (active && !was) { bursts++; onTicks = 0; burstDry = true; }
+      if (active) {
+        if (weatherParamsAt(1, t).rain > 0) burstDry = false;
+        if (s.on > 0) onTicks++;
+        if (s.on > 0) {
+          minA = Math.min(minA, s.angle); maxA = Math.max(maxA, s.angle);
+          expect(Math.hypot(s.dirX, s.dirZ)).toBeCloseTo(1, 6);
+          expect(s.dirX).toBeCloseTo(Math.cos(s.angle), 6);
+          expect(s.dirZ).toBeCloseTo(Math.sin(s.angle), 6);
+        }
       }
-      if (s.on > 0 && !was) bursts++;
-      was = s.on > 0;
+      if (!active && was && burstDry) { dryBursts++; expect(onTicks / TICK).toBeCloseTo(sp.burst, 0); }
+      was = active;
     }
-    expect(bursts).toBe(6);
-    expect(onTicks / TICK / 6).toBeCloseTo(sp.burst, 0);
-    expect(jump).toBeLessThan(0.02);             // pressure ramps (1.5 s), never pops on/off
+    expect(bursts).toBe(8);
+    expect(dryBursts).toBeGreaterThanOrEqual(4);
+    expect(jump).toBeLessThan(0.02);             // pressure ramps (1.5 s, rain sensor 20 s), never pops on/off
     expect(minA).toBeGreaterThanOrEqual(sp.a0 - 1e-9);
     expect(maxA).toBeLessThanOrEqual(sp.a1 + 1e-9);
     expect(maxA - minA).toBeGreaterThan((sp.a1 - sp.a0) * 0.95);
+  });
+
+  it('rain sensor: sprinklers stay dry while it rains', () => {
+    for (const kind of ['rain', 'storm'] as const) {
+      const seg = weatherCycle(1, 0).find((x) => x.kind === kind)!;
+      for (let t = seg.start + 1200; t < seg.end - 1200; t += 7) for (const s2 of data.sprinklers!) expect(sprinklerAt(1, s2, t).on).toBe(0);
+    }
   });
 
   it('jet and sweep hit tests', () => {

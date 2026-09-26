@@ -117,6 +117,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
   const applied: SkyWeather = { cloud: -1, rain: 0, storm: 0, fog: 0, dark: 0, flash: 0, boltBearing: 0, boltPower: 0, boltSeed: 0 };
   const baseSat = opts.grade?.saturation.value ?? 1;
   const windDir = new THREE.Vector2(0.8, 0.45).normalize();
+  let rainMs = 0, weatherMs = 0;
 
   function resolveWeather(): void {
     if (Number.isFinite(clock)) weatherAt(data.seed, clock, sample);
@@ -143,8 +144,10 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
     (WORLD_WEATHER.wet as { value: number }).value = w.wet;
     (WORLD_WEATHER.rain as { value: number }).value = w.rain;
     (WORLD_WEATHER.wind as { value: number }).value = 1 + 2.4 * Math.max(0, w.wind - 0.22);
-    if (opts.grade) opts.grade.saturation.value = baseSat * (1 - 0.32 * w.dark - 0.08 * Math.max(0, w.cloud - 0.2));
+    if (opts.grade) opts.grade.saturation.value = baseSat * (1 - 0.55 * w.dark - 0.1 * Math.max(0, w.cloud - 0.2));
+    const r0 = performance.now();
     rain.update(camera, w.rain, w.wind, windDir.x, windDir.y, dt);
+    rainMs += (performance.now() - r0 - rainMs) * 0.05;          // EMA, for stats()/perf proofs
   }
 
   return {
@@ -162,11 +165,15 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
       else if (Number.isFinite(clock)) clock += dt * TICK_HZ;      // free-run between tick-driven frames
       if (Number.isFinite(clock) && !pinned) {
         const t = timeOfDayAt(data.seed, clock);
-        if (Math.abs(t - sky.timeOfDay) > 1e-5) sky.setTimeOfDay(t);
+        // re-ramp the sky/lights only every ~1e-4 day (~0.14 s real, 0.04 deg of sun): no per-frame churn
+        const d = Math.abs(t - sky.timeOfDay);
+        if (Math.min(d, 1 - d) > 1e-4) sky.setTimeOfDay(t);
       } else if (daySpeed && !Number.isFinite(clock)) sky.setTimeOfDay(sky.timeOfDay + dt * daySpeed);
+      const w0 = performance.now();
       resolveWeather();
       applyWeather(dt, camera);
       if (Number.isFinite(clock)) garden.update(clock, dt);
+      weatherMs += (performance.now() - w0 - weatherMs) * 0.05;
       sky.update(camera);
       foliage?.update(camera);
     },
@@ -178,6 +185,8 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
         prims: props.stats.prims,
         fenceBoards: fence?.boards.count ?? 0,
         rainDrops: rain.drops,
+        rainCpuMs: +rainMs.toFixed(4),
+        weatherCpuMs: +weatherMs.toFixed(4),
         ...garden.stats(),
         ...(foliage?.stats() ?? {}),
       };

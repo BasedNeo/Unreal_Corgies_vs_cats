@@ -94,9 +94,13 @@ export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.
   // Pond bed: dark mud under the water line.
   const wet = smoothstep(-0.12, -0.45, p.y);
   col = mix(col, U.dirt.mul(0.55), wet);
-  // Neighbours' ground beyond the fence line: a little darker and flatter so the yard reads as the stage.
+  // Neighbours' ground beyond the fence line: no mowing stripes, cooler and patchier (other people's
+  // lawns, unevenly kept), so the yard reads as the stage and the far field recedes (G1, L2 critique).
   const outside = smoothstep(U.yardHalf, U.yardHalf.add(14), max(abs(p.x), abs(p.z)));
-  col = mix(col, mix(U.grassDark, U.grassDry, 0.35), outside.mul(0.45));
+  const plots = mx_noise_float(p.xz.mul(0.012).add(vec2(7.3, 1.9)));
+  const neighbour = mix(mix(U.grassDark, U.grass, 0.55), mix(U.grassDry, U.grassDark, 0.35), smoothstep(-0.25, 0.35, plots))
+    .mul(vec3(0.88, 0.95, 1.02)).mul(float(0.94).add(nMid.mul(0.05)));
+  col = mix(col, neighbour, outside.mul(0.85));
   // G1 rain: soaked ground reads darker and cooler; puddles gather on flat, low, trodden spots and
   // mirror the grey sky; raindrops ring them. Everything scales with WORLD_WEATHER (0 = dry: no-op).
   const W = WORLD_WEATHER;
