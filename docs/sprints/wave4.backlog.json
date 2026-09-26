@@ -1,0 +1,31 @@
+{
+  "sprint": "Wave 4 — the adventure: six district chapters, alone or in co-op (docs/design/ADVENTURE.md)",
+  "sprintHours": 8,
+  "agents": [
+    { "id": "adv-1", "lanes": ["adventure"] },
+    { "id": "destruct-1", "lanes": ["destruct"] },
+    { "id": "veh-2", "lanes": ["vehicles"] },
+    { "id": "boss-2", "lanes": ["boss"] },
+    { "id": "lead", "lanes": ["integration"] }
+  ],
+  "tasks": [
+    { "id": "A1", "title": "Adventure framework: mode, chapter data + triggers (reach/interact/hold/collect/defeat/destroy/survive), briefing/complete/fail-forward, chapter picker, captions; chapters 1-2", "lane": "adventure", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/sim/adventure/**", "src/shared/content/chapters.ts", "src/sim/interact/objectives.ts", "src/shared/content/objectives.ts", "src/client/adventure/**", "src/client/ui/menu.ts", "src/client/ui/strings.ts", "tests/unit/adventure*"],
+      "acceptance": ["chapter 1 is completable by a bot squad with no human, first objective inside 60 s", "a squad wipe restarts at the last checkpoint, not from zero", "chapter 2 stealth: being spotted starts the alarm spawns"] },
+    { "id": "A2", "title": "Chapters 3-6 content (Garage Job, Laser Pointer at Dawn, Porch Siege, Last Tennis Ball) + barks", "lane": "adventure", "deps": ["A1", "X1", "R1", "E1"], "estimate": 3, "priority": 1,
+      "paths": ["src/shared/content/chapters.ts", "tests/unit/adventure*"],
+      "acceptance": ["every chapter completable by a bot squad (headless) inside 2x par", "each chapter's featured kit matters (step needs its ability or vehicle)"] },
+    { "id": "X1", "title": "Destructibles: breakable props (garage breach wall, tuna-can stacks, crates) with hp, debris, removed colliders, nav update", "lane": "destruct", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/sim/destruct/**", "src/sim/combat/projectiles.ts", "src/shared/world/**", "src/client/world/**", "tests/unit/destruct*"],
+      "acceptance": ["dig charge / mortar blast breaks the breach wall and opens a walkable path (nav)", "authority decides; clients see the same break (snapshot)", "no floating debris colliders, no fps hitch > 5 ms on break"] },
+    { "id": "R1", "title": "RC plane: a flying vehicle from a Vehicle Terminal on the Rooftops; Skyraider flies it best", "lane": "vehicles", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/sim/vehicles/**", "src/client/vehicles/**", "src/shared/content/vehicles.ts", "tests/unit/vehicle*"],
+      "acceptance": ["take off, bank, climb, land/crash without tunnelling through geometry", "driver camera readable, other players see it interpolate smoothly", "the kart still passes all its tests"] },
+    { "id": "E1", "title": "The Siamese sniper elite: a laser-pointer duel mini-boss for the Rooftops", "lane": "boss", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/sim/boss/**", "src/client/procgen/boss/**", "src/shared/content/bosses.ts", "tests/unit/boss*"],
+      "acceptance": ["telegraphed laser (1 s dot tracking) before each shot; cover beats it", "relocates between perches; beatable by one Overwatch in 2-4 min", "Vac-Tank tests stay green"] },
+    { "id": "INT4", "title": "Integrate wave 4, Room/main wiring for adventure, verify every commit, screenshots, PROGRESS", "lane": "integration", "deps": ["A2"], "estimate": 2, "priority": 1,
+      "paths": ["src/client/main.ts", "src/host/room.ts", "server/config.ts", "PROGRESS.md", "ARCHITECTURE.md"],
+      "acceptance": ["npm run verify -- --e2e PASS on every integration commit", "all 6 chapters playable offline and in online co-op"] }
+  ]
+}

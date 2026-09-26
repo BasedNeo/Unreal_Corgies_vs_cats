@@ -18,7 +18,8 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import { parseClientFrame, sanitizeRoomName, TokenBucket, AbuseMeter } from '../src/host/guard';
+import { parseClientFrame, sanitizeRoomName, sanitizeRoomSetup, TokenBucket, AbuseMeter } from '../src/host/guard';
+import type { RoomSetup } from './rooms';
 import { SnapEncoder, encodeServerMsg, type WireEncoding } from '../src/host/wire';
 import type { Conn } from '../src/host/room';
 import type { ClientMsg, ServerMsg } from '../src/shared/protocol';
@@ -43,6 +44,8 @@ interface Client {
   ws: WebSocket;
   ip: string;
   roomName: string;
+  /** Requested setup if this client ends up creating its room (?mode=, ?chapter=). */
+  roomSetup: RoomSetup | null;
   room: ManagedRoom | null;
   joined: boolean;
   joining: boolean;
@@ -237,7 +240,8 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
     const id = `c${nextId++}`;
     const encoding: WireEncoding = url.searchParams.get('enc') === 'raw' ? 'raw' : url.searchParams.get('enc') === 'delta' ? 'delta' : cfg.encoding;
     const c: Client = {
-      id, ws, ip, roomName: sanitizeRoomName(url.searchParams.get('room')), room: null, joined: false, joining: false,
+      id, ws, ip, roomName: sanitizeRoomName(url.searchParams.get('room')), roomSetup: sanitizeRoomSetup(url.searchParams.get('mode'), url.searchParams.get('chapter')),
+      room: null, joined: false, joining: false,
       connectedAt: now, lastMsgAt: now, lastSeenAt: now, pingSentAt: 0, rttMs: 0,
       msgs: new TokenBucket(cfg.msgBurst, cfg.msgRate, now), bytes: new TokenBucket(cfg.byteBurst, cfg.byteRate, now),
       abuse: new AbuseMeter(cfg.kickScore, 10_000, now), encoder: encoding === 'delta' ? new SnapEncoder() : null,
@@ -307,7 +311,7 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
         if (occupied.size >= cfg.maxRoomsPerIp) { kick(c, 1013, 'too many rooms from your address'); return; }
       }
       try {
-        mr = await rooms.acquire(c.roomName, id);
+        mr = await rooms.acquire(c.roomName, id, c.roomSetup);
       } catch (err) {
         failed = true;
         log(`[cvc] room '${c.roomName}' could not be created: ${(err as Error)?.stack ?? err}`);

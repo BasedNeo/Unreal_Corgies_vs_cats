@@ -125,3 +125,14 @@ export class AbuseMeter {
     return this.score >= this.threshold;
   }
 }
+
+/** Match modes a room can be created with (the first joiner's ?mode= picks it; later joiners get the room as is). */
+export const ROOM_MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'boss-rush', 'adventure'] as const;
+export type RoomMode = (typeof ROOM_MODES)[number];
+
+/** A requested room setup from untrusted query params: known modes only, chapter ids like `yard_day`. */
+export function sanitizeRoomSetup(mode: string | null, chapter: string | null): { mode: RoomMode; chapter?: string } | null {
+  if (!mode || !(ROOM_MODES as readonly string[]).includes(mode)) return null;
+  const ch = chapter && /^[a-z0-9_]{1,32}$/.test(chapter) ? chapter : undefined;
+  return { mode: mode as RoomMode, ...(mode === 'adventure' && ch ? { chapter: ch } : {}) };
+}

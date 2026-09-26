@@ -4,7 +4,8 @@
 //   3. ?online, or the page was served by the production server (server/prod.ts injects
 //      <meta name="cvc-ws" content="/ws">)  -> ws(s)://<page host><path>  (wss when the page is https)
 //   4. otherwise                         -> null (offline worker; the Vite dev server never injects the meta)
-// In cases 2 and 3, ?room=<name> is forwarded as the `room` query parameter (separate Room per name).
+// In cases 2 and 3, ?room=<name> is forwarded as the `room` query parameter (separate Room per name), and
+// ?mode= / ?chapter= are forwarded too: they set up the room if this client creates it.
 
 import { sanitizeRoomName } from '../../host/guard';
 
@@ -16,10 +17,13 @@ export interface PageLocation {
   search: string;
 }
 
-function withRoom(url: string, room: string | null): string {
-  if (!room) return url;
+function withRoom(url: string, room: string | null, params?: URLSearchParams): string {
+  const mode = params?.get('mode'), chapter = params?.get('chapter');
+  if (!room && !mode) return url;
   const u = new URL(url);
-  u.searchParams.set('room', sanitizeRoomName(room));
+  if (room) u.searchParams.set('room', sanitizeRoomName(room));
+  if (mode) u.searchParams.set('mode', mode);
+  if (mode && chapter) u.searchParams.set('chapter', chapter);
   return u.toString();
 }
 
@@ -29,11 +33,11 @@ export function resolveServerUrl(loc: PageLocation, metaWsPath: string | null): 
   if (params.has('offline')) return null;
   const room = params.get('room');
   const explicit = params.get('server');
-  if (explicit && /^wss?:\/\//i.test(explicit)) return withRoom(explicit, room);
+  if (explicit && /^wss?:\/\//i.test(explicit)) return withRoom(explicit, room, params);
   if (params.has('online') || metaWsPath) {
     const scheme = loc.protocol === 'https:' ? 'wss' : 'ws';
     const path = metaWsPath && metaWsPath.startsWith('/') ? metaWsPath : '/ws';
-    return withRoom(`${scheme}://${loc.host}${path}`, room);
+    return withRoom(`${scheme}://${loc.host}${path}`, room, params);
   }
   return null;
 }

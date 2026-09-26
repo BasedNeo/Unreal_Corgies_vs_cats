@@ -60,7 +60,9 @@ async function main(): Promise<void> {
   const serverUrl = serverUrlForPage(); // ?server / ?online / ?room / page served by server/prod.ts
   let mode = params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish';
   // Skirmish: a corgi squad of bots with you; cat waves come from the match rules. TDM / core-rush: bot-filled teams.
-  const botsFor = (m: string) => (params.get('bots') ?? (m === 'team-deathmatch' || m === 'core-rush' ? '4,4' : '3,0')).split(',').map(Number) as [number, number];
+  const botsFor = (m: string) => (params.get('bots') ?? (m === 'team-deathmatch' || m === 'core-rush' ? '4,4' : m === 'adventure' ? '4,0' : '3,0')).split(',').map(Number) as [number, number];
+  // Adventure chapter (?chapter=, or the menu's chapter picker); the authority validates it.
+  let chapter = /^[a-z0-9_]{1,32}$/.test(params.get('chapter') ?? '') ? params.get('chapter')! : undefined;
   // The session (authority + connection) starts only when the player presses PLAY — or immediately for
   // ?autoplay / online links — so an offline match never runs behind the menu (QA W1 FTUE finding).
   let net: NetClient | null = null;
@@ -72,7 +74,7 @@ async function main(): Promise<void> {
     if (match && !params.has('boss')) mode = match; // the menu's MATCH selector (offline only)
     const bots = botsFor(mode);
     loadingStep(serverUrl ? 'Calling the server…' : 'Waking up the squad…');
-    transport = serverUrl ? await createWebSocketTransport(serverUrl, em) : createWorkerTransport({ seed, mode, bots }, em);
+    transport = serverUrl ? await createWebSocketTransport(serverUrl, em) : createWorkerTransport({ seed, mode, bots, chapter: mode === 'adventure' ? chapter : undefined }, em);
     debug.transport = transport.kind;
     net = new NetClient(transport);
     net.join(name, cls, team);

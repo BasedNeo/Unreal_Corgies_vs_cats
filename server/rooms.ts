@@ -8,7 +8,11 @@ import { Sim } from '../src/sim/sim';
 import { Room } from '../src/host/room';
 import { MAX_PLAYERS_PER_ROOM, TICK_HZ } from '../src/shared/constants';
 import type { MatchPhase } from '../src/shared/protocol';
-import type { ServerConfig } from './config';
+import { botsForMode, type ServerConfig } from './config';
+import type { RoomMode } from '../src/host/guard';
+
+/** How a new room is set up (from its first joiner's ?mode= / ?chapter=, validated by sanitizeRoomSetup). */
+export interface RoomSetup { mode: RoomMode; chapter?: string }
 
 /**
  * Room names starting with this are unlisted: anyone with the name can join (`?room=_porch`), but the room browser
@@ -84,13 +88,13 @@ export class RoomManager {
   get(name: string): ManagedRoom | undefined { return this.rooms.get(name); }
 
   /** Attach a connection to a room, creating the room if needed. null = room limit reached. */
-  async acquire(name: string, connId: string): Promise<ManagedRoom | null> {
+  async acquire(name: string, connId: string, setup?: RoomSetup | null): Promise<ManagedRoom | null> {
     let mr = this.rooms.get(name);
     if (!mr) {
       let pending = this.creating.get(name);
       if (!pending) {
         if (this.rooms.size + this.creating.size >= this.cfg.maxRooms) return null;
-        pending = this.create(name);
+        pending = this.create(name, setup ?? null);
         this.creating.set(name, pending);
         pending.finally(() => this.creating.delete(name)).catch(() => {});
       }
@@ -190,9 +194,12 @@ export class RoomManager {
     });
   }
 
-  private async create(name: string): Promise<ManagedRoom> {
+  private async create(name: string, setup: RoomSetup | null): Promise<ManagedRoom> {
     const sim = await Sim.create({ seed: this.cfg.seed });
-    const room = new Room(sim, { mode: this.cfg.mode, botsPerTeam: this.cfg.bots });
+    // the server's MODE/BOTS apply unless the creator asked for a mode (co-op adventure, core-rush, …)
+    const room = setup
+      ? new Room(sim, { mode: setup.mode, chapter: setup.chapter, botsPerTeam: botsForMode(setup.mode, this.cfg.bots) })
+      : new Room(sim, { mode: this.cfg.mode, botsPerTeam: this.cfg.bots });
     const now = performance.now();
     const mr: ManagedRoom = {
       name, room, conns: new Set(), createdAt: now, emptySince: now, acc: 0, last: now,

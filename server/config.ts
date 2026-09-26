@@ -110,7 +110,7 @@ export function loadConfig(env: Env = process.env, defaults: Partial<ServerConfi
     mode: env.MODE ?? d.mode,
     // Skirmish/boss-rush: a 3-bot corgi squad fights beside the players (cats come from the waves).
     // Team deathmatch: both teams bot-filled. (QA W1 P0: 0,4 made solo online skirmish unwinnable.)
-    bots: bots(env.BOTS, defaults.bots ?? (['team-deathmatch', 'core-rush'].includes(env.MODE ?? d.mode) ? [4, 4] : d.bots)),
+    bots: bots(env.BOTS, defaults.bots ?? botsForMode(env.MODE ?? d.mode, d.bots)),
     seed: num(env, 'SEED', d.seed),
     maxRooms: num(env, 'MAX_ROOMS', d.maxRooms, 1),
     maxConnections: num(env, 'MAX_CONNECTIONS', d.maxConnections, 1),
@@ -141,4 +141,11 @@ export function loadConfig(env: Env = process.env, defaults: Partial<ServerConfi
     encoding: env.WIRE === 'raw' ? 'raw' : env.WIRE === 'delta' ? 'delta' : d.encoding,
     log: env.LOG ? env.LOG !== '0' : d.log,
   };
+}
+
+/** Default bot fill per mode: PvP modes fill both teams; skirmish/boss-rush a corgi squad; adventure a squad of four. */
+export function botsForMode(mode: string, fallback: [number, number] = [3, 0]): [number, number] {
+  if (mode === 'team-deathmatch' || mode === 'core-rush') return [4, 4];
+  if (mode === 'adventure') return [4, 0];
+  return fallback;
 }
