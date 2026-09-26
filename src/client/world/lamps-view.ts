@@ -2,22 +2,28 @@
 // One InstancedMesh per glow color (the garage uses one: 1 draw call for every tube), glow() material
 // (unlit, > 1 so the comic pipeline's bloom picks it up, never inked). The fixture housings and chains are
 // ordinary VisualPrims merged with the rest of the props. Static: no per-frame work.
+// E4: the view also owns the Yard War's battle dressing (battle-dressing.ts: sodium floodlights, torn banners, camo
+// nets, battle clutter), so the world view shows it without changes. `update(camera)` hands the floodlights' real
+// lights around (only with `lights: true`); `quality` 'low' drops the clutter (default: the style's detail tier).
 import * as THREE from 'three/webgpu';
 import type { Lamp, WorldData } from '../../shared/world/world-data';
 import { glow } from '../style/style-webgpu.js';
 import { worldHex } from './world-palette';
+import { createBattleDressing, type BattleDressingOptions } from './battle-dressing';
 
 export interface LampsView {
   group: THREE.Group;
   stats(): Record<string, number>;
   dispose(): void;
+  /** E4: per frame (optional): floodlight real-light hand-off when created with `lights: true`. */
+  update(camera: THREE.Camera): void;
 }
 
 /** Tube radius (m) and glow intensity (white-ish tubes can bloom harder than hue-carrying cores). */
 const TUBE_R = 0.13;
 const INTENSITY = 2.2;
 
-export function createLampsView(data: WorldData): LampsView {
+export function createLampsView(data: WorldData, opts: BattleDressingOptions = {}): LampsView {
   const group = new THREE.Group();
   group.name = 'lamps';
   const lamps = data.lamps ?? [];
@@ -47,11 +53,15 @@ export function createLampsView(data: WorldData): LampsView {
     group.add(mesh);
     meshes.push(mesh);
   }
+  const dressing = createBattleDressing(data, opts);
+  group.add(dressing.group);
   return {
     group,
-    stats: () => ({ lamps: lamps.length, lampDraws: meshes.length }),
+    stats: () => ({ lamps: lamps.length, lampDraws: meshes.length, ...dressing.stats() }),
+    update(camera) { dressing.update(camera); },
     dispose() {
       geo.dispose();                                       // glow() materials are shared style-cache entries
+      dressing.dispose();
       group.removeFromParent();
     },
   };

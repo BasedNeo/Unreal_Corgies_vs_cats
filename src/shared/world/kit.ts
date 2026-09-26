@@ -60,7 +60,8 @@ export class Frame {
     return p;
   }
 
-  /** Visual rounded box centered at local (lx, ly, lz), size w x h x d. */
+  /** Visual rounded box centered at local (lx, ly, lz), size w x h x d. (E4: `seg: 1` asks the client for a cheaper
+   *  single-chamfer bevel, 44 tris instead of 92 — sacks and other soft shapes.) */
   box(lx: number, ly: number, lz: number, w: number, h: number, d: number, col: string, o: PrimOpts = {}): void {
     this.prim('box', lx, ly, lz, w, h, d, col, { bev: Math.min(0.12, w * 0.25, h * 0.25, d * 0.25), ...o });
   }

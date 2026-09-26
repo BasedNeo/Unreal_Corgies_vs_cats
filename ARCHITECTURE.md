@@ -16,7 +16,12 @@ src/shared/                        PURE contracts + data (runs everywhere; no th
   content/                         theme data: classes, weapons (+ AIM_RAY), abilities, vehicles, bosses,
                                    terminals (vehicle + ordnance kiosks), pickups (cores, kibble), objectives
   world/                           WorldData contract (world-types), West Yard + Garden builders, terrain,
-                                   queries (height/surface/concealment), weather/time-of-day from tick, kit
+                                   queries (height/surface/concealment), weather/time-of-day from tick, kit;
+                                   maps.ts: the map registry (MAP_IDS, mapForMode, mapsForMode; W8)
+                                   fortifications.ts (W7 E4): the Yard War front as data: both forward bases
+                                   (kibble-sack walls, MG nest, bird-table watchtower, flag, armory, motor pool,
+                                   floodlights, hedgehogs, barricades) plus trenches and craters; BattleLayout
+                                   (battleOf) feeds the client dressing
 src/sim/                           AUTHORITATIVE simulation (worker / Node / tests / client prediction)
   rapier.ts entity.ts sim.ts       Rapier init + layers · SimEntity · Sim (ordered systems, spawn, snapshot, events)
   systems/                         movement.ts stepCharacter (shared with prediction) · core.ts (physics step, kill plane)
@@ -84,6 +89,9 @@ src/client/
   world/                           world view: terrain, fences, prims, foliage, water, sky/day-night, lamps
                                    (Garden, Garage + Rooftops districts; quality tiers apply live where possible)
                                    destruct-view.ts + destruct-debris.ts: standing/rubble index ranges, pooled debris
+                                   battle-dressing.ts (W7 E4): banners + nets (cloth, TSL icons), S4 floodlights with
+                                   real lights (world-view calls lamps.update), instanced battle clutter; terrain-view
+                                   bakes the `battle` ground channels (scorch, mud, puddles, ruts)
   ui/  audio/  fx/                 comic HUD + menus (MATCH selector, room browser, LOCKER) + chat + tips + settings ·
                                    reward card (rewards.ts, never interactive) ·
                                    procedural audio + music (S2: vehicle-loops.ts engine loops from snapshot states,

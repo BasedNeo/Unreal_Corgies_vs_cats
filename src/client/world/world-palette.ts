@@ -98,7 +98,49 @@ export const WORLD_EXTRA: Record<string, number> = {
   splinter: 0xf0cf94,
   scorch: 0x6a5e52,
   crateStencil: 0x5a3b1f,
+  // ---- E4: the Yard War front (fortifications.ts, battle-dressing.ts). The first block mirrors keys S4 adds to the
+  // style PALETTE (HARDENED): PALETTE wins when it has them, these keep the world building if a key is renamed.
+  sandbag: 0x8b7a57, khaki: 0x8f8160, canvas: 0x9c8c66, olive: 0x535a35, oliveDark: 0x363b24,
+  gunmetal: 0x3a3e44, rust: 0x7a3e22, steel: 0x7d848b, oxidized: 0x56615c, mud: 0x3a2e23, sodium: 0xffa53f,
+  tennisFelt: 0xb8c448,       // grimy tennis-ball felt (ammo crates, spent balls)
+  brassCasing: 0xb8913f,      // spent casings
+  soot: 0x1d1813,             // blast scorch core
+  ash: 0x6d665c,              // scorch rim ash
+  mudWet: 0x2a2119,           // churned mud, ruts
+  camoA: 0x5a6439, camoB: 0x8a7e53, camoC: 0x3c4129,
+  bannerRag: 0xd6cdb8,        // torn banner edge / bleached cloth, crate stencils
+  crateOlive: 0x6f7446,       // tennis-ball ammo crates (olive drab that survives the dusk grade)
+  cable: 0x1f2124,
 };
+
+/**
+ * E4: weathering values per palette key for the hardened style factory's per-vertex `surface` attribute
+ * (rough, metal, grime, wear). Keys not listed use the 'world' preset.
+ */
+// half-metal: with metal >= 0.8 the hardened lighting takes diffuse x (1 - metal) and poles go near-black at dusk (K2)
+const SURF_METAL: [number, number, number, number] = [0.42, 0.5, 0.35, 0.45];
+const SURF_RUST: [number, number, number, number] = [0.82, 0.25, 0.55, 0.3];
+const SURF_WOOD: [number, number, number, number] = [0.82, 0, 0.5, 0.4];
+const SURF_CLOTH: [number, number, number, number] = [0.9, 0, 0.42, 0.15];
+const SURF_PAINT: [number, number, number, number] = [0.6, 0, 0.38, 0.45];
+const SURF_GLASS: [number, number, number, number] = [0.12, 0, 0.12, 0];
+const SURF_LEAF: [number, number, number, number] = [0.75, 0, 0.08, 0];
+const SURF_STONE: [number, number, number, number] = [0.86, 0, 0.45, 0.3];
+export const SURF_WORLD: [number, number, number, number] = [0.78, 0, 0.42, 0.35];
+const SURFACE_OF: Record<string, [number, number, number, number]> = {};
+for (const k of ['metal', 'steel', 'gunmetal', 'tin', 'tinDark', 'wire', 'brass', 'brassCasing', 'cable', 'catBlack']) SURFACE_OF[k] = SURF_METAL;
+for (const k of ['rust', 'oxidized']) SURFACE_OF[k] = SURF_RUST;
+for (const k of ['fenceWood', 'fenceDark', 'fenceDark2', 'plywood', 'plywoodDark', 'bark', 'barkDark', 'bamboo', 'bambooDark', 'olive', 'oliveDark', 'crateOlive', 'underDeck', 'trim', 'splinter', 'sisal', 'sisalDark']) SURFACE_OF[k] = SURF_WOOD;
+for (const k of ['sandbag', 'khaki', 'canvas', 'cardboard', 'cardboardDark', 'tennisFelt', 'camoA', 'camoB', 'camoC', 'bannerRag', 'twine']) SURFACE_OF[k] = SURF_CLOTH;
+for (const k of ['teamCorgis', 'teamCats', 'teamCatsDark', 'teamCorgisTrim', 'teamCatsTrim', 'danger', 'accent', 'accentHot', 'plasticBlue', 'duck', 'toolRed', 'carBody', 'garageDoor', 'garageSiding', 'garageSiding2', 'siding', 'siding2', 'hullLight', 'catWhite']) SURFACE_OF[k] = SURF_PAINT;
+for (const k of ['glass', 'water']) SURFACE_OF[k] = SURF_GLASS;
+for (const k of ['leaf', 'leafDark', 'leafLight', 'hedge', 'hedgeLight', 'tallGrass', 'corn', 'cornLeaf', 'bean', 'lettuce', 'cabbage', 'zucchini']) SURFACE_OF[k] = SURF_LEAF;
+for (const k of ['concrete', 'brick', 'brickDark', 'stone', 'stoneDark', 'terracotta', 'terracottaDark', 'roof', 'roofTar', 'roofGravel']) SURFACE_OF[k] = SURF_STONE;
+
+/** Weathering (rough, metal, grime, wear) for a palette key (E4). */
+export function worldSurface(key: string): readonly [number, number, number, number] {
+  return SURFACE_OF[key] ?? SURF_WORLD;
+}
 
 const colorCache = new Map<string, THREE.Color>();
 

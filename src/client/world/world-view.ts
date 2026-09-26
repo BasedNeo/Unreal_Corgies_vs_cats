@@ -109,7 +109,8 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
 
   const garden = createGardenView(data, { density: P.gardenDensity });
   root.add(garden.group);
-  const lamps = createLampsView(data);
+  // E4: lamps + the battle dressing; S4 floodlights get real spot lights (the tier's budget, moved to the nearest each frame)
+  const lamps = createLampsView(data, { quality: q, lights: true });
   root.add(lamps.group);
   // X1: destructibles (their looks are not in data.prims; debris lands on whatever surface is below it)
   const destruct = createDestructView(data, { surfaceAt: (x, z, below) => surfaceAt(data, x, z, below).y });
@@ -196,6 +197,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
       if (Number.isFinite(clock)) garden.update(clock, dt);
       weatherMs += (performance.now() - w0 - weatherMs) * 0.05;
       sky.update(camera);
+      lamps.update(camera);
       foliage?.update(camera);
     },
     stats() {

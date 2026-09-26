@@ -8,18 +8,45 @@
 //  - G1: WORLD_WEATHER uniforms (wet, rain, wind) shared by every world material: rain darkens and
 //    cools the ground, fills puddles in flat low spots and on paths (with rain ripple rings), and wind
 //    scales foliage sway amplitude (never its frequency, so gusts don't make the grass jump).
+//  - E4 (W7 HARDENED): every world material comes from the hardened style factory (toonMaterial: weathering masks,
+//    roughness/specular, wet sheen) when the style lane provides it, with a SURFACES preset per use (props 'world' or
+//    per-vertex `surface` values from prim-mesh, boards 'wood', ground 'ground', foliage, water); otherwise the v1
+//    toon path. The terrain reads the `battle` vertex attribute (terrain-view.ts from fortifications.ts): scorch,
+//    churned mud, standing puddles (extra wetness: near-mirror water even in clear weather) and twin tyre ruts.
 import * as THREE from 'three/webgpu';
 import {
   attribute, positionWorld, positionLocal, uv, time, sin, vec3, float, mix, smoothstep, step, fract,
   mx_noise_float, uniform, abs, length, vec2, max, min, normalize, normalView, transformNormalToView, floor, normalWorld,
 } from 'three/tsl';
-import { toon } from '../style/style-webgpu.js';
+import * as STYLE_FACTORY from '../style/style-webgpu.js';
 import { worldColor } from './world-palette';
 
-type Params = { color?: number; vertexColors?: boolean; side?: THREE.Side; transparent?: boolean; opacity?: number };
+const { toon } = STYLE_FACTORY;
+/** The hardened factory (W7 S4): a new uncached HardenedToonMaterial for code that sets its own nodes. */
+const hardenedFactory = (STYLE_FACTORY as unknown as Record<string, unknown>).toonMaterial as
+  | ((p: Record<string, unknown>) => THREE.MeshToonNodeMaterial) | undefined;
+/** True when world materials are HardenedToonMaterials (weathering, roughness, wetNode/roughnessNode hooks). */
+export const HARDENED_WORLD = typeof hardenedFactory === 'function';
+
+type Params = {
+  color?: number; vertexColors?: boolean; side?: THREE.Side; transparent?: boolean; opacity?: number;
+  /** E4: SURFACES preset of the hardened factory (default 'world'). */
+  surface?: string;
+  /** E4: read (rough, metal, grime, wear) from the geometry's `surface` vec4 attribute (prim-mesh builds it). */
+  surfaceAttr?: boolean;
+  /** internal: toon-lit without the ink hull. */
+  ink?: boolean;
+};
 
 /** New toon material sharing toon()'s gradient map (same bands as every styled object). */
 export function toonFrom(p: Params = {}): THREE.MeshToonNodeMaterial {
+  if (hardenedFactory) {
+    const m = hardenedFactory({
+      color: p.color ?? 0xffffff, vertexColors: !!p.vertexColors, side: p.side ?? THREE.FrontSide,
+      transparent: !!p.transparent, opacity: p.opacity ?? 1, surface: p.surface ?? 'world', surfaceAttr: !!p.surfaceAttr, ink: p.ink ?? true,
+    });
+    return m;
+  }
   const ref = toon({ color: 0xffffff }) as THREE.MeshToonNodeMaterial;
   const m = new THREE.MeshToonNodeMaterial({
     color: p.color ?? 0xffffff, gradientMap: ref.gradientMap, vertexColors: !!p.vertexColors,
@@ -35,6 +62,7 @@ export function toonFrom(p: Params = {}): THREE.MeshToonNodeMaterial {
  * isMeshToonMaterial = true through setDefaultValues(new MeshToonMaterial()), so BOTH must be cleared.
  */
 export function toonNoInk(p: Params = {}): THREE.MeshToonNodeMaterial {
+  if (hardenedFactory) return toonFrom({ ...p, ink: false });
   const m = toonFrom(p);
   const flags = m as unknown as { isMeshToonNodeMaterial: boolean; isMeshToonMaterial: boolean };
   flags.isMeshToonNodeMaterial = false;
@@ -63,7 +91,9 @@ export interface TerrainMaterial { material: THREE.MeshToonNodeMaterial; uniform
 export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.4, detail = true }: { ink?: boolean; yardHalf?: number; flatten?: number; detail?: boolean } = {}): TerrainMaterial {
   const U = {
     grass: c('grass'), grassDark: c('grassDark'), grassDry: c('grassDry'), clover: c('clover'),
-    dirt: c('dirt'), sand: c('sand'), mulch: c('mulch'), bark: c('bark'), stripe: uniform(0.85), yardHalf: uniform(yardHalf),
+    dirt: c('dirt'), sand: c('sand'), mulch: c('mulch'), bark: c('bark'), stripe: uniform(0.4), yardHalf: uniform(yardHalf),
+    // E4 battle ground
+    mud: c('mudWet'), soot: c('soot'), ash: c('ash'), rutGauge: uniform(0.85),
   };
   const surf = attribute('surf', 'vec4');
   const p = positionWorld;
@@ -91,6 +121,20 @@ export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.
   // Mulch: dark bark chips.
   const mulch = mix(U.mulch, U.bark, smoothstep(0.18, 0.24, nFine).mul(0.5));
   col = mix(col, mulch, edge(surf.z, nMid.mul(0.2)));
+  // E4 battle ground (terrain-view's `battle` attribute: scorch, mud, puddle, rut signed distance in m; 0/0/0/9 = none):
+  //   churned mud with darker clods, twin tyre ruts (gauge 1.7 m) with a raised middle, blast scorch (soot core, ash
+  //   ring, broken by noise) and standing puddles that stay after the rain.
+  const bat = attribute('battle', 'vec4');
+  const rutD = abs(abs(bat.w).sub(U.rutGauge));
+  // (a soft 0.5 m track: churned, not painted; fades out at the ends of the kart lines' baked band)
+  const rut = float(1).sub(smoothstep(0.1, 0.44, rutD.add(nFine.mul(0.08)))).mul(step(abs(bat.w), float(4)));
+  const mudK = max(smoothstep(0.22, 0.62, bat.y.add(nMid.mul(0.22)).add(nFine.mul(0.14))), rut.mul(0.72)).toVar('battleMud');
+  const mudTone = mix(U.mud, U.dirt.mul(0.72), smoothstep(0.05, 0.45, nFine).mul(0.4));
+  col = mix(col, mudTone, mudK.mul(0.9));
+  const sc = bat.x.add(nMid.mul(0.2)).add(nFine.mul(0.12));
+  col = mix(col, U.ash, smoothstep(0.1, 0.28, sc).mul(0.5));
+  col = mix(col, U.soot, smoothstep(0.34, 0.68, sc).mul(0.9));
+  const pud = smoothstep(0.5, 0.58, bat.z.add(nFine.mul(0.1)).add(nMid.mul(0.08))).toVar('battlePuddle');
   // Pond bed: dark mud under the water line.
   const wet = smoothstep(-0.12, -0.45, p.y);
   col = mix(col, U.dirt.mul(0.55), wet);
@@ -123,11 +167,21 @@ export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.
     const age = fract(time.mul(1.4).add(ph));
     const rd = length(fract(cellP).sub(0.5));
     const ring = smoothstep(0.05, 0.0, abs(rd.sub(age.mul(0.45)))).mul(float(1).sub(age)).mul(W.rain);
-    col = mix(col, sheen, puddle.mul(0.9));
-    col = col.add(vec3(ring.mul(puddle).mul(0.22)));
+    // (the hardened ground material pools its own near-mirror puddles when wet: G1's sheen only tints them)
+    col = mix(col, sheen, puddle.mul(HARDENED_WORLD ? 0.4 : 0.9));
+    col = col.add(vec3(ring.mul(max(puddle, pud)).mul(0.22)));
   }
-  const material = ink ? toonFrom() : toonNoInk();
+  // E4 standing puddles: dark water mirroring the sky even in clear weather (the hardened material also makes them
+  // glossy through wetNode)
+  col = mix(col, mix(vec3(0.1, 0.12, 0.14), vec3(0.24, 0.28, 0.33), smoothstep(0.55, 0.7, bat.z.add(nMid.mul(0.1)))), pud.mul(HARDENED_WORLD ? 0.55 : 0.85));
+  const material = ink ? toonFrom({ surface: 'ground' }) : toonNoInk({ surface: 'ground' });
   material.colorNode = col;
+  if (HARDENED_WORLD) {
+    // hardened hooks: churned mud is damp (a sheen even when dry), puddles are water
+    const hm = material as unknown as { wetNode: unknown; roughnessNode: unknown };
+    hm.wetNode = max(pud, mudK.mul(0.38));
+    hm.roughnessNode = mix(float(0.92), float(0.62), mudK);
+  }
   // Stylized lighting: bend shading normals toward up so gentle lawn undulation doesn't flip toon
   // bands into blotches; real slopes (mound, pond banks) still read. Geometry is untouched.
   if (flatten > 0) material.normalNode = normalize(mix(normalView, transformNormalToView(vec3(0, 1, 0)), flatten));
@@ -136,7 +190,7 @@ export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.
 
 /** Foliage: vertex + instance colors, toon-lit, no ink, wind sway by uv.y^2 (bases stay planted). */
 export function createFoliageMaterial(strength: number, windDir: THREE.Vector2, opts: { side?: THREE.Side } = {}): THREE.MeshToonNodeMaterial {
-  const m = toonNoInk({ vertexColors: true, side: opts.side ?? THREE.DoubleSide });
+  const m = toonNoInk({ vertexColors: true, side: opts.side ?? THREE.DoubleSide, surface: 'foliage' });
   if (strength > 0) {
     const h = uv().y.mul(uv().y);
     const phase = positionLocal.x.mul(0.11).add(positionLocal.z.mul(0.07));
@@ -152,7 +206,7 @@ export function createFoliageMaterial(strength: number, windDir: THREE.Vector2, 
  * uniform for ripple rings.
  */
 export function createWaterMaterial(center: THREE.Vector2): THREE.MeshToonNodeMaterial {
-  const m = toonNoInk({ transparent: true, opacity: 0.86 });
+  const m = toonNoInk({ transparent: true, opacity: 0.86, surface: 'water' });
   const depth = attribute('depth', 'float');
   const shallow = c('water'), deep = uniform(new THREE.Color(0x236f9a)), foam = uniform(new THREE.Color(0xeaf8ff));
   const ctr = uniform(center);

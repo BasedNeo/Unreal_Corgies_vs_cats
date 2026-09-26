@@ -12,6 +12,9 @@
 //   NE The Garage (D3, garage.ts): detached garage, close-quarters interior, 3 entrances · The Rooftops:
 //      its flat roof + satellite crow's nest, reached by a crate stair + lean-to roof or an alley scaffold
 //   S  red shed + cat-tree tower + plank bridge (Cats base) · kiddie pool · cardboard boxes
+//   E4 the Yard War front (fortifications.ts): a forward base in front of each team's spawns (kibble-sack walls, an
+//      MG nest, a bird-table watchtower, flag + torn banner, armory under camo netting, motor pool, floodlights,
+//      hedgehogs), zig-zag trench lines + craters in the contested middle; client battle marks via battleOf(data)
 // Movement reference (classes.ts): corgi jump ~1.47 m, double ~2.55 m; cat ~1.84 / ~3.1 m;
 // autostep 0.45 m; max walkable slope 52 deg.
 import type { Bookmark, Destructible, FenceRun, JumpPad, ScatterZone, SpawnPoint, WaterZone, WorldData } from './world-types';
@@ -22,6 +25,7 @@ import { yawToward } from './queries';
 import { buildGarden, gardenTerrain, GARDEN_FLANK_PATH } from './garden';
 import { buildGarage, garageTerrain } from './garage';
 import { crateStack } from './destructibles';
+import { buildFortifications, fortificationTerrain, registerBattle } from './fortifications';
 
 export const FENCE_H = 8;
 const HALF = 100;
@@ -36,6 +40,7 @@ export function buildWestYard(seed = 1): WorldData {
   const pathWest = GARDEN_FLANK_PATH;   // dig hole -> through the Garden -> big tree
   const garden = gardenTerrain();
   const garageT = garageTerrain();
+  const fortT = fortificationTerrain();
   const pathEast = [98, 45, 86, 42, 74, 36, 72, 30];
   const ops: TerrainOp[] = [
     { op: 'raise', x: -38, z: 66, r: 9, falloff: 19, h: 4.2 },             // back mound (Cats-side high ground)
@@ -63,6 +68,7 @@ export function buildWestYard(seed = 1): WorldData {
     { op: 'hole', x: -9, z: -74, r: 1.2, depth: 0.35 },
     ...garden.ops,
     ...garageT.ops,
+    ...fortT.ops,
   ];
   const surfaces: SurfaceOp[] = [
     { kind: 'dirt', shape: 'path', pts: pathMain, width: 3.6, soft: 0.9 },
@@ -86,6 +92,7 @@ export function buildWestYard(seed = 1): WorldData {
     { kind: 'mulch', shape: 'rect', x: 47, z: 98.5, hx: 14, hz: 1.4, soft: 0.5 },       // behind the shed
     ...garden.surfaces,
     ...garageT.surfaces,
+    ...fortT.surfaces,
   ];
   const spec: TerrainSpec = {
     seed,
@@ -203,6 +210,10 @@ export function buildWestYard(seed = 1): WorldData {
   // ------------------------------------------------------------------ neighbour strips
   strips(kit, rng);
 
+  // ------------------------------------------------------------------ E4: the Yard War front (appended last, no rng:
+  // every earlier prim/collider keeps its index, so the rest of the yard is bit-identical)
+  const front = buildFortifications(kit, height);
+
   // ------------------------------------------------------------------ spawns
   const spawnList: [number, number, 0 | 1][] = [
     [-64, -70, 0], [-50, -68, 0], [-40, -71, 0], [-28, -70, 0], [-16, -72, 0], [-6, -79, 0],
@@ -236,9 +247,10 @@ export function buildWestYard(seed = 1): WorldData {
     { name: 'strip', pos: [-107, 2.2, -62], look: [-106, 2.5, 20], fov: 62 },
     ...gardenBuilt.bookmarks,
     ...garageBuilt.bookmarks,
+    ...front.bookmarks,
   ];
 
-  return {
+  const world: WorldData = {
     seed,
     name: 'West Yard',
     height,
@@ -264,6 +276,8 @@ export function buildWestYard(seed = 1): WorldData {
     perches: garageBuilt.perches,
     destructibles: [...garageBuilt.destructibles, ...yardCrates(height)],
   };
+  registerBattle([world, fences], front.layout);
+  return world;
 }
 
 // ====================================================================== X1: crate stacks (destructible)

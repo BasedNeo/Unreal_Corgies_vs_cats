@@ -3,6 +3,9 @@
 // ONE toon material, so ~1200 prims cost a handful of draw calls:
 //   solid: ink hull + crease ink (LineSegments2 via addCreaseInk)   soft: ink hull only
 //   noink: toon-lit, no ink (glass, decals, tiny details)
+// E4: every vertex also carries its prim's weathering (rough, metal, grime, wear) from the palette key
+// (world-palette worldSurface) as a `surface` attribute, read by the hardened style material (surfaceAttr), so
+// one merged mesh holds sacks (cloth), crates (wood), poles (metal) and paint with their own wear.
 import * as THREE from 'three/webgpu';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { PrimGroup, VisualPrim } from '../../shared/world/world-data';
@@ -12,7 +15,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { PALETTE, STYLE } from '../style/style-tokens.js';
 import { smoothNormalsByPosition } from '../style/style-utils.js';
 import { toonFrom, toonNoInk } from './materials';
-import { worldColor } from './world-palette';
+import { worldColor, worldSurface } from './world-palette';
 
 const edgeCache = new WeakMap<THREE.BufferGeometry, Float32Array>();
 /** Crease edges (style crease angle) of one source geometry, computed once per unique geometry. */
@@ -29,11 +32,13 @@ export function creaseEdges(g: THREE.BufferGeometry): Float32Array {
 
 export class Builder {
   pos: number[] = []; nor: number[] = []; col: number[] = []; idx: number[] = []; lines: number[] = [];
+  /** E4: per-vertex weathering (rough, metal, grime, wear), only when add() is given one. */
+  sur: number[] = [];
   addLines(e: Float32Array, m: THREE.Matrix4): void {
     const v = new THREE.Vector3();
     for (let i = 0; i < e.length; i += 3) { v.set(e[i], e[i + 1], e[i + 2]).applyMatrix4(m); this.lines.push(v.x, v.y, v.z); }
   }
-  add(g: THREE.BufferGeometry, m: THREE.Matrix4, color: THREE.Color): void {
+  add(g: THREE.BufferGeometry, m: THREE.Matrix4, color: THREE.Color, surf?: readonly number[]): void {
     const p = g.getAttribute('position'), n = g.getAttribute('normal');
     const nm = new THREE.Matrix3().getNormalMatrix(m);
     const v = new THREE.Vector3(), w = new THREE.Vector3();
@@ -42,6 +47,7 @@ export class Builder {
       v.fromBufferAttribute(p, i).applyMatrix4(m);
       w.fromBufferAttribute(n, i).applyMatrix3(nm).normalize();
       this.pos.push(v.x, v.y, v.z); this.nor.push(w.x, w.y, w.z); this.col.push(color.r, color.g, color.b);
+      if (surf) this.sur.push(surf[0], surf[1], surf[2], surf[3]);
     }
     const index = g.getIndex();
     if (index) for (let i = 0; i < index.count; i++) this.idx.push(base + index.getX(i));
@@ -53,6 +59,7 @@ export class Builder {
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    if (this.sur.length && this.sur.length === (this.pos.length / 3) * 4) g.setAttribute('surface', new THREE.Float32BufferAttribute(this.sur, 4));
     g.setIndex(this.pos.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(this.idx, 1) : new THREE.Uint16BufferAttribute(this.idx, 1));
     g.computeBoundingBox();
     g.computeBoundingSphere();
@@ -77,7 +84,10 @@ export function primGeometry(p: VisualPrim, inked: boolean): THREE.BufferGeometr
   switch (p.s) {
     case 'box': {
       const bev = p.bev ?? 0.1;
-      if (bev > 0.025 && Math.min(p.a, p.b, p.c) > 0.12) {
+      if (p.seg === 1 && bev > 0.025 && Math.min(p.a, p.b, p.c) > 0.12) {
+        // E4: `seg: 1` on a box = a single-chamfer bevel (44 tris instead of 92): kibble sacks, cheap soft shapes
+        g = chamferBoxGeometry(p.a, p.b, p.c, Math.min(bev, p.a / 2 - 0.001, p.b / 2 - 0.001, p.c / 2 - 0.001));
+      } else if (bev > 0.025 && Math.min(p.a, p.b, p.c) > 0.12) {
         g = bevelBoxGeometry(p.a, p.b, p.c, Math.min(bev, p.a / 2 - 0.001, p.b / 2 - 0.001, p.c / 2 - 0.001));
       } else {
         g = strip(new THREE.BoxGeometry(p.a, p.b, p.c));
@@ -188,6 +198,51 @@ export function bevelBoxGeometry(w: number, h: number, d: number, r: number): TH
   return g;
 }
 
+/**
+ * E4: box with single-segment chamfered edges, 44 triangles: flat faces with face normals, one quad per edge whose
+ * normals blend the two faces (reads rounded under toon shading), one triangle per corner. Watertight (ink hull safe).
+ */
+export function chamferBoxGeometry(w: number, h: number, d: number, r: number): THREE.BufferGeometry {
+  const ix = w / 2 - r, iy = h / 2 - r, iz = d / 2 - r;
+  const pos: number[] = [], nor: number[] = [], idx: number[] = [];
+  const map = new Map<string, number>();
+  const vtx = (sx: number, sy: number, sz: number, nx: number, ny: number, nz: number): number => {
+    const k = `${sx},${sy},${sz},${nx},${ny},${nz}`;
+    let i = map.get(k);
+    if (i === undefined) {
+      i = pos.length / 3; map.set(k, i);
+      pos.push(sx * ix + nx * r, sy * iy + ny * r, sz * iz + nz * r); nor.push(nx, ny, nz);
+    }
+    return i;
+  };
+  const tri = (a: number, b: number, c: number) => {
+    const P = (i: number) => [pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]];
+    const [A, B, C] = [P(a), P(b), P(c)];
+    const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+    const gx = uy * vz - uz * vy, gy = uz * vx - ux * vz, gz = ux * vy - uy * vx;
+    const nx = nor[a * 3] + nor[b * 3] + nor[c * 3], ny = nor[a * 3 + 1] + nor[b * 3 + 1] + nor[c * 3 + 1], nz = nor[a * 3 + 2] + nor[b * 3 + 2] + nor[c * 3 + 2];
+    if (gx * nx + gy * ny + gz * nz >= 0) idx.push(a, b, c); else idx.push(a, c, b);
+  };
+  const quad = (a: number, b: number, c: number, e: number) => { tri(a, b, c); tri(a, c, e); };
+  const sg = [-1, 1];
+  for (const sx of sg) for (const sy of sg) for (const sz of sg) tri(vtx(sx, sy, sz, sx, 0, 0), vtx(sx, sy, sz, 0, sy, 0), vtx(sx, sy, sz, 0, 0, sz));
+  for (const a of sg) for (const b of sg) {
+    quad(vtx(-1, a, b, 0, a, 0), vtx(1, a, b, 0, a, 0), vtx(1, a, b, 0, 0, b), vtx(-1, a, b, 0, 0, b));   // along x
+    quad(vtx(a, -1, b, a, 0, 0), vtx(a, 1, b, a, 0, 0), vtx(a, 1, b, 0, 0, b), vtx(a, -1, b, 0, 0, b));   // along y
+    quad(vtx(a, b, -1, a, 0, 0), vtx(a, b, 1, a, 0, 0), vtx(a, b, 1, 0, b, 0), vtx(a, b, -1, 0, b, 0));   // along z
+  }
+  for (const s of sg) {
+    quad(vtx(s, -1, -1, s, 0, 0), vtx(s, 1, -1, s, 0, 0), vtx(s, 1, 1, s, 0, 0), vtx(s, -1, 1, s, 0, 0));
+    quad(vtx(-1, s, -1, 0, s, 0), vtx(1, s, -1, 0, s, 0), vtx(1, s, 1, 0, s, 0), vtx(-1, s, 1, 0, s, 0));
+    quad(vtx(-1, -1, s, 0, 0, s), vtx(1, -1, s, 0, 0, s), vtx(1, 1, s, 0, 0, s), vtx(-1, 1, s, 0, 0, s));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setIndex(idx);
+  return g;
+}
+
 /** Organic lumpy blob: deterministic displacement from position (seams stay closed). */
 function blobify(g: THREE.BufferGeometry, p: VisualPrim): void {
   const pos = g.getAttribute('position');
@@ -235,15 +290,15 @@ export function buildPrimMeshes(prims: readonly VisualPrim[], opts: { cell?: num
     // gentle deterministic brightness jitter so repeated parts (boards, bricks) don't look cloned
     const jit = 1 + (hash2(i, 17, 99) - 0.5) * 0.08;
     color.copy(worldColor(p.col)).multiplyScalar(jit);
-    b.add(g, m, color);
+    b.add(g, m, color, worldSurface(p.col));
     if (group === 'solid' && !far && opts.creases !== false) b.addLines(creaseEdges(g), m);
   });
   const group = new THREE.Group();
   group.name = 'world_props';
   const mats = {
-    solid: toonFrom({ vertexColors: true }),
-    soft: toonFrom({ vertexColors: true }),
-    noink: toonNoInk({ vertexColors: true }),
+    solid: toonFrom({ vertexColors: true, surfaceAttr: true }),
+    soft: toonFrom({ vertexColors: true, surfaceAttr: true }),
+    noink: toonNoInk({ vertexColors: true, surfaceAttr: true }),
   };
   const meshes: THREE.Mesh[] = [];
   let triangles = 0;

@@ -1,9 +1,13 @@
 // Board fences from WorldData.fences: ~1700 dog-eared boards as ONE instanced toon mesh (ink hull
 // outlines every board -> drawn plank seams), posts/rails/dig spoil as VisualPrims merged with the
 // rest of the props. Colliders come from the shared layout (props of type 'fence').
+// E4 (Yard War): boards inside the battle layout's fence-damage zones are snapped short, knocked askew, scorched,
+// shot through (dark holes) or patched with plywood — visual only: the fence colliders are untouched (a snapped
+// board never opens the map; the tops stay far above any jump).
 import * as THREE from 'three/webgpu';
 import type { FenceRun, VisualPrim } from '../../shared/world/world-data';
 import { hash2 } from '../../shared/world/noise';
+import { battleOf } from '../../shared/world/fortifications';
 import { toonFrom } from './materials';
 import { worldColor } from './world-palette';
 
@@ -33,6 +37,8 @@ export function createFenceView(runs: readonly FenceRun[], height: (x: number, z
   const prims: VisualPrim[] = [];
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3();
   const base = worldColor('fenceWood');
+  const damage = battleOf(runs)?.fenceDamage ?? [];
+  const tilt = new THREE.Quaternion(), zAxis = new THREE.Vector3(0, 0, 1);
   runs.forEach((f, ri) => {
     const len = Math.hypot(f.x1 - f.x0, f.z1 - f.z0);
     const dx = (f.x1 - f.x0) / len, dz = (f.z1 - f.z0) / len;
@@ -51,11 +57,29 @@ export function createFenceView(runs: readonly FenceRun[], height: (x: number, z
       if (g?.kind === 'open') continue;
       if (g?.kind === 'dig') y0 = g.bottom ?? 1.2;
       if (g?.kind === 'broken') top = (g.top ?? 1.5) + (hash2(i, ri, 3) - 0.3) * 0.7;
+      // E4 battle damage: how hard this spot of the fence was hit (0..1)
+      let dmg = 0;
+      for (const d of damage) { const dd = Math.hypot(x - d.x, z - d.z); if (dd < d.r) dmg = Math.max(dmg, d.amount * (1 - dd / d.r)); }
+      let v = 0.9 + r * 0.16, qq = q;
+      if (dmg > 0 && !g) {
+        const h1 = hash2(i, ri, 71), h2 = hash2(i, ri, 72), h3 = hash2(i, ri, 73);
+        if (h1 < dmg * 0.34) top = f.h - 1.4 - 3.2 * h2;                                  // snapped short
+        else if (h1 < dmg * 0.6) qq = tilt.copy(q).multiply(new THREE.Quaternion().setFromAxisAngle(zAxis, (h2 - 0.5) * 0.22));   // knocked askew
+        v *= 1 - dmg * (0.25 + 0.45 * h3);                                                  // scorched / weathered darker
+        if (h3 < dmg * 0.5) {                                                               // bullet holes (dark, 1 cm proud)
+          for (let k = 0; k < 2; k++) {
+            const hy = 1.2 + hash2(i, k, ri + 74) * (Math.max(1.5, top - y0) - 1.6);
+            prims.push({ s: 'box', x: x + nx * (BOARD_T / 2 + 0.01), y: y0 + hy, z: z + nz * (BOARD_T / 2 + 0.01), a: 0.14, b: 0.14, c: 0.02, yaw, col: 'soot', g: 'noink', bev: 0 });
+          }
+        }
+        if (h2 > 1 - dmg * 0.08 && i % 3 === 0) {                                           // a plywood patch nailed over the damage
+          prims.push({ s: 'box', x: x + nx * (BOARD_T / 2 + 0.05), y: 2.6 + h3 * 1.6, z: z + nz * (BOARD_T / 2 + 0.05), a: 1.9, b: 1.6, c: 0.08, yaw: yaw + 0, roll: (h1 - 0.5) * 0.2, col: 'plywood', bev: 0.02 });
+        }
+      }
       p.set(x, y0, z);
       sc.set(1, top - y0, 1);
-      m.compose(p, q, sc);
+      m.compose(p, qq, sc);
       mats.push(m.clone());
-      const v = 0.9 + r * 0.16;
       tints.push(base.r * v, base.g * v, base.b * v);
     }
     // posts every ~8 m and two rails on the back side
@@ -97,7 +121,7 @@ export function createFenceView(runs: readonly FenceRun[], height: (x: number, z
     }
   });
   const geo = boardGeometry();
-  const mat = toonFrom({ vertexColors: false });
+  const mat = toonFrom({ vertexColors: false, surface: 'wood' });
   const boards = new THREE.InstancedMesh(geo, mat, mats.length);
   mats.forEach((mm, i) => boards.setMatrixAt(i, mm));
   boards.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(tints), 3);
