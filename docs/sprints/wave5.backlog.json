@@ -1,0 +1,23 @@
+{
+  "sprint": "Wave 5 — bots use the whole yard: they climb to the roofs, drive the karts and fly the RC plane",
+  "sprintHours": 8,
+  "agents": [
+    { "id": "nav-1", "lanes": ["nav"] },
+    { "id": "drive-1", "lanes": ["ai-vehicles"] },
+    { "id": "lead", "lanes": ["integration"] }
+  ],
+  "tasks": [
+    { "id": "N1", "title": "Bots climb: nav links along the Rooftops climb routes (crates, scaffold) and other hop routes; A* across regions through links; the brain executes a link (approach, jump, double jump, land) and recovers from a missed hop", "lane": "nav", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/sim/ai/nav.ts", "src/sim/ai/nav-links.ts", "src/sim/ai/brain.ts", "tests/unit/ai-nav*"],
+      "acceptance": ["an Overwatch bot told to hold a roof perch reaches it from its base by the climb routes in under 60 s, on 4 seeds", "bots fall back to the ground route when a link is contested or they miss the hop twice (no bot stuck > 5 s)", "sim tick p95 at 28 characters stays within 3 ms; existing ai/world/destruct tests stay green"] },
+    { "id": "B2a", "title": "Bots drive karts: board an empty own-team kart when the goal is far, steer with a deterministic driver (path following, braking into turns, boost on straights), ram enemies, hop out near the goal", "lane": "ai-vehicles", "deps": [], "estimate": 3, "priority": 1,
+      "paths": ["src/sim/ai/tactics.ts", "src/sim/ai/drive.ts", "tests/unit/ai-drive*"],
+      "acceptance": ["in a 4v4 TDM soak bots drive karts at least once per match and score ram kills; no kart stuck > 5 s", "a bot-driven kart reaches a 60 m goal faster than walking in 4 of 5 seeds", "chapter 3's escape step completes with a bot driver when the squad is bot-only (no waiver needed)"] },
+    { "id": "B2b", "title": "Bots fly the RC plane: an Overwatch/Skyraider bot on the roof vends and flies strafing runs over contested areas (planeAutopilot), bails out when hurt; chapter 6's flight with a bot pilot", "lane": "ai-vehicles", "deps": ["B2a", "N1"], "estimate": 2, "priority": 2,
+      "paths": ["src/sim/ai/tactics.ts", "src/sim/ai/drive.ts", "tests/unit/ai-drive*"],
+      "acceptance": ["in TDM the plane is used by a bot at least once per match on 3 of 4 seeds", "bot pilots never crash into the house on take-off (5 runs)", "chapter 6 completes bot-only without the vehicle/airborne waivers"] },
+    { "id": "INT5", "title": "Integrate wave 5: brain hook for seated bots, soak all modes, verify every commit, PROGRESS", "lane": "integration", "deps": ["N1", "B2a", "B2b"], "estimate": 2, "priority": 1,
+      "paths": ["src/client/main.ts", "PROGRESS.md", "ARCHITECTURE.md"],
+      "acceptance": ["verify --e2e green on every integration commit", "soak PASS in all five modes"] }
+  ]
+}
