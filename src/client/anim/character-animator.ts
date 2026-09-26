@@ -4,7 +4,7 @@
 // (recoil, hit, flip, land squash) → death flop → face → spring secondary motion (ears, tail, fluff,
 // tongue) → FK → weapon placement in rig space → two-bone arm IK onto the weapon grips.
 import * as THREE from 'three/webgpu';
-import { Anim } from '../../shared/types';
+import { Anim, EFlag } from '../../shared/types';
 import { mulberry32 } from '../../shared/rng';
 import type { AvatarFrame } from '../views/avatar';
 import { PoseBuffer, type RigInstance } from './rig';
@@ -84,6 +84,8 @@ export class CharacterAnimator {
   private twitchT: number;
   private twitchSide: Side = 'L';
   private wagEnv = 0;
+  /** 0..1 blend into the Ear Glide pose (EFlag.Gliding): ears spread out like wings. */
+  private glideW = 0;
   private legTwitch = 0;
   /** Seeded idle personality: head tilt, hip cock, chest twist, stance width, breathing rate. */
   private persona: { tilt: number; hip: number; twist: number; splay: number; breath: number; look: number };
@@ -523,10 +525,14 @@ export class CharacterAnimator {
       this.earTip[this.twitchSide].impulse(-4);
       this.twitchT = 1.5 + this.rng() * 4;
     }
+    this.glideW = approach(this.glideW, (f.flags & EFlag.Gliding) ? 1 : 0, 7, dt);
+    const gw = smooth01(this.glideW);
     for (const s of SIDES) {
       const k = SX[s];
-      const back = fp.earsBack * 1.0 + speedN * 0.25 + W.zoom * 0.55 - this.accel * 0.012 + (f.grounded ? 0 : Math.max(-0.4, Math.min(0.5, -vy * 0.04)));
-      const droop = fp.earsDroop * 0.9 + (dead ? 0.6 : 0) + this.yawRate * 0.03 * k;
+      const fall = f.grounded ? 0 : Math.max(-0.4, Math.min(0.5, -vy * 0.04));
+      const back = (fp.earsBack * 1.0 + speedN * 0.25 + W.zoom * 0.55 - this.accel * 0.012 + fall) * (1 - gw) + gw * 0.15;
+      // gliding: "airplane" ears spread flat to the sides, with a slow flutter
+      const droop = (fp.earsDroop * 0.9 + (dead ? 0.6 : 0) + this.yawRate * 0.03 * k) * (1 - gw) + gw * (1.35 + Math.sin(this.t * 17 + k) * 0.08);
       const ep = this.earP[s].step(back, dt);
       const er = this.earR[s].step(droop, dt);
       const tip = this.earTip[s].step(ep * 0.35, dt);

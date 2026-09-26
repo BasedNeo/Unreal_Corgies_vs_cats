@@ -106,7 +106,7 @@ export function spawnBoss(sim: Sim, at?: { x: number; z: number; y?: number; yaw
         jumpVelocity: 0, doubleJumpVelocity: 0, fallGravityScale: 1.6, coyoteTime: 0, jumpBuffer: 0,
         capsuleRadius: def.radius, capsuleHalfHeight: 0,
       },
-      grounded: false, airTime: 0, jumpBuffer: 0, jumpsUsed: 0, jumpHeld: false, landImpact: 0, sprinting: false, slideTime: 0, slideCooldown: 0, pounding: false, crouchBuffer: 0, restX: NaN, restY: NaN, restZ: NaN,
+      grounded: false, airTime: 0, jumpBuffer: 0, jumpsUsed: 0, jumpHeld: false, landImpact: 0, sprinting: false, slideTime: 0, slideCooldown: 0, pounding: false, crouchBuffer: 0, glideTime: 0, glideCooldown: 0, restX: NaN, restY: NaN, restZ: NaN,
     },
     health: { hp, max: hp, lastDamageTick: sim.tick, lastAttacker: -1 },
     anim: Anim.Idle, flags: 0, dead: false, respawnTick: 0, weapon: -1, ammo: 0,

@@ -8,7 +8,7 @@
 //   x, y, z = pickup center · seed = spot index · flags & Busy = empty (collected / not spawned yet) ·
 //   ammo = whole seconds until it (re)appears while Busy · hp / maxHp = refill progress seconds / total.
 // Events: `pickup { id: collector, item: PickupId }` (existing GameEvent shape).
-import type { TeamId } from '../types';
+import { EFlag, type TeamId } from '../types';
 
 export type PickupKind = 'core' | 'collectible';
 
@@ -47,6 +47,10 @@ export const PICKUP_IDS = ['overclock', 'thick_fur', 'zoomies_plus', 'squeaky_cl
 export type PickupId = (typeof PICKUP_IDS)[number];
 export const CORE_IDS = ['overclock', 'thick_fur', 'zoomies_plus', 'squeaky_clean'] as const satisfies readonly PickupId[];
 export type CoreId = (typeof CORE_IDS)[number];
+/** Snapshot bit per running core buff (EntityState.flags of the character): HUD chips and client prediction. */
+export const CORE_FLAGS: Record<CoreId, number> = {
+  overclock: EFlag.BuffOverclock, thick_fur: EFlag.BuffThickFur, zoomies_plus: EFlag.BuffZoomies, squeaky_clean: EFlag.BuffSqueaky,
+};
 
 export const PICKUPS: Record<PickupId, PickupDef> = {
   overclock: {

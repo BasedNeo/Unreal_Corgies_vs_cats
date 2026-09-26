@@ -43,6 +43,12 @@ export const EFlag = {
   Spotted: 1 << 12,
   /** Gliding (Ear Glide): fall speed capped, air control kept. */
   Gliding: 1 << 13,
+  /** Upgrade Core buffs running on a character (one bit per core type; see CORE_FLAGS in content/pickups). */
+  BuffOverclock: 1 << 14,
+  BuffThickFur: 1 << 15,
+  BuffZoomies: 1 << 16,
+  BuffSqueaky: 1 << 17,
 } as const;
+export const BUFF_FLAGS = EFlag.BuffOverclock | EFlag.BuffThickFur | EFlag.BuffZoomies | EFlag.BuffSqueaky;
 
 export interface Vec3 { x: number; y: number; z: number }

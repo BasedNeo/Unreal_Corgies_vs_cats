@@ -27,6 +27,9 @@ export interface CharacterState {
   pounding: boolean;
   /** Seconds an in-air crouch press stays buffered for a ground pound. */
   crouchBuffer: number;
+  /** Ear Glide: seconds of glide left (0 = not gliding) and seconds until the next glide. */
+  glideTime: number;
+  glideCooldown: number;
   /**
    * Collider position after the last full controller sweep that left the character resting (grounded, still).
    * While the collider is still exactly there and the character has no intent, the sweep is skipped; anything

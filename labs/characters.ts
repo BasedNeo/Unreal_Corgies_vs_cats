@@ -13,7 +13,7 @@ import { createRenderContext } from '../src/client/engine/renderer';
 import { toon } from '../src/client/style/style-webgpu.js';
 import { PALETTE } from '../src/client/style/style-tokens.js';
 import { createCharacter, variantFor, type CharacterAvatar } from '../src/client/procgen/characters';
-import { Anim, CLASS_IDS, Species, Team, type AnimId, type ClassId, type SpeciesId, type TeamId } from '../src/shared/types';
+import { Anim, CLASS_IDS, EFlag, Species, Team, type AnimId, type ClassId, type SpeciesId, type TeamId } from '../src/shared/types';
 import type { AvatarFrame } from '../src/client/views/avatar';
 import type { Expression } from '../src/client/anim/face';
 
@@ -22,7 +22,7 @@ const view = P.get('view') ?? 'grid';
 const info = document.getElementById('info')!;
 const labelsEl = document.getElementById('labels')!;
 
-type AnimName = 'idle' | 'walk' | 'run' | 'sprint' | 'jump' | 'fall' | 'aim' | 'aimfwd' | 'fire' | 'hit' | 'death' | 'emote' | 'slide' | 'swim' | 'cycle';
+type AnimName = 'idle' | 'walk' | 'run' | 'sprint' | 'jump' | 'fall' | 'glide' | 'aim' | 'aimfwd' | 'fire' | 'hit' | 'death' | 'emote' | 'slide' | 'swim' | 'cycle';
 const CYCLE: AnimName[] = ['idle', 'walk', 'run', 'sprint', 'jump', 'aim', 'fire', 'hit', 'death', 'emote'];
 
 interface Spec { species: SpeciesId; coat?: string; cls: ClassId; team: TeamId; anim: AnimName; expr?: Expression; x: number; z: number; yaw: number }
@@ -120,6 +120,7 @@ class Driver {
       case 'sprint': f.speed = 9.6; f.anim = Anim.Sprint; f.sprinting = true; break;
       case 'jump': { const k = (this.t % 1.2) / 1.2; f.grounded = false; f.vy = 7 - 16 * k; f.anim = f.vy > 0 ? Anim.Jump : Anim.Fall; break; }
       case 'fall': f.grounded = false; f.vy = -9; f.anim = Anim.Fall; break;
+      case 'glide': f.grounded = false; f.vy = -2.5; f.speed = 8; f.anim = Anim.Fall; f.flags = EFlag.Gliding; break;
       case 'aim': f.aiming = true; f.aimPitch = 0.3 * Math.sin(this.t * 0.8); f.aimYawOffset = 0.25 * Math.sin(this.t * 0.5); break;
       case 'aimfwd': f.aiming = true; f.aimPitch = Number(P.get('pitch') ?? 0); break;
       case 'fire':

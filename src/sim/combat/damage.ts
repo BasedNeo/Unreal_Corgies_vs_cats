@@ -86,7 +86,7 @@ export function respawnNow(sim: Sim, e: SimEntity, at?: { x: number; y: number; 
   e.anim = Anim.Idle;
   e.flags &= ~(DEATH_CLEAR | EFlag.Dead);
   const c = e.char;
-  if (c) { c.grounded = false; c.airTime = 0; c.jumpBuffer = 0; c.crouchBuffer = 0; c.jumpsUsed = 0; c.jumpHeld = false; c.sprinting = false; }
+  if (c) { c.grounded = false; c.airTime = 0; c.jumpBuffer = 0; c.crouchBuffer = 0; c.glideTime = 0; c.jumpsUsed = 0; c.jumpHeld = false; c.sprinting = false; }
   const meta = e.combat!;
   meta.stealthUntil = 0;
   meta.corpseSettled = false;

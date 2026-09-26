@@ -74,6 +74,20 @@ describe('buff tracker (HUD chips from pickup events)', () => {
     expect(t.kibble).toBe(0);
     expect(t.active(1, 1)).toEqual([]);
   });
+
+  it('snapshot flags decide which buffs run: a late joiner sees them, an early end drops them after a grace', () => {
+    const t = new BuffTracker();
+    t.syncFlags(4, EFlag.BuffZoomies | EFlag.BuffSqueaky, 10); // joined mid-buff: no pickup event ever seen
+    expect(t.active(4, 10).map((b) => b.id).sort()).toEqual(['squeaky_clean', 'zoomies_plus']);
+    t.syncFlags(4, EFlag.BuffSqueaky, 12); // Zoomies+ ended (flag cleared)
+    expect(t.active(4, 12).map((b) => b.id)).toEqual(['squeaky_clean']);
+    // the pickup event can arrive before the interpolated state carries the flag: no flicker inside the grace
+    t.onEvent({ e: 'pickup', id: 4, item: 'overclock' }, 20, 4);
+    t.syncFlags(4, EFlag.BuffSqueaky, 20.2);
+    expect(t.active(4, 20.2).map((b) => b.id).sort()).toEqual(['overclock', 'squeaky_clean']);
+    t.syncFlags(4, EFlag.BuffSqueaky, 21);
+    expect(t.active(4, 21).map((b) => b.id)).toEqual(['squeaky_clean']);
+  });
 });
 
 describe('interact views', () => {

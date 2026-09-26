@@ -10,6 +10,8 @@ import { EventLoop, LoopbackLink } from '../../src/client/net/loopback';
 import { Btn, sanitizeInput, type InputCmd } from '../../src/shared/input';
 import { Team, Species, EFlag } from '../../src/shared/types';
 import { TICK_HZ } from '../../src/shared/constants';
+import type { EntityState } from '../../src/shared/protocol';
+import { grantBuff, stepBuffs } from '../../src/sim/interact';
 
 const TICK_MS = 1000 / TICK_HZ;
 
@@ -62,6 +64,76 @@ describe('client prediction (LocalPredictor)', () => {
     expect(seen.has('jump')).toBe(true);
     expect(seen.has('land')).toBe(true);
     expect(maxErr).toBe(0);
+    pred.dispose();
+    sim.dispose();
+  });
+
+  it('matches the authority exactly while Ear Gliding (Skyraider)', async () => {
+    const sim = await Sim.create({ seed: 3 });
+    const e = sim.spawnCharacter({ team: Team.Corgis, species: Species.Corgi, cls: 'skyraider', name: 'A' });
+    for (let i = 0; i < 30; i++) sim.step();
+    quantizeMotion(e);
+    const pred = await LocalPredictor.create(3);
+    pred.reconcile(sim.toState(e), 0, []);
+    let maxErr = 0, glidingTicks = 0;
+    const seen = new Set<string>();
+    for (let k = 1; k <= 60 * 20; k++) {
+      // every 6.5 s (glide cooldown 6 s): jump, double jump, Q at the apex, glide forward while turning; one cycle
+      // cancels early with a second Q
+      const t = (k / TICK_HZ) % 6.5, cycle = Math.floor(k / (TICK_HZ * 6.5));
+      let buttons = 0;
+      if (t < 0.3 || (t >= 0.4 && t < 0.75)) buttons |= Btn.Jump;
+      if (t >= 0.78 && t < 0.83) buttons |= Btn.Ability;
+      if (cycle === 1 && t >= 1.2 && t < 1.25) buttons |= Btn.Ability;
+      const raw: InputCmd = { seq: k, rt: 0, mx: t > 1.2 ? 0.4 : 0, mz: 1, yaw: k * 0.004, pitch: -0.1, buttons };
+      sim.setInput(e.id, sanitizeInput(raw)!);
+      sim.step();
+      quantizeMotion(e);
+      for (const ev of sim.drainEvents()) seen.add(ev.e === 'ability' ? ev.ability : ev.e);
+      if (e.flags & EFlag.Gliding) glidingTicks++;
+      pred.step(raw, k * TICK_MS);
+      const p = pred.predicted(sim.toState(e));
+      maxErr = Math.max(maxErr, Math.hypot(p.x - e.pos.x, p.y - e.pos.y, p.z - e.pos.z));
+      expect(p.flags & EFlag.Gliding).toBe(e.flags & EFlag.Gliding);
+    }
+    expect(seen.has('ear_glide')).toBe(true);
+    expect(glidingTicks).toBeGreaterThan(120);
+    expect(maxErr).toBe(0);
+    pred.dispose();
+    sim.dispose();
+  });
+
+  it('follows Upgrade Core buffs from snapshot flags: Zoomies+ corrects once at start and once at expiry', async () => {
+    const sim = await Sim.create({ seed: 3 });
+    const e = sim.spawnCharacter({ team: Team.Corgis, species: Species.Corgi, cls: 'assault', name: 'A' });
+    for (let i = 0; i < 30; i++) sim.step();
+    quantizeMotion(e);
+    const pred = await LocalPredictor.create(3);
+    pred.reconcile(sim.toState(e), 0, []);
+    const LAG = 6, inputs: InputCmd[] = [], snaps: EntityState[] = [];
+    const corrections: number[] = [];
+    let buffTicks = 0;
+    for (let k = 1; k <= 60 * 26; k++) {
+      const raw: InputCmd = { seq: k, rt: 0, mx: 0, mz: 1, yaw: k * 0.01, pitch: 0, buttons: k % 240 < 120 ? Btn.Sprint : 0 };
+      inputs.push(raw);
+      pred.step(raw, k * TICK_MS);
+      if (k === 90) grantBuff(sim, e, 'zoomies_plus'); // 20 s buff, as if picked up this tick
+      stepBuffs(sim, 1 / TICK_HZ); // the interact system (order 150) is off without a room mode: run its buff step
+      sim.setInput(e.id, sanitizeInput(raw)!);
+      sim.step();
+      quantizeMotion(e);
+      snaps.push(sim.toState(e));
+      if (e.flags & EFlag.BuffZoomies) buffTicks++;
+      if (k > LAG) {
+        const a = k - LAG;
+        const r = pred.reconcile(snaps[a - 1], a, inputs.filter((i) => i.seq > a));
+        if (r.correction > 1e-6) corrections.push(k);
+      }
+    }
+    expect(buffTicks).toBeGreaterThan(60 * 19);
+    expect(e.flags & EFlag.BuffZoomies).toBe(0); // expired
+    expect(corrections.length).toBeGreaterThan(0);
+    expect(corrections.length).toBeLessThanOrEqual(2);
     pred.dispose();
     sim.dispose();
   });

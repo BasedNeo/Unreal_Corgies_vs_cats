@@ -281,6 +281,7 @@ export function createInteractPrompts(uiRoot: HTMLElement, opts: InteractPrompts
       local = states.get(id) ?? null;
       const now = clock();
       tracker.prune(states);
+      if (local) tracker.syncFlags(local.id, local.flags, now);
       target = findInteractTarget(states, local);
       // Prompt (hidden while the picker is up).
       if (target && !open) {

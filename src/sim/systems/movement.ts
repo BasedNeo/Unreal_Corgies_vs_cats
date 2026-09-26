@@ -8,6 +8,9 @@ import type { SimSystem } from '../sim';
 import { Btn } from '../../shared/input';
 import { GRAVITY } from '../../shared/constants';
 import { Anim, EFlag } from '../../shared/types';
+import { ABILITIES } from '../../shared/content/abilities';
+import { CLASSES } from '../../shared/content/classes';
+import { PICKUPS } from '../../shared/content/pickups';
 import { CHARACTER_MOVE_FILTER } from '../rapier';
 import type { GameEvent } from '../../shared/protocol';
 
@@ -21,6 +24,17 @@ const POUND_SPEED = -26;
 const POUND_BUFFER = 0.2;
 /** Minimum air time before a pound (s): no accidental slam off a tiny hop. */
 const POUND_MIN_AIR = 0.15;
+// Ear Glide (Skyraider's class ability) lives here, not in the combat ability system, so client prediction replays it
+// exactly (hidden state in CharacterState, restored from history like the slide). Duration/cooldown: ABILITIES.
+const GLIDE = ABILITIES.ear_glide;
+/** Glide fall-speed cap (m/s) — "fall speed capped at 2.5 m/s" in the ability text. */
+const GLIDE_FALL_SPEED = 2.5;
+/** How hard the ears brake a fast fall down to the cap (m/s²): from 20 m/s to the cap in ~0.4 s. */
+const GLIDE_BRAKE = 45;
+/** Air control while gliding, as a multiple of airAccel; top glide speed is the sprint speed. */
+const GLIDE_ACCEL = 1.4;
+/** Squeaky Clean (Upgrade Core) drains ability cooldowns faster; read from the snapshot flag so prediction agrees. */
+const SQUEAKY_RATE = 1 / (PICKUPS.squeaky_clean.buff.abilityCooldown ?? 1);
 
 /** Reused result object for KCC collision queries (no per-tick allocation). */
 let collisionScratch: CharacterCollision | undefined;
@@ -52,6 +66,7 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
   const wantsSprint = held(e, Btn.Sprint) && !aiming && cmd.mz > 0.1;
   c.sprinting = wantsSprint && wlen > 0.1 && c.slideTime <= 0;
   c.slideCooldown = Math.max(0, c.slideCooldown - dt);
+  c.glideCooldown = Math.max(0, c.glideCooldown - dt * (e.flags & EFlag.BuffSqueaky ? SQUEAKY_RATE : 1));
 
   // --- slide: crouch while running fast on the ground; keeps momentum, steers a little ---
   const hsNow = Math.hypot(e.vel.x, e.vel.z);
@@ -75,9 +90,11 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
     }
     if (c.slideTime <= 0 || !c.grounded || Math.hypot(e.vel.x, e.vel.z) < m.walkSpeed) { c.slideTime = 0; c.slideCooldown = SLIDE_COOLDOWN; }
   } else if (!c.pounding) {
-    const speed = aiming ? m.walkSpeed : c.sprinting ? m.sprintSpeed : m.runSpeed;
+    const gliding = c.glideTime > 0;
+    const speed = gliding ? m.sprintSpeed : aiming ? m.walkSpeed : c.sprinting ? m.sprintSpeed : m.runSpeed;
     const tx = wx * speed, tz = wz * speed;
-    const accel = c.grounded ? (wlen > 0.05 ? m.groundAccel : m.groundDecel) : m.airAccel;
+    // a glide with no stick input keeps its drift instead of braking in the air
+    const accel = c.grounded ? (wlen > 0.05 ? m.groundAccel : m.groundDecel) : gliding ? (wlen > 0.05 ? m.airAccel * GLIDE_ACCEL : 0) : m.airAccel;
     const dvx = tx - e.vel.x, dvz = tz - e.vel.z;
     const dvLen = Math.hypot(dvx, dvz);
     const maxDv = accel * dt;
@@ -93,6 +110,16 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
     c.pounding = true; c.crouchBuffer = 0;
     e.vel.x *= 0.2; e.vel.z *= 0.2;
     e.vel.y = POUND_SPEED;
+  }
+
+  // --- Ear Glide: Q in the air spreads the ears; Q again, crouch (pound) or landing ends it ---
+  if (c.pounding) c.glideTime = 0;
+  else if (c.glideTime > 0) {
+    c.glideTime = pressed(e, Btn.Ability) ? 0 : Math.max(0, c.glideTime - dt);
+  } else if (pressed(e, Btn.Ability) && !c.grounded && c.glideCooldown <= 0 && e.cls && CLASSES[e.cls]?.ability === GLIDE.id) {
+    c.glideTime = GLIDE.duration;
+    c.glideCooldown = GLIDE.cooldown;
+    ctx.emit?.({ e: 'ability', id: e.id, ability: GLIDE.id, x: e.pos.x, y: e.pos.y, z: e.pos.z });
   }
 
   // --- jumping: buffer, coyote time, double jump, variable height ---
@@ -117,6 +144,7 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
   // --- gravity ---
   const g = GRAVITY * (e.vel.y < 0 ? m.fallGravityScale : 1);
   e.vel.y = c.pounding ? POUND_SPEED : Math.max(-40, e.vel.y + g * dt);
+  if (c.glideTime > 0 && e.vel.y < -GLIDE_FALL_SPEED) e.vel.y = Math.min(-GLIDE_FALL_SPEED, e.vel.y + (GLIDE_BRAKE - g) * dt);
 
   // --- resting fast path: grounded, still, no intent, collider untouched since the last full sweep ---
   const t0 = e.collider.translation();
@@ -124,7 +152,7 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
       Math.abs(e.vel.x) < 1e-3 && Math.abs(e.vel.z) < 1e-3 && t0.x === c.restX && t0.y === c.restY && t0.z === c.restZ) {
     e.vel.x = 0; e.vel.y = 0; e.vel.z = 0; c.airTime = 0; c.jumpsUsed = 0;
     e.anim = Anim.Idle as typeof e.anim;
-    let f = e.flags & ~(EFlag.Grounded | EFlag.Sprinting | EFlag.Aiming | EFlag.Crouching);
+    let f = e.flags & ~(EFlag.Grounded | EFlag.Sprinting | EFlag.Aiming | EFlag.Crouching | EFlag.Gliding);
     f |= EFlag.Grounded;
     if (aiming) f |= EFlag.Aiming;
     e.flags = f;
@@ -171,7 +199,7 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
       ctx.emit?.({ e: 'land', id: e.id, impact: c.landImpact });
       if (c.pounding) ctx.emit?.({ e: 'ability', id: e.id, ability: 'ground_pound', x: e.pos.x, y: e.pos.y, z: e.pos.z });
     }
-    c.pounding = false; c.crouchBuffer = 0;
+    c.pounding = false; c.crouchBuffer = 0; c.glideTime = 0;
     if (e.vel.y < 0) e.vel.y = 0;
     c.airTime = 0; c.jumpsUsed = 0;
   } else {
@@ -195,8 +223,9 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
   else if (hs < m.walkSpeed + 0.4) anim = Anim.Walk;
   else anim = Anim.Run;
   e.anim = anim as typeof e.anim;
-  let f = e.flags & ~(EFlag.Grounded | EFlag.Sprinting | EFlag.Aiming | EFlag.Crouching);
+  let f = e.flags & ~(EFlag.Grounded | EFlag.Sprinting | EFlag.Aiming | EFlag.Crouching | EFlag.Gliding);
   if (c.slideTime > 0 || c.pounding) f |= EFlag.Crouching;
+  if (c.glideTime > 0) f |= EFlag.Gliding;
   if (c.grounded) f |= EFlag.Grounded;
   if (c.sprinting) f |= EFlag.Sprinting;
   if (aiming) f |= EFlag.Aiming;

@@ -8,7 +8,8 @@
 // same core again refreshes its timer.
 import type { Sim } from '../sim';
 import type { SimEntity } from '../entity';
-import { PICKUPS, type CoreId } from '../../shared/content/pickups';
+import { CORE_FLAGS, PICKUPS, type CoreId } from '../../shared/content/pickups';
+import { BUFF_FLAGS } from '../../shared/types';
 import { ticksOf, type ActiveBuff } from './state';
 
 function apply(e: SimEntity, b: ActiveBuff): void {
@@ -36,6 +37,13 @@ function restore(e: SimEntity, b: ActiveBuff): void {
   b.move = null;
 }
 
+/** Mirror the running buffs into the snapshot flags (clients can't see `e.buffs`). */
+function syncFlags(e: SimEntity): void {
+  let f = e.flags & ~BUFF_FLAGS;
+  for (const b of e.buffs ?? []) f |= CORE_FLAGS[b.id];
+  e.flags = f;
+}
+
 /** Give a character a core's buff (or refresh its timer). */
 export function grantBuff(sim: Sim, e: SimEntity, id: CoreId): ActiveBuff {
   const until = sim.tick + ticksOf(PICKUPS[id].duration);
@@ -45,6 +53,7 @@ export function grantBuff(sim: Sim, e: SimEntity, id: CoreId): ActiveBuff {
   const b: ActiveBuff = { id, until, hpBonus: 0, move: null };
   apply(e, b);
   list.push(b);
+  syncFlags(e);
   return b;
 }
 
@@ -54,6 +63,7 @@ export function clearBuffs(e: SimEntity): void {
   if (!list || list.length === 0) return;
   for (let i = list.length - 1; i >= 0; i--) restore(e, list[i]);
   list.length = 0;
+  syncFlags(e);
 }
 
 /** Temporarily undo buffs (kit swaps rebuild the base stats underneath them). */
@@ -91,6 +101,7 @@ export function stepBuffs(sim: Sim, dt: number): void {
       if (sim.tick < list[i].until) continue;
       restore(e, list[i]);
       list.splice(i, 1);
+      syncFlags(e);
     }
     for (const b of list) {
       const fx = PICKUPS[b.id].buff;

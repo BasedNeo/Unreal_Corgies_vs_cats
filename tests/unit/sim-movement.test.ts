@@ -160,3 +160,68 @@ describe('slide and ground pound', () => {
     expect(early.rejump).toBe(dry.land + 1);
   });
 });
+
+describe('Ear Glide (Skyraider)', () => {
+  const makeSky = async (cls: 'skyraider' | 'assault') => {
+    const sim = await Sim.create({ seed: 7, world: flatWorld(7), systems: [movementSystem, physicsStepSystem] });
+    const e = sim.spawnCharacter({ team: Team.Corgis, species: Species.Corgi, cls, name: 'S', x: 0, y: 0.5, z: 0, yaw: 0 });
+    for (let i = 0; i < 30; i++) sim.step();
+    let seq = 1;
+    const seen: string[] = [];
+    const go = (b: number, mz = 0) => { sim.setInput(e.id, { seq: seq++, mx: 0, mz, yaw: 0, pitch: 0, buttons: b, rt: 0 }); sim.step(); for (const v of sim.drainEvents()) seen.push(v.e === 'ability' ? v.ability : v.e); };
+    return { sim, e, go, seen };
+  };
+  /** Jump, double jump, then (optionally) Q at the apex; returns air time in ticks and the fastest fall. */
+  const hop = async (cls: 'skyraider' | 'assault', glide: boolean) => {
+    const { e, go, seen } = await makeSky(cls);
+    go(Btn.Jump); for (let i = 0; i < 10; i++) go(Btn.Jump);
+    go(0); go(Btn.Jump); for (let i = 0; i < 10; i++) go(Btn.Jump);
+    while (e.vel.y > 0) go(0);
+    if (glide) go(Btn.Ability);
+    let air = 0, minVy = 0, glidingTicks = 0;
+    while (!e.char!.grounded && air < 600) { go(0, 1); air++; minVy = Math.min(minVy, e.vel.y); if (e.flags & EFlag.Gliding) glidingTicks++; }
+    return { e, air, minVy, glidingTicks, seen };
+  };
+
+  it('caps the fall at 2.5 m/s, keeps drifting forward, and ends on landing', async () => {
+    const plain = await hop('skyraider', false);
+    const g = await hop('skyraider', true);
+    expect(g.seen).toContain('ear_glide');
+    expect(g.glidingTicks).toBeGreaterThan(20);
+    expect(g.minVy).toBeGreaterThanOrEqual(-2.5 - 1e-9);
+    expect(g.air).toBeGreaterThan(plain.air * 1.5);
+    expect(g.e.char!.glideTime).toBe(0);
+    expect(g.e.flags & EFlag.Gliding).toBe(0);
+  });
+
+  it('only the class with the ability can glide', async () => {
+    const a = await hop('assault', true);
+    expect(a.glidingTicks).toBe(0);
+    expect(a.seen).not.toContain('ear_glide');
+  });
+
+  it('Q again or a crouch ends it; the cooldown blocks an immediate re-glide', async () => {
+    const { e, go, seen } = await makeSky('skyraider');
+    go(Btn.Jump); for (let i = 0; i < 10; i++) go(Btn.Jump);
+    go(0); go(Btn.Jump); for (let i = 0; i < 10; i++) go(Btn.Jump);
+    while (e.vel.y > 0) go(0);
+    go(Btn.Ability);
+    expect(e.flags & EFlag.Gliding).toBeTruthy();
+    go(0); go(Btn.Ability);
+    expect(e.flags & EFlag.Gliding).toBe(0);
+    go(0); go(Btn.Ability); // still airborne but cooling down
+    expect(e.flags & EFlag.Gliding).toBe(0);
+    expect(seen.filter((s) => s === 'ear_glide').length).toBe(1);
+    // crouch ends a glide (and pounds)
+    while (!e.char!.grounded) go(0);
+    for (let i = 0; i < 60 * 7; i++) go(0); // cooldown 6 s
+    go(Btn.Jump); for (let i = 0; i < 10; i++) go(Btn.Jump);
+    go(0); go(Btn.Jump); for (let i = 0; i < 10; i++) go(Btn.Jump);
+    while (e.vel.y > 0) go(0);
+    go(Btn.Ability);
+    expect(e.flags & EFlag.Gliding).toBeTruthy();
+    go(0); go(Btn.Crouch);
+    expect(e.char!.glideTime).toBe(0);
+    expect(e.char!.pounding).toBe(true);
+  });
+});

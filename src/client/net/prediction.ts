@@ -19,7 +19,8 @@ import { stepWorldEffects } from '../../sim/world/systems';
 import type { CharacterState, SimEntity } from '../../sim/entity';
 import type { EntityState, GameEvent } from '../../shared/protocol';
 import { Btn, sanitizeInput, type InputCmd } from '../../shared/input';
-import { CLASS_IDS, EFlag } from '../../shared/types';
+import { BUFF_FLAGS, CLASS_IDS, EFlag } from '../../shared/types';
+import { PICKUPS } from '../../shared/content/pickups';
 import { TICK_DT, TICK_HZ } from '../../shared/constants';
 import { quantizeMotion } from '../../host/quantize';
 
@@ -33,7 +34,7 @@ const VEL_EPS = 0.05;
 const MAX_HISTORY = TICK_HZ * 4;
 const TICK_MS = 1000 / TICK_HZ;
 /** Flags owned by movement (predicted); every other flag comes from the authority. */
-export const MOVE_FLAGS = EFlag.Grounded | EFlag.Sprinting | EFlag.Aiming | EFlag.Crouching;
+export const MOVE_FLAGS = EFlag.Grounded | EFlag.Sprinting | EFlag.Aiming | EFlag.Crouching | EFlag.Gliding;
 
 interface Hist {
   seq: number;
@@ -62,6 +63,8 @@ export class LocalPredictor {
   private e: SimEntity | null = null;
   private localId = -1;
   private key = '';
+  /** Class move speeds before buffs (Zoomies+ scales walk/run/sprint exactly as the authority's buff does). */
+  private baseMove = { walkSpeed: 0, runSpeed: 0, sprintSpeed: 0 };
   private hist: Hist[] = [];
   private readonly ctx: MoveContext;
   private readonly quiet: MoveContext;
@@ -118,6 +121,7 @@ export class LocalPredictor {
     const key = `${s.id}:${s.species}:${s.cls}:${s.team}`;
     if (!this.e || key !== this.key) {
       this.spawn(s, key);
+      this.syncBuffs(s.flags);
       this.resetTo(s, null, pending);
       const replayed = this.replay(ack, pending, null);
       this.cur = { x: this.e!.pos.x, y: this.e!.pos.y, z: this.e!.pos.z };
@@ -129,7 +133,10 @@ export class LocalPredictor {
     let keep = 0;
     for (; keep < this.hist.length && this.hist[keep].seq <= ack; keep++) if (this.hist[keep].seq === ack) h = this.hist[keep];
     const error = h ? Math.hypot(s.x - h.x, s.y - h.y, s.z - h.z) : NaN;
-    if (h && error <= POS_EPS && Math.hypot(s.vx - h.vx, s.vy - h.vy, s.vz - h.vz) <= VEL_EPS
+    // A buff that changes movement (Zoomies+) started or ended at or before `ack`: replay the pending inputs
+    // with it now instead of waiting for the next snapshot to show the error.
+    const buffMoved = this.syncBuffs(s.flags);
+    if (h && !buffMoved && error <= POS_EPS && Math.hypot(s.vx - h.vx, s.vy - h.vy, s.vz - h.vz) <= VEL_EPS
       && ((s.flags & EFlag.Grounded) !== 0) === h.char.grounded) {
       // Keep the acked entry: if the authority repeats this input (its buffer ran dry) the next
       // snapshot carries the same ack and must be compared against it, not silently re-based.
@@ -210,10 +217,26 @@ export class LocalPredictor {
     };
   }
 
+  /** Take the authority's buff bits; returns true when Zoomies+ turned on/off (movement speeds changed). */
+  private syncBuffs(flags: number): boolean {
+    const e = this.e!, m = e.char!.move;
+    const was = (e.flags & EFlag.BuffZoomies) !== 0, now = (flags & EFlag.BuffZoomies) !== 0;
+    e.flags = (e.flags & ~BUFF_FLAGS) | (flags & BUFF_FLAGS);
+    if (was === now) return false;
+    const k = PICKUPS.zoomies_plus.buff.moveSpeed ?? 1;
+    const b = this.baseMove;
+    // same arithmetic as the authority (base × k on apply, base restored on expiry) → bit-identical speeds
+    if (now) { m.walkSpeed = b.walkSpeed * k; m.runSpeed = b.runSpeed * k; m.sprintSpeed = b.sprintSpeed * k; }
+    else { m.walkSpeed = b.walkSpeed; m.runSpeed = b.runSpeed; m.sprintSpeed = b.sprintSpeed; }
+    return true;
+  }
+
   private spawn(s: EntityState, key: string): void {
     if (this.e) this.sim.removeEntity(this.localId);
     const cls = CLASS_IDS[s.cls] ?? 'assault';
     const e = this.sim.spawnCharacter({ team: s.team, species: s.species, cls, name: 'local', x: s.x, y: s.y, z: s.z, yaw: s.yaw });
+    const m = e.char!.move;
+    this.baseMove = { walkSpeed: m.walkSpeed, runSpeed: m.runSpeed, sprintSpeed: m.sprintSpeed };
     this.sim.drainEvents();
     this.localId = e.id;
     e.id = s.id; // events and states carry the authoritative id
@@ -274,7 +297,7 @@ export class LocalPredictor {
       const first = pending[0];
       e.prevButtons = first ? Math.floor(first.buttons) & 0x3ff : 0;
       c.jumpHeld = (e.prevButtons & Btn.Jump) !== 0;
-      c.jumpBuffer = 0; c.crouchBuffer = 0;
+      c.jumpBuffer = 0; c.crouchBuffer = 0; c.glideTime = 0;
     }
     const grounded = (s.flags & EFlag.Grounded) !== 0;
     c.grounded = grounded;

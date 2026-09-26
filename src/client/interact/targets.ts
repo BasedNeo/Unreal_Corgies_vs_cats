@@ -5,7 +5,7 @@ import type { EntityState, GameEvent } from '../../shared/protocol';
 import { EFlag, EntityKind, type TeamId } from '../../shared/types';
 import { TERMINALS, terminalKindAt } from '../../shared/content/terminals';
 import { VEHICLES, vehicleByIndex } from '../../shared/content/vehicles';
-import { PICKUPS, isCore, type CoreId } from '../../shared/content/pickups';
+import { CORE_FLAGS, CORE_IDS, PICKUPS, isCore, type CoreId } from '../../shared/content/pickups';
 import { objectiveChainByIndex, type ObjectiveChain } from '../../shared/content/objectives';
 
 export type InteractKind = 'ordnance' | 'kart_terminal' | 'kart' | 'dismount' | 'objective';
@@ -91,12 +91,14 @@ export function atOwnOrdnanceKiosk(states: ReadonlyMap<number, EntityState>, loc
   return false;
 }
 
-export interface TrackedBuff { id: CoreId; until: number; duration: number }
+export interface TrackedBuff { id: CoreId; until: number; duration: number; /** When it was added (s). */ added?: number }
 
 /**
- * Local presentation of timed buffs + kibble count, from `pickup` events (buff state is not in snapshots
- * yet — see docs/handoff/S1.md). Times are in the caller's clock (seconds).
+ * Local presentation of timed buffs + kibble count. Timers come from `pickup` events; which buffs run comes
+ * from the snapshot flags (EFlag.Buff*, via `syncFlags`). Times are in the caller's clock (seconds).
  */
+const SYNC_GRACE = 0.6;
+
 export class BuffTracker {
   readonly buffs = new Map<number, TrackedBuff[]>();
   kibble = 0;
@@ -107,13 +109,32 @@ export class BuffTracker {
         const list = this.buffs.get(ev.id) ?? [];
         const d = PICKUPS[ev.item].duration;
         const cur = list.find((b) => b.id === ev.item);
-        if (cur) cur.until = now + d;
-        else list.push({ id: ev.item, until: now + d, duration: d });
+        if (cur) { cur.until = now + d; cur.added = now; }
+        else list.push({ id: ev.item, until: now + d, duration: d, added: now });
         this.buffs.set(ev.id, list);
       } else if (ev.item === 'golden_kibble' && ev.id === localId) this.kibble++;
     } else if (ev.e === 'death') this.buffs.delete(ev.id);
     else if (ev.e === 'score' && ev.reason === 'reset') { this.buffs.clear(); this.kibble = 0; }
     else if (ev.e === 'score' && ev.reason === 'win') this.buffs.clear(); // match over: cores end
+  }
+
+  /**
+   * The snapshot flags are the truth for WHICH buffs run: add one a late joiner never saw an event for (its timer
+   * is unknown, so it shows the full duration), drop one that ended early. Interpolated states lag the pickup event
+   * by ~0.1 s, so an event-added buff gets a short grace before a clear flag removes it.
+   */
+  syncFlags(id: number, flags: number, now: number): void {
+    let list = this.buffs.get(id);
+    for (const core of CORE_IDS) {
+      const on = (flags & CORE_FLAGS[core]) !== 0;
+      const cur = list?.find((b) => b.id === core);
+      if (on && !cur) {
+        list ??= [];
+        const d = PICKUPS[core].duration;
+        list.push({ id: core, until: now + d, duration: d, added: now });
+        this.buffs.set(id, list);
+      } else if (!on && cur && now - (cur.added ?? -Infinity) > SYNC_GRACE) list!.splice(list!.indexOf(cur), 1);
+    }
   }
 
   /** Active buffs of an entity at `now` (expired ones dropped). */
