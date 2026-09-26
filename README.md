@@ -31,13 +31,13 @@ npm run dev                 # http://localhost:5173 → main menu → pick a MAT
 | **Skirmish** | Co-op vs five waves of cats and the Vac-Tank boss. Your squad is you plus bot pups, or friends. |
 | **Deathmatch** | 4v4, first team to 30 knockouts. Bots fill empty slots. |
 | **Core Rush** | 4v4: hold the three Core Pads (A, B, C) for points; first team to 250 wins. |
-| **Adventure** | "The Last Tennis Ball": six district chapters, one class each (`docs/design/ADVENTURE.md`). All six are playable, alone with bot pups or in online co-op. |
+| **Adventure** | "The Last Tennis Ball": six district chapters, one class each (`docs/design/ADVENTURE.md`). All six are playable, alone with bot pups or in online co-op; after the last one, THE END. |
 
 ### Controls
 | Key | Action |
 |---|---|
 | WASD, Space ×2, Shift | move, double jump, sprint |
-| Mouse, RMB | aim and fire, aim down |
+| Mouse, RMB | aim and fire, zoom (hold) |
 | Q | class ability |
 | R | reload |
 | E | interact (kiosks, karts, the RC plane, mission steps); in a vehicle: hop out, or bail out in the air |
