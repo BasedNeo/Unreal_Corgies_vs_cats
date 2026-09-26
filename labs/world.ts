@@ -1,6 +1,10 @@
 // World lab: renders the West Yard with the real style pipeline and a free camera.
 //   /labs/world.html?bm=overview&t=0.68&webgl&seed=1&hud=0&dummies=0
-//   Keys: 1-8 bookmarks · T/G time of day +/- · WASD/QE fly (Shift fast) · drag to look · P print pose
+//   G1 clock/weather: &tick=N (server tick) · &wx=clear|overcast|rain|storm|clearing (jump the clock to the
+//   middle of that state) · &bolt=1 (jump to the next nearby lightning flash) · &spr=meadow|veg (jump into
+//   a sprinkler burst) · &freeze (clock stops: deterministic shots) · &look=... &pos=... as before.
+//   Keys: 1-9 bookmarks · T/G time of day +/- (pins it) · WASD/QE fly (Shift fast) · drag to look · P print
+//   pose · R cycle weather override · L next lightning · [ / ] clock -/+ 30 s · F freeze clock
 // Exposes window.__cvc (ready, fps, drawCalls, triangles, world stats, bookmarks) for tools/probe.mjs.
 import { debug } from '../src/client/debug/debug-hook';
 import * as THREE from 'three/webgpu';
@@ -8,6 +12,7 @@ import * as TSL from 'three/tsl';
 import { createRenderContext } from '../src/client/engine/renderer';
 import { createWorldData } from '../src/shared/world/world-data';
 import { createWorldView } from '../src/client/world/world-view';
+import { findWeather, forEachStrike, sprinklerAt, WEATHER_KINDS, type WeatherKind } from '../src/shared/world/weather';
 import { toon } from '../src/client/style/style-webgpu.js';
 import { PALETTE } from '../src/client/style/style-tokens.js';
 
@@ -25,7 +30,27 @@ async function main() {
   const view = createWorldView(ctx.scene, data, {
     timeOfDay: params.has('t') ? Number(params.get('t')) : undefined,
     quality: (params.get('q') as 'low' | 'med' | 'high' | null) ?? undefined,
+    grade: ctx.pipeline.grade.uniforms as unknown as { saturation: { value: number } },
   });
+  // ---- G1 clock ----
+  let clock = Number(params.get('tick') ?? 0);
+  let frozen = params.has('freeze');
+  const wxParam = params.get('wx') as WeatherKind | null;
+  if (wxParam && WEATHER_KINDS.includes(wxParam)) clock = findWeather(seed, wxParam, clock);
+  /** Next near strike after `from` (optionally with its bearing in [b0, b1], math angle in XZ). */
+  const nextBolt = (from: number, b0 = -Infinity, b1 = Infinity) => {
+    let hit = -1;
+    const inWin = (b: number) => { for (const k of [-1, 0, 1]) { const x = b + k * Math.PI * 2; if (x >= b0 && x <= b1) return true; } return false; };
+    for (let t = from; t < from + 60 * 60 * 40 && hit < 0; t += 600) forEachStrike(seed, t, t + 600, (s) => { if (hit < 0 && s.dist < 700 && s.tick > from && inWin(s.bearing)) hit = s.tick; });
+    return hit;
+  };
+  if (params.get('bolt') === '1') { const b = nextBolt(clock); if (b >= 0) clock = b + 2; }
+  const sprId = params.get('spr');
+  if (sprId) {
+    const sp = data.sprinklers?.find((s) => s.id === sprId);
+    if (sp) for (let t = clock; t < clock + 60 * 600; t += 30) if (sprinklerAt(seed, sp, t).on >= 1) { clock = t + 60 * 4; break; }
+  }
+  let overrideIdx = -1;
   const buildMs = performance.now() - t0;
   (globalThis as unknown as { __lab: unknown }).__lab = { scene: ctx.scene, view, data, renderer: ctx.renderer, ctx, THREE, TSL };
   const lab = debug as unknown as typeof debug & LabDebug;
@@ -77,6 +102,22 @@ async function main() {
     lab.bookmark = 'custom';
   }
 
+  // scripting hook for batch screenshots (tools / scratch scripts): one page load, many shots
+  const setPose = (p: number[], l: number[], fov?: number) => {
+    Object.assign(pose, { x: p[0], y: p[1], z: p[2], yaw: Math.atan2(-(l[0] - p[0]), -(l[2] - p[2])), pitch: Math.atan2(l[1] - p[1], Math.hypot(l[0] - p[0], l[2] - p[2])) });
+    if (fov) { cam.fov = fov; cam.updateProjectionMatrix(); }
+    lab.bookmark = 'custom';
+  };
+  Object.assign((globalThis as unknown as { __lab: Record<string, unknown> }).__lab, {
+    applyBookmark, setPose,
+    setClock: (t: number) => { clock = t; },
+    getClock: () => clock,
+    setFrozen: (f: boolean) => { frozen = f; },
+    frames: () => frames,
+    nextBolt,
+    findWeather: (k: WeatherKind, from = 0) => findWeather(seed, k, from),
+  });
+
   const keys = new Set<string>();
   addEventListener('keydown', (e) => {
     keys.add(e.code);
@@ -84,6 +125,11 @@ async function main() {
     if (n >= 1 && n <= view.bookmarks.length) applyBookmark(view.bookmarks[n - 1].name);
     if (e.code === 'KeyT') view.setTimeOfDay(view.timeOfDay + 0.02);
     if (e.code === 'KeyG') view.setTimeOfDay(view.timeOfDay - 0.02);
+    if (e.code === 'KeyR') { overrideIdx = overrideIdx + 1 >= WEATHER_KINDS.length ? -1 : overrideIdx + 1; view.setWeather(overrideIdx < 0 ? null : WEATHER_KINDS[overrideIdx]); }
+    if (e.code === 'KeyL') { const b = nextBolt(clock); if (b >= 0) clock = b - 30; }
+    if (e.code === 'BracketLeft') clock = Math.max(0, clock - 1800);
+    if (e.code === 'BracketRight') clock += 1800;
+    if (e.code === 'KeyF') frozen = !frozen;
     if (e.code === 'KeyP') console.log('pose', JSON.stringify(pose), 't', view.timeOfDay.toFixed(3));
   });
   addEventListener('keyup', (e) => keys.delete(e.code));
@@ -108,7 +154,8 @@ async function main() {
     cam.position.set(pose.x, pose.y, pose.z);
     cam.rotation.set(pose.pitch, pose.yaw, 0, 'YXZ');
     cam.updateMatrixWorld();
-    view.update(dt, cam);
+    if (!frozen) clock += dt * 60;
+    view.update(dt, cam, clock);
     ctx.renderer.info.reset();
     ctx.render();
     frames++; fpsN++;
@@ -117,11 +164,13 @@ async function main() {
     lab.drawCalls = info.drawCalls ?? info.calls ?? 0;
     lab.triangles = info.triangles ?? 0;
     lab.timeOfDay = view.timeOfDay;
+    const wx = view.weather;
+    (lab as unknown as { weather: unknown }).weather = { tick: Math.round(clock), kind: wx.kind, rain: +wx.rain.toFixed(2), wet: +wx.wet.toFixed(2), storm: +wx.storm.toFixed(2), flash: +wx.flash.toFixed(2) };
     debug.frames = frames;
     debug.frameMs = dt * 1000;
-    if (frames === 3) lab.world = view.stats();
+    if (frames === 3 || frames % 30 === 0) lab.world = view.stats();
     debug.ready = frames > 5;
-    if (params.get('hud') !== '0') hudEl.textContent = `${lab.bookmark} · t=${view.timeOfDay.toFixed(2)} · ${debug.fps.toFixed(1)} fps · ${lab.drawCalls} draws · ${(lab.triangles / 1000).toFixed(0)}k tris · ${ctx.backend}`;
+    if (params.get('hud') !== '0') hudEl.textContent = `${lab.bookmark} · t=${view.timeOfDay.toFixed(2)} · ${wx.kind}${wx.blend > 0 ? `→${wx.to}` : ''} tick ${Math.round(clock)} · ${debug.fps.toFixed(1)} fps · ${lab.drawCalls} draws · ${(lab.triangles / 1000).toFixed(0)}k tris · ${ctx.backend}`;
   });
 }
 

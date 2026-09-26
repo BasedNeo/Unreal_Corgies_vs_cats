@@ -26,7 +26,7 @@ interface Species {
 /** Merge parts into one non-indexed geometry with vertex colors + a uv.y height ramp (wind). All
  *  foliage renders FrontSide: back-facing triangles shade black in the toon pipeline here (see
  *  LEARNINGS), so two-sided shapes are built as thin closed wedges instead of DoubleSide cards. */
-function finish(parts: { geo: THREE.BufferGeometry; color: THREE.Color }[], upNormals = true): THREE.BufferGeometry {
+export function finish(parts: { geo: THREE.BufferGeometry; color: THREE.Color }[], upNormals = true): THREE.BufferGeometry {
   const pos: number[] = [], nor: number[] = [], col: number[] = [];
   for (const { geo, color } of parts) {
     const g = geo.index ? geo.toNonIndexed() : geo;
@@ -54,7 +54,7 @@ function finish(parts: { geo: THREE.BufferGeometry; color: THREE.Color }[], upNo
 }
 
 /** Tapered, bent blade as a thin wedge (front + back faces with opposite windings, never coincident). */
-function blade(h: number, w: number, lean: number, yaw: number, tipCol: THREE.Color, baseCol: THREE.Color): { geo: THREE.BufferGeometry; color: THREE.Color }[] {
+export function blade(h: number, w: number, lean: number, yaw: number, tipCol: THREE.Color, baseCol: THREE.Color): { geo: THREE.BufferGeometry; color: THREE.Color }[] {
   const c = Math.cos(yaw), s = Math.sin(yaw);
   const rot = (x: number, y: number, z: number) => [x * c + z * s, y, -x * s + z * c];
   const T = 0.035;

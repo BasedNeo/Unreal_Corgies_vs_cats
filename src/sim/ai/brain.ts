@@ -7,6 +7,9 @@
 //
 // Perception: sight cone + range + world line-of-sight (10 Hz, staggered), cloak reveal range,
 // hearing via combat noise (weapon fire, explosions, barks) and "who just shot me".
+// World (G1): weather scales the sight range (storm x0.6) and tall-grass concealment (e.conceal from the
+// world lane's conceal system) shrinks the distance a target is spotted at (5 m fully hidden, x2 when
+// already tracked; halved concealment when the observer's eye is > 3.5 m above the target's feet).
 import type { Sim } from '../sim';
 import type { SimEntity } from '../entity';
 import { Btn, type InputCmd } from '../../shared/input';
@@ -19,6 +22,7 @@ import { combatBus, ensureCombat, equipWeapon, eyeHeight, characterHeight, isSte
 import { worldLineClear } from '../combat/geometry';
 import { ARCHETYPES, archetypeForClass, type Archetype, type ArchetypeId } from './archetypes';
 import { type NavGrid, cellX, cellZ, findPath, lineWalkable, nearestWalkable, randomCell } from './nav';
+import { concealLevel, concealRevealRange, weatherSightMult } from '../world/env';
 
 export type AiMode = 'patrol' | 'alert' | 'engage' | 'cover' | 'regroup';
 
@@ -151,13 +155,16 @@ function perceive(sim: Sim, e: SimEntity, ai: AiState, a: Archetype, ctx: AiCont
   const cosFov = Math.cos(a.fovHalf), cosTrack = Math.cos(100 * DEG);
   const attacker = e.health && sim.tick - e.health.lastDamageTick < 120 ? e.health.lastAttacker : -1;
   let best: SimEntity | null = null, bestScore = Infinity;
+  const sight = a.sightRange * weatherSightMult(sim);
   for (const t of ctx.chars) {
     if (t.team === e.team || t === e) continue;
     const dx = t.pos.x - ex, dz = t.pos.z - ez;
     const dist = Math.hypot(dx, dz);
-    if (dist > a.sightRange) continue;
+    if (dist > sight) continue;
     if (isStealthed(sim, t) && dist > CLOAK_REVEAL) continue;
     const tracking = t.id === ai.target && sim.tick - ai.lastSeenTick < 90;
+    const hidden = concealLevel(t) * (ey - t.pos.y > 3.5 ? 0.5 : 1);   // lookouts see into the grass
+    if (hidden > 0 && dist > concealRevealRange(hidden, sight, tracking)) continue;
     const c = dist > 1e-3 ? (dx * fx + dz * fz) / dist : 1;
     if (dist > 5 && c < (tracking || t.id === attacker ? cosTrack : cosFov)) continue;
     const h = characterHeight(t);

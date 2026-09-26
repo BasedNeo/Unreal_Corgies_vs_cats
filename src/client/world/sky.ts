@@ -3,10 +3,14 @@
 // Toon version: a gradient sky dome with a bloom-bright sun disc, flat two-tone cartoon clouds and
 // night stars; the style light rig (key / rim / hemisphere from createStyleLights) is driven as the
 // sun, sky rim and ambient. Palette-tinted ramps, not physical scattering.
+// G1 weather: setWeather() blends the ramps toward overcast/storm greys (luminance-preserving, then
+// dimmed), thickens the cartoon cloud layer, hides the sun disc, dims + cools the key light, flattens
+// light into the hemisphere, thickens and greys the fog, and draws lightning: a whole-sky flash plus
+// a jagged comic bolt at the strike's bearing (bloom-bright). All smooth: inputs are blended values.
 import * as THREE from 'three/webgpu';
 import {
   positionLocal, normalize, uniform, vec3, vec2, float, mix, smoothstep, max, dot, pow, step, fract, sin,
-  mx_fractal_noise_float, time, floor, clamp,
+  mx_fractal_noise_float, time, floor, clamp, abs,
 } from 'three/tsl';
 import { STYLE } from '../style/style-tokens.js';
 
@@ -62,11 +66,32 @@ export function sunState(t: number): SunState {
   return { t, elevation, azimuth: az, dir, night };
 }
 
+/** Weather inputs for the sky (the blended values of a WeatherSample). */
+export interface SkyWeather {
+  cloud: number; rain: number; storm: number; fog: number; dark: number;
+  /** Lightning flash 0..1 and the bearing (math angle in XZ) + power of the bolt, if any. */
+  flash: number; boltBearing: number; boltPower: number; boltSeed: number;
+}
+export const CLEAR_SKY: SkyWeather = { cloud: 0.18, rain: 0, storm: 0, fog: 0, dark: 0, flash: 0, boltBearing: 0, boltPower: 0, boltSeed: 0 };
+
+const OVERCAST_ZENITH = hex(0x8795a3), OVERCAST_HORIZON = hex(0xb9c0c4);
+const STORM_ZENITH = hex(0x39424d), STORM_HORIZON = hex(0x5f6870);
+const lum = (c: RGB) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+/** Blend `base` toward a grey of the same luminance (tinted by `tint`), then dim. */
+function weatherTint(base: RGB, tint: RGB, amount: number, dim: number): RGB {
+  const k = amount <= 0 ? 0 : Math.min(1, amount);
+  const lb = lum(base), lt = Math.max(1e-4, lum(tint));
+  const out = base.map((v, i) => lerp(v, tint[i] * (lb / lt), k) * (1 - dim)) as RGB;
+  return out;
+}
+
 export interface YardSky {
   dome: THREE.Mesh;
   sun: THREE.DirectionalLight;
   setTimeOfDay(t: number): void;
   readonly timeOfDay: number;
+  /** G1: weather look (cloud cover, greys, fog, lightning). */
+  setWeather(w: SkyWeather): void;
   update(camera: THREE.Camera, focus?: THREE.Vector3): SunState;
   dispose(): void;
 }
@@ -105,6 +130,7 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
     zenith: uniform(new THREE.Color()), horizon: uniform(new THREE.Color()), sunCol: uniform(new THREE.Color()),
     sunDir: uniform(new THREE.Vector3(0, 1, 0)), night: uniform(0), cloud: uniform(new THREE.Color()), cloudShade: uniform(new THREE.Color()),
     sunVis: uniform(1),
+    coverBias: uniform(0.02), flash: uniform(0), boltDir: uniform(new THREE.Vector2(1, 0)), bolt: uniform(0), boltSeed: uniform(0),
   };
   const dir = normalize(positionLocal);
   const up = max(dir.y, 0);
@@ -118,7 +144,7 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
   const withClouds = opts.clouds !== false;
   const n = withClouds ? mx_fractal_noise_float(cuv.mul(0.55), 3, 2.0, 0.5) : float(-1);
   const n2 = withClouds ? mx_fractal_noise_float(cuv.mul(0.55).add(vec2(U.sunDir.x, U.sunDir.z).mul(0.05)), 3, 2.0, 0.5) : float(-1);
-  const cover = withClouds ? smoothstep(0.03, 0.06, n.add(0.02)).mul(smoothstep(0.04, 0.22, dir.y)) : float(0);
+  const cover = withClouds ? smoothstep(0.03, 0.06, n.add(U.coverBias)).mul(smoothstep(0.04, 0.22, dir.y)) : float(0);
   const shade = step(n2, n.sub(0.035));
   const cloudCol = mix(U.cloudShade, U.cloud, shade);
   if (withClouds) sky = mix(sky, cloudCol, cover.mul(0.92));
@@ -130,6 +156,20 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
   const h = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))).mul(43758.5453));
   const star = step(0.9975, h).mul(U.night).mul(smoothstep(0.08, 0.35, dir.y)).mul(float(1).sub(cover));
   sky = sky.add(vec3(star.mul(1.4)));
+  // lightning: whole-sky flash (lavender white) + a jagged comic bolt at the strike bearing
+  const flashCol = vec3(0.86, 0.88, 1.0);
+  sky = sky.add(flashCol.mul(U.flash.mul(0.32).mul(float(0.35).add(up))));
+  const hxz = normalize(dir.xz.add(vec2(1e-5, 0)));
+  const across = hxz.x.mul(U.boltDir.y).sub(hxz.y.mul(U.boltDir.x));
+  const facing = step(0, hxz.x.mul(U.boltDir.x).add(hxz.y.mul(U.boltDir.y)));
+  // continuous jagged line: sum of two triangle waves of the elevation (no sawtooth jumps)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TSL node types are too narrow for helpers
+  const tri = (x: any) => abs(fract(x).sub(0.5)).mul(2).sub(0.5);
+  const zig = tri(dir.y.mul(7).add(U.boltSeed)).mul(0.06).add(tri(dir.y.mul(19).add(U.boltSeed.mul(3.7))).mul(0.02));
+  const inBand = smoothstep(-0.01, 0.03, dir.y).mul(float(1).sub(smoothstep(0.38, 0.46, dir.y)));
+  const core = smoothstep(0.011, 0.003, abs(across.sub(zig)));
+  const halo = smoothstep(0.06, 0.0, abs(across.sub(zig))).mul(0.3);
+  sky = sky.add(flashCol.mul(core.mul(4.5).add(halo)).mul(facing).mul(inBand).mul(U.bolt));
   // Sky dome: unlit and never inked by design (like glow()); not a lit surface material.
   const mat = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false, fog: false });
   mat.colorNode = clamp(sky, 0, 8);
@@ -146,37 +186,56 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
   scene.background = new THREE.Color(0xbfe3f4);
 
   let tod = opts.timeOfDay ?? 0.68;
+  let wx: SkyWeather = { ...CLEAR_SKY };
   const tmp = new THREE.Vector3(), fwd = new THREE.Vector3(), lightSpace = new THREE.Matrix4(), inv = new THREE.Matrix4();
   const c3 = new THREE.Color();
   const setRGB = (c: THREE.Color, v: RGB) => c.setRGB(v[0], v[1], v[2]);
 
   function apply(s: SunState) {
     const e = s.elevation;
-    setRGB(U.zenith.value as THREE.Color, ramp(YARD_RAMPS.zenith, e));
-    setRGB(U.horizon.value as THREE.Color, ramp(YARD_RAMPS.horizon, e));
+    const W = wx;
+    const grey = Math.min(1, Math.max(0, (W.cloud - 0.2) / 0.7));              // overcast amount
+    const storm = W.storm;
+    const tintZ = STORM_ZENITH.map((v, i) => lerp(OVERCAST_ZENITH[i], v, storm)) as RGB;
+    const tintH = STORM_HORIZON.map((v, i) => lerp(OVERCAST_HORIZON[i], v, storm)) as RGB;
+    const dimSky = 0.78 * W.dark;
+    setRGB(U.zenith.value as THREE.Color, weatherTint(ramp(YARD_RAMPS.zenith, e), tintZ, grey * 0.92, dimSky));
+    const horizon = weatherTint(ramp(YARD_RAMPS.horizon, e), tintH, grey * 0.9, dimSky * 0.8);
+    setRGB(U.horizon.value as THREE.Color, horizon);
     setRGB(U.sunCol.value as THREE.Color, ramp(YARD_RAMPS.sun, e));
-    setRGB(U.cloud.value as THREE.Color, ramp(YARD_RAMPS.cloud, e));
-    setRGB(U.cloudShade.value as THREE.Color, ramp(YARD_RAMPS.cloudShade, e));
-    (U.night as { value: number }).value = s.night ? 1 : 0;
-    (U.sunVis as { value: number }).value = s.night ? 0.25 : 1;
+    setRGB(U.cloud.value as THREE.Color, weatherTint(ramp(YARD_RAMPS.cloud, e), tintH, grey * 0.8, W.dark * 0.45));
+    setRGB(U.cloudShade.value as THREE.Color, weatherTint(ramp(YARD_RAMPS.cloudShade, e), tintZ, grey * 0.85, W.dark * 0.55));
+    (U.coverBias as { value: number }).value = 0.02 + 0.62 * Math.max(0, W.cloud - 0.18) / 0.82;
+    (U.night as { value: number }).value = s.night ? 1 - grey : 0;
+    const sunVis = (s.night ? 0.25 : 1) * (1 - 0.95 * Math.min(1, Math.max(0, (W.cloud - 0.45) / 0.4)));
+    (U.sunVis as { value: number }).value = sunVis;
     // true sun direction for the sky even at night (moon handled by the light only)
     const trueDir = sunState(s.t);
     const el = (Math.max(trueDir.elevation, -10) * Math.PI) / 180;
     (U.sunDir.value as THREE.Vector3).set(Math.cos(trueDir.azimuth) * Math.cos(el), Math.sin(el), Math.sin(trueDir.azimuth) * Math.cos(el));
     if (s.night) (U.sunDir.value as THREE.Vector3).copy(s.dir);
-    setRGB(sun.color, s.night ? hex(0x9db4ff) : ramp(YARD_RAMPS.sun, e));
-    sun.intensity = base.key * (s.night ? 0.32 : ramp(YARD_RAMPS.sunI, e));
-    if (rim) { setRGB(rim.color, ramp(YARD_RAMPS.rim, e)); rim.intensity = base.rim * ramp(YARD_RAMPS.rimI, e); }
+    // key light: dimmer and cooler under cloud; the hemisphere carries the flat overcast light
+    const keyCol = s.night ? hex(0x9db4ff) : ramp(YARD_RAMPS.sun, e);
+    setRGB(sun.color, weatherTint(keyCol, hex(0xc8d2dc), grey * 0.7, 0));
+    sun.intensity = base.key * (s.night ? 0.32 : ramp(YARD_RAMPS.sunI, e)) * (1 - 0.85 * W.dark) + base.key * 0.6 * W.flash;
+    if (rim) { setRGB(rim.color, ramp(YARD_RAMPS.rim, e)); rim.intensity = base.rim * ramp(YARD_RAMPS.rimI, e) * (1 - 0.45 * W.dark); }
     if (hemi) {
-      setRGB(hemi.color, ramp(YARD_RAMPS.hemiSky, e));
+      const hs = weatherTint(ramp(YARD_RAMPS.hemiSky, e), tintH, grey * 0.85, W.dark * 0.35);
+      setRGB(hemi.color, hs.map((v, i) => lerp(v, [0.8, 0.84, 1.0][i], Math.min(1, W.flash))) as RGB);
       setRGB(hemi.groundColor, ramp(YARD_RAMPS.hemiGround, e));
-      hemi.intensity = base.amb * ramp(YARD_RAMPS.hemiI, e);
+      hemi.intensity = base.amb * ramp(YARD_RAMPS.hemiI, e) * (1 + 0.12 * grey - 0.55 * W.dark) + base.amb * 1.25 * W.flash;
     }
-    setRGB(c3, ramp(YARD_RAMPS.horizon, e));
-    fog.color.copy(c3).lerp(new THREE.Color().setRGB(...ramp(YARD_RAMPS.zenith, e)), 0.12);
-    baseFog = ramp(YARD_RAMPS.fogDensity, e);
+    setRGB(c3, horizon);
+    const zen = weatherTint(ramp(YARD_RAMPS.zenith, e), tintZ, grey * 0.92, dimSky);
+    fog.color.copy(c3).lerp(new THREE.Color().setRGB(...zen), 0.12).multiplyScalar(1 - 0.3 * storm);
+    fog.color.lerp(new THREE.Color(0xc9d0e4), Math.min(1, W.flash * 0.3));
+    baseFog = ramp(YARD_RAMPS.fogDensity, e) * (1 + 1.5 * W.fog + 0.8 * W.rain);
     fog.density = baseFog;
     (scene.background as THREE.Color).copy(fog.color);
+    (U.flash as { value: number }).value = W.flash;
+    (U.bolt as { value: number }).value = W.boltPower;
+    (U.boltDir.value as THREE.Vector2).set(Math.cos(W.boltBearing), Math.sin(W.boltBearing));
+    (U.boltSeed as { value: number }).value = W.boltSeed;
   }
   let state = sunState(tod);
   let baseFog = 0.003;
@@ -186,6 +245,7 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
     dome, sun,
     get timeOfDay() { return tod; },
     setTimeOfDay(t: number) { tod = ((t % 1) + 1) % 1; state = sunState(tod); apply(state); },
+    setWeather(w: SkyWeather) { wx = w; apply(state); },
     update(camera, focus) {
       dome.position.copy(camera.position);
       // less aerial haze when looking down from high up (overviews), full haze at player height

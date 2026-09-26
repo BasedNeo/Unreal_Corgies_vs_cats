@@ -33,13 +33,17 @@ const COMPOST = { x: -94, z: -33 };
 const TOWER = { x: -80, z: 32 };
 /** Garden path (N -> S) and the flank path from the dig hole toward the big tree. */
 export const GARDEN_PATH = [-81, -67, -81.5, -56, -81, -45, -79.5, -36, -74.5, -28, -71.5, -18, -71.5, -6, -74, 4, -78.5, 10, -79, 22, -74, 27, -71.5, 34, -70, 46];
-export const GARDEN_FLANK_PATH = [-97.5, -45, -90, -42.5, -81, -41, -72, -33, -62, -14, -56, 8];
+export const GARDEN_FLANK_PATH = [-97.5, -45, -91, -43.2, -84, -42.6, -80.3, -40.5];   // dig hole -> garden path
 
 export const GARDEN_CONCEAL: ConcealZone[] = [
-  { id: 'meadow', x: -85, z: -15, rx: 8.5, rz: 11, h: 2.3, style: 'grass' },
-  { id: 'fence_weeds', x: -97.3, z: -4, rx: 2.3, rz: 26, h: 2.2, style: 'weeds' },
-  { id: 'dig_weeds', x: -97.4, z: -51, rx: 2.1, rz: 8, h: 2.2, style: 'weeds' },
-  { id: 'jungle', x: -88, z: 18, rx: 7.5, rz: 9, h: 2.5, style: 'flowers' },
+  // a continuous stealth corridor along the west fence: corn row (dig hole) -> north patch -> [open gap
+  // at the compost bin] -> meadow -> hedge-row grass -> flower jungle -> fence weeds; plus edge clumps
+  { id: 'corn', x: -97.6, z: -52, rx: 2.0, rz: 10.5, h: 4.5, style: 'weeds' },
+  { id: 'north_patch', x: -91.5, z: -39.6, rx: 4.6, rz: 3.1, h: 2.2, style: 'grass' },
+  { id: 'meadow', x: -86, z: -14, rx: 10, rz: 12.5, h: 2.4, style: 'grass' },
+  { id: 'hedge_row', x: -93.2, z: 3.2, rx: 5, rz: 3.6, h: 2.3, style: 'grass' },
+  { id: 'jungle', x: -89, z: 18, rx: 8.5, rz: 10.5, h: 2.5, style: 'flowers' },
+  { id: 'fence_weeds', x: -97.4, z: 37.5, rx: 2.2, rz: 8, h: 2.2, style: 'weeds' },
   { id: 'tower_skirt', x: -79.5, z: 39, rx: 5, rz: 2.8, h: 2.2, style: 'flowers' },
   { id: 'lawn_edge', x: -67.5, z: -39, rx: 2.4, rz: 4, h: 2.2, style: 'grass' },
 ];
@@ -113,12 +117,15 @@ export function buildGarden(kit: Kit, rng: Rng, height: HeightFn): GardenBuild {
   zucchini(kit.frame(-76.5, height(-76.5, -4.5), -4.5, -0.8));
   zucchini(kit.frame(-81.5, height(-81.5, -26.5), -26.5, 2.0), 0.8);
   vines(kit, height, rng);
+  squashLeaves(kit, height, rng);
+  cornRow(kit, height, rng);
+  scarecrow(kit.frame(-77.2, height(-77.2, -33.5), -33.5, 0.5));
   for (const s of GARDEN_SPRINKLERS) sprinklerHead(kit.frame(s.x, height(s.x, s.z), s.z, 0), s.id === 'meadow');
   // ---- south: flower jungle + sunflowers + watchtower
   const sunflowers: [number, number, number, number][] = [[-95.2, 10, 12.5, 1.25], [-91, 22.5, 14, 1.75], [-96.2, 32, 11.5, 1.45], [-86.5, 12.5, 10.5, 1.95], [-84.5, 25.5, 12, 1.1]];
   for (const [x, z, h, yaw] of sunflowers) sunflower(kit.frame(x, height(x, z), z, yaw), h, rng);
   flowerJungle(kit, height, rng);
-  watchtower(kit, height);
+  watchtower(kit);
   // garden gate arch where the path leaves toward the corgi side (landmark entrance)
   gateArch(kit.frame(-81, height(-81, -63.5), -63.5, 0), rng);
   return { concealZones: GARDEN_CONCEAL.map((z) => ({ ...z })), sprinklers: GARDEN_SPRINKLERS.map((s) => ({ ...s, y: height(s.x, s.z) + s.y })), bookmarks: GARDEN_BOOKMARKS, district: GARDEN_DISTRICT };
@@ -381,6 +388,69 @@ function vines(kit: Kit, height: HeightFn, rng: Rng): void {
   }
 }
 
+/** Giant squash/rhubarb leaves on stalks around the pumpkin patch (visual jungle canopy). */
+function squashLeaves(kit: Kit, height: HeightFn, rng: Rng): void {
+  const spots: [number, number][] = [[-80.5, -19.5], [-77, -26.5], [-83.5, -24], [-76.5, -15.5], [-72.5, -9.5], [-89.5, -8.5], [-93.5, -2], [-78.5, -1.5], [-86.5, -3.5], [-92, -27], [-88, -30], [-73.5, -20.5], [-95.5, -17], [-83, -6]];
+  for (const [x, z] of spots) {
+    const n = 2 + (rng.next() < 0.5 ? 1 : 0);
+    for (let k = 0; k < n; k++) {
+      // low, drooping umbrella leaves (flat 7-sided cones) on short stalks: a knee-high canopy
+      const a = rng.range(0, TAU), h = rng.range(0.55, 1.15), r = rng.range(1.3, 1.9);
+      const lx = x + Math.cos(a) * 1.0, lz = z + Math.sin(a) * 1.0;
+      const f = kit.frame(lx, height(lx, lz), lz, Math.PI / 2 - a);
+      f.cyl(0, h / 2, -0.3, 0.07, h + 0.15, 0.1, 'leafDark', { pitch: -0.45, seg: 5, g: 'soft' });
+      f.cone(0, h + 0.05, 0.3, r, 0.42, k % 2 ? 'leafLight' : 'leaf', { pitch: 0.22, seg: 7, g: 'soft' });
+      f.box(0, h + 0.27, 0.3, 0.1, 0.05, r * 1.6, 'leafDark', { pitch: 0.22, g: 'noink', bev: 0 });
+    }
+  }
+}
+
+/**
+ * Scarecrow by the path junction (landmark, visible from the lawn): dressed as a big grumpy cat to
+ * scare the birds off the beds. Post + crossbar are solid (cover); the costume is visual.
+ */
+function scarecrow(f: Frame): void {
+  f.solidCyl('scarecrow', 0, 2.6, 0, 0.2, 5.2, 0.24, 'bark', { seg: 8 });
+  f.solid('scarecrow', 0, 3.6, 0, 4.4, 0.3, 0.3, 'bark', { bev: 0.06 });
+  f.cyl(0, 3.1, 0, 0.95, 2.0, 1.15, 'danger', { seg: 12, g: 'soft' });                     // shirt
+  for (const y of [2.5, 3.1, 3.7]) f.torus(0, y, 0, 1.02, 0.07, 'catBlack', { pitch: Math.PI / 2, seg: 14, g: 'noink' });   // flannel stripes
+  for (const s of [-1, 1]) {
+    f.cyl(s * 1.6, 3.6, 0, 0.32, 1.8, 0.4, 'danger', { roll: Math.PI / 2, seg: 8, g: 'soft' });   // sleeves
+    for (let k = 0; k < 3; k++) f.cone(s * (2.55 + k * 0.08), 3.6 + (k - 1) * 0.16, 0, 0.1, 0.55, 'sand', { roll: -s * Math.PI / 2, seg: 4, g: 'noink' });  // straw hands
+  }
+  f.sphere(0, 4.75, 0, 0.8, 0.75, 0.75, 'catGrey', { seg: 12 });                            // cat-mask head
+  for (const s of [-1, 1]) {
+    f.cone(s * 0.45, 5.45, 0, 0.28, 0.6, 'catGrey', { roll: -s * 0.3, seg: 6 });            // ears
+    f.sphere(s * 0.3, 4.85, -0.68, 0.14, 0.14, 0.06, 'accentHot', { seg: 8 });              // button eyes
+  }
+  f.box(0, 4.5, -0.72, 0.5, 0.06, 0.04, 'catBlack', { g: 'noink', bev: 0 });               // stitched frown
+  f.cyl(0, 5.35, 0.05, 1.25, 0.1, 1.25, 'sand', { seg: 14 });                               // straw hat brim
+  f.cyl(0, 5.6, 0.05, 0.55, 0.5, 0.65, 'sand', { seg: 12 });
+  f.sphere(0.9, 3.75, -0.1, 0.3, 0.26, 0.4, 'catBlack', { seg: 8 });                        // a crow on the arm, unimpressed
+  f.cone(0.9, 3.8, -0.5, 0.1, 0.3, 'accentHot', { pitch: -Math.PI / 2, seg: 4 });
+}
+
+/** Corn row along the fence above the dig hole: tall stalks with drooping leaves, cobs and tassels. */
+function cornRow(kit: Kit, height: HeightFn, rng: Rng): void {
+  for (let i = 0; i < 22; i++) {
+    const z = -61.5 + i * 0.95 + rng.range(-0.2, 0.2);
+    const x = (i % 2 ? -96.6 : -98.5) + rng.range(-0.25, 0.25);
+    if (Math.hypot(x + 100, z + 45) < 3.4) continue;              // the dig hole stays clear
+    const H = rng.range(5.2, 6.4);
+    const f = kit.frame(x, height(x, z), z, rng.range(0, TAU));
+    f.cyl(0, H / 2, 0, 0.1, H, 0.16, 'corn', { seg: 6, g: 'soft' });
+    for (let k = 0; k < 4; k++) {
+      const y = 1.4 + k * (H - 2.2) / 4, a = k * 2.4;
+      f.sphere(Math.cos(a) * 0.8, y, Math.sin(a) * 0.8, 1.05, 0.08, 0.2, 'cornLeaf', { yaw: Math.PI / 2 - a, roll: -0.35, seg: 6, g: 'soft' });
+    }
+    if (i % 3 === 0) {
+      f.cyl(0.22, H * 0.55, 0, 0.2, 0.9, 0.22, 'cornCob', { roll: 0.35, seg: 7 });
+      f.cone(0.3, H * 0.55 + 0.35, 0, 0.26, 0.9, 'cornLeaf', { roll: 0.35, seg: 6, g: 'soft' });
+    }
+    f.cone(0, H + 0.35, 0, 0.3, 0.8, 'grassDry', { seg: 5, g: 'soft' });
+  }
+}
+
 function sprinklerHead(f: Frame, impact: boolean): void {
   f.colCyl('sprinkler', 0, 0.55, 0, 0.35, 0.55);
   f.cyl(0, 0.55, 0, 0.12, 1.1, 0.2, 'metal', { seg: 8 });
@@ -418,7 +488,7 @@ function sunflower(f: Frame, H: number, rng: Rng): void {
 /** Flower-bed jungle: tall stems with big heads between the sunflowers and around the tower (visual). */
 function flowerJungle(kit: Kit, height: HeightFn, rng: Rng): void {
   const cols = ['zinnia', 'marigold', 'cosmos', 'catWhite', 'purple', 'pink'];
-  const areas: [number, number, number, number, number][] = [[-88, 18, 7, 8, 26], [-79.5, 39, 4.5, 2.4, 9], [-97, -4, 1.8, 22, 10]];
+  const areas: [number, number, number, number, number][] = [[-89, 18, 8, 9.5, 40], [-79.5, 39, 4.5, 2.4, 14], [-95, -14, 3, 11, 12], [-93, 3, 4, 3, 8]];
   let n = 0;
   for (const [cx, cz, rx, rz, count] of areas) {
     for (let i = 0; i < count; i++) {
@@ -445,7 +515,7 @@ function flowerJungle(kit: Kit, height: HeightFn, rng: Rng): void {
  * binoculars on its west half, low rails, and a stair of stacked terracotta pots (1.3 / 2.5 / 3.7 m)
  * on the east side. Deck spans x [-82.3, -77.7], z [29.7, 34.3].
  */
-function watchtower(kit: Kit, height: HeightFn): void {
+function watchtower(kit: Kit): void {
   const f = kit.frame(TOWER.x, 0, TOWER.z, 0);
   const S = 4.6, TOP = 4.9;
   f.solid('tower', 0, TOP - 0.2, 0, S, 0.4, S, 'fenceWood', { bev: 0.1 });
@@ -465,20 +535,32 @@ function watchtower(kit: Kit, height: HeightFn): void {
   f.box(S / 2 - 0.3 + 1.0, TOP + 5.0, -S / 2 + 0.3, 2.0, 1.1, 0.08, 'teamCorgis', { g: 'soft', bev: 0.03 });
   // the gnome (west half of the deck): collider cylinder r 1.25 up to the hat tip
   const g = f.sub(-1.05, TOP, 0.1, -Math.PI / 2);            // gnome faces +x (east, toward the yard)
-  g.colCyl('gnome', 0, 2.9, 0, 1.25, 2.9);
-  g.cyl(0, 1.0, 0, 1.0, 2.0, 1.3, 'teamCorgis', { seg: 14 });
-  g.torus(0, 1.2, 0, 1.08, 0.12, 'catBlack', { pitch: Math.PI / 2, seg: 16 });
-  g.box(0, 1.2, -1.12, 0.36, 0.3, 0.12, 'accentHot', { bev: 0.04 });
-  for (const s of [-1, 1]) g.sphere(s * 0.5, 0.12, -0.35, 0.42, 0.25, 0.6, 'catBlack', { seg: 8 });          // boots
-  g.sphere(0, 2.55, 0, 0.85, 0.8, 0.85, 'corgiCream', { seg: 14 });                                          // head
-  g.sphere(0, 2.1, -0.55, 0.85, 1.0, 0.55, 'catWhite', { seg: 12, g: 'soft' });                             // beard
-  g.sphere(0, 2.62, -0.82, 0.24, 0.24, 0.24, 'corgiRed', { seg: 8 });                                        // nose
-  g.cone(0, 4.15, 0.12, 1.02, 2.8, 'danger', { pitch: 0.12, seg: 14 });                                      // hat
-  // arms up, binoculars at the eyes
-  for (const s of [-1, 1]) g.cyl(s * 0.75, 2.2, -0.45, 0.2, 1.3, 0.24, 'teamCorgis', { pitch: -1.1, roll: s * 0.25, seg: 8 });
-  for (const s of [-1, 1]) g.cyl(s * 0.28, 2.75, -1.0, 0.2, 0.55, 0.2, 'catBlack', { pitch: Math.PI / 2, seg: 10 });
-  g.box(0, 2.75, -0.95, 0.4, 0.14, 0.2, 'catBlack', { bev: 0.03 });
+  gnomeStatue(g, 1.3);
+  // ladder on the north face (visual)
+  for (const s of [-1, 1]) f.box(s * 0.7, TOP / 2, -S / 2 - 0.35, 0.2, TOP + 0.6, 0.2, 'fenceDark', { bev: 0.04 });
+  for (let k = 0; k < 7; k++) f.box(0, 0.5 + k * 0.7, -S / 2 - 0.35, 1.4, 0.14, 0.14, 'fenceWood', { bev: 0.03 });
   // pot stair (east side, rising north toward the deck's open corner)
+  potStair(kit);
+}
+
+/** Big garden gnome (k = scale): collider cylinder up to the hat tip. Frame: feet at origin, faces -Z. */
+function gnomeStatue(g: Frame, k: number): void {
+  g.colCyl('gnome', 0, 2.9 * k, 0, 1.25 * k, 2.9 * k);
+  g.cyl(0, 1.0 * k, 0, 1.0 * k, 2.0 * k, 1.3 * k, 'teamCorgis', { seg: 14 });
+  g.torus(0, 1.2 * k, 0, 1.08 * k, 0.12 * k, 'catBlack', { pitch: Math.PI / 2, seg: 16 });
+  g.box(0, 1.2 * k, -1.12 * k, 0.36 * k, 0.3 * k, 0.12 * k, 'accentHot', { bev: 0.04 });
+  for (const s of [-1, 1]) g.sphere(s * 0.5 * k, 0.12 * k, -0.35 * k, 0.42 * k, 0.25 * k, 0.6 * k, 'catBlack', { seg: 8 });          // boots
+  g.sphere(0, 2.55 * k, 0, 0.85 * k, 0.8 * k, 0.85 * k, 'corgiCream', { seg: 14 });                                              // head
+  g.sphere(0, 2.1 * k, -0.55 * k, 0.85 * k, 1.0 * k, 0.55 * k, 'catWhite', { seg: 12, g: 'soft' });                             // beard
+  g.sphere(0, 2.62 * k, -0.82 * k, 0.24 * k, 0.24 * k, 0.24 * k, 'corgiRed', { seg: 8 });                                        // nose
+  g.cone(0, 4.15 * k, 0.12 * k, 1.02 * k, 2.8 * k, 'danger', { pitch: 0.12, seg: 14 });                                          // hat
+  // arms up, binoculars at the eyes
+  for (const s of [-1, 1]) g.cyl(s * 0.75 * k, 2.2 * k, -0.45 * k, 0.2 * k, 1.3 * k, 0.24 * k, 'teamCorgis', { pitch: -1.1, roll: s * 0.25, seg: 8 });
+  for (const s of [-1, 1]) g.cyl(s * 0.28 * k, 2.75 * k, -1.0 * k, 0.2 * k, 0.55 * k, 0.2 * k, 'catBlack', { pitch: Math.PI / 2, seg: 10 });
+  g.box(0, 2.75 * k, -0.95 * k, 0.4 * k, 0.14 * k, 0.2 * k, 'catBlack', { bev: 0.03 });
+}
+
+function potStair(kit: Kit): void {
   const pots: [number, number, number][] = [[4.2, 6.5, 1.3], [4.2, 4.0, 2.5], [4.2, 1.5, 3.7]];
   for (const [px, pz, top] of pots) {
     const R0 = 1.35, R1 = 1.05;
@@ -494,7 +576,6 @@ function watchtower(kit: Kit, height: HeightFn): void {
     }
     pf.cyl(0, top - 0.06, 0, R0 - 0.2, 0.1, R0 - 0.2, 'mulch', { seg: 14, g: 'noink' });
     pf.cone(0.4, top + 0.3, -0.2, 0.25, 0.6, 'leaf', { seg: 5, g: 'soft' });
-    void height;
   }
 }
 

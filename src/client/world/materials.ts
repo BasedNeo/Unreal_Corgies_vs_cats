@@ -5,10 +5,13 @@
 //    TSL toonOutlinePass inks every material flagged isMeshToonNodeMaterial; clearing the flag on our
 //    own instance opts it out (lighting model unchanged). PROPOSED for style-webgpu.js.
 //  - waterMaterial: translucent stylized water (depth tint, shore foam, drifting ripple rings).
+//  - G1: WORLD_WEATHER uniforms (wet, rain, wind) shared by every world material: rain darkens and
+//    cools the ground, fills puddles in flat low spots and on paths (with rain ripple rings), and wind
+//    scales foliage sway amplitude (never its frequency, so gusts don't make the grass jump).
 import * as THREE from 'three/webgpu';
 import {
   attribute, positionWorld, positionLocal, uv, time, sin, vec3, float, mix, smoothstep, step, fract,
-  mx_noise_float, uniform, abs, length, vec2, max, min, normalize, normalView, transformNormalToView,
+  mx_noise_float, uniform, abs, length, vec2, max, min, normalize, normalView, transformNormalToView, floor, normalWorld,
 } from 'three/tsl';
 import { toon } from '../style/style-webgpu.js';
 import { worldColor } from './world-palette';
@@ -41,6 +44,19 @@ export function toonNoInk(p: Params = {}): THREE.MeshToonNodeMaterial {
 }
 
 const c = (key: string) => uniform(worldColor(key).clone());
+
+/** Weather uniforms shared by all world materials (driven by the world view from the weather sample). */
+export const WORLD_WEATHER = {
+  /** Ground wetness 0..1 (darkening, puddles). */
+  wet: uniform(0),
+  /** Rain intensity 0..1 (puddle ripple rings). */
+  rain: uniform(0),
+  /** Foliage sway amplitude multiplier (1 = calm breeze). */
+  wind: uniform(1),
+  /** Up to two running sprinklers: (x, z, reach, wetness 0..1) — their sweep darkens the grass. */
+  spr0: uniform(new THREE.Vector4(0, 0, 1, 0)),
+  spr1: uniform(new THREE.Vector4(0, 0, 1, 0)),
+};
 
 export interface TerrainMaterial { material: THREE.MeshToonNodeMaterial; uniforms: Record<string, ReturnType<typeof uniform>> }
 
@@ -81,6 +97,31 @@ export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.
   // Neighbours' ground beyond the fence line: a little darker and flatter so the yard reads as the stage.
   const outside = smoothstep(U.yardHalf, U.yardHalf.add(14), max(abs(p.x), abs(p.z)));
   col = mix(col, mix(U.grassDark, U.grassDry, 0.35), outside.mul(0.45));
+  // G1 rain: soaked ground reads darker and cooler; puddles gather on flat, low, trodden spots and
+  // mirror the grey sky; raindrops ring them. Everything scales with WORLD_WEATHER (0 = dry: no-op).
+  const W = WORLD_WEATHER;
+  const sprWet = (u: typeof W.spr0) => u.w.mul(float(1).sub(smoothstep(u.z.sub(1.5), u.z.add(0.5), length(p.xz.sub(vec2(u.x, u.y))))));
+  const wetAll = max(W.wet, max(sprWet(W.spr0), sprWet(W.spr1)));
+  const soaked = col.mul(vec3(0.66, 0.72, 0.8));
+  col = mix(col, soaked, wetAll.mul(0.9));
+  if (detail) {
+    const flat = smoothstep(0.965, 0.995, normalWorld.y);
+    // puddles: mostly on trodden dirt/mulch, only the lowest spots of the lawn
+    const bare = max(surf.x, surf.z);
+    const lowSpot = mx_noise_float(p.xz.mul(0.13).add(vec2(3.1, -7.7))).add(bare.mul(0.55)).add(nFine.mul(0.06));
+    const puddle = smoothstep(0.56, 0.6, lowSpot).mul(flat).mul(smoothstep(0.35, 0.95, wetAll)).mul(float(1).sub(outside));
+    // dark water mirroring the grey sky, a lighter rim toward the deeper middle (no white blobs)
+    const sheen = mix(vec3(0.16, 0.19, 0.23), vec3(0.3, 0.35, 0.42), smoothstep(0.6, 0.72, lowSpot));
+    // raindrop rings: one ring per 1.3 m cell, random phase, only on puddles
+    const cellP = p.xz.div(1.3);
+    const cid = floor(cellP);
+    const ph = fract(sin(cid.x.mul(127.1).add(cid.y.mul(311.7))).mul(43758.5453));
+    const age = fract(time.mul(1.4).add(ph));
+    const rd = length(fract(cellP).sub(0.5));
+    const ring = smoothstep(0.05, 0.0, abs(rd.sub(age.mul(0.45)))).mul(float(1).sub(age)).mul(W.rain);
+    col = mix(col, sheen, puddle.mul(0.9));
+    col = col.add(vec3(ring.mul(puddle).mul(0.22)));
+  }
   const material = ink ? toonFrom() : toonNoInk();
   material.colorNode = col;
   // Stylized lighting: bend shading normals toward up so gentle lawn undulation doesn't flip toon
@@ -96,7 +137,7 @@ export function createFoliageMaterial(strength: number, windDir: THREE.Vector2, 
     const h = uv().y.mul(uv().y);
     const phase = positionLocal.x.mul(0.11).add(positionLocal.z.mul(0.07));
     const sway = sin(time.mul(1.4).add(phase)).add(sin(time.mul(3.1).add(phase.mul(1.7))).mul(0.35));
-    const amt = sway.mul(h).mul(strength);
+    const amt = sway.mul(h).mul(strength).mul(WORLD_WEATHER.wind);
     m.positionNode = positionLocal.add(vec3(amt.mul(windDir.x), float(0), amt.mul(windDir.y)));
   }
   return m;

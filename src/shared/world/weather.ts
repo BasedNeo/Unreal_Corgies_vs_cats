@@ -90,12 +90,14 @@ const MIN = 60 * TICK_HZ;
 interface Segment { kind: WeatherKind; start: number; end: number }
 
 const segCache = new Map<string, Segment[]>();
+let lastSeed = NaN, lastK = NaN, lastSegs: Segment[] = [];
 
 /** The weather segments of cycle k (ticks, absolute). The last one is always 'clear'. */
 export function weatherCycle(seed: number, k: number): Segment[] {
+  if (seed === lastSeed && k === lastK) return lastSegs;      // hot path: no key string per call
   const key = `${seed}:${k}`;
   let segs = segCache.get(key);
-  if (segs) return segs;
+  if (segs) { lastSeed = seed; lastK = k; lastSegs = segs; return segs; }
   const s = hashSeed(`weather:${seed}`) | 0;
   const r = (i: number) => hash2(k, i, s);
   const q = (mins: number) => Math.floor(mins * MIN);
@@ -112,6 +114,7 @@ export function weatherCycle(seed: number, k: number): Segment[] {
   segs.push({ kind: 'clear', start: t, end: (k + 1) * CYCLE });
   if (segCache.size > 64) segCache.clear();
   segCache.set(key, segs);
+  lastSeed = seed; lastK = k; lastSegs = segs;
   return segs;
 }
 
