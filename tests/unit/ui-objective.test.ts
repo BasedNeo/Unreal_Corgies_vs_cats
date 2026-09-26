@@ -1,0 +1,21 @@
+import { describe, expect, it } from 'vitest';
+import { objectiveForTeam } from '../../src/client/ui/objective';
+
+describe('objectiveForTeam', () => {
+  it('leaves corgis and team deathmatch untouched', () => {
+    expect(objectiveForTeam('Defend the yard! Cats attack in 4', 'yard-skirmish', 0)).toBe('Defend the yard! Cats attack in 4');
+    expect(objectiveForTeam('Team Deathmatch — first to 30', 'team-deathmatch', 1)).toBe('Team Deathmatch — first to 30');
+  });
+
+  it('rewrites the skirmish lines for a cat', () => {
+    const cat = (t: string) => objectiveForTeam(t, 'yard-skirmish', 1);
+    expect(cat('Defend the yard! Cats attack in 4')).toBe('Raid the yard! Attack in 4');
+    expect(cat('Wave 2/5 — 7 cats left')).toBe('Wave 2/5 — take down the corgi squad (7 cats in the raid)');
+    expect(cat('FINAL WAVE (5/5) — 1 cat left')).toBe('FINAL WAVE (5/5) — take down the corgi squad (1 cat in the raid)');
+    expect(cat('Wave 3 cleared! Wave 4 in 6')).toBe('Wave 3 beaten back. Regroup: wave 4 in 6');
+    expect(cat('Wave 4 cleared! Wave 5 (FINAL) in 2')).toBe('Wave 4 beaten back. Regroup: wave 5 (FINAL) in 2');
+    expect(cat('Squad down! 1 retry left · 6 cats left')).toBe('Corgi squad wiped! They can regroup 1 more time');
+    expect(cat('Yard secured! The cats retreat.')).toBe('The corgis held the yard. Retreat!');
+    expect(cat('The cats took the yard! (wave 3/5)')).toBe('The cats took the yard! (wave 3/5)');
+  });
+});

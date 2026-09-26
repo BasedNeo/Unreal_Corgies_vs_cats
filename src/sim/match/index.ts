@@ -283,8 +283,9 @@ function updateSkirmish(sim: Sim, rt: MatchRuntime, dt: number, kills: KillRecor
 
   // spawn the wave in batches while under the alive cap
   rt.spawnTimer -= dt;
-  if (rt.queue.length && rt.spawnTimer <= 0 && catsAlive < cfg.maxAlive) {
-    const n = Math.min(cfg.spawnBatch, rt.queue.length, cfg.maxAlive - catsAlive);
+  const cap = cfg.waves[ms.wave - 1]?.maxAlive ?? cfg.maxAlive;
+  if (rt.queue.length && rt.spawnTimer <= 0 && catsAlive < cap) {
+    const n = Math.min(cfg.spawnBatch, rt.queue.length, cap - catsAlive);
     for (let i = 0; i < n; i++) spawnWaveEnemy(sim, rt.queue.shift()!, ++rt.spawned);
     catsAlive += n;
     rt.spawnTimer = cfg.spawnInterval;

@@ -52,7 +52,7 @@ async function run(label, bots, afk, seed, mode = 'yard-skirmish') {
 const MODES = opt('modes', 'skirmish').split(',');
 for (const seed of SEEDS) {
   if (MODES.includes('tdm')) {
-    await run('TDM offline default (4,5) you=corgi', [4, 5], false, seed, 'team-deathmatch');
+    await run('TDM offline default (4,4) you=corgi', [4, 4], false, seed, 'team-deathmatch');
     await run('TDM mirrored (5,5) you=corgi', [5, 5], false, seed, 'team-deathmatch');
   }
   if (!MODES.includes('skirmish')) continue;

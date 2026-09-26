@@ -18,6 +18,11 @@ export interface ServerConfig {
   maxRoomsPerIp: number;
   /** Trust X-Forwarded-For for per-IP limits (only behind your own reverse proxy). */
   trustProxy: boolean;
+  /**
+   * `/stats?reset=1` (restart the tick-max window) is honoured from a direct loopback peer, or anywhere with
+   * `&token=<statsToken>` (env STATS_TOKEN). Otherwise anyone could hide overruns from a monitor (QA W1).
+   */
+  statsToken: string | null;
   /** Empty rooms are destroyed after this long (ms). */
   roomTtlMs: number;
   /** A connection must send 'hello' within this long (ms). */
@@ -77,7 +82,7 @@ function bots(raw: string | undefined, def: [number, number]): [number, number] 
 export function loadConfig(env: Env = process.env, defaults: Partial<ServerConfig> = {}): ServerConfig {
   const d: ServerConfig = {
     host: '0.0.0.0', port: 8787, mode: 'yard-skirmish', bots: [3, 0], seed: 1,
-    maxRooms: 32, maxConnections: 256, maxConnectionsPerIp: 16, maxRoomsPerIp: 3, trustProxy: false,
+    maxRooms: 32, maxConnections: 256, maxConnectionsPerIp: 16, maxRoomsPerIp: 3, trustProxy: false, statsToken: null,
     roomTtlMs: 10_000, helloTimeoutMs: 10_000, idleTimeoutMs: 30_000, heartbeatMs: 5_000, peerTimeoutMs: 20_000,
     maxPayload: 16 * 1024, msgRate: 120, msgBurst: 240, byteRate: 64 * 1024, byteBurst: 128 * 1024,
     kickScore: 20, maxBufferedBytes: 512 * 1024, congestionKickMs: 15_000,
@@ -92,13 +97,14 @@ export function loadConfig(env: Env = process.env, defaults: Partial<ServerConfi
     mode: env.MODE ?? d.mode,
     // Skirmish/boss-rush: a 3-bot corgi squad fights beside the players (cats come from the waves).
     // Team deathmatch: both teams bot-filled. (QA W1 P0: 0,4 made solo online skirmish unwinnable.)
-    bots: bots(env.BOTS, defaults.bots ?? ((env.MODE ?? d.mode) === 'team-deathmatch' ? [4, 5] : d.bots)),
+    bots: bots(env.BOTS, defaults.bots ?? ((env.MODE ?? d.mode) === 'team-deathmatch' ? [4, 4] : d.bots)),
     seed: num(env, 'SEED', d.seed),
     maxRooms: num(env, 'MAX_ROOMS', d.maxRooms, 1),
     maxConnections: num(env, 'MAX_CONNECTIONS', d.maxConnections, 1),
     maxConnectionsPerIp: num(env, 'MAX_CONN_PER_IP', d.maxConnectionsPerIp, 1),
     maxRoomsPerIp: num(env, 'MAX_ROOMS_PER_IP', d.maxRoomsPerIp, 1),
     trustProxy: env.TRUST_PROXY ? env.TRUST_PROXY === '1' || env.TRUST_PROXY === 'true' : d.trustProxy,
+    statsToken: env.STATS_TOKEN || d.statsToken,
     roomTtlMs: num(env, 'ROOM_TTL_MS', d.roomTtlMs, 0),
     helloTimeoutMs: num(env, 'HELLO_TIMEOUT_MS', d.helloTimeoutMs, 100),
     idleTimeoutMs: num(env, 'IDLE_TIMEOUT_MS', d.idleTimeoutMs, 1000),

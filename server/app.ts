@@ -107,11 +107,19 @@ export async function startGameServer(cfg: ServerConfig): Promise<GameServer> {
     memoryMB: Math.round(process.memoryUsage().rss / 1048576),
   });
 
+  const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+  const mayResetStats = (req: http.IncomingMessage, query: string): boolean => {
+    const token = new URLSearchParams(query).get('token');
+    if (cfg.statsToken && token === cfg.statsToken) return true;
+    // a direct local peer only: behind a same-host reverse proxy every request arrives from loopback
+    return LOOPBACK.has(req.socket.remoteAddress ?? '') && req.headers['x-forwarded-for'] === undefined;
+  };
+
   const httpServer = http.createServer((req, res) => {
     const [url, query = ''] = (req.url ?? '/').split('?');
     if (url === '/health' || url === '/stats') {
-      // /stats?reset=1 starts a new tick-max/overrun window (soak tools skip warm-up that way).
-      const body = JSON.stringify(url === '/health' ? { ok: !shuttingDown, rooms: rooms.size, connections: clients.size } : stats(/(^|&)reset=1(&|$)/.test(query)));
+      // /stats?reset=1 starts a new tick-max/overrun window (soak tools skip warm-up that way) — local or token only.
+      const body = JSON.stringify(url === '/health' ? { ok: !shuttingDown, rooms: rooms.size, connections: clients.size } : stats(/(^|&)reset=1(&|$)/.test(query) && mayResetStats(req, query)));
       res.writeHead(shuttingDown ? 503 : 200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(body);
       return;

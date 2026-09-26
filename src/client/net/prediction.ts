@@ -274,7 +274,7 @@ export class LocalPredictor {
       const first = pending[0];
       e.prevButtons = first ? Math.floor(first.buttons) & 0x3ff : 0;
       c.jumpHeld = (e.prevButtons & Btn.Jump) !== 0;
-      c.jumpBuffer = 0;
+      c.jumpBuffer = 0; c.crouchBuffer = 0;
     }
     const grounded = (s.flags & EFlag.Grounded) !== 0;
     c.grounded = grounded;

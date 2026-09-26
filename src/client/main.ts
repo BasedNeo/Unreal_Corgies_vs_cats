@@ -55,7 +55,7 @@ async function main(): Promise<void> {
   const serverUrl = serverUrlForPage(); // ?server / ?online / ?room / page served by server/prod.ts
   const mode = params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish';
   // Skirmish: a corgi squad of bots with you; cat waves come from the match rules. TDM: bot-filled teams.
-  const bots = (params.get('bots') ?? (mode === 'team-deathmatch' ? '4,5' : '3,0')).split(',').map(Number) as [number, number];
+  const bots = (params.get('bots') ?? (mode === 'team-deathmatch' ? '4,4' : '3,0')).split(',').map(Number) as [number, number];
   // The session (authority + connection) starts only when the player presses PLAY — or immediately for
   // ?autoplay / online links — so an offline match never runs behind the menu (QA W1 FTUE finding).
   let net: NetClient | null = null;

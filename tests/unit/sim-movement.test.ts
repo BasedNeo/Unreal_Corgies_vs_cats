@@ -112,4 +112,51 @@ describe('slide and ground pound', () => {
     expect(seen).toContain('ground_pound');
     expect(e.char!.grounded).toBe(true);
   });
+
+  it('buffers a crouch tapped right after takeoff into a pound (QA W1: the press was dropped)', async () => {
+    const { sim, e } = await makeSim();
+    for (let i = 0; i < 30; i++) sim.step();
+    let seq = 1;
+    const seen: string[] = [];
+    const go = (b: number) => { sim.setInput(e.id, { seq: seq++, mx: 0, mz: 0, yaw: 0, pitch: 0, buttons: b, rt: 0 }); sim.step(); for (const v of sim.drainEvents()) seen.push(v.e === 'ability' ? v.ability : v.e); };
+    go(Btn.Jump); go(Btn.Jump | Btn.Crouch); // one tick into the jump: airTime is still inside the no-pound window
+    expect(e.char!.pounding).toBe(false);
+    for (let i = 0; i < 40; i++) go(Btn.Jump);
+    expect(seen).toContain('ground_pound');
+  });
+
+  it('a crouch on the ground does not carry into the next jump as a pound', async () => {
+    const { sim, e } = await makeSim();
+    for (let i = 0; i < 30; i++) sim.step();
+    let seq = 1;
+    const seen: string[] = [];
+    const go = (b: number) => { sim.setInput(e.id, { seq: seq++, mx: 0, mz: 0, yaw: 0, pitch: 0, buttons: b, rt: 0 }); sim.step(); for (const v of sim.drainEvents()) seen.push(v.e === 'ability' ? v.ability : v.e); };
+    go(Btn.Crouch); go(Btn.Jump);
+    for (let i = 0; i < 60; i++) go(Btn.Jump);
+    expect(seen).toContain('jump');
+    expect(seen).not.toContain('ground_pound');
+  });
+
+  it('honours the whole jump buffer: a press 7 ticks (~117 ms) before touchdown still jumps', async () => {
+    // jump, double jump, then press again shortly before landing (the press can only be buffered: no jumps left)
+    const hop = async (earlyPressAt: number) => {
+      const { sim, e } = await makeSim();
+      for (let i = 0; i < 30; i++) sim.step();
+      let seq = 1, t = 0, land = -1, rejump = -1;
+      const go = (b: number) => {
+        sim.setInput(e.id, { seq: seq++, mx: 0, mz: 0, yaw: 0, pitch: 0, buttons: b, rt: 0 }); sim.step(); t++;
+        for (const v of sim.drainEvents()) if (v.e === 'jump' && land >= 0 && rejump < 0) rejump = t;
+        if (land < 0 && t > 20 && e.char!.grounded) land = t;
+      };
+      go(Btn.Jump); for (let i = 0; i < 12; i++) go(0);
+      go(Btn.Jump); while (t < 200 && (land < 0 || t < land + 5)) go(t + 1 === earlyPressAt ? Btn.Jump : 0);
+      return { land, rejump };
+    };
+    const dry = await hop(-1);
+    expect(dry.land).toBeGreaterThan(20);
+    expect(dry.rejump).toBe(-1);
+    const early = await hop(dry.land - 7);
+    expect(early.land).toBe(dry.land);
+    expect(early.rejump).toBe(dry.land + 1);
+  });
 });

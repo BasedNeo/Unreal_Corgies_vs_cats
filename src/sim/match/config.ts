@@ -9,6 +9,8 @@ export interface WaveDef {
   label?: string;
   /** B1 hook: a boss (BOSSES id) joins this wave; it holds the wave open and its defeat clears it. */
   boss?: string;
+  /** Alive cap for this wave (overrides SkirmishConfig.maxAlive) — keeps the opening waves learnable. */
+  maxAlive?: number;
 }
 
 export interface SkirmishConfig {
@@ -48,8 +50,9 @@ export const SKIRMISH: SkirmishConfig = {
   intermission: 7,
   endedHold: 12,
   waves: [
-    { counts: { grunt: 4 } },
-    { counts: { grunt: 4, kitten: 3 } },
+    // opening waves trickle in (few alive at once) so a new player learns to fight one or two cats at a time
+    { counts: { grunt: 3 }, maxAlive: 2 },
+    { counts: { grunt: 4, kitten: 2 }, maxAlive: 4 },
     { counts: { grunt: 4, sniper: 1, kitten: 4 } },
     { counts: { grunt: 5, sniper: 2, brute: 1, kitten: 4 } },
     // finale: the Vac-Tank (B1) with a light escort (the old final wave was 6 grunts, 2 snipers, 2 brutes, 6 kittens)

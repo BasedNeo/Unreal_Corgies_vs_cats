@@ -17,6 +17,10 @@ const SLIDE_BOOST = 1.25;
 const SLIDE_FRICTION = 0.55;
 const SLIDE_COOLDOWN = 0.35;
 const POUND_SPEED = -26;
+/** A crouch press in the air stays buffered this long (s), so C tapped right after takeoff still pounds. */
+const POUND_BUFFER = 0.2;
+/** Minimum air time before a pound (s): no accidental slam off a tiny hop. */
+const POUND_MIN_AIR = 0.15;
 
 /** Reused result object for KCC collision queries (no per-tick allocation). */
 let collisionScratch: CharacterCollision | undefined;
@@ -82,14 +86,19 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
   }
 
   // --- ground pound: crouch in the air slams down ---
-  if (pressed(e, Btn.Crouch) && !c.grounded && !c.pounding && c.airTime > 0.15) {
-    c.pounding = true;
+  // The press is buffered (QA W1: a jump starts airTime at the coyote value, so C in the first ~30 ms was lost).
+  if (pressed(e, Btn.Crouch) && !c.grounded && !c.pounding) c.crouchBuffer = POUND_BUFFER;
+  else c.crouchBuffer = Math.max(0, c.crouchBuffer - dt);
+  if (c.crouchBuffer > 0 && !c.grounded && !c.pounding && c.airTime > POUND_MIN_AIR) {
+    c.pounding = true; c.crouchBuffer = 0;
     e.vel.x *= 0.2; e.vel.z *= 0.2;
     e.vel.y = POUND_SPEED;
   }
 
   // --- jumping: buffer, coyote time, double jump, variable height ---
-  if (pressed(e, Btn.Jump)) c.jumpBuffer = m.jumpBuffer;
+  // Landing is detected at the END of a tick, so a buffered jump fires one tick after touchdown: + dt keeps the
+  // effective window equal to m.jumpBuffer (QA W1 measured 100 ms for the configured 120).
+  if (pressed(e, Btn.Jump)) c.jumpBuffer = m.jumpBuffer + dt;
   else c.jumpBuffer = Math.max(0, c.jumpBuffer - dt);
   const jumpHeldNow = held(e, Btn.Jump);
   if (c.jumpBuffer > 0 && !c.pounding) {
@@ -162,7 +171,7 @@ export function stepCharacter(ctx: MoveContext, e: SimEntity, dt: number): void 
       ctx.emit?.({ e: 'land', id: e.id, impact: c.landImpact });
       if (c.pounding) ctx.emit?.({ e: 'ability', id: e.id, ability: 'ground_pound', x: e.pos.x, y: e.pos.y, z: e.pos.z });
     }
-    c.pounding = false;
+    c.pounding = false; c.crouchBuffer = 0;
     if (e.vel.y < 0) e.vel.y = 0;
     c.airTime = 0; c.jumpsUsed = 0;
   } else {

@@ -148,7 +148,7 @@ function seatRider(sim: Sim, kart: SimEntity, rider: SimEntity): void {
   rider.flags = (rider.flags & ~(EFlag.Grounded | EFlag.Sprinting | EFlag.Aiming | EFlag.Crouching | EFlag.Firing))
     | EFlag.Mounted | (kart.kart!.grounded ? EFlag.Grounded : 0);
   const c = rider.char;
-  if (c) { c.grounded = false; c.airTime = 0; c.jumpBuffer = 0; c.jumpsUsed = 0; c.sprinting = false; c.slideTime = 0; c.pounding = false; }
+  if (c) { c.grounded = false; c.airTime = 0; c.jumpBuffer = 0; c.crouchBuffer = 0; c.jumpsUsed = 0; c.sprinting = false; c.slideTime = 0; c.pounding = false; }
 }
 
 export function mountKart(sim: Sim, kart: SimEntity, rider: SimEntity): boolean {

@@ -21,7 +21,7 @@ const MIN_BOOM = 0.2;
 
 export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): CameraRig {
   const pivot = new THREE.Vector3();
-  let dist = 4.2, shoulder: number = AIM_RAY.shoulderHip, fov = 62, trauma = 0, first = true;
+  let dist = 4.2, shoulder: number = AIM_RAY.shoulderHip, fov = 62, aimK = 0, speedFov = 0, trauma = 0, first = true;
   const ray = new THREE.Raycaster();
   const tmp = new THREE.Vector3(), dir = new THREE.Vector3(), want = new THREE.Vector3();
   let solids: THREE.Object3D[] = [];
@@ -57,10 +57,13 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
       }
       const footDist = aiming ? 2.3 : 4.2 + Math.min(1.2, speed * 0.06);
       const footShoulder = aiming ? AIM_RAY.shoulderAim : AIM_RAY.shoulderHip;
-      const footFov = aiming ? 48 : 62 + Math.min(8, speed * 0.5);
+      // aim zoom lands in ~0.12 s (QA W1: λ8 felt sluggish); the speed kick stays gentle
+      aimK = damp(aimK, aiming ? 1 : 0, 26, dt);
+      speedFov = damp(speedFov, Math.min(8, speed * 0.5), 8, dt);
+      const footFov = (62 + speedFov) * (1 - aimK) + 48 * aimK;
       dist = damp(dist, mix(footDist, lastVeh.distance), 10, dt);
       shoulder = damp(shoulder, mix(footShoulder, lastVeh.shoulder), 18, dt);
-      fov = damp(fov, mix(footFov, lastVeh.fov), 8, dt);
+      fov = mix(footFov, lastVeh.fov);
       camera.fov = fov; camera.updateProjectionMatrix();
       const cp = Math.cos(pitch), sp = Math.sin(pitch);
       // Direction from pivot to camera (behind and above the view direction).

@@ -25,6 +25,8 @@ export interface CharacterState {
   slideCooldown: number;
   /** True while slamming down in a ground pound. */
   pounding: boolean;
+  /** Seconds an in-air crouch press stays buffered for a ground pound. */
+  crouchBuffer: number;
   /**
    * Collider position after the last full controller sweep that left the character resting (grounded, still).
    * While the collider is still exactly there and the character has no intent, the sweep is skipped; anything

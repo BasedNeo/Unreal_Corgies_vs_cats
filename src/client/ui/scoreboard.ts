@@ -36,7 +36,8 @@ export function kdText(k: number, d: number): string {
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-export function renderScoreboardHtml(m: ScoreboardModel, teamScores: [number, number] | null, classIcon: (cls: ClassId) => string, classLabel: (cls: ClassId) => string): string {
+/** `empty`: per-team text for a column with no roster rows (skirmish cats are PvE waves, not players). */
+export function renderScoreboardHtml(m: ScoreboardModel, teamScores: [number, number] | null, classIcon: (cls: ClassId) => string, classLabel: (cls: ClassId) => string, empty: [string, string] = ['No one here yet', 'No one here yet']): string {
   const col = (t: 0 | 1) => {
     const name = t === 0 ? 'CORGIS' : 'CATS';
     const rows = m.teams[t].map((r) => `
@@ -45,7 +46,7 @@ export function renderScoreboardHtml(m: ScoreboardModel, teamScores: [number, nu
         <td class="sb-name">${esc(r.name)}${r.bot ? '<span class="sb-bot">BOT</span>' : ''}${r.local ? '<span class="sb-you">YOU</span>' : ''}</td>
         <td class="num">${r.kills}</td><td class="num">${r.deaths}</td><td class="num">${kdText(r.kills, r.deaths)}</td>
         <td class="num strong">${r.score}</td><td class="num dim">${r.bot ? '—' : Math.round(r.ping)}</td>
-      </tr>`).join('') || `<tr><td colspan="7" class="sb-empty">No one here yet</td></tr>`;
+      </tr>`).join('') || `<tr><td colspan="7" class="sb-empty">${esc(empty[t])}</td></tr>`;
     return `
       <section class="sb-team t${t}">
         <header><span class="sb-tname">${name}</span><span class="sb-tscore">${teamScores ? teamScores[t] : m.totals[t]}</span></header>

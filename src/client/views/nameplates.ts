@@ -1,10 +1,11 @@
-// Screen-space nameplates for other characters: team-colored names with a compact health pip that
-// appears once damaged. DOM elements projected from 3D each frame (≤ 24 entities — cheap).
+// Screen-space nameplates for other characters: class icon + team-colored name, and a compact health pip
+// that appears once damaged. DOM elements projected from 3D each frame (≤ 24 entities — cheap).
 import * as THREE from 'three/webgpu';
 import type { EntityState, RosterEntry } from '../../shared/protocol';
-import { EFlag, EntityKind, Team } from '../../shared/types';
+import { CLASS_IDS, EFlag, EntityKind, Team } from '../../shared/types';
+import { classIcon } from '../ui/icons';
 
-interface Plate { el: HTMLDivElement; name: HTMLSpanElement; bar: HTMLDivElement; fill: HTMLDivElement }
+interface Plate { el: HTMLDivElement; icon: HTMLSpanElement; name: HTMLSpanElement; bar: HTMLDivElement; fill: HTMLDivElement; cls: number; ally: boolean | null }
 
 export class Nameplates {
   private root: HTMLDivElement;
@@ -16,6 +17,9 @@ export class Nameplates {
     this.root = document.createElement('div');
     this.root.id = 'nameplates';
     this.root.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden';
+    const css = document.createElement('style');
+    css.textContent = '#nameplates svg{display:block;width:100%;height:100%}';
+    this.root.appendChild(css);
     parent.prepend(this.root);
   }
 
@@ -44,7 +48,13 @@ export class Nameplates {
       const info = this.names.get(id);
       const ally = s.team === localTeam;
       p.name.textContent = info?.name ?? (s.team === Team.Cats ? 'Cat' : 'Pup');
-      p.name.style.color = ally ? '#8fc1ff' : '#ff8c95';
+      if (p.cls !== s.cls || p.ally !== ally) {
+        // the class reads at a glance (QA W1: which cat is the sniper?) — icons only rebuilt on change
+        p.cls = s.cls; p.ally = ally;
+        p.icon.innerHTML = classIcon(CLASS_IDS[s.cls] ?? 'assault');
+        p.icon.style.color = ally ? '#5da2ff' : '#ff4d5e';
+        p.name.style.color = ally ? '#8fc1ff' : '#ff8c95';
+      }
       const frac = s.maxHp ? s.hp / s.maxHp : 1;
       p.bar.style.display = frac < 0.999 ? 'block' : 'none';
       p.fill.style.width = `${Math.max(0, frac * 100).toFixed(0)}%`;
@@ -56,6 +66,8 @@ export class Nameplates {
   private make(): Plate {
     const el = document.createElement('div');
     el.style.cssText = 'position:absolute;left:0;top:0;text-align:center;will-change:transform;white-space:nowrap';
+    const icon = document.createElement('span');
+    icon.style.cssText = 'display:inline-block;width:15px;height:15px;margin-right:3px;vertical-align:-3px;filter:drop-shadow(0 0 1.5px #1a120c)';
     const name = document.createElement('span');
     name.style.cssText = 'font:800 13px/1 system-ui,sans-serif;text-shadow:0 0 3px #1a120c,0 1px 0 #1a120c,1px 0 0 #1a120c,-1px 0 0 #1a120c';
     const bar = document.createElement('div');
@@ -63,8 +75,8 @@ export class Nameplates {
     const fill = document.createElement('div');
     fill.style.cssText = 'height:100%;width:100%';
     bar.appendChild(fill);
-    el.append(name, bar);
+    el.append(icon, name, bar);
     this.root.appendChild(el);
-    return { el, name, bar, fill };
+    return { el, icon, name, bar, fill, cls: -1, ally: null };
   }
 }
