@@ -67,7 +67,7 @@ export const ABILITIES: Record<AbilityId, AbilityDef> = {
   },
   squeak_barrier: {
     id: 'squeak_barrier', name: 'Squeak Barrier', catName: 'Scratch Wall', kind: 'barrier',
-    description: 'Raise a 4 m wide squeaky-toy wall with 300 hp for 8 s that blocks shots.',
+    description: 'Raise a 4 m wide squeaky-toy wall with 300 hp for 8 s that blocks enemy shots; your squad fires through it.',
     cooldown: 18, duration: 8, range: 4, halfAngle: 0, damage: 0, knockback: 0, knockUp: 0,
     revealRange: 0, breakOnFire: false, noise: 12, live: true,
   },

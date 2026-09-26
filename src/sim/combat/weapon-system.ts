@@ -9,7 +9,8 @@ import { EFlag } from '../../shared/types';
 import { viewDir } from '../../shared/math';
 import { WEAPONS, COMBAT_RULES, AIM_RAY, type WeaponDef } from '../../shared/content/weapons';
 import { abilityDef } from '../../shared/content/abilities';
-import { rayCapsule, worldRay } from './geometry';
+import { rayCapsule, worldRay, type RayPass } from './geometry';
+import { friendlyShotPass } from './ability-core';
 import { TargetSet, rewindTick } from './lagcomp';
 import { applyDamage } from './damage';
 import { spawnProjectile } from './projectiles';
@@ -23,9 +24,9 @@ const targets = new TargetSet();
 /** Result of the last trace (module scratch — the sim is single-threaded). */
 const tr = { t: 0, idx: -1 };
 
-/** Closest hit along a unit ray among static world geometry and the prepared target set. */
-function trace(sim: Sim, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number, ts: TargetSet): void {
-  let best = worldRay(sim, ox, oy, oz, dx, dy, dz, maxT);
+/** Closest hit along a unit ray among static world geometry and the prepared target set (`pass`: own shields). */
+function trace(sim: Sim, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number, ts: TargetSet, pass?: RayPass): void {
+  let best = worldRay(sim, ox, oy, oz, dx, dy, dz, maxT, pass);
   let bi = -1;
   for (let i = 0; i < ts.n; i++) {
     const cap = capsuleOf(ts.ents[i]);
@@ -75,14 +76,14 @@ const aim = { x: 0, y: 0, z: 0 };
  * over-the-shoulder camera, so the authority first finds what the crosshair ray (AIM_RAY) is on and
  * then fires from the eye toward that point — hits land where the crosshair shows.
  */
-function aimDirection(sim: Sim, e: SimEntity, ex: number, ey: number, ez: number, def: WeaponDef): typeof aim {
+function aimDirection(sim: Sim, e: SimEntity, ex: number, ey: number, ez: number, def: WeaponDef, pass?: RayPass): typeof aim {
   const v = viewDir(e.yaw, e.pitch);
   aim.x = v.x; aim.y = v.y; aim.z = v.z;
   if (e.ownerPid === null) return aim;
   const shoulder = held(e, Btn.Aim) ? AIM_RAY.shoulderAim : AIM_RAY.shoulderHip;
   const ox = e.pos.x + Math.cos(e.yaw) * shoulder, oy = e.pos.y + AIM_RAY.pivotHeight, oz = e.pos.z - Math.sin(e.yaw) * shoulder;
   const maxT = def.range + 4;
-  trace(sim, ox, oy, oz, v.x, v.y, v.z, maxT, targets);
+  trace(sim, ox, oy, oz, v.x, v.y, v.z, maxT, targets, pass);
   if (tr.t < 1) return aim; // crosshair origin is inside/against geometry: trust the eye ray
   const px = ox + v.x * tr.t - ex, py = oy + v.y * tr.t - ey, pz = oz + v.z * tr.t - ez;
   const l = Math.sqrt(px * px + py * py + pz * pz);
@@ -112,12 +113,13 @@ function fire(sim: Sim, e: SimEntity, w: WeaponState, def: WeaponDef, frac: numb
 
   const ex = e.pos.x, ey = e.pos.y + eyeHeight(e), ez = e.pos.z;
   targets.fill(sim, e, rewindTick(sim, e.input.rt), COMBAT_RULES.friendlyFire);
-  const a = aimDirection(sim, e, ex, ey, ez, def);
+  const pass = friendlyShotPass(sim, e.team); // shots pass the shooter's own barriers and drones
+  const a = aimDirection(sim, e, ex, ey, ez, def, pass);
   const ax = a.x, ay = a.y, az = a.z;
 
   if (def.kind === 'projectile' && def.projectile) {
     const d = perturb(sim, ax, ay, az, spread);
-    const muzzle = Math.max(0.05, Math.min(0.55, worldRay(sim, ex, ey, ez, d.x, d.y, d.z, 0.6) - 0.08));
+    const muzzle = Math.max(0.05, Math.min(0.55, worldRay(sim, ex, ey, ez, d.x, d.y, d.z, 0.6, pass) - 0.08));
     const mx = ex + d.x * muzzle, my = ey + d.y * muzzle, mz = ez + d.z * muzzle;
     const s = def.projectile.speed;
     spawnProjectile(sim, e, w.id, mx, my, mz, d.x * s, d.y * s, d.z * s);
@@ -130,7 +132,7 @@ function fire(sim: Sim, e: SimEntity, w: WeaponState, def: WeaponDef, frac: numb
   for (let p = 0; p < def.pellets; p++) {
     const d = perturb(sim, ax, ay, az, spread);
     const dx = d.x, dy = d.y, dz = d.z;
-    trace(sim, ex, ey, ez, dx, dy, dz, def.range, targets);
+    trace(sim, ex, ey, ez, dx, dy, dz, def.range, targets, pass);
     const hx = ex + dx * tr.t, hy = ey + dy * tr.t, hz = ez + dz * tr.t;
     if (p === 0) { fdx = dx; fdy = dy; fdz = dz; fhx = hx; fhy = hy; fhz = hz; fhit = tr.idx >= 0 ? targets.ents[tr.idx].id : -1; }
     if (tr.idx < 0) continue;

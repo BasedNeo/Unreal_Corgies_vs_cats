@@ -20,6 +20,7 @@ import { emptyInput } from '../../shared/input';
 import { COMBAT_RULES } from '../../shared/content/weapons';
 import { ABILITY_IDS, type AbilityDef, type AbilityId } from '../../shared/content/abilities';
 import { groups, Layer } from '../rapier';
+import type { RayPass } from './geometry';
 import { combatLive, ticksOf } from './state';
 import { ABILITY_ENTITY_KIND, BARRIER, CHARGE, DRONE } from './ability-tuning';
 
@@ -68,6 +69,31 @@ export function abilityEntities(sim: Sim): SimEntity[] {
   for (const e of list) if (!e.removed) list[n++] = e;
   list.length = n;
   return list;
+}
+
+interface PassCache { tick: number; handles: [number[], number[]]; fns: [RayPass, RayPass] }
+const passCaches = new WeakMap<Sim, PassCache>();
+
+/**
+ * A team's shots pass through its own Squeak Barriers and Spotter Drones; they still block the other team's shots
+ * (and everyone's movement). Returns the ray predicate for `team`, or undefined when that team has no live ability
+ * colliders — the usual case, which costs nothing. The handle list is rebuilt once per tick.
+ */
+export function friendlyShotPass(sim: Sim, team: TeamId | -1): RayPass | undefined {
+  if (team !== 0 && team !== 1) return undefined;
+  let pc = passCaches.get(sim);
+  if (!pc) {
+    const handles: [number[], number[]] = [[], []];
+    pc = { tick: -1, handles, fns: [(c) => !handles[0].includes(c.handle), (c) => !handles[1].includes(c.handle)] };
+    passCaches.set(sim, pc);
+  }
+  if (pc.tick !== sim.tick) {
+    pc.tick = sim.tick;
+    pc.handles[0].length = 0;
+    pc.handles[1].length = 0;
+    for (const e of abilityEntities(sim)) if (e.collider && (e.team === 0 || e.team === 1)) pc.handles[e.team].push(e.collider.handle);
+  }
+  return pc.handles[team].length ? pc.fns[team] : undefined;
 }
 
 export function abilityIndexOf(id: string): number {

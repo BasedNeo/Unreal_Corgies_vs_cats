@@ -1,7 +1,8 @@
 // Squeak Barrier ("Scratch Wall", Warden): a wall segment in front of the owner, facing the aim yaw, for
 // AbilityDef.duration. It is a fixed Rapier cuboid in BARRIER_GROUPS, so the character controller of BOTH teams
-// (CHARACTER_MOVE_FILTER sees Vehicle), karts, hitscan and projectiles (WORLD_RAY_FILTER) all collide with it; bark
-// blasts, explosions and bot sight lines (worldLineClear) are blocked too. It has hit points and can be shot down.
+// (CHARACTER_MOVE_FILTER sees Vehicle), karts, and the other team's hitscan and projectiles (WORLD_RAY_FILTER) collide
+// with it; the owner's team shoots through it (friendlyShotPass). Enemy bark blasts, explosions and bot sight lines
+// (worldLineClear) are blocked too; bots see through their own team's walls. It has hit points and can be shot down.
 // Placement never overlaps a character or a solid prop: the preferred spot is nudged nearer/farther/sideways, and
 // the activation is refused (no cooldown spent) when nothing nearby is clear.
 import type { Collider } from '@dimforge/rapier3d-compat';

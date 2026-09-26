@@ -10,6 +10,7 @@ import { WEAPONS, COMBAT_RULES, type WeaponId, type ProjectileDef } from '../../
 import { pointCapsuleDistance, rayCapsule, worldLineClear, worldRayNormal, type WorldHit } from './geometry';
 import { applyDamage, knockback } from './damage';
 import { capsuleOf, reportNoiseAt, type ProjectileState } from './state';
+import { friendlyShotPass } from './ability-core';
 
 const pools = new WeakMap<Sim, SimEntity[]>();
 const POOL_MAX = 64;
@@ -119,7 +120,7 @@ function stepProjectile(sim: Sim, e: SimEntity, dt: number): void {
   if (len < 1e-6) return;
   const dx = mx / len, dy = my / len, dz = mz / len;
   const ox = e.pos.x, oy = e.pos.y, oz = e.pos.z;
-  const w = worldRayNormal(sim, ox, oy, oz, dx, dy, dz, len, wh) ?? terrainHit(sim, ox, oy, oz, dx, dy, dz, len, wh);
+  const w = worldRayNormal(sim, ox, oy, oz, dx, dy, dz, len, wh, friendlyShotPass(sim, p.ownerTeam)) ?? terrainHit(sim, ox, oy, oz, dx, dy, dz, len, wh);
   let best = w ? w.t : len;
   let hitChar: SimEntity | null = null;
   for (const t of sim.entities.values()) {

@@ -27,7 +27,7 @@ import { worldLineClear } from '../combat/geometry';
 import { ARCHETYPES, archetypeForClass, type Archetype, type ArchetypeId } from './archetypes';
 import { type NavGrid, cellX, cellZ, findPath, lineWalkable, nearestWalkable, randomCell } from './nav';
 import { concealLevel, concealRevealRange, weatherSightMult } from '../world/env';
-import { abilityEntities } from '../combat/ability-core';
+import { abilityEntities, friendlyShotPass } from '../combat/ability-core';
 import { DRONE } from '../combat/ability-tuning';
 import {
   abilityIntent, buddyInTrouble, createTactics, objectiveInteract, pushBand, raiderAir, skipGoal, updateObjectiveGoal, type TacticsState,
@@ -180,7 +180,8 @@ function perceive(sim: Sim, e: SimEntity, ai: AiState, a: Archetype, ctx: AiCont
     const c = dist > 1e-3 ? (dx * fx + dz * fz) / dist : 1;
     if (dist > 5 && c < (tracking || t.id === attacker ? cosTrack : cosFov)) continue;
     const h = characterHeight(t);
-    if (!worldLineClear(sim, ex, ey, ez, t.pos.x, t.pos.y + h * 0.55, t.pos.z) && !worldLineClear(sim, ex, ey, ez, t.pos.x, t.pos.y + h * 0.9, t.pos.z)) continue;
+    const pass = friendlyShotPass(sim, e.team); // bots see (and so shoot) through their own team's barriers
+    if (!worldLineClear(sim, ex, ey, ez, t.pos.x, t.pos.y + h * 0.55, t.pos.z, pass) && !worldLineClear(sim, ex, ey, ez, t.pos.x, t.pos.y + h * 0.9, t.pos.z, pass)) continue;
     const score = dist - (tracking ? 10 : 0) - (t.id === attacker ? 8 : 0);
     if (score < bestScore) { bestScore = score; best = t; }
   }

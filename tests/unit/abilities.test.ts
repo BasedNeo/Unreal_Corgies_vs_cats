@@ -324,6 +324,36 @@ describe('squeak barrier', () => {
     expect(charge.removed).toBe(true);
   });
 
+  it('lets its own team shoot through it (hitscan and mortar) and still blocks the other team', async () => {
+    const sim = await yard();
+    const owner = spawn(sim, Team.Corgis, 0, 0, 'warden');
+    const rifle = spawn(sim, Team.Corgis, 0.6, 1.5, 'assault');
+    const lobber = spawn(sim, Team.Corgis, -0.6, 1.5, 'breacher');
+    const cat = spawn(sim, Team.Cats, 0, -12, 'assault', Math.PI);
+    run(sim, 0.3);
+    useAbility(sim, owner, 0);
+    const [bar] = ents(sim, 'barrier');
+    run(sim, 0.1);
+    const evs: Ev[] = [];
+    let k = 0;
+    run(sim, 2, evs, () => {
+      const r = aimAt(rifle, cat.pos.x, cat.pos.y + 0.6, cat.pos.z);
+      input(sim, rifle, Btn.Fire, r.yaw, r.pitch);
+      const l = aimAt(lobber, 0, 1.2, bar.pos.z); // the flat lob that stops on an enemy wall (test above)
+      input(sim, lobber, k++ % 30 < 3 ? Btn.Fire : 0, l.yaw, l.pitch + 0.1);
+      const c = aimAt(cat, owner.pos.x, owner.pos.y + 0.6, owner.pos.z);
+      input(sim, cat, Btn.Fire, c.yaw, c.pitch);
+    });
+    const hits = (src: number, dst: number) => evs.filter((e) => e.e === 'hit' && e.src === src && e.dst === dst).length;
+    expect(hits(rifle.id, cat.id)).toBeGreaterThan(0); // through its own team's wall
+    const blasts = evs.filter((e): e is Extract<Ev, { e: 'explode' }> => e.e === 'explode' && e.by === lobber.id);
+    expect(blasts.length).toBeGreaterThan(0);
+    for (const b of blasts) expect(b.z).toBeLessThan(bar.pos.z - 1); // the mortars flew on past it
+    expect(hits(cat.id, bar.id)).toBeGreaterThan(0); // the cat's shots still stop on it
+    expect(hits(cat.id, owner.id)).toBe(0);
+    expect(bar.removed).toBe(false);
+  });
+
   it('client prediction mirrors barriers from snapshots, so predicted movement stops at the wall too', async () => {
     const auth = await yard();
     const owner = spawn(auth, Team.Corgis, 0, 0, 'warden');

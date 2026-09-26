@@ -141,13 +141,14 @@ Newest first. Every task appends: what changed, proof (command + result + screen
 - Proposed contract additions (L3): archetype on EntityState, weapon on `death`, `MatchState.enemiesLeft`.
 - `EntityState.cls` carries content indexes through `CLASS_IDS`: 6 entries per content table at most (S1, B1).
 - Bots don't climb to the Rooftops perches (they fight in the Garage fine) (D3/C2).
-- Ability entities: shotgun damage to drones/barriers is estimated from the first pellet; your own barrier and drone
-  block your team's shots (C2).
+- Ability entities: shotgun damage to drones/barriers is estimated from the first pellet (C2).
 - Fixed since first logged:
   - upgrade-core buffs now ride in snapshots as `EFlag` buff bits, so late joiners see them and Zoomies+ no longer
     causes corrections (M2);
   - the low tier has blob shadows (`4724e38`);
   - faces are smoother, with attitude expressions (K1).
+  - your team's shots, and your bots' sight lines, now pass through your own Squeak Barriers and drones; they still
+    stop the other team's shots (lead).
 
 ## Human verdicts
 _(none yet — first human session after Wave 1 integration)_

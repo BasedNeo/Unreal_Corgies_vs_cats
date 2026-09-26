@@ -1,12 +1,18 @@
 // Hit-test geometry. Character hit tests are analytic (ray/sphere vs vertical capsule) because
 // Rapier's query BVH is only refreshed by world.step(): rewound (lag-compensated) capsules would be
 // invisible to Rapier queries until the next step. Static world geometry uses Rapier raycasts.
-import type { Ray } from '@dimforge/rapier3d-compat';
+import type { Collider, Ray } from '@dimforge/rapier3d-compat';
 import type { Sim } from '../sim';
 import { groups, Layer } from '../rapier';
 
 /** Rays that only see static world geometry (terrain, props, vehicles) — never characters. */
 export const WORLD_RAY_FILTER = groups(Layer.Projectile, Layer.World | Layer.Vehicle);
+
+/**
+ * Optional per-ray collider predicate (false = the ray passes through). Used for friendlyShotPass: a team's shots
+ * pass its own barriers and drones. Undefined in the common case, so Rapier never calls back into JS.
+ */
+export type RayPass = (c: Collider) => boolean;
 
 /**
  * Ray (unit direction) vs a vertical capsule whose bottom sphere center is (cx, yb, cz) and whose
@@ -68,31 +74,31 @@ function cachedRay(sim: Sim): Ray {
 }
 
 /** Distance along a unit ray to static world geometry, or maxT when nothing is hit. */
-export function worldRay(sim: Sim, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number {
+export function worldRay(sim: Sim, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number, pass?: RayPass): number {
   const ray = cachedRay(sim);
   ray.origin.x = ox; ray.origin.y = oy; ray.origin.z = oz;
   ray.dir.x = dx; ray.dir.y = dy; ray.dir.z = dz;
-  const hit = sim.world.castRay(ray, maxT, true, undefined, WORLD_RAY_FILTER);
+  const hit = sim.world.castRay(ray, maxT, true, undefined, WORLD_RAY_FILTER, undefined, undefined, pass);
   return hit ? hit.timeOfImpact : maxT;
 }
 
 export interface WorldHit { t: number; nx: number; ny: number; nz: number }
 
 /** Like worldRay but also returns the surface normal; null when nothing is hit within maxT. */
-export function worldRayNormal(sim: Sim, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number, out: WorldHit): WorldHit | null {
+export function worldRayNormal(sim: Sim, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number, out: WorldHit, pass?: RayPass): WorldHit | null {
   const ray = cachedRay(sim);
   ray.origin.x = ox; ray.origin.y = oy; ray.origin.z = oz;
   ray.dir.x = dx; ray.dir.y = dy; ray.dir.z = dz;
-  const hit = sim.world.castRayAndGetNormal(ray, maxT, true, undefined, WORLD_RAY_FILTER);
+  const hit = sim.world.castRayAndGetNormal(ray, maxT, true, undefined, WORLD_RAY_FILTER, undefined, undefined, pass);
   if (!hit) return null;
   out.t = hit.timeOfImpact; out.nx = hit.normal.x; out.ny = hit.normal.y; out.nz = hit.normal.z;
   return out;
 }
 
 /** True when the straight segment between two points is not blocked by static world geometry. */
-export function worldLineClear(sim: Sim, ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
+export function worldLineClear(sim: Sim, ax: number, ay: number, az: number, bx: number, by: number, bz: number, pass?: RayPass): boolean {
   const dx = bx - ax, dy = by - ay, dz = bz - az;
   const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
   if (d < 1e-4) return true;
-  return worldRay(sim, ax, ay, az, dx / d, dy / d, dz / d, d) >= d - 1e-3;
+  return worldRay(sim, ax, ay, az, dx / d, dy / d, dz / d, d, pass) >= d - 1e-3;
 }
