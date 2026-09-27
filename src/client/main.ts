@@ -10,7 +10,7 @@ import * as THREE from 'three/webgpu';
 import { createRenderContext } from './engine/renderer';
 import { QUALITY, toQualityTier } from './engine/quality';
 import { createWorldData } from '../shared/world/world-data';
-import { DEFAULT_MAP, MAPS, mapForMode } from '../shared/world/maps';
+import { DEFAULT_MAP, MAPS, mapForRoom } from '../shared/world/maps';
 import { worldReloadSearch } from './net/map-sync';
 import { MatchTally, currentLook, recordMatch } from './profile'; // P2
 import { createRewardCard } from './ui/rewards'; // U2
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   debug.backend = ctx.backend;
 
   // Wave 8: the battleground (?map=, kept only if it can host the mode); an online room's welcome can overrule it
-  const mapId = mapForMode(params.get('map'), params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish');
+  const mapId = mapForRoom(params.get('map'), params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish', chapterById(params.get('chapter'))?.map); // W10: a chapter's own map
   const mapTitle = MAPS[mapId].title;
   loadingStep(mapTitle === 'West Yard' ? 'Mowing West Yard…' : `Scouting ${mapTitle}…`);
   await new Promise((r) => setTimeout(r, 0)); // let the step text paint before the blocking world build
@@ -187,7 +187,7 @@ async function main(): Promise<void> {
         return;
       }
       // W8: another map than the one built at boot needs a fresh page (the world view is built once)
-      const newWorld = !serverUrl && (o.match === 'adventure' ? DEFAULT_MAP : o.map ?? mapId) !== mapId;
+      const newWorld = !serverUrl && (o.match === 'adventure' ? mapForRoom(null, 'adventure', chapterById(o.chapter)?.map) : o.map ?? mapId) !== mapId;
       if (!net && !newWorld) { if (o.chapter) chapter = o.chapter; void startSession(o.name, o.cls, o.team, o.match); return; } // A1: the picked chapter
       if (!serverUrl && o.match && (newWorld || o.match !== mode || (o.match === 'adventure' && o.chapter !== chapter))) {
         // a different offline match type (or chapter) needs a fresh authority: restart the page straight into it

@@ -67,7 +67,7 @@ export function kill(sim: Sim, e: SimEntity, src: DamageSource): void {
   if (e.wpn) { e.wpn.charge = 0; e.wpn.charging = false; e.wpn.reload = 0; }
   if (meta.pve) { meta.removeTick = sim.tick + ticksOf(COMBAT_RULES.pveCorpseTime); e.respawnTick = 0; }
   else e.respawnTick = sim.tick + ticksOf(COMBAT_RULES.respawnDelay);
-  sim.emit({ e: 'death', id: e.id, by: killer });
+  sim.emit(src.weapon >= 0 ? { e: 'death', id: e.id, by: killer, wpn: src.weapon } : { e: 'death', id: e.id, by: killer }); // W10 C10: the kill feed's glyph
   combatBus(sim).kills.push({ victim: e.id, killer, victimTeam: e.team, killerTeam, tick: sim.tick, weapon: src.weapon });
 }
 

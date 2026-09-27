@@ -52,6 +52,7 @@ export interface ChapterDef {
   steps: ChapterStep[];
   t?: number;                                // time of day 0..1 (optional, e.g. dawn)
   pups?: ClassId[];                          // A2: squad pup kits, featured kit first
+  map?: string;                              // W10 C10: the map the chapter plays on (a MAP_IDS id; absent = the West Yard)
 }
 
 /** A2: a spot on the map, optionally elevated (feet height). */

@@ -270,6 +270,8 @@ export interface WorldData {
   timeOfDay?: number;
   /** W9 L3: this map's weather schedule bias (weather.ts; The Lot: rain by default). Absent = the default schedule. */
   weatherBias?: WeatherBias;
+  /** W10 C10: boxes (world space, min/max corners) inside which the sky fill is suppressed: tunnels, containers, sheds. */
+  interiors?: { min: [number, number, number]; max: [number, number, number] }[];
   // ---- G1 additions (optional) ----
   /** Tall-grass concealment zones (The Garden). */
   concealZones?: ConcealZone[];

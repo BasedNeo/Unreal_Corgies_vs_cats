@@ -43,3 +43,9 @@ export function mapForMode(id: unknown, mode: string): MapId {
   const m = sanitizeMap(id);
   return MAPS[m].modes.includes(mode) ? m : DEFAULT_MAP;
 }
+
+/** W10 C10: the map a room really runs. An adventure room plays its chapter's map (`ChapterDef.map`; absent or unknown →
+ *  the default map) whatever the query asked; every other mode is `mapForMode`. */
+export function mapForRoom(id: unknown, mode: string, chapterMap?: string): MapId {
+  return mode === 'adventure' ? sanitizeMap(chapterMap) : mapForMode(id, mode);
+}

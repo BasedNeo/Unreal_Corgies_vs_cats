@@ -6,7 +6,7 @@ import { sanitizeInput, type InputCmd } from '../shared/input';
 import { CLASS_IDS, type ClassId, type TeamId } from '../shared/types';
 import { CHAPTERS, chapterById } from '../shared/content/chapters';
 import { BOSS_IDS } from '../shared/content/bosses';
-import { mapForMode, type MapId } from '../shared/world/maps';
+import { mapForRoom, type MapId } from '../shared/world/maps';
 import { sanitizeLook } from '../shared/content/cosmetics';
 
 /** Most commands one input message may carry (new + redundant resends). */
@@ -152,5 +152,5 @@ export function sanitizeRoomSetup(mode: string | null, chapter: string | null, b
   if (!mode || !(ROOM_MODES as readonly string[]).includes(mode)) return null;
   const ch = mode === 'adventure' ? (chapterById(chapter)?.id ?? CHAPTERS[0].id) : undefined;
   const b = mode === 'boss-rush' && boss && (BOSS_IDS as readonly string[]).includes(boss) ? boss : undefined;
-  return { mode: mode as RoomMode, ...(ch ? { chapter: ch } : {}), ...(b ? { boss: b } : {}), map: mapForMode(map, mode) };
+  return { mode: mode as RoomMode, ...(ch ? { chapter: ch } : {}), ...(b ? { boss: b } : {}), map: mapForRoom(map, mode, chapterById(ch)?.map) }; // W10: a chapter's own map
 }

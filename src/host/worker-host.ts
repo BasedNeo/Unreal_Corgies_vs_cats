@@ -6,7 +6,8 @@ import { Sim } from '../sim/sim';
 import { Room, startRoomLoop, type Conn } from './room';
 import { validateClientMsg } from './guard';
 import type { ServerMsg } from '../shared/protocol';
-import { mapForMode } from '../shared/world/maps';
+import { mapForRoom } from '../shared/world/maps';
+import { chapterById } from '../shared/content/chapters';
 
 /** The page's offline setup (src/client/net/transport.ts createWorkerTransport). `map` is sanitized like a room's. */
 export interface WorkerBootConfig { seed: number; mode: string; bots: [number, number]; chapter?: string; boss?: string; map?: string }
@@ -18,7 +19,7 @@ const pending: unknown[] = [];
 const conn: Conn = { id: 'local', send: (m: ServerMsg) => self.postMessage(m) };
 
 async function boot(cfg: WorkerBootConfig) {
-  const sim = await Sim.create({ seed: cfg.seed, map: mapForMode(cfg.map, cfg.mode) });
+  const sim = await Sim.create({ seed: cfg.seed, map: mapForRoom(cfg.map, cfg.mode, chapterById(cfg.chapter)?.map) }); // W10: a chapter's own map
   // Offline an adventure's result card waits for the player's choice; online rooms move on after a countdown.
   if (cfg.mode === 'adventure') sim.state.adventureConfig = { holdResult: true };
   room = new Room(sim, { mode: cfg.mode, botsPerTeam: cfg.bots, defaultTeam: 0, chapter: cfg.chapter, boss: cfg.boss });

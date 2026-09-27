@@ -65,7 +65,7 @@ export interface MatchState {
 export type GameEvent =
   | { e: 'fire'; id: EntityId; wpn: number; x: number; y: number; z: number; dx: number; dy: number; dz: number; hx: number; hy: number; hz: number; hit: EntityId | -1 }
   | { e: 'hit'; src: EntityId; dst: EntityId; dmg: number; x: number; y: number; z: number; crit: boolean }
-  | { e: 'death'; id: EntityId; by: EntityId }
+  | { e: 'death'; id: EntityId; by: EntityId; /** W10 C10: the killing weapon's wire index (a gun, or a throwable: content/ordnance ordnanceByWire); absent when unknown */ wpn?: number }
   | { e: 'spawn'; id: EntityId }
   | { e: 'jump'; id: EntityId; double: boolean }
   | { e: 'land'; id: EntityId; impact: number }

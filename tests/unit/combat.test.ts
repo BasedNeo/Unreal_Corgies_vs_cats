@@ -124,7 +124,7 @@ describe('hitscan damage', () => {
     const a = aimAt(shooter, target.pos.x, chestOf(target), target.pos.z);
     const events = run(sim, 90, () => input(sim, shooter, Btn.Fire | Btn.Aim, a.yaw, a.pitch));
     const death = events.find((e) => e.e === 'death');
-    expect(death).toEqual({ e: 'death', id: target.id, by: shooter.id });
+    expect(death).toEqual({ e: 'death', id: target.id, by: shooter.id, wpn: shooter.wpn!.index }); // W10: the killing weapon
     expect(target.dead).toBe(true);
     expect(target.anim).toBe(Anim.Dead);
     expect(sim.toState(target).flags & EFlag.Dead).toBeTruthy();
@@ -213,7 +213,7 @@ describe('death and respawn', () => {
     input(sim, shooter, Btn.Fire | Btn.Aim, a.yaw, a.pitch);
     let ev = run(sim, 1);
     input(sim, shooter, 0);
-    expect(ev).toContainEqual({ e: 'death', id: target.id, by: shooter.id });
+    expect(ev).toContainEqual({ e: 'death', id: target.id, by: shooter.id, wpn: shooter.wpn!.index });
     const diedAt = sim.tick;
     ev = run(sim, Math.round(COMBAT_RULES.respawnDelay * 60) - 2);
     expect(target.dead).toBe(true);
