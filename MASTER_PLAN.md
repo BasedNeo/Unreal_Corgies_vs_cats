@@ -443,12 +443,13 @@ Class hats stay the class silhouette cue (K1), and team colours stay readable.
   reward card.
 - **Lead**: N2 (the look in hello → roster → views, validated server-side), INT6.
 
-### Wave 7 — HARDENED quality loop (`docs/design/HARDENED.md`, `docs/sprints/WAVE7_PLAN.md`) ✅ (P3 budget pass in progress)
+### Wave 7 — HARDENED quality loop (`docs/design/HARDENED.md`, `docs/sprints/WAVE7_PLAN.md`) ✅
 The owner's direction (2026-09-26) is battle-hardened warriors with the animal soul kept. One quality loop, in blocks:
 - **Block 1, K2:** armoured veteran characters and elite variants.
 - **Block 2, E4:** the Yard War front, with forward bases, trenches and weathered ground.
 - **Block 3, X3:** weapons and combat feedback.
-- **Block 4, S4:** the style factory v2, dusk/storm rig and gritty grade, plus **P3**, the render budget pass.
+- **Block 4, S4:** the style factory v2, dusk/storm rig and gritty grade, plus **P3**, the render budget pass (every
+  view inside §8.7: 12v12 373 / 400 draws).
 - **Block 5 (lead):** gallery, docs and the next loop.
 
 Evidence: `docs/qa/W7_GALLERY.md`.
@@ -457,11 +458,11 @@ Evidence: `docs/qa/W7_GALLERY.md`.
 A second, larger battleground next door: **The Lot**, a construction lot at pet scale.
 - **M1 multi-map plumbing (lead) ✅:** map registry, `?map=`, rooms, the MAP picker.
 - **M2 layout (world-2) ✅**
-- **M3 atmosphere, M5 gameplay:** in the Wave 9 proposal (L3).
+- **M3 atmosphere, M5 gameplay ✅:** Wave 9 L3.
 - **M4 perf:** folded into P3 and L3.
-- **M6 base assault:** in the Wave 9 proposal (G4).
+- **M6 base assault ✅:** Wave 9 G4a + G4b.
 
-### Wave 9 — PROPOSED, awaiting owner approval (`docs/sprints/WAVE9_PLAN.md`)
+### Wave 9 — The war gets a purpose (`docs/sprints/WAVE9_PLAN.md`) ✅ lanes landed; Q4 + INT9 in progress
 The war gets a purpose:
 - Base Assault on both maps: steal the squeaky tennis ball.
 - The Lot finished (atmosphere and gameplay).
@@ -470,8 +471,15 @@ The war gets a purpose:
 - A readability pass.
 - Independent QA.
 
-Six agents, 8 h makespan, no path collisions (validated with `game-sprint-planner`). Starts after P3 lands and the owner
-approves it.
+Approved by the owner 2026-09-26. Landed, each with verify --e2e:
+- **C9** contracts;
+- **G4a** Base Assault rules and **G4b** its bots, on both maps and online;
+- **X4** throwables, with the bot throw hook;
+- **K3** squads and the rank look;
+- **L3** The Lot M3 + M5;
+- **P4** readability.
+
+Open: **Q4**, the independent verification (`docs/qa/W9_VERIFICATION.md`), and **INT9**, the integration and gallery.
 
 ### Quality loop (runs forever after the slice)
 Capture bookmarks → diagnose with `game-worlds-iteration-coach` → change one thing → gate → before/after →

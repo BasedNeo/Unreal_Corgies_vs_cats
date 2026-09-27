@@ -462,7 +462,11 @@ export class Room {
       const bots = members.filter((p) => p.bot);
       const target = Math.max(0, (want[team as 0 | 1] ?? 0) - humans);
       for (let i = bots.length; i < target; i++) this.addBot(team, CLASS_IDS[i % 3]);
-      for (let i = target; i < bots.length; i++) this.removeSlot(bots[i].pid);
+      // W9 Q4 P2-1: a joining human must not delete a Base Assault ball carrier (that dropped a steal on every join).
+      // Carriers move to the front (a stable sort), so the newest non-carriers are the ones removed.
+      const carries = (p: PlayerSlot) => ((this.sim.entities.get(p.entity)?.flags ?? 0) & EFlag.Carrier ? 1 : 0);
+      const order = bots.length > target ? [...bots].sort((a, b) => carries(b) - carries(a)) : bots;
+      for (let i = target; i < order.length; i++) this.removeSlot(order[i].pid);
     }
   }
 
