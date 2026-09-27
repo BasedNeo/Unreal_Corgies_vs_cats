@@ -2,7 +2,8 @@
 
 Short, verified explanations of the techniques this project relies on: what each one is, the numbers that matter,
 and how it failed before it worked. Raw lessons with evidence live in `LEARNINGS.jsonl`; lane reports are in
-`docs/handoff/`. Updated at milestones (game-worlds-knowledge-extractor). Last update: Wave 7 (HARDENED) + Wave 8 M1–M2.
+`docs/handoff/`. Updated at milestones (game-worlds-knowledge-extractor). Last update: Wave 9 (Base Assault, throwables, squads,
+The Lot finished, readability, Q4).
 
 ---
 
@@ -135,6 +136,76 @@ sRGB → linear conversion, or the effects look washed out.
 - **A shared LEARNINGS.jsonl.** Lanes append in their own order. Stage "HEAD + this lane's lines" (a set difference),
   never the whole working file.
 
+## 9. An objective mode with no protocol change (W9 G4a, G4b)
+**What.** Base Assault is authoritative from end to end, and it adds no message and no field.
+- **Snapshot:** each team's ball, stand and capture ring are ordinary prop entities in the snapshot. Their seed says
+  which is which; their `weapon`, `ammo` and `hp` fields carry the state, the carrier's id and the return countdown.
+- **Events:** the existing `score` and `pickup` events.
+
+**What it takes to hold.**
+- **Carried state must survive every way the authority moves a living character:** the out-of-bounds guard, the kill
+  plane, a stall's catch-up and a kit swap, not only death.
+- **An invariant checked after every tick of every test** ("exactly one ball per team, never two carriers") is what
+  caught the edge cases.
+- **Prediction has to see any authority flag that changes movement.** The carrier's 0.75× speed was invisible to the
+  predictor until it copied `EFlag.Carrier` from snapshots. After that the error was 0.
+
+**Bots.** Objective bots that each chase the goal alone never score: 7–11 steals and 0 captures per match, because
+every lone thief died by the enemy spawn.
+- **Team roles** (attack, carry, escort, defend, return, chase) are re-planned every 0.5 s with hysteresis.
+- **A rally point** 35 m short of the stand, then a group storm, turned steals into captures.
+- **One override above the FSM modes** ("carriers run home") works where patching a single mode failed.
+
+## 10. An honest throw preview (W9 X4)
+- **One integrator step, shared.** The authority and the client use the same step function, with a pluggable contact
+  query, and the client's world query is collider-exact (the terrain's own triangles, not a smoothed height).
+  The preview and the real flight then agree to under 1 mm at the landing point, on both maps.
+- **Button edges need care.** Edge-detecting a button from `prevButtons` is unsafe for any button the Room's stall
+  replay doesn't treat as a combat button: a press or release inside a catch-up batch can vanish. Track the edge
+  yourself, and list the button in `COMBAT_BUTTONS`.
+- **Balance as a soft counter.** 70 at the centre, so the frailest class keeps 20: a grenade opens a kill, it never
+  makes one. A fuse of 2.2 s leaves the target 0.5–1.6 s to react after it lands.
+- **Q4's lesson for bots:** a planner that aims at where a cluster stands works only while the cluster holds still.
+  In Base Assault the targets had sprinted a median 19 m away by the time the fuse went off (1 blast in 35 hit).
+
+## 11. Readability at range is lighting, not colour (W9 K3, P4)
+At 35 m under the dusk rig a pet is 20–30 px, mostly ink, and seen from behind it sits on the toon ramp's floor.
+- **Colour didn't carry it.** K3 lifted the under-suit's luma from 35 to 71, and the 35 m lineup moved from 38.4 to
+  only 39.2.
+- **Light did.** P4 added a distance-graded rim + fill on character materials only (no real light, no extra pass) and a
+  dusk fill from the sky's anti-sun light. The lineup went to 70, and the team hue from 7.9 % to 13.1 %.
+- **The dark bookmarks were backlit views,** so ambient light barely moved them (it lands on the ramp's floor band).
+- **In storm, fog erased the team read** (0.1–0.4 %). Characters shed 60 % of the fog, and the grade protects the two
+  team hues: ≥ 6.7 % per species.
+- **A metric trap:** changing a colour next to a team marking can break the team-read metric, because edge triangles
+  average the two colours.
+
+## 12. A map's defaults are gameplay (W9 L3)
+- **Weather.** Opening The Lot in rain at tick 0 made the soak's skirmish miss its match: wet ground is slippery and AI
+  sight drops. The per-map weather bias now opens overcast and brings the rain after 1.3–1.8 min. Every weather function
+  takes a seed (the old schedule, bit-identical) or the world.
+- **Light.** A light tuned for a 12 m pole, scaled by inverse square onto 33–39 m towers, clipped the stepped ramp to
+  white. The fix was a gain on top of the physical scale.
+- **Lanes.** Shortest-path bots crowd a big map's middle (Canyon 26, Pipeworks 31, Mud 599 bot-seconds). A pure lane
+  module (a lane per life, hashed from seed, id and life) with a 3-line hook took the side lanes to 0.36 / 0.38 of the
+  Mud.
+
+## 13. Verifying bot statistics and landing lanes safely (W9 Q4, lead)
+- **Mirror the map before blaming a mechanic.** The West Yard's corgi side won Base Assault 25 : 12. With equal
+  species speeds the lean stayed (27 : 13); with swapped sides it flipped (6 : 24). Line-of-sight exposure on the run
+  home was the cause.
+- **Backfill by state, not by list order.** `fillBots` removed a team's newest bot, which was sometimes the ball
+  carrier.
+- **Content counts are pinned in many test files.** Adding a room mode broke two tests (the Lot's mode list, one
+  first-win unlock per mode); a new look pack then broke a third, in the locker tests. Run the whole unit suite on a
+  trial tree before verifying, not only the suites that look related.
+- **Two lanes in one file.** Build the committed version from HEAD plus the landing lane's hunks. The other lane's lines
+  stay in the working tree for its own landing.
+- **Timing tests under parallel vitest forks:** warm the JIT, then take the fastest of several batches. The
+  1-minute load average lags bursts: one run read 4.5 ms for code that costs 0.18 ms warm.
+- **A container restart kills processes, not files.** Commits, lanes' edits and scratch folders survived; verifies and
+  measurements had to be re-run, and the stopped lanes resumed with their own context.
+
 ---
 
 ## Proposed skill updates (evidence-backed; the skills are read-only here, so apply them via skill-creator)
@@ -159,3 +230,13 @@ sRGB → linear conversion, or the effects look washed out.
 
    Evidence: K2 depending on X3's weapons; X4's bot throws needing `tactics.ts`, which G4b owns (fixed with a separate
    `ordnance-ai.ts`).
+
+### Wave 9 proposals (evidence-backed; apply via skill-creator)
+4. **threejs-toon-comic-style-system**, under "Things that go wrong": "Characters read as silhouettes at range under a
+   dark rig → it is a lighting job, not a colour job: add a distance-graded character-only rim/fill term and a sky fill;
+   protect team hues in the grade; cut fog on characters in storm." Evidence: K3 (suit luma ×2, lineup +0.8) vs P4
+   (lineup 39 → 70, team hue 7.9 → 13.1 %).
+5. **game-sprint-gates**, under "Budgets and statistics": "Before attributing a one-sided bot statistic to a mechanic,
+   replay the same seeds on a mirrored map (swapped spawns and bases)." Evidence: Q4's 25 : 12 → swapped 6 : 24.
+6. **game-design-psychology**, under objective modes: "Solo objective bots never finish the objective: give teams roles
+   and a rally point before the objective." Evidence: G4b, 7–11 steals and 0 captures per match without it.
