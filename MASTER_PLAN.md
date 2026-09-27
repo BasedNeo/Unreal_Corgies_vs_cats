@@ -462,7 +462,7 @@ A second, larger battleground next door: **The Lot**, a construction lot at pet 
 - **M4 perf:** folded into P3 and L3.
 - **M6 base assault ✅:** Wave 9 G4a + G4b.
 
-### Wave 9 — The war gets a purpose (`docs/sprints/WAVE9_PLAN.md`) ✅ lanes landed; Q4 + INT9 in progress
+### Wave 9 — The war gets a purpose (`docs/sprints/WAVE9_PLAN.md`) ✅
 The war gets a purpose:
 - Base Assault on both maps: steal the squeaky tennis ball.
 - The Lot finished (atmosphere and gameplay).
@@ -479,7 +479,11 @@ Approved by the owner 2026-09-26. Landed, each with verify --e2e:
 - **L3** The Lot M3 + M5;
 - **P4** readability.
 
-Open: **Q4**, the independent verification (`docs/qa/W9_VERIFICATION.md`), and **INT9**, the integration and gallery.
+Then:
+- **Q4**, the independent verification: 75 / 100, no P0 (`docs/qa/W9_VERIFICATION.md`).
+- Its P1 and P2s fixed by **F1** (the West Yard balance: the corgi flag mirrored), **F2** (bots: parked karts, grenades,
+  lanes) and the lead.
+- **INT9**: the gallery (`docs/qa/W9_GALLERY.md`), docs and knowledge capture.
 
 ### Quality loop (runs forever after the slice)
 Capture bookmarks → diagnose with `game-worlds-iteration-coach` → change one thing → gate → before/after →

@@ -219,22 +219,27 @@ Newest first. Every task appends: what changed, proof (command + result + screen
   shows the toon-shaded corgi placeholder, ink outlines, crates and a cat bot.
 - Next: Wave 1 lanes in parallel (see MASTER_PLAN §10).
 
-## Next quality loop: highest-leverage items (W7 self-review, 2026-09-26)
-1. **Human playtest of W7 (MASTER_PLAN §9 milestone DoD).** Play, visuals and technical verdicts on the HARDENED build,
-   on a real GPU. Nothing in W7 has been judged by a human, and "humans certify fun".
-2. **Budgets:** ✅ P3 landed every view inside §8.7 (12v12 373 / 400 draws is the tightest). Still open: real-GPU
-   fps at high and medium.
-3. **Readability at range under dusk:** the dark under-suit reads as a near-silhouette at 35 m, and the deck and flank
-   bookmarks sit at luma 31–35. Wave 9 K3 and P4 cover both.
-4. **Kart rams halved on the fortified yard** (3 vs 6 per 6 matches). Is that the right trade (cover vs karts)? It is a
-   design question for the playtest (see Q3 P2-3).
-5. **The Lot:** atmosphere, pickups and bot lane use (Wave 9 L3). Base Assault gives both maps' bases a purpose (Wave 9 G4).
-6. **Small calls left with the owner:**
-   - X3's invented shotgun extra impacts;
-   - the ~0.4° visual-kick crosshair offset;
-   - the rifle's SQUEAK! word under HARDENED;
-   - matches starting later in the day (S4 snippet 6);
-   - bot-only veterans vs a player rank (Wave 9 K3 proposes a level-10 rank look).
+## Next quality loop: highest-leverage items (after Wave 9, 2026-09-27)
+Wave 9 is complete and pushed: every lane, Q4's verification (75 / 100, no P0) and the fixes for its P1 and P2s
+(F1, F2, lead). Evidence: `docs/qa/W9_GALLERY.md`, `docs/qa/W9_VERIFICATION.md` (with a resolution section).
+1. **Human playtest on a real GPU (MASTER_PLAN §9 milestone DoD).** Base Assault on both maps, throwables, the new
+   squads, the HARDENED look after P4. Nothing since W6 has been judged by a human; "humans certify fun". Real-GPU fps
+   at high and medium is still unmeasured.
+2. **Look calls for the owner, on a real monitor:**
+   - daytime is ~18 % brighter after P4 (exposure is global);
+   - The Lot's pipe and container interiors are now lit by the sky fill;
+   - The Lot's storm overview from the high camera is still a grey wash.
+3. **Open bot and world items:**
+   - thin hedgehog beams are missing from the nav grid (F1 §7; `src/sim/ai/nav.ts`);
+   - The Lot's lane weights should move into `LOT_LANES` (F2);
+   - Base Assault has no plane pilot (`PLANE_MODES`).
+4. **A throwable kill shows the gun glyph** in the kill feed: the `death` event has no weapon (a protocol decision).
+5. **Earlier design questions still open:**
+   - kart rams halved on the fortified yard (Q3 P2-3);
+   - X3's shotgun extra impacts;
+   - the ~0.4° visual-kick offset;
+   - the rifle's SQUEAK! word;
+   - later match start times.
 
 ## Known issues
 - Rapier KCC on the heightfield was ~0.13 ms/character/tick. The P1 terrain fast path (grounded capsules only) brought
