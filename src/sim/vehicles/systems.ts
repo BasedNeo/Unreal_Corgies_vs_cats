@@ -28,6 +28,7 @@ import { addProjectileHitListener } from '../combat/projectiles';
 import { damageDestructible } from '../destruct';
 import { destructibleOfCollider } from '../destruct/tag';
 import { setNavFixture } from '../ai/nav';
+import { syncParkedKarts } from './parked'; // W9 F2 (P2-2)
 import { falloff } from '../combat/weapon-system';
 import { reportNoiseAt } from '../combat/state';
 import { groups, Layer } from '../rapier';
@@ -706,6 +707,7 @@ export const kartStepSystem: SimSystem = {
         if (k.idle > d.abandonTime) despawnKart(sim, kart);
       }
     }
+    syncParkedKarts(sim); // W9 F2 (P2-2): parked karts are nav fixtures (bots walk round them)
   },
 };
 

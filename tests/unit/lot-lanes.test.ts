@@ -18,20 +18,22 @@ import type { SimEntity } from '../../src/sim/entity';
 
 describe('lanes: the pick', () => {
   it('is deterministic per (seed, bot, life) and follows the weights', () => {
-    expect(LANES_BY_MAP[LOT_NAME]).toBe(LOT_LANES);
+    // F2 (Q4 P2-5): the paths are LOT_LANES', the weights lanes.ts's tuned set
+    const LANES = LANES_BY_MAP[LOT_NAME];
+    expect(LANES.map((l) => [l.id, l.pts])).toEqual(LOT_LANES.map((l) => [l.id, l.pts]));
     expect([...LANE_MODES]).toEqual(['team-deathmatch']);
-    const total = LOT_LANES.reduce((a, l) => a + l.weight, 0);
+    const total = LANES.reduce((a, l) => a + l.weight, 0);
     expect(total).toBeCloseTo(1, 6);
-    const n = new Array<number>(LOT_LANES.length).fill(0);
+    const n = new Array<number>(LANES.length).fill(0);
     for (let id = 0; id < 400; id++) for (let life = 0; life < 20; life++) {
-      const k = pickLane(LOT_LANES, 1, id, life * 317);
-      expect(pickLane(LOT_LANES, 1, id, life * 317)).toBe(k);
+      const k = pickLane(LANES, 1, id, life * 317);
+      expect(pickLane(LANES, 1, id, life * 317)).toBe(k);
       n[k]++;
     }
-    for (const [i, l] of LOT_LANES.entries()) expect(Math.abs(n[i] / 8000 - l.weight), l.id).toBeLessThan(0.03);
+    for (const [i, l] of LANES.entries()) expect(Math.abs(n[i] / 8000 - l.weight), l.id).toBeLessThan(0.03);
     // another seed deals other lanes
     let same = 0;
-    for (let id = 0; id < 200; id++) if (pickLane(LOT_LANES, 1, id, 0) === pickLane(LOT_LANES, 2, id, 0)) same++;
+    for (let id = 0; id < 200; id++) if (pickLane(LANES, 1, id, 0) === pickLane(LANES, 2, id, 0)) same++;
     expect(same).toBeLessThan(120);
   });
 });
@@ -47,7 +49,7 @@ describe('lanes: The Lot geometry', () => {
   afterAll(() => sim.dispose());
 
   it('every waypoint is walkable ground in the main region; every leg is a grid path, both ways', () => {
-    expect(lanesFor(sim)).toBe(LOT_LANES);
+    expect(lanesFor(sim)).toBe(LANES_BY_MAP[LOT_NAME]);
     const out: number[] = [];
     for (const l of LOT_LANES) {
       for (const [x, z] of l.pts) {

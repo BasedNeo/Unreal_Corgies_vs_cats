@@ -1,6 +1,8 @@
 // W9 X4: bots throw at clusters (src/sim/ai/ordnance-ai.ts, the pure decision module the lead wires at INT9).
 // When: ≥ 2 enemies within 4 m of each other, 8–22 m away, the arc lands in the open near them, no ally near the blast.
 // Never: a lone enemy, too close / too far, an ally in the blast, a roof over them, without a throwable. Deterministic.
+// (W9 F2: every target must be holding its spot, and a lone pet holding 1 s with >= 60 % health is a target:
+// tests/unit/ai-ordnance-bots.)
 // End to end: a bot driven by ordnanceBotThink (wired like the snippet in docs/handoff/X4.md) throws a real grenade that
 // hurts both cats of a cluster and no ally, and the wind-up is visible (Throw held before the release).
 import { describe, it, expect } from 'vitest';
@@ -15,7 +17,7 @@ import { movementSystem } from '../../src/sim/systems/movement';
 import { physicsStepSystem } from '../../src/sim/systems/core';
 import { worldSystems } from '../../src/sim/world/systems';
 import { combatSystems, liveOrdnance, ordnanceArcWorld, ordnanceStats } from '../../src/sim/combat';
-import { ORDNANCE_AI, createOrdnanceBot, makeIntent, makePlan, ordnanceBotThink, planThrow } from '../../src/sim/ai/ordnance-ai';
+import { ORDNANCE_AI, createOrdnanceBot, makeIntent, makePlan, noteBodies, ordnanceBotThink, planThrow } from '../../src/sim/ai/ordnance-ai';
 import { ORDNANCE_BLAST, arcWorldOf } from '../../src/shared/content/ordnance';
 
 function flat(props: PropBox[] = []): WorldData {
@@ -52,7 +54,7 @@ describe('X4 ordnance AI: planThrow', () => {
     expect(Math.abs(plan.yaw)).toBeLessThan(0.2); // facing −Z
   });
 
-  it('holds: a lone enemy, a cluster too close or too far, an ally by the blast, no throwable, in a vehicle', async () => {
+  it('holds: a lone enemy that is not camping, a cluster too close or too far, an ally by the blast, no throwable, in a vehicle', async () => {
     const { sim, mk } = await setup();
     const bot = mk(Team.Corgis, 0, 0);
     const lone = mk(Team.Cats, 0, -14);
@@ -62,7 +64,11 @@ describe('X4 ordnance AI: planThrow', () => {
     const ally = mk(Team.Corgis, 11.5, -7.5);
     settle(sim);
     const aw = ordnanceArcWorld(sim), plan = makePlan();
-    expect(planThrow(bot, [lone], [bot], aw, plan)).toBe(false);
+    // F2 (Q4 P2-3): a lone pet is a target only once it has held its spot for ORDNANCE_AI.singleTicks (a camper)
+    noteBodies(1000, [lone]);
+    expect(planThrow(bot, [lone], [bot], aw, plan, 1000 + ORDNANCE_AI.singleTicks - 1)).toBe(false);
+    expect(planThrow(bot, [lone], [bot], aw, plan, 1000 + ORDNANCE_AI.singleTicks)).toBe(true);
+    expect(plan.hits).toBe(1);
     expect(planThrow(bot, [near1, near2], [bot], aw, plan)).toBe(false);
     expect(planThrow(bot, [far1, far2], [bot], aw, plan)).toBe(false);
     expect(planThrow(bot, [c1, c2], [bot], aw, plan)).toBe(true);

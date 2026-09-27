@@ -12,6 +12,10 @@
 //   attack   to the enemy ball and touch it. On its stand: gather at a rally point RALLY_D m short of it, then storm it
 //            together; on the ground (where our carrier fell): straight at it. A healthy attacker pushes through fights on
 //            the way (rush), a hurt one fights its way; far trips may take a kart (tactics.ts objectiveTrip).
+//            F2 (Q4 P2-4): on a map with lanes (lanes.ts: The Lot), each push picks a lane (L3's weighted pickLane, per
+//            team and push); its attackers walk the lane's waypoints and gather at its enemy-side end, then storm from
+//            there. So pushes come down the Canyon and the Pipeworks too, not only the Mud's shortest path. Carriers,
+//            escorts, chasers and returners keep the shortest routes: a lane is for the approach, not the run home.
 //   defend   guards our stand from a spot beside it, fighting from there (the brain's hold zone keeps it home).
 //   return   our ball lies on the ground: the nearest two touch it home (rush over the last RUSH m).
 //   chase    our ball is taken: hunt the carrier (every bot focuses a carrier it can see, brain.ts perceive). A chaser
@@ -31,6 +35,7 @@ import { BA_BALL, BallState } from '../../shared/content/modes';
 import { TICK_HZ } from '../../shared/constants';
 import { baseAssaultConfig, baseAssaultState, type BallRt, type BaseAssaultState } from '../match/base-assault';
 import { type NavGrid, cellIndex, cellX, cellZ, findPath, nearestWalkable, randomCell } from './nav';
+import { lanesFor, pickLane, type LaneDef } from './lanes';
 import type { TacticsState } from './tactics';
 
 export type BaRole = 'carry' | 'escort' | 'attack' | 'defend' | 'return' | 'chase';
@@ -44,6 +49,11 @@ export interface BaBot {
   since: number;
   /** The ball / carrier / stand the role is about (-1 = none). */
   about: EntityId;
+  /** F2: the goal lies within BASE_KEEP m of a stand or a ring (a kart trip there ends short of it). */
+  nearBase: boolean;
+  /** F2 (P2-4): the push this bot walks a lane for (its team's cycle), and its next waypoint (walking order). */
+  laneCycle: number;
+  laneIdx: number;
 }
 
 interface TeamPlan {
@@ -55,6 +65,10 @@ interface TeamPlan {
   push: boolean;
   pushAt: number;
   rallyAt: number;
+  /** F2 (P2-4): the push cycle (a new one after every storm or steal) and its lane (-1: no lanes, the A* rally). */
+  cycle: number;
+  lane: number;
+  fresh: boolean;
 }
 
 type Spot = { x: number; z: number };
@@ -65,6 +79,8 @@ interface PlanState {
   ring: [Spot | null, Spot | null];
   /** Per team: where its attackers gather before storming the enemy stand, found once. */
   rally: [Spot | null, Spot | null];
+  /** F2: per team and lane, the lane's rally (its enemy-side end: null when that end is not 20-60 m from the stand). */
+  laneRally: Map<number, Spot | null>;
   /** Telemetry: team plans made, pushes started. */
   plans: number;
   pushes: [number, number];
@@ -92,14 +108,17 @@ const RUSH_COS = Math.cos(55 * (Math.PI / 180));
 const RALLY_D = 35, RALLY_R = 9, RALLY_WAIT = 8, PUSH_MIN = 8, PUSH_KEEP = 22;
 /** A team behind on captures with less than this many seconds left sends its guards too (s). */
 const ALL_IN = 90;
+/** F2 (Q4 P2-2): a kart trip to a goal this close to a stand or a capture ring (m) ends TRIP_SHORT m from the goal, so
+ *  no bot leaves a kart parked in a ring or on a stand (carriers wait in rings; a parked kart there pinned bots). */
+const BASE_KEEP = 12, TRIP_SHORT = 14;
 
 const states = new WeakMap<Sim, PlanState>();
 
 function planState(sim: Sim): PlanState {
   let s = states.get(sim);
   if (!s) {
-    const plan = (): TeamPlan => ({ due: -1, sig: -1, roles: new Map(), push: false, pushAt: 0, rallyAt: -1 });
-    s = { teams: [plan(), plan()], ring: [null, null], rally: [null, null], plans: 0, pushes: [0, 0] };
+    const plan = (): TeamPlan => ({ due: -1, sig: -1, roles: new Map(), push: false, pushAt: 0, rallyAt: -1, cycle: 0, lane: -2, fresh: false });
+    s = { teams: [plan(), plan()], ring: [null, null], rally: [null, null], laneRally: new Map(), plans: 0, pushes: [0, 0] };
     states.set(sim, s);
   }
   return s;
@@ -202,9 +221,11 @@ function planFor(sim: Sim, st: BaseAssaultState, g: NavGrid, team: 0 | 1, e: Sim
   return p;
 }
 
-/** Rally or storm (see RALLY_D): only while the enemy ball is on its stand. */
+/** Rally or storm (see RALLY_D): only while the enemy ball is on its stand. F2: a new push cycle (and lane) after
+ *  every storm and every steal. */
 function updatePush(sim: Sim, st: BaseAssaultState, g: NavGrid, team: 0 | 1, p: TeamPlan): void {
-  if (st.balls[other(team)].state !== BallState.Home) { p.push = false; p.rallyAt = -1; return; }
+  if (st.balls[other(team)].state !== BallState.Home) { p.push = false; p.rallyAt = -1; p.fresh = true; return; }
+  if (p.fresh || p.lane === -2) { if (p.fresh) p.cycle++; p.fresh = false; p.lane = laneFor(sim, team, p.cycle); }
   const r = rallySpot(sim, st, g, team), s = st.spots[other(team)].stand;
   let n = 0, at = 0, close = 0;
   for (const [id, role] of p.roles) {
@@ -217,6 +238,8 @@ function updatePush(sim: Sim, st: BaseAssaultState, g: NavGrid, team: 0 | 1, p: 
   if (p.push) {
     if (sim.tick - p.pushAt < PUSH_MIN * TICK_HZ || close > 0) return;
     p.push = false;
+    p.cycle++; p.lane = laneFor(sim, team, p.cycle); // the storm is spent: the next squad may come another way
+    return;
   }
   if (at === 0) { p.rallyAt = -1; return; }
   if (p.rallyAt < 0) p.rallyAt = sim.tick;
@@ -226,9 +249,41 @@ function updatePush(sim: Sim, st: BaseAssaultState, g: NavGrid, team: 0 | 1, p: 
   }
 }
 
-/** Where the team's attackers gather: RALLY_D m from the enemy stand back along the route to their own flag (cached). */
+/** F2 (P2-4): this push's lane for the team (-1 on maps without lanes): L3's weighted pick, by (world seed, team, cycle). */
+function laneFor(sim: Sim, team: 0 | 1, cycle: number): number {
+  const lanes = lanesFor(sim);
+  return lanes ? pickLane(lanes, sim.worldData.seed, LANE_SALT + team, cycle) : -1;
+}
+const LANE_SALT = 7919;
+
+/** A lane's waypoint k in the team's walking order (corgis walk a lane forward, cats backward: lanes.ts). */
+function laneAt(lane: LaneDef, team: 0 | 1, k: number): readonly number[] {
+  return lane.pts[team === 0 ? k : lane.pts.length - 1 - k];
+}
+
+/** The lane's rally: its enemy-side end when that stands 20-60 m from the enemy stand (else null: the A* rally). */
+function laneRallyOf(sim: Sim, st: BaseAssaultState, g: NavGrid, team: 0 | 1, li: number, lane: LaneDef): Spot | null {
+  const ps = planState(sim);
+  const key = team * 1000 + li;
+  if (ps.laneRally.has(key)) return ps.laneRally.get(key)!;
+  const end = laneAt(lane, team, lane.pts.length - 1), s = st.spots[other(team)].stand;
+  const d = d2(s, end[0], end[1]);
+  let spot: Spot | null = null;
+  if (d >= 20 && d <= 60) {
+    const c = nearestWalkable(g, end[0], end[1], 3);
+    if (c >= 0) spot = { x: cellX(g, c), z: cellZ(g, c) };
+  }
+  ps.laneRally.set(key, spot);
+  return spot;
+}
+
+/** Where the team's attackers gather: this push's lane end (F2), else RALLY_D m from the enemy stand back along the
+ *  route to their own flag (cached). */
 function rallySpot(sim: Sim, st: BaseAssaultState, g: NavGrid, team: 0 | 1): Spot {
   const ps = planState(sim);
+  const li = ps.teams[team].lane, lanes = li >= 0 ? lanesFor(sim) : null;
+  const lr = lanes ? laneRallyOf(sim, st, g, team, li, lanes[li]) : null;
+  if (lr) return lr;
   const have = ps.rally[team];
   if (have) return have;
   const s = st.spots[other(team)].stand, f = st.spots[team].flag;
@@ -251,7 +306,7 @@ function rallySpot(sim: Sim, st: BaseAssaultState, g: NavGrid, team: 0 | 1): Spo
 function ringSpot(sim: Sim, st: BaseAssaultState, g: NavGrid, team: 0 | 1): { x: number; z: number } {
   const ps = planState(sim);
   const have = ps.ring[team];
-  if (have) return have;
+  if (have && walkableAt(g, have.x, have.z)) return have; // F2: re-picked when a parked kart covers it
   const f = st.spots[team].flag;
   const r = baseAssaultConfig(sim).captureRadius - 0.9;
   let best = -1, bd = Infinity;
@@ -270,6 +325,8 @@ function ringSpot(sim: Sim, st: BaseAssaultState, g: NavGrid, team: 0 | 1): { x:
   return spot;
 }
 
+const walkableAt = (g: NavGrid, x: number, z: number) => { const i = cellIndex(g, x, z); return i >= 0 && g.walk[i] === 1; };
+
 /** Aim a goal at (x, z): itself when walkable, else the nearest walkable cell (the brain walks straight in at the end). */
 function pointAt(t: TacticsState, g: NavGrid, x: number, z: number): void {
   t.gx = x; t.gz = z;
@@ -281,10 +338,35 @@ function pointAt(t: TacticsState, g: NavGrid, x: number, z: number): void {
 
 /** A spot in a zone, kept while it stays inside (a guard's post, an escort's place beside its carrier). */
 function zoneSpot(sim: Sim, t: TacticsState, g: NavGrid, keep: boolean, x: number, z: number, r: number): void {
-  if (keep && Math.hypot(t.gx - x, t.gz - z) < r * 0.8) return;
+  if (keep && Math.hypot(t.gx - x, t.gz - z) < r * 0.8 && walkableAt(g, t.gx, t.gz)) return; // (F2: not under a parked kart)
   let c = randomCell(g, sim.rng, g.mainRegion, x, z, r * 0.6, 1.5);
   if (c < 0) c = nearestWalkable(g, x, z, Math.ceil(r));
   t.gx = c >= 0 ? cellX(g, c) : x; t.gz = c >= 0 ? cellZ(g, c) : z;
+}
+
+/** A lane waypoint counts as reached within this (m). */
+const LANE_ARRIVE = 6;
+
+/**
+ * F2 (P2-4): advance the bot along its push's lane; true while a waypoint before the lane's end (the rally) is next.
+ * A bot new to this push starts at the waypoint nearest it, or the one after when it is already past that one.
+ */
+function laneStep(b: BaBot, e: SimEntity, lane: LaneDef, team: 0 | 1, cycle: number): boolean {
+  const n = lane.pts.length;
+  const dist = (k: number) => { const w = laneAt(lane, team, k); return Math.hypot(w[0] - e.pos.x, w[1] - e.pos.z); };
+  if (b.laneCycle !== cycle) {
+    b.laneCycle = cycle;
+    let k = 0;
+    for (let i = 1; i < n; i++) if (dist(i) < dist(k)) k = i;
+    b.laneIdx = k;
+  }
+  while (b.laneIdx < n - 1) {
+    const w = laneAt(lane, team, b.laneIdx), v = laneAt(lane, team, b.laneIdx + 1);
+    // reached it, or already between it and the next one
+    if (dist(b.laneIdx) < LANE_ARRIVE || dist(b.laneIdx + 1) < Math.hypot(v[0] - w[0], v[1] - w[1])) b.laneIdx++;
+    else break;
+  }
+  return b.laneIdx < n - 1;
 }
 
 /** Attackers at or above this health fraction push through fights on the way to the enemy ball. */
@@ -317,7 +399,7 @@ function goalOf(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, chars: SimE
   if (!st || (team !== 0 && team !== 1)) { if (t.ba) t.ba.rush = false; return; }
   const plan = planFor(sim, st, g, team, e, chars);
   const role = plan.roles.get(e.id) ?? 'attack';
-  const b = t.ba ?? (t.ba = { role, rush: false, since: sim.tick, about: -1 });
+  const b = t.ba ?? (t.ba = { role, rush: false, since: sim.tick, about: -1, nearBase: false, laneCycle: -1, laneIdx: 0 });
   const keep = prev === 'ball' && b.role === role && t.hold; // the same zone as last time: keep the spot in it
   if (b.role !== role) { b.role = role; b.since = sim.tick; b.rush = false; }
   const own = st.balls[team], foe = st.balls[other(team)];
@@ -377,6 +459,16 @@ function goalOf(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, chars: SimE
       if (foe.state === BallState.Carried) { t.goal = ''; b.rush = false; return; } // (a teammate has it: the plan catches up)
       b.about = foe.ball;
       if (foe.state === BallState.Home && !plan.push) {
+        // F2 (P2-4): this push's lane first, waypoint by waypoint, to its end (the rally)
+        const lanes = plan.lane >= 0 ? lanesFor(sim) : null;
+        const lane = lanes && laneRallyOf(sim, st, g, team, plan.lane, lanes[plan.lane]) ? lanes[plan.lane] : null;
+        if (lane && laneStep(b, e, lane, team, plan.cycle)) {
+          const w = laneAt(lane, team, b.laneIdx);
+          pointAt(t, g, w[0], w[1]);
+          t.gy = sim.worldData.height(w[0], w[1]);
+          b.rush = hpFrac(e) >= PUSH_HP; // healthy: push through fights on the way
+          break;
+        }
         // gather at the rally point and fight from there until the squad storms the stand
         const r = rallySpot(sim, st, g, team);
         zoneSpot(sim, t, g, keep, r.x, r.z, RALLY_R);
@@ -393,6 +485,8 @@ function goalOf(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, chars: SimE
   }
   t.goalId = b.about;
   if (prev !== 'ball' || prevId !== t.goalId) t.goalSince = sim.tick;
+  b.nearBase = false;
+  for (const sp of st.spots) if (d2(sp.flag, t.gx, t.gz) < BASE_KEEP || d2(sp.stand, t.gx, t.gz) < BASE_KEEP) b.nearBase = true;
 }
 
 /**
@@ -423,7 +517,7 @@ export const CARRIER_FOCUS = 15;
 export function ballTrip(t: TacticsState, out: { x: number; z: number; r: number; stay: boolean; calm: boolean }): boolean {
   const b = t.ba;
   if (!b || t.goal !== 'ball' || b.role === 'carry' || b.role === 'escort') return false;
-  out.x = t.gx; out.z = t.gz; out.r = b.role === 'defend' ? 8 : 6; out.stay = false; out.calm = false;
+  out.x = t.gx; out.z = t.gz; out.r = b.nearBase ? TRIP_SHORT : b.role === 'defend' ? 8 : 6; out.stay = false; out.calm = false;
   return true;
 }
 
@@ -436,6 +530,13 @@ export function isCarrier(e: SimEntity): boolean {
 export function baRoleOf(e: SimEntity): BaRole | null {
   const t = (e as { ai?: { tac: TacticsState } }).ai?.tac;
   return t?.goal === 'ball' && t.ba ? t.ba.role : null;
+}
+
+/** Telemetry (F2): the team's push cycle and its lane id ('' = the A* rally). */
+export function baLaneOf(sim: Sim, team: 0 | 1): { cycle: number; lane: string } {
+  const p = states.get(sim)?.teams[team];
+  const lanes = lanesFor(sim);
+  return { cycle: p?.cycle ?? 0, lane: p && p.lane >= 0 && lanes ? lanes[p.lane].id : '' };
 }
 
 /** Telemetry: team plans made in this sim so far; storms started per team. */

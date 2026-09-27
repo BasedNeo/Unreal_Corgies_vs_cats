@@ -50,7 +50,9 @@ import {
   vehicleThink,
 } from './tactics';
 import { CARRIER_FOCUS, ballRunIgnores } from './base-assault-ai';
-import { createOrdnanceBot, makeIntent, ordnanceBotThink, type OrdnanceBot, type OrdnanceIntent } from './ordnance-ai'; // W9 X4 hook
+import {
+  createOrdnanceBot, keepClearOfOwnBlast, makeIntent, ordnanceBotThink, throwApproachBand, type OrdnanceBot, type OrdnanceIntent,
+} from './ordnance-ai'; // W9 X4 hook
 import { ordnanceArcWorld } from '../combat/ordnance'; // W9 X4 hook
 
 export type AiMode = 'patrol' | 'alert' | 'engage' | 'cover' | 'regroup';
@@ -99,6 +101,8 @@ export interface AiState {
   stuck: number;
   detourUntil: number;
   detourX: number; detourZ: number;
+  /** W9 F2: no step-away (unhug) before this tick (one per UNHUG_EVERY: a second stuck there takes a random detour). */
+  unhugAt: number;
   coverCooldown: number;
   wasDead: boolean;
   jumpNext: boolean;
@@ -157,7 +161,7 @@ export function createBrain(arch: ArchetypeId, yaw: number): AiState {
     burstLeft: 0, pause: 0, semiTimer: 0, chargeHold: 0, telegraph: 0, lastShots: 0,
     hasGoal: false, goalX: 0, goalZ: 0, path: [], pathIdx: 0, pathGX: 0, pathGZ: 0, repathTick: 0, waitUntil: 0,
     strafeDir: 1, strafeTimer: 0, wantMove: false, lastX: 0, lastZ: 0, odo: 0, checkTimer: 0, stuck: 0,
-    detourUntil: 0, detourX: 0, detourZ: 0, coverCooldown: 0, wasDead: false, jumpNext: false, seq: 0, external: false,
+    detourUntil: 0, detourX: 0, detourZ: 0, unhugAt: 0, coverCooldown: 0, wasDead: false, jumpNext: false, seq: 0, external: false,
     out: { seq: 0, mx: 0, mz: 0, yaw, pitch: 0, buttons: 0, rt: 0 },
     tac: createTactics(),
     pathGrid: null, nav: createNavBot(), perch: null, perchNext: 0,
@@ -349,6 +353,40 @@ function steerOn(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, g: NavGrid
   const l = Math.hypot(dx, dz);
   if (l > 1e-3) { mv.x = dx / l; mv.z = dz / l; }
   return dist;
+}
+
+/** W9 F2: body-wide walkable line: the centre line and both sides BODY_SIDE off it. A centre line grazing a blocked
+ *  row's edge passes, the body's side does not: The Lot's diagonal scaffold brace dips to the heap beside a walkable
+ *  row (the probe at the cell centre clears it), and a stuck detour along that row pinned a cat under it 6.5 s. */
+const BODY_SIDE = 0.3;
+function bodyLineWalkable(g: NavGrid, ax: number, az: number, bx: number, bz: number): boolean {
+  const l = Math.hypot(bx - ax, bz - az);
+  if (l < 1e-3) return isWalkable(g, bx, bz);
+  const px = (-(bz - az) / l) * BODY_SIDE, pz = ((bx - ax) / l) * BODY_SIDE;
+  return lineWalkable(g, ax, az, bx, bz) && lineWalkable(g, ax + px, az + pz, bx + px, bz + pz) && lineWalkable(g, ax - px, az - pz, bx - px, bz - pz);
+}
+
+/**
+ * W9 F2: a bot whose body (not its centre) overlaps a closed cell is pressed against something the grid keeps in the
+ * next cell: a diagonal brace or a low beam the character controller cannot slide along (its underside is a ceiling).
+ * Step UNHUG m straight away from the closed side, then re-plan from there: the new path's line clears it, where a
+ * random detour along the same row grazes it again (The Lot: a cat under the scaffold's facade brace, 6.5 s).
+ * Writes the detour target into unhugOut (UNHUG + 0.5 m out: the detour ends 0.5 m short of it).
+ */
+const UNHUG = 0.5, UNHUG_R = 0.4, UNHUG_EVERY = 5 * TICK_HZ;
+const unhugOut = { x: 0, z: 0 };
+function unhug(g: NavGrid, e: SimEntity): boolean {
+  let ax = 0, az = 0;
+  for (let k = 0; k < 8; k++) {
+    const sx = Math.cos((k * Math.PI) / 4), sz = Math.sin((k * Math.PI) / 4);
+    if (!isWalkable(g, e.pos.x + sx * UNHUG_R, e.pos.z + sz * UNHUG_R)) { ax -= sx; az -= sz; }
+  }
+  const l = Math.hypot(ax, az);
+  if (l < 1e-3) return false;
+  const sx = e.pos.x + (ax / l) * UNHUG, sz = e.pos.z + (az / l) * UNHUG;
+  if (!isWalkable(g, sx, sz) || !lineWalkable(g, e.pos.x, e.pos.z, sx, sz)) return false;
+  unhugOut.x = e.pos.x + (ax / l) * (UNHUG + 0.5); unhugOut.z = e.pos.z + (az / l) * (UNHUG + 0.5);
+  return true;
 }
 
 /** Can the bot step ~1 m in direction (dx, dz)? */
@@ -773,7 +811,7 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
           break;
         }
       }
-      const [minR, maxR] = pushBand(sim, ai.tac) ?? a.preferRange ?? def.aiRange;
+      const [minR, maxR] = pushBand(sim, ai.tac) ?? throwBand(sim, e, ai, target) ?? a.preferRange ?? def.aiRange; // F2: a grenadier closes on a camper
       const tx = ai.visible ? target.pos.x : ai.lkx, tz = ai.visible ? target.pos.z : ai.lkz;
       const dx = tx - e.pos.x, dz = tz - e.pos.z;
       const dist = Math.hypot(dx, dz) || 1e-3;
@@ -899,15 +937,24 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
       const cur = nearestWalkable(hg, e.pos.x, e.pos.z, 4);
       // wedged in a closed cell (against an obstacle): the nearest open cell is the way out
       const wayOut = cur >= 0 && !isWalkable(hg, e.pos.x, e.pos.z);
-      let c = wayOut ? cur : -1;
+      let c = wayOut ? cur : -1, line = -1; // F2: line = the first candidate only the centre line reaches (the fallback)
       for (let k = 0; k < 6 && !wayOut; k++) {
         const cand = randomCell(hg, sim.rng, cur >= 0 ? hg.region[cur] : -1, e.pos.x, e.pos.z, 6, 2.5);
         if (cand < 0) continue;
         if (c < 0) c = cand;
         const cx = cellX(hg, cand), cz = cellZ(hg, cand), l = Math.hypot(cx - e.pos.x, cz - e.pos.z);
-        if (l > 1e-3 && lineWalkable(hg, e.pos.x + ((cx - e.pos.x) / l) * 0.6, e.pos.z + ((cz - e.pos.z) / l) * 0.6, cx, cz)) { c = cand; break; }
+        if (l <= 1e-3) continue;
+        const ax = e.pos.x + ((cx - e.pos.x) / l) * 0.6, az = e.pos.z + ((cz - e.pos.z) / l) * 0.6;
+        if (!lineWalkable(hg, ax, az, cx, cz)) continue;
+        if (line < 0) line = cand;
+        if (bodyLineWalkable(hg, ax, az, cx, cz)) { line = -1; c = cand; break; } // W9 F2: the body's width clears too
       }
+      if (line >= 0) c = line;
       if (c >= 0) { ai.detourX = cellX(hg, c); ai.detourZ = cellZ(hg, c); ai.detourUntil = sim.tick + 70; ai.path.length = 0; }
+      if (!wayOut && sim.tick >= ai.unhugAt && unhug(hg, e)) {
+        ai.detourX = unhugOut.x; ai.detourZ = unhugOut.z; ai.detourUntil = sim.tick + 70; ai.path.length = 0;
+        ai.unhugAt = sim.tick + UNHUG_EVERY;
+      }
       if (ai.stuck >= 3) { ai.hasGoal = false; ai.stuck = 0; if (ai.tac.goal) skipGoal(sim, ai.tac); if (ai.mode !== 'engage') setMode(sim, ai, 'patrol'); }
     }
   }
@@ -972,13 +1019,15 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   // ---- W9 X4 hook: throwables at clusters (ordnance-ai.ts). Room bots only: never wave or chapter cats, never in
   //      adventure, never a player stand-in. A ball carrier never stops to throw (G4b): its wind-up is dropped.
   if (e.flags & EFlag.Carrier) ai.ord.phase = 'idle';
-  else if (e.kind === EntityKind.Bot && !e.combat?.pve && (sim.state.room as { mode?: string } | undefined)?.mode !== 'adventure') {
+  else if (e.kind === EntityKind.Bot && !e.combat?.pve && (sim.state.room as { mode?: string } | undefined)?.mode !== 'adventure'
+    && (ai.ord.phase === 'wind' || !onLink)) { // (F2: never starts a throw mid-climb)
     const oi = ordnanceBotThink(ai.ord, e, sim.tick, ai.yaw, ai.pitch, ai.seen, ctx.chars, ordnanceArcWorld(sim), ai.ordIntent);
     if (oi.active) {
       if (oi.buttons) turnToward(ai, a, oi.yaw, oi.pitch, dt, 1.5); // the wind-up: turn to the throw, Throw held
       else { ai.yaw = oi.yaw; ai.pitch = oi.pitch; }                   // the release: exactly the solved angles
       buttons = (buttons & ~(Btn.Fire | Btn.Aim)) | oi.buttons;
-    }
+      mv.x = 0; mv.z = 0; mv.sprint = false; ai.jumpNext = false;       // F2 (P2-3): plant the feet, so the arc holds
+    } else keepClearOfOwnBlast(ai.ord, e, sim.tick, mv);                // F2: never run into its own live grenade
   }
 
   // ---- write the input (camera frame: mx right, mz forward relative to the aim yaw)
@@ -995,6 +1044,14 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   inp.buttons = buttons;
   // presentation: alerted bots (investigating or fighting) carry EFlag.Alerted for "!" telegraphs
   if (!ai.external) e.flags = ai.mode === 'alert' || ai.mode === 'engage' ? e.flags | EFlag.Alerted : e.flags & ~EFlag.Alerted;
+}
+
+/** F2 (P2-3): the X4 hook's approach band (the rules are ordnance-ai.ts's). Room bots in team-deathmatch only: in the
+ *  objective modes the objective owns where a bot stands (G4b's guards hold their zone, chasers hunt the carrier, core
+ *  pushers push), and a closer engage band pulled them off it. */
+function throwBand(sim: Sim, e: SimEntity, ai: AiState, target: SimEntity): [number, number] | null {
+  if (e.kind !== EntityKind.Bot || e.combat?.pve || !ai.visible || (sim.state.room as { mode?: string } | undefined)?.mode !== 'team-deathmatch') return null;
+  return throwApproachBand(ai.ord, e, target, sim.tick);
 }
 
 /** Trigger discipline: bursts for auto weapons, paced taps for semi-auto, telegraph + charge for chargers. */

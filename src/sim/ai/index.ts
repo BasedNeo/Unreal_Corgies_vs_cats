@@ -4,7 +4,8 @@
 import type { Sim, SimSystem } from '../sim';
 import type { SimEntity } from '../entity';
 import { think, ensureBrain, isAiControlled, type AiContext } from './brain';
-import { navGridFor, pathStats } from './nav';
+import { navFixtureVersion, navGridFor, pathStats } from './nav';
+import { noteBodies } from './ordnance-ai';
 
 export { applyArchetype, createBrain, think, type AiState, type AiMode } from './brain';
 export { ARCHETYPES, archetypeForClass, type Archetype, type ArchetypeId } from './archetypes';
@@ -18,6 +19,8 @@ export { driveKart, flyPlane, kartNavFor, findDrivePath, createDriver, createFli
 export interface AiPerf { ms: number; bots: number; searches: number; navBuildMs: number }
 
 const contexts = new WeakMap<Sim, AiContext>();
+/** F2: the sim's fixture version the context's grid was taken at (a sim's own grid appears with its first fixture). */
+const gridVersions = new WeakMap<AiContext, number>();
 
 function contextOf(sim: Sim): AiContext {
   let c = contexts.get(sim);
@@ -38,11 +41,13 @@ export const aiSystem: SimSystem = {
     const ctx = contextOf(sim);
     const perf = (sim.state.aiPerf as AiPerf | undefined) ?? { ms: 0, bots: 0, searches: 0, navBuildMs: 0 };
     // Rapier's query structures exist only after the first world.step() (physics system, tick 0).
-    if (!ctx.grid && sim.tick >= 1) { ctx.grid = navGridFor(sim); perf.navBuildMs = ctx.grid.buildMs; }
+    if (!ctx.grid && sim.tick >= 1) { ctx.grid = navGridFor(sim); perf.navBuildMs = ctx.grid.buildMs; gridVersions.set(ctx, navFixtureVersion(sim)); }
+    else if (ctx.grid && gridVersions.get(ctx) !== navFixtureVersion(sim)) { ctx.grid = navGridFor(sim); gridVersions.set(ctx, navFixtureVersion(sim)); } // F2: a first fixture after tick 1 (a parked kart)
     ctx.pathBudget = 2;
     const chars: SimEntity[] = ctx.chars;
     chars.length = 0;
     for (const e of sim.entities.values()) if (e.char && !e.dead) chars.push(e);
+    noteBodies(sim.tick, chars); // F2 (P2-3): who is holding still (bots throw only at holding targets)
     const s0 = pathStats.searches;
     let bots = 0;
     for (const e of sim.entities.values()) {
