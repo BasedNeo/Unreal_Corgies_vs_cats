@@ -306,9 +306,10 @@ export function createCharacter(o: CharacterOptions): CharacterAvatar {
   // HARDENED (S4 style v2): one weathered toon material for fur, suit and armour, reading per-vertex roughness / metal /
   // grime / edge wear from the `surface` attribute (MeshBuilder.surface); a light mud band at the boots. The weapon gets
   // its own weathered material from its finish (X3). Older style factories ignore these params.
-  const bodyMat = toon({ color: 0xffffff, vertexColors: true, surfaceAttr: true, surface: 'fur', mud: 0.3 } as Parameters<typeof toon>[0]);
+  // W9 P4 (K3's 35 m finding): the style's character rim + fill (STYLE.rim) on the body and the weapon.
+  const bodyMat = toon({ color: 0xffffff, vertexColors: true, surfaceAttr: true, surface: 'fur', mud: 0.3, rim: 1 } as Parameters<typeof toon>[0]);
   const finish = (kit.weapon as { finish?: { metal: number; wear: number; grime: number } }).finish;
-  const weaponMat = toon({ color: 0xffffff, vertexColors: true, surface: 'weapon', ...(finish ?? {}) } as Parameters<typeof toon>[0]);
+  const weaponMat = toon({ color: 0xffffff, vertexColors: true, surface: 'weapon', rim: 1, ...(finish ?? {}) } as Parameters<typeof toon>[0]);
   // Generous static bounds: poses (zoomies, death flop, flips) leave the bind-pose box.
   const sphere = new THREE.Sphere(new THREE.Vector3(0, 0.6, 0), 1.7);
   const box = new THREE.Box3(new THREE.Vector3(-1.2, -0.2, -1.2), new THREE.Vector3(1.2, 1.9, 1.2));

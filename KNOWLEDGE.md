@@ -74,8 +74,10 @@ triangles.
   changes *shrink* it, so shared armour stays within ~3 cm of the body and each class's signature shape is enlarged.
 
 **Open.** K3 lifted the under-suit's value (luma 35 → 71 up close), but at 35 m under dusk the pets still sit on the toon
-ramp's floor: a 4× lighter suit only moved the lineup from 38 to 41. At range, readability is a lighting job (a rim or
-fill light), not a colour job (P4).
+ramp's floor: a 4× lighter suit only moved the lineup from 38 to 41. At range, readability is a lighting job, not a colour job. P4 proved it: a distance-graded
+rim + fill term on character materials only, plus a dusk fill from the sky's anti-sun light, took the 35 m lineup from
+luma 39 to 70 and the team hue from 7.9 % to 13.1 % with no new light and no new draw. In storm, characters shed 60 %
+of the fog and the grade protects the two team hues (team read 0.1 % → ≥ 6.7 %).
 
 ## 5. Combat feedback that costs almost nothing (X3)
 **Surfaces.** `fx/surfaces.ts` classifies an impact point from WorldData (prop `type` keywords, cylinders, water,

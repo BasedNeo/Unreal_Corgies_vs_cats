@@ -19,6 +19,8 @@
 //   0 low: ramp + wet darkening + sky reflection, no noise, no per-light specular (≈ v1 cost)
 //   1 medium: + per-light specular, one grime octave, edge wear, mud
 //   2 high: + second grime octave, wall streaks, specular anti-aliasing
+// W9 P4: toon({ rim }) compiles in a character rim + fill (STYLE.rim, STYLE_RIM): a cool Fresnel edge plus a flat fill,
+// as light on the albedo, growing with distance, at every detail level (the low tier gets the same read).
 //
 // Differences from WebGL that matter:
 // - Ink hull comes from TSL toonOutlinePass: it outlines ONLY toon materials (isMeshToonMaterial /
@@ -56,6 +58,9 @@ export const STYLE_ENV = {
   intensity: uniform(STYLE.env.intensity),
 };
 
+/** W9 P4 character rim + fill (STYLE.rim): colour × gain (a live hook: e.g. a menu or a cutscene can dim it; 1 in play). */
+export const STYLE_RIM = { color: uniform(new THREE.Color(STYLE.rim.color)), gain: uniform(1) };
+
 let detail = 2;
 /** Tier → material detail (see the header). */
 export const DETAIL_BY_TIER = { low: 0, medium: 1, high: 2 };
@@ -91,7 +96,7 @@ const envFresnel = Fn(({ f0, dotNV, rough }) => {
 });
 
 export class HardenedLightingModel extends THREE.LightingModel {
-  constructor(level = 2) { super(); this.level = level; }
+  constructor(level = 2, rim = false) { super(); this.level = level; this.rim = rim; }
 
   direct({ lightDirection, lightColor, reflectedLight }) {
     const dotNL = normalView.dot(lightDirection);
@@ -124,6 +129,15 @@ export class HardenedLightingModel extends THREE.LightingModel {
     const F = envFresnel({ f0: specularColor, dotNV: N.dot(V).clamp(), rough: roughness });
     const dim = float(1).sub(STYLE_WEATHER.dark.mul(STYLE.env.stormDim));
     reflectedLight.indirectSpecular.addAssign(env.mul(F).mul(STYLE_ENV.intensity).mul(dim).mul(ambientOcclusion));
+    if (this.rim) {
+      // W9 P4 rim + fill (characters): light on the albedo, a Fresnel edge plus a flat fill, both growing from `near`
+      // to `far` metres. Not occluded: it is the read that separates a pet from the ground at range, front or back.
+      const R = STYLE.rim;
+      const edge = float(1).sub(N.dot(V).clamp()).pow(R.power);
+      const far = smoothstep(R.near, R.far, length(cameraPosition.sub(positionWorld)));
+      const k = edge.mul(mix(float(R.nearGain), float(R.farGain), far)).add(mix(float(R.nearFill), float(R.farFill), far));
+      reflectedLight.indirectDiffuse.addAssign(diffuseColor.rgb.mul(STYLE_RIM.color).mul(k.mul(STYLE_RIM.gain).mul(materialReference('rim', 'float'))));
+    }
   }
 }
 
@@ -152,6 +166,7 @@ export class HardenedLightingModel extends THREE.LightingModel {
  * @property {number} [wetK] 0..1
  * @property {number} [puddle] 0..1 puddle coverage on flat up-facing parts when wet
  * @property {boolean} [surfaceAttr] read (rough, metal, grime, wear) from a `surface` vec4 vertex attribute (paintSurface)
+ * @property {number} [rim] 0..1 character rim + fill strength (STYLE.rim; compiled in only when > 0 at creation)
  */
 
 const SURF_KEYS = ['rough', 'metal', 'grime', 'wear', 'mud', 'fade', 'wetK', 'puddle'];
@@ -162,7 +177,7 @@ export class HardenedToonMaterial extends THREE.MeshToonNodeMaterial {
   constructor(params = {}) {
     const own = {};
     const rest = { ...params };
-    for (const k of [...SURF_KEYS, 'detail', 'surfaceAttr']) { own[k] = rest[k]; delete rest[k]; }
+    for (const k of [...SURF_KEYS, 'detail', 'surfaceAttr', 'rim']) { own[k] = rest[k]; delete rest[k]; }
     super(rest);
     this.isHardenedToonMaterial = true;
     const s = SURFACES.default;
@@ -178,6 +193,8 @@ export class HardenedToonMaterial extends THREE.MeshToonNodeMaterial {
     /** Material detail (0 low, 1 medium, 2 high), fixed at creation. */
     this.detail = own.detail ?? detail;
     this.surfaceAttr = !!own.surfaceAttr;
+    /** W9 P4 character rim + fill strength 0..1 (STYLE.rim; compiled in only when > 0 at creation). */
+    this.rim = own.rim ?? 0;
     /** Optional per-pixel base roughness node (e.g. puddles on the terrain). Overrides `rough`. */
     this.roughnessNode = null;
     /** Optional per-pixel extra wetness node 0..1 (e.g. puddles, sprinkler sweep), max-ed with the weather's. */
@@ -186,10 +203,17 @@ export class HardenedToonMaterial extends THREE.MeshToonNodeMaterial {
   }
 
   customProgramCacheKey() {
-    return `${super.customProgramCacheKey()}|hd${this.detail}${this.surfaceAttr ? 's' : ''}${this.puddle > 0 ? 'p' : ''}`;
+    return `${super.customProgramCacheKey()}|hd${this.detail}${this.surfaceAttr ? 's' : ''}${this.puddle > 0 ? 'p' : ''}${this.rim > 0 ? 'r' : ''}`;
   }
 
-  setupLightingModel() { return new HardenedLightingModel(this.detail); }
+  setupLightingModel() { return new HardenedLightingModel(this.detail, this.rim > 0); }
+
+  /** W9 P4: a rim material (a character) sheds STYLE.rim.fogCut of the fog/haze: it keeps its read through a storm. */
+  setupFog(builder, outputNode) {
+    const fogged = super.setupFog(builder, outputNode);
+    if (!(this.rim > 0) || !builder.fogNode) return fogged;
+    return mix(fogged, outputNode, float(STYLE.rim.fogCut));
+  }
 
   /**
    * Weathering masks + final albedo/roughness/metal nodes (built once per program build). With surfaceAttr, a geometry
@@ -291,6 +315,7 @@ export class HardenedToonMaterial extends THREE.MeshToonNodeMaterial {
     for (const k of SURF_KEYS) this[k] = source[k];
     this.detail = source.detail;
     this.surfaceAttr = source.surfaceAttr;
+    this.rim = source.rim;
     this.roughnessNode = source.roughnessNode;
     this.wetNode = source.wetNode;
     return this;
@@ -311,10 +336,10 @@ export function surfaceOf(p = {}) {
  */
 export function toonMaterial(p = {}) {
   const { color = PALETTE.hull, emissive = 0x000000, emissiveIntensity = 1, map = null, steps = STYLE.toonSteps,
-    side = THREE.FrontSide, vertexColors = false, transparent = false, opacity = 1, ink = true, surfaceAttr = false } = p;
+    side = THREE.FrontSide, vertexColors = false, transparent = false, opacity = 1, ink = true, surfaceAttr = false, rim = 0 } = p;
   const m = new HardenedToonMaterial({
     color, emissive, emissiveIntensity, map, gradientMap: rampFor(steps), side, vertexColors, transparent, opacity,
-    ...surfaceOf(p), surfaceAttr,
+    ...surfaceOf(p), surfaceAttr, rim,
   });
   m.userData.style = 'toon';
   m.userData.surface = p.surface ?? 'default';
@@ -334,10 +359,10 @@ export function toonMaterial(p = {}) {
  */
 export function toon(p = {}) {
   const { color = PALETTE.hull, emissive = 0x000000, emissiveIntensity = 1, map = null, steps = STYLE.toonSteps,
-    side = THREE.FrontSide, vertexColors = false, transparent = false, opacity = 1, ink = true, surfaceAttr = false } = p;
+    side = THREE.FrontSide, vertexColors = false, transparent = false, opacity = 1, ink = true, surfaceAttr = false, rim = 0 } = p;
   const key = matKey({
     color, emissive, emissiveIntensity, map: map?.uuid ?? null, steps, side, vertexColors, transparent, opacity, ink,
-    surfaceAttr, detail, ...surfaceOf(p),
+    surfaceAttr, detail, rim, ...surfaceOf(p),
   });
   let m = materialCache.get(key);
   if (!m) { m = toonMaterial(p); materialCache.set(key, m); }
@@ -421,6 +446,17 @@ export function createStyleLights() {
  * elliptical vignette, luminance-weighted animated grain, and a faint screen-space rain sheet when it rains (depth-
  * less far rain that sells a downpour at no extra pass). `uniforms.saturation` is the knob the weather dims.
  */
+/** Unit hue directions (opponent a/b plane, display sRGB) of the two team signal colours, and the hue window's cosine. */
+const hueDir = (hex) => {
+  const c = new THREE.Color(hex); // .r/.g/.b are linear; the grade works on display values: back to sRGB
+  const [r, g, b] = [c.r, c.g, c.b].map((v) => (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055));
+  const a = r - (g + b) / 2, bb = (g - b) * 0.8660254, l = Math.hypot(a, bb) || 1;
+  return [a / l, bb / l];
+};
+export const TEAM_HUE_DIRS = [hueDir(PALETTE.teamCorgis), hueDir(PALETTE.teamCats)];
+const TEAM_HUE = TEAM_HUE_DIRS.map((d) => vec2(d[0], d[1]));
+const TEAM_HUE_COS = Math.cos(((STYLE.grade.signalHueDeg ?? 26) * Math.PI) / 180);
+
 export function createGrade(tokens = STYLE.grade) {
   const t = { ...STYLE.grade, ...tokens };
   const u = {
@@ -429,6 +465,7 @@ export function createGrade(tokens = STYLE.grade) {
     saturation: uniform(t.saturation),
     contrast: uniform(t.contrast),
     signal: uniform(new THREE.Vector2(...t.signalChroma)),
+    signalHue: uniform(new THREE.Vector2(...t.signalHueChroma)),
     vignette: uniform(t.vignette),
     grain: uniform(t.grain),
     rain: STYLE_WEATHER.rain,
@@ -441,7 +478,12 @@ export function createGrade(tokens = STYLE.grade) {
     const l = luminance(s);
     const toned = s.add(u.shadowTint.mul(fall(0.55, 0.0, l))).add(u.highlightTint.mul(smoothstep(0.4, 1.0, l)));
     const mx = max(max(toned.r, toned.g), toned.b), mn = min(min(toned.r, toned.g), toned.b);
-    const keep = smoothstep(u.signal.x, u.signal.y, mx.sub(mn));
+    const chroma = mx.sub(mn);
+    // W9 P4: the team hues are protected from a lower chroma up (a storm washes them below signalChroma)
+    const ab = vec2(toned.r.sub(toned.g.add(toned.b).mul(0.5)), toned.g.sub(toned.b).mul(0.8660254));
+    const dirAB = ab.div(max(length(ab), float(1e-4)));
+    const nearTeam = max(smoothstep(TEAM_HUE_COS, TEAM_HUE_COS + 0.04, dot(dirAB, TEAM_HUE[0])), smoothstep(TEAM_HUE_COS, TEAM_HUE_COS + 0.04, dot(dirAB, TEAM_HUE[1])));
+    const keep = max(smoothstep(u.signal.x, u.signal.y, chroma), nearTeam.mul(smoothstep(u.signalHue.x, u.signalHue.y, chroma)));
     const sat = mix(u.saturation, max(u.saturation, float(1.05)), keep);
     let out = mix(vec3(luminance(toned)), toned, sat);
     // rain sheet: thin slanted streaks in ~150 screen columns, each with its own speed/phase

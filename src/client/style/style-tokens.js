@@ -94,9 +94,17 @@ export const STYLE = {
     pivot: 0.42,
     saturation: 0.86,
     signalChroma: [0.2, 0.42],
-    vignette: 0.62,
+    // W9 P4 team signal protection by hue: pixels near a team hue (the signal colours below, ± signalHueDeg) keep their
+    // saturation from a lower chroma up (signalHueChroma), so storms (which dim saturation and wash chroma) never grey
+    // the blue / crimson trims out. The hues are the locked team signal colours (PALETTE.teamCorgis, teamCats).
+    signalHueDeg: 26,
+    signalHueChroma: [0.05, 0.13],
+    // W9 P4: exposure 1.0 → 1.25 and vignette 0.62 → 0.5 (with the sky's dusk fill, sky.ts rimI / rimUp) lift the dark
+    // dusk bookmarks (deck, flank: luma 31–36) above 45 while every bookmark's contrast rises (docs/handoff/P4.md).
+    // Exposure scales every light alike, so the sodium pools keep their saturation; the fill carries the backlit faces.
+    vignette: 0.5,
     grain: 0.045,
-    exposure: 1.0,
+    exposure: 1.25,
   },
   toneMapping: 'aces',
   lights: {
@@ -118,6 +126,14 @@ export const STYLE = {
   // Fake environment reflection (no env map): the sky's zenith/horizon/ground colours by reflection direction.
   // `stormDim`: the reflected sky darkens with the weather's `dark` (storm puddles mirror a black sky, not a pale one).
   env: { intensity: 0.62, stormDim: 0.55 },
+  // Character rim + fill (W9 P4, toon({ rim })): a view-dependent cool rim (Fresnel edge) plus a flat fill, both as
+  // light on the albedo (hue and saturation kept, so team colours get brighter, not paler), growing with distance: a
+  // subtle comic rim up close, a real lift at range where a pet is 20–30 px of mostly ink and the dusk ramp floor
+  // (K3: at 35 m the suit's albedo barely moved the image; light does). Characters only; no real light, no new pass.
+  // gain/fill: multiples of the albedo (× color) at `near` / `far` metres; power: edge falloff (1 − N·V)^power.
+  // fogCut: the share of the atmospheric fog/haze a rim material (a character) sheds, so a pet keeps its value and team
+  // colour through a storm's haze at range (storm: ~52 % fog at 35 m → ~21 %); near characters are barely fogged anyway.
+  rim: { color: 0xa9c0e6, power: 2.2, near: 8, far: 30, nearGain: 0.35, farGain: 1.1, nearFill: 0.0, farFill: 0.45, fogCut: 0.6 },
   // Battle mood: clear weather still keeps broken cloud and haze (the sky never looks like a picnic).
   mood: { minCloud: 0.42, haze: 0.35, hazeHeight: 7, sunMaxElevation: 42 },
   // Sodium floodlights (style/floodlights.js): real spot lights up to the tier's budget (lights cost every lit pixel

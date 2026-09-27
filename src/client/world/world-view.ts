@@ -129,6 +129,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
     timeOfDay: opts.timeOfDay ?? data.timeOfDay ?? 0.68,
     shadowMap: opts.shadowMapSize ?? P.shadowMapSize,
     clouds: P.clouds,
+    fogScale: 118 / (edge + 1), // W9 L3: the fog's distances scale with the map (West Yard: 118 / 118 = 1)
   });
   scene.add(root);
 

@@ -39,7 +39,14 @@ export const YARD_RAMPS = {
   sun: [[-4, hex(0xff7a3e)], [4, hex(0xff9c58)], [14, hex(0xffbe84)], [30, hex(0xffd8ae)], [60, hex(0xffe8cc)]] as [number, RGB][],
   sunI: [[-5, 0], [0, 0.4], [8, 0.85], [20, 1.0], [60, 1.02]] as [number, number][],
   rim: [[-10, hex(0x4e64a8)], [0, hex(0x8a8cc8)], [12, hex(0x86a6d8)], [40, hex(0x8fb0da)]] as [number, RGB][],
-  rimI: [[-10, 0.5], [0, 0.9], [20, 1.0]] as [number, number][],
+  // W9 P4 sky fill: the anti-sun "rim" light is the dusk sky's fill for everything seen against the low sun (backlit
+  // views: deck, flank). Strongest while the sun is low (×2.5 at t = 0.74), back to the old level by mid-afternoon;
+  // was [[-10, 0.5], [0, 0.9], [20, 1.0]].
+  rimI: [[-10, 0.6], [-3, 1.2], [0, 2.2], [6, 2.4], [16, 1.6], [30, 1.1], [42, 1.0]] as [number, number][],
+  // W9 P4: the fill's height (the up component of its direction, was a fixed 0.35 ≈ 19°): near-horizontal while the sun
+  // is low (≈ 3°), like the anti-sun horizon glow, so it lights the faces turned from the sun and grazes the ground.
+  // At 19° the strong dusk fill washed the floodlit sodium pools out to cream (saturation 0.58 → 0.38, The Lot's pit).
+  rimUp: [[-10, 0.35], [-3, 0.35], [0, 0.05], [8, 0.05], [20, 0.35]] as [number, number][],
   hemiSky: [[-12, hex(0x243052)], [0, hex(0x6a6a8c)], [12, hex(0x74849c)], [40, hex(0x8092a8)]] as [number, RGB][],
   hemiGround: [[-12, hex(0x16130f)], [0, hex(0x2c241b)], [20, hex(0x3a3024)]] as [number, RGB][],
   hemiI: [[-12, 0.6], [0, 0.82], [20, 0.95]] as [number, number][],
@@ -106,7 +113,8 @@ export interface YardSky {
   dispose(): void;
 }
 
-export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; shadowSize?: number; shadowMap?: number; clouds?: boolean } = {}): YardSky {
+export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; shadowSize?: number; shadowMap?: number; clouds?: boolean; /** W9 L3: fog density × this (maps larger than the West Yard see proportionally farther) */ fogScale?: number } = {}): YardSky {
+  const fogScale = opts.fogScale ?? 1;
   // --- style light rig: reuse createStyleLights() output if the renderer added it ---
   let rig = scene.getObjectByName('style_lights') as THREE.Group | undefined;
   let ownRig = false;
@@ -245,6 +253,7 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
     setRGB(sun.color, weatherTint(keyCol, hex(0xc8d2dc), grey * 0.7, 0));
     sun.intensity = base.key * (s.night ? 0.32 : ramp(YARD_RAMPS.sunI, e)) * (1 - 0.85 * W.dark) + base.key * 0.6 * W.flash;
     if (rim) { setRGB(rim.color, ramp(YARD_RAMPS.rim, e)); rim.intensity = base.rim * ramp(YARD_RAMPS.rimI, e) * (1 - 0.45 * W.dark); }
+    rimUp = ramp(YARD_RAMPS.rimUp, e);
     if (hemi) {
       const hs = weatherTint(ramp(YARD_RAMPS.hemiSky, e), tintH, grey * 0.85, W.dark * 0.35);
       setRGB(hemi.color, hs.map((v, i) => lerp(v, [0.8, 0.84, 1.0][i], Math.min(1, W.flash))) as RGB);
@@ -256,7 +265,7 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
     // aerial perspective: distance tints toward the sky's blue, not a beige-green wall (L2 critique)
     fog.color.copy(c3).lerp(new THREE.Color().setRGB(...zen), 0.3).multiplyScalar(1 - 0.3 * storm);
     fog.color.lerp(new THREE.Color(0xc9d0e4), Math.min(1, W.flash * 0.3));
-    baseFog = ramp(YARD_RAMPS.fogDensity, e) * (1 + 1.5 * W.fog + 0.8 * W.rain);
+    baseFog = ramp(YARD_RAMPS.fogDensity, e) * (1 + 1.5 * W.fog + 0.8 * W.rain) * fogScale;
     fog.density = baseFog;
     (FU.density as { value: number }).value = baseFog;
     (scene.background as THREE.Color).copy(fog.color);
@@ -276,6 +285,7 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
     (U.boltDir.value as THREE.Vector2).set(Math.cos(W.boltBearing), Math.sin(W.boltBearing));
     (U.boltSeed as { value: number }).value = W.boltSeed;
   }
+  let rimUp = 0.35; // the fill's height (YARD_RAMPS.rimUp), set by apply()
   let state = sunState(tod);
   let baseFog = 0.003;
   apply(state);
@@ -316,7 +326,7 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
       sun.position.copy(tmp).addScaledVector(state.dir, 200);
       target.updateMatrixWorld();
       rimTarget.position.copy(tmp);
-      if (rim) rim.position.copy(tmp).add(new THREE.Vector3(-state.dir.x, 0.35, -state.dir.z).normalize().multiplyScalar(100));
+      if (rim) rim.position.copy(tmp).add(new THREE.Vector3(-state.dir.x, rimUp, -state.dir.z).normalize().multiplyScalar(100));
       return state;
     },
     dispose() {

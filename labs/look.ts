@@ -7,6 +7,12 @@
 //   &inkmin=0   P3 A/B: every ink hull drawn (default: the renderer's ink LOD skips hulls under 0.3 px)
 //   &harden=1 (default): world materials are rebuilt with toonMaterial() + a surface preset IN THIS LAB ONLY — the
 //   preview of the materials.ts snippet in docs/handoff/S4.md (toonFrom -> toonMaterial).
+//   W9 P4 readability bench: &lineup=35 puts all 12 class × species kits (NPC tier; corgis team Corgis, cats team Cats)
+//   on an arc `lineup` m ahead of the bookmark camera, on the ground (&facing=back turns them round; the 4-pet lineup
+//   is off). &mask=1 renders only them, flat white on black (no world, sky, fog, grade vignette/grain): the pixel mask
+//   for artifacts/p4/tools/metrics.mjs. With &freeze the poses are settled once and held (same frame in both shots).
+//   window.__lab.boxes: per lineup character { x0, y0, x1, y1 } CSS px, species, team, cls, tag.
+//   &cam=x,h,z&at=x,y,z: an explicit camera, h metres above the ground at (x, z) (the bench uses cam=42,1.7,2&at=74.3,0.6,-11.4).
 // Keys: 1-9 bookmarks · T/G time of day · R cycle weather · WASD/QE fly · drag to look.
 // Exposes window.__cvc (ready, frames, drawCalls, triangles) and window.__lab (applyBookmark, view, ctx, setWeather).
 import { debug } from '../src/client/debug/debug-hook';
@@ -17,9 +23,10 @@ import { createWorldData } from '../src/shared/world/world-data';
 import { createWorldView } from '../src/client/world/world-view';
 import { WEATHER_KINDS, type WeatherKind } from '../src/shared/world/weather';
 import { surfaceAt } from '../src/shared/world/queries';
-import { toonMaterial, type HardenedToonMaterial } from '../src/client/style/style-webgpu.js';
+import { toonMaterial, glow, type HardenedToonMaterial } from '../src/client/style/style-webgpu.js';
 import { createFloodlights } from '../src/client/style/floodlights.js';
 import { createCharacter } from '../src/client/procgen/characters';
+import { CLASS_IDS, Species, Team } from '../src/shared/types';
 import type { AvatarFrame } from '../src/client/views/avatar';
 
 const params = new URLSearchParams(location.search);
@@ -76,7 +83,9 @@ async function main() {
   const lineup = new THREE.Group();
   lineup.name = 'lineup';
   const avatars: { update(f: AvatarFrame, dt: number): void; root: THREE.Object3D }[] = [];
-  if (params.get('chars') !== '0') {
+  const lineupDist = params.has('lineup') ? Number(params.get('lineup')) : 0;
+  const mask = params.get('mask') === '1';
+  if (params.get('chars') !== '0' && lineupDist <= 0) {
     const specs = [
       { species: 0, cls: 'assault', team: 0, x: -1.6 }, { species: 0, cls: 'breacher', team: 0, x: -0.55 },
       { species: 1, cls: 'assault', team: 1, x: 0.55 }, { species: 1, cls: 'overwatch', team: 1, x: 1.6 },
@@ -124,6 +133,57 @@ async function main() {
     lineup.rotation.y = Math.atan2(-dx, -dz) + Math.PI;
   };
   applyBookmark(params.get('bm') ?? 'center');
+  if (params.has('cam') && params.has('at')) {
+    // explicit camera (the bench's open 35 m sightline: artifacts/p4/tools/sightline.mjs): y is above the ground there
+    const [px, py, pz] = params.get('cam')!.split(',').map(Number), [ax, ay, az] = params.get('at')!.split(',').map(Number);
+    const gy = surfaceAt(data, px, pz).y;
+    const dx = ax - px, dz = az - pz, dy = ay - py;
+    Object.assign(pose, { x: px, y: gy + py, z: pz, yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) });
+    lab.bookmark = 'cam';
+  }
+
+  // W9 P4 readability bench: the 12 kits on an arc `lineupDist` m ahead of the camera, on the ground (see the header)
+  const bench: { root: THREE.Object3D; height: number; species: number; team: number; cls: string; tag: string }[] = [];
+  if (lineupDist > 0) {
+    const back = params.get('facing') === 'back';
+    const step = 1.9 / lineupDist, gap = 1.6 / lineupDist;
+    const span = 2 * CLASS_IDS.length * step + gap - step;
+    let a = pose.yaw - span / 2;
+    for (const sp of [Species.Corgi, Species.Cat]) {
+      for (const cls of CLASS_IDS) {
+        const x = pose.x - Math.sin(a) * lineupDist, z = pose.z - Math.cos(a) * lineupDist;
+        const av = createCharacter({ species: sp, cls, team: sp === Species.Cat ? Team.Cats : Team.Corgis, seed: 3 + bench.length, isLocal: false });
+        av.root.position.set(x, surfaceAt(data, x, z).y, z);
+        av.root.rotation.y = Math.atan2(pose.x - x, pose.z - z) + (back ? 0 : Math.PI); // characters face -Z
+        for (let i = 0; i < 72; i++) av.update(frame, 1 / 60); // settled idle (held with &freeze)
+        ctx.scene.add(av.root);
+        avatars.push(av);
+        bench.push({ root: av.root, height: av.height, species: sp, team: sp === Species.Cat ? Team.Cats : Team.Corgis, cls, tag: back ? 'back' : 'front' });
+        a += step;
+      }
+      a += gap;
+    }
+    if (mask) {
+      // only the characters, flat white on black: no world, sky, fog, floodlights, vignette or grain
+      view.root.visible = false;
+      if (floods) floods.group.visible = false;
+      ctx.scene.traverse((o) => { if (o.name === 'sky_dome') o.visible = false; });
+      const white = glow(0xffffff, 1);
+      for (const b of bench) b.root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && !o.userData.styleInk) m.material = white; if (o.userData.styleInk) o.visible = false; });
+      const g = (ctx.pipeline as unknown as { grade: { uniforms: Record<string, { value: number }> } }).grade.uniforms;
+      g.vignette.value = 0; g.grain.value = 0;
+    }
+  }
+  const boxOf = (b: (typeof bench)[number]) => {
+    const v = new THREE.Vector3();
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [px, py, pz] of [[-0.55, -0.05, -0.55], [0.55, -0.05, 0.55], [-0.55, b.height + 0.25, 0.55], [0.55, b.height + 0.25, -0.55], [-0.55, b.height + 0.25, -0.55], [0.55, b.height + 0.25, 0.55], [-0.55, -0.05, 0.55], [0.55, -0.05, -0.55]]) {
+      v.set(px, py, pz).applyMatrix4(b.root.matrixWorld).project(cam);
+      const sx = ((v.x + 1) / 2) * innerWidth, sy = ((1 - v.y) / 2) * innerHeight;
+      x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+    }
+    return { x0, y0, x1, y1, species: b.species, team: b.team, cls: b.cls, squad: null, tag: b.tag };
+  };
   Object.assign(globalThis as unknown as Record<string, unknown>, {
     __lab: {
       scene: ctx.scene, view, data, renderer: ctx.renderer, ctx, THREE, floods, hardened, applyBookmark,
@@ -166,8 +226,9 @@ async function main() {
     cam.updateMatrixWorld();
     if (!frozen) clock += dt * 60;
     view.update(dt, cam, clock);
+    if (mask) { ctx.scene.fogNode = null; ctx.scene.background = new THREE.Color(0x000000); }
     floods?.update(cam);
-    for (const a of avatars) a.update(frame, dt);
+    if (!(frozen && lineupDist > 0)) for (const a of avatars) a.update(frame, dt);
     ctx.renderer.info.reset();
     ctx.render();
     frames++; fpsN++;
@@ -176,6 +237,8 @@ async function main() {
     lab.drawCalls = info.drawCalls ?? info.calls ?? 0;
     lab.triangles = info.triangles ?? 0;
     lab.timeOfDay = view.timeOfDay;
+    if (bench.length) { for (const b of bench) b.root.updateMatrixWorld(true); (globalThis as unknown as { __lab: Record<string, unknown> }).__lab.boxes = bench.map(boxOf); }
+    (globalThis as unknown as { __lab: Record<string, unknown> }).__lab.frames = frames;
     debug.frames = frames;
     debug.frameMs = dt * 1000;
     debug.ready = frames > 5;
