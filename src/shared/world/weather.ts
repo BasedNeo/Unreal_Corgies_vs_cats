@@ -9,7 +9,16 @@
 //   always in cycle 0] -> clearing (1-1.5) -> clear (rest of the cycle, then the next cycle's clear).
 // Every boundary blends over 20 s (smoothstep, +-10 s), so no parameter moves faster than
 // 1.5 * delta / 20 s (<= 0.075 per second for the table below). The first 3 minutes of every seed are
-// clear and sprinklers stay off for the first 75 s: short tests and soaks see the L2 world unchanged.
+// clear on the default schedule and sprinklers stay off for the first 75 s: short tests and soaks see the L2 world
+// unchanged.
+//
+// W9 L3 per-map bias: a world can carry `weatherBias` (a data field next to its seed; The Lot's is LOT_WEATHER in
+// lot/layout.ts). Every schedule function takes a WeatherKey: a bare seed (the default schedule above, unchanged) or
+// the world itself ({ seed, weatherBias }), so the authority, prediction and the view read the same schedule from the
+// same data. A biased cycle opens in rain, with a storm in cycle 0 and at `stormChance` after, then more rain (the rest
+// of the cycle), clearing, a short dry break (clear), an overcast lead-in, and rain again at the next cycle:
+// rain -> [storm] -> rain -> clearing -> clear -> overcast. Cycle 0 first holds `open` minutes of overcast (the rain
+// rolls in a minute or two into a match; soaks and short tests keep a dry first minute, as on the default schedule).
 //
 // Cross-machine determinism: everything that feeds gameplay (wetness -> slippery grass, sprinkler jet
 // direction, burst schedule, lightning schedule) uses integer hashing and + - * / floor sqrt only.
@@ -80,6 +89,28 @@ export interface WeatherSample extends WeatherParams {
   strike: Strike | null;
 }
 
+/** A map's weather bias (W9 L3): segment lengths in minutes as [min, span] (length = min + span * hash). */
+export interface WeatherBias {
+  /** Cache key: unique per bias table. */
+  id: string;
+  /** Cycle 0 only: overcast before the first rain. */
+  open: readonly [number, number];
+  /** Opening rain (then the storm, then the rest of the cycle is rain again). */
+  rain: readonly [number, number];
+  storm: readonly [number, number];
+  /** Chance of a storm in cycles after the first (cycle 0 always has one). */
+  stormChance: number;
+  /** The dry break and the overcast lead-in back into rain. */
+  clear: readonly [number, number];
+  overcast: readonly [number, number];
+}
+
+/** A weather schedule: a bare world seed (the default schedule) or a world with its seed and optional bias. */
+export type WeatherKey = number | { readonly seed: number; readonly weatherBias?: WeatherBias };
+
+const seedOf = (k: WeatherKey): number => (typeof k === 'number' ? k : k.seed);
+const biasOf = (k: WeatherKey): WeatherBias | undefined => (typeof k === 'number' ? undefined : k.weatherBias);
+
 export const WEATHER_CYCLE_S = 13 * 60;
 /** Half of the 20 s transition. */
 export const WEATHER_BLEND_S = 10;
@@ -91,30 +122,47 @@ interface Segment { kind: WeatherKind; start: number; end: number }
 
 const segCache = new Map<string, Segment[]>();
 let lastSeed = NaN, lastK = NaN, lastSegs: Segment[] = [];
+let lastBias: WeatherBias | undefined;
 
-/** The weather segments of cycle k (ticks, absolute). The last one is always 'clear'. */
-export function weatherCycle(seed: number, k: number): Segment[] {
-  if (seed === lastSeed && k === lastK) return lastSegs;      // hot path: no key string per call
-  const key = `${seed}:${k}`;
+/** The weather segments of cycle k (ticks, absolute). Unbiased: the last one is always 'clear'; biased (W9 L3): the
+ *  cycle opens in rain (cycle 0 after its overcast opening) and ends overcast. */
+export function weatherCycle(seed: number, k: number, bias?: WeatherBias): Segment[] {
+  if (seed === lastSeed && k === lastK && bias === lastBias) return lastSegs;      // hot path: no key string per call
+  const key = bias ? `${seed}:${k}:${bias.id}` : `${seed}:${k}`;
   let segs = segCache.get(key);
-  if (segs) { lastSeed = seed; lastK = k; lastSegs = segs; return segs; }
+  if (segs) { lastSeed = seed; lastK = k; lastBias = bias; lastSegs = segs; return segs; }
   const s = hashSeed(`weather:${seed}`) | 0;
   const r = (i: number) => hash2(k, i, s);
   const q = (mins: number) => Math.floor(mins * MIN);
-  const list: [WeatherKind, number][] = [
-    ['clear', k === 0 ? q(3 + 0.8 * r(1)) : q(2 + 1.5 * r(1))],
-    ['overcast', q(1 + 1.0 * r(2))],
-    ['rain', q(1.5 + 1.2 * r(3))],
-  ];
-  if (k === 0 || r(4) < 0.65) list.push(['storm', q(1.2 + 1.0 * r(5))]);
-  list.push(['clearing', q(1 + 0.5 * r(6))]);
   segs = [];
   let t = k * CYCLE;
-  for (const [kind, len] of list) { segs.push({ kind, start: t, end: t + len }); t += len; }
-  segs.push({ kind: 'clear', start: t, end: (k + 1) * CYCLE });
+  if (!bias) {
+    const list: [WeatherKind, number][] = [
+      ['clear', k === 0 ? q(3 + 0.8 * r(1)) : q(2 + 1.5 * r(1))],
+      ['overcast', q(1 + 1.0 * r(2))],
+      ['rain', q(1.5 + 1.2 * r(3))],
+    ];
+    if (k === 0 || r(4) < 0.65) list.push(['storm', q(1.2 + 1.0 * r(5))]);
+    list.push(['clearing', q(1 + 0.5 * r(6))]);
+    for (const [kind, len] of list) { segs.push({ kind, start: t, end: t + len }); t += len; }
+    segs.push({ kind: 'clear', start: t, end: (k + 1) * CYCLE });
+  } else {
+    // wet map: [cycle 0: overcast] -> rain -> [storm] -> rain (the rest of the cycle) -> clearing -> clear -> overcast
+    const L = (p: readonly [number, number], i: number) => q(p[0] + p[1] * r(i));
+    const open = k === 0 ? L(bias.open, 7) : 0;
+    const rain1 = L(bias.rain, 3);
+    const storm = k === 0 || r(4) < bias.stormChance ? L(bias.storm, 5) : 0;
+    const tail: [WeatherKind, number][] = [['clearing', q(1 + 0.5 * r(6))], ['clear', L(bias.clear, 1)], ['overcast', L(bias.overcast, 2)]];
+    const rest = CYCLE - open - rain1 - storm - tail.reduce((a, [, n]) => a + n, 0);
+    const list: [WeatherKind, number][] = storm > 0 ? [['rain', rain1], ['storm', storm], ['rain', rest]] : [['rain', rain1 + rest]];
+    if (open > 0) list.unshift(['overcast', open]);
+    list.push(...tail);
+    for (const [kind, len] of list) { segs.push({ kind, start: t, end: t + len }); t += len; }
+    segs[segs.length - 1].end = (k + 1) * CYCLE;
+  }
   if (segCache.size > 64) segCache.clear();
   segCache.set(key, segs);
-  lastSeed = seed; lastK = k; lastSegs = segs;
+  lastSeed = seed; lastK = k; lastBias = bias; lastSegs = segs;
   return segs;
 }
 
@@ -126,28 +174,29 @@ const smooth = (a: number, b: number, x: number): number => {
 interface Blend { from: WeatherKind; to: WeatherKind; w: number }
 const blendScratch: Blend = { from: 'clear', to: 'clear', w: 0 };
 
-function blendAt(seed: number, tick: number, out: Blend): Blend {
+function blendAt(seed: number, tick: number, out: Blend, bias?: WeatherBias): Blend {
   const t = tick < 0 ? 0 : tick;
   const k = Math.floor(t / CYCLE);
-  const segs = weatherCycle(seed, k);
+  const segs = weatherCycle(seed, k, bias);
   let i = 0;
   while (i < segs.length - 1 && t >= segs[i].end) i++;
   const seg = segs[i];
   out.from = seg.kind; out.to = seg.kind; out.w = 0;
   if (t < seg.start + H) {
-    // entering this segment: blend from the previous one (previous cycle ends 'clear')
-    const prev = i > 0 ? segs[i - 1].kind : 'clear';
+    // entering this segment: blend from the previous one (the previous cycle ends 'clear', or overcast when biased;
+    // tick 0 starts in its first state)
+    const prev = i > 0 ? segs[i - 1].kind : k === 0 ? seg.kind : bias ? 'overcast' : 'clear';
     if (prev !== seg.kind) { out.from = prev; out.to = seg.kind; out.w = smooth(seg.start - H, seg.start + H, t); }
   } else if (t > seg.end - H) {
-    const next = i < segs.length - 1 ? segs[i + 1].kind : 'clear';
+    const next = i < segs.length - 1 ? segs[i + 1].kind : bias ? 'rain' : 'clear';
     if (next !== seg.kind) { out.from = seg.kind; out.to = next; out.w = smooth(seg.end - H, seg.end + H, t); }
   }
   return out;
 }
 
 /** Blended weather parameters only (no lightning), for hot paths (sim wetness, AI sight). */
-export function weatherParamsAt(seed: number, tick: number, out: WeatherParams = { ...WEATHER_PARAMS.clear }): WeatherParams {
-  const b = blendAt(seed, tick, blendScratch);
+export function weatherParamsAt(key: WeatherKey, tick: number, out: WeatherParams = { ...WEATHER_PARAMS.clear }): WeatherParams {
+  const b = blendAt(seedOf(key), tick, blendScratch, biasOf(key));
   const A = WEATHER_PARAMS[b.from], B = WEATHER_PARAMS[b.to];
   for (const key of PARAM_KEYS) out[key] = A[key] + (B[key] - A[key]) * b.w;
   return out;
@@ -159,10 +208,10 @@ const STRIKE_RATE = 0.16;
 const stormScratch: WeatherParams = { ...WEATHER_PARAMS.clear };
 
 /** The strike that happens in second-bin j (ticks [j*60, j*60+60)), or null. */
-export function strikeInSecond(seed: number, j: number): Strike | null {
+export function strikeInSecond(key: WeatherKey, j: number): Strike | null {
   if (j < 0) return null;
-  const s = hashSeed(`strike:${seed}`) | 0;
-  const storm = weatherParamsAt(seed, j * TICK_HZ, stormScratch).storm;
+  const s = hashSeed(`strike:${seedOf(key)}`) | 0;
+  const storm = weatherParamsAt(key, j * TICK_HZ, stormScratch).storm;
   if (storm < 0.25 || hash2(j, 1, s) >= STRIKE_RATE * storm) return null;
   const dist = 150 + 1150 * hash2(j, 4, s) * hash2(j, 5, s);
   return {
@@ -176,7 +225,7 @@ export function strikeInSecond(seed: number, j: number): Strike | null {
 }
 
 /** Calls `fn` for every strike whose flash tick is in [t0, t1). */
-export function forEachStrike(seed: number, t0: number, t1: number, fn: (s: Strike) => void): void {
+export function forEachStrike(seed: WeatherKey, t0: number, t1: number, fn: (s: Strike) => void): void {
   if (t1 <= t0) return;
   const j0 = Math.floor(Math.max(0, t0) / TICK_HZ), j1 = Math.floor(t1 / TICK_HZ);
   for (let j = j0; j <= j1; j++) {
@@ -186,7 +235,7 @@ export function forEachStrike(seed: number, t0: number, t1: number, fn: (s: Stri
 }
 
 /** Most recent strike at or before `tick` within `lookbackS` seconds. */
-export function lastStrike(seed: number, tick: number, lookbackS = 8): Strike | null {
+export function lastStrike(seed: WeatherKey, tick: number, lookbackS = 8): Strike | null {
   const j1 = Math.floor(tick / TICK_HZ);
   for (let j = j1; j >= Math.max(0, j1 - lookbackS); j--) {
     const st = strikeInSecond(seed, j);
@@ -205,10 +254,10 @@ export function flashEnvelope(dt: number): number {
 }
 
 /** Full weather sample: blended parameters + state names + lightning flash and last strike. */
-export function weatherAt(seed: number, tick: number, out?: WeatherSample): WeatherSample {
+export function weatherAt(seed: WeatherKey, tick: number, out?: WeatherSample): WeatherSample {
   const o = out ?? ({ ...WEATHER_PARAMS.clear, tick: 0, kind: 'clear', from: 'clear', to: 'clear', blend: 0, flash: 0, strike: null } as WeatherSample);
   weatherParamsAt(seed, tick, o);
-  const b = blendAt(seed, tick, blendScratch);
+  const b = blendAt(seedOf(seed), tick, blendScratch, biasOf(seed));
   o.tick = tick;
   o.from = b.from; o.to = b.to; o.blend = b.w;
   o.kind = b.w < 0.5 ? b.from : b.to;
@@ -220,10 +269,10 @@ export function weatherAt(seed: number, tick: number, out?: WeatherSample): Weat
 }
 
 /** First tick >= fromTick whose dominant state is `kind` and that sits mid-segment (for labs/tests). */
-export function findWeather(seed: number, kind: WeatherKind, fromTick = 0, maxCycles = 12): number {
+export function findWeather(seed: WeatherKey, kind: WeatherKind, fromTick = 0, maxCycles = 12): number {
   const k0 = Math.floor(Math.max(0, fromTick) / CYCLE);
   for (let k = k0; k < k0 + maxCycles; k++) {
-    for (const s of weatherCycle(seed, k)) {
+    for (const s of weatherCycle(seedOf(seed), k, biasOf(seed))) {
       const mid = Math.floor((s.start + s.end) / 2);
       if (s.kind === kind && mid >= fromTick) return mid;
     }
@@ -283,7 +332,8 @@ const rainScratch: WeatherParams = { ...WEATHER_PARAMS.clear };
 
 /** Burst + sweep state of a sprinkler at a tick. Pure; + - * / floor only. The garden's sprinklers
  *  have a rain sensor: pressure fades out while it rains (and comes back as the rain clears). */
-export function sprinklerAt(seed: number, sp: Sprinkler, tick: number, out?: SprinklerState): SprinklerState {
+export function sprinklerAt(key: WeatherKey, sp: Sprinkler, tick: number, out?: SprinklerState): SprinklerState {
+  const seed = seedOf(key);
   const o = out ?? { on: 0, angle: sp.a0, dirX: 1, dirZ: 0, t: -1 };
   o.on = 0; o.t = -1; o.angle = sp.a0;
   const first = sp.first * TICK_HZ, period = sp.period * TICK_HZ, burst = sp.burst * TICK_HZ;
@@ -295,7 +345,7 @@ export function sprinklerAt(seed: number, sp: Sprinkler, tick: number, out?: Spr
     const start = first + m * period + Math.floor(hash2(m, 7, s) * slack);
     const local = t - start;
     if (local >= 0 && local <= burst) {
-      o.on = smooth(0, RAMP, local) * (1 - smooth(burst - RAMP, burst, local)) * (1 - smooth(0.05, 0.4, weatherParamsAt(seed, t, rainScratch).rain));
+      o.on = smooth(0, RAMP, local) * (1 - smooth(burst - RAMP, burst, local)) * (1 - smooth(0.05, 0.4, weatherParamsAt(key, t, rainScratch).rain));
       o.t = local / TICK_HZ;
       let u = local / (sp.sweep * TICK_HZ);
       u -= Math.floor(u);

@@ -3,6 +3,7 @@
 // AI) and the client (visuals). Additions over the Wave 0 skeleton are OPTIONAL fields so older
 // callers and hand-built test worlds keep compiling; consumers treat a missing field as empty.
 import type { TeamId, Vec3 } from '../types';
+import type { WeatherBias } from './weather';
 
 /**
  * Solid oriented box collider. Rotation is applied yaw (Y) first, then pitch (local X), then roll
@@ -267,6 +268,8 @@ export interface WorldData {
   bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
   /** Default time of day for visuals (0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset). */
   timeOfDay?: number;
+  /** W9 L3: this map's weather schedule bias (weather.ts; The Lot: rain by default). Absent = the default schedule. */
+  weatherBias?: WeatherBias;
   // ---- G1 additions (optional) ----
   /** Tall-grass concealment zones (The Garden). */
   concealZones?: ConcealZone[];

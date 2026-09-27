@@ -138,6 +138,46 @@ export interface PickupLayout {
 // deck rail, cat tree, shed roof and bean teepee, and secrets behind the neighbour-strip fence gaps.
 const CAT_TREE: RoutePoint[] = [[15.5, 0, 84], [19.4, 0.6, 81.2], [19.6, 1.6, 84.8], [22.4, 2.8, 81.0], [24.8, 4.0, 84.0], [22.0, 5.2, 87.4], [22.2, 6.4, 84.3]];
 
+// W9 L3: The Lot (WorldData.name 'The Lot'). Heights from surfaceAt(); tests/unit/lot-pickups.test.ts re-derives them and
+// runs S1's hop search for a corgi and a cat. Cores: two point-symmetric pairs — inside the loose walk-through pipes on
+// either side of the mud, and up high: the east container's roof (corgi side, by the gangway) and the south pipe crown
+// of the west tunnel (cat side, by the pallet stair). Bots only walk to the two ground-level ones (tactics: no
+// platforming). Kibble: 18 hideouts — the pit (banner plinth, footings, ammo crates, the floodlight ballast), the
+// trenches, the gangway landing, the container pallets, the rebar bundles, the ditch floor, the tunnel inverts, the
+// pallet stair, the scaffold deck and crow's nest, the cats' crates and the tall pallet stacks in the open mud.
+const LOT_GANGWAY: RoutePoint[] = [[-68.3, 0, -63], [-68.3, 10.4, -42]];
+const LOT_STAIR: RoutePoint[] = [[58, 0, 39], [62.4, 1.17, 39], [66.4, 2.37, 39], [70.4, 3.57, 39], [74.4, 4.77, 39], [79.5, 5.68, 38.5]];
+
+const THE_LOT: PickupLayout = {
+  cores: [
+    { id: 'container_roof', x: -72.2, y: 11.02, z: -24, hint: "on the east container's roof (gangway)", side: -1, route: [...LOT_GANGWAY, [-71.2, 10.4, -41.5]] },
+    { id: 'pipe_crown', x: 79.5, y: 6.3, z: 41, hint: "on the west pipe tunnel's crown (pallet stair)", side: -1, route: LOT_STAIR },
+    { id: 'loose_pipe_w', x: -44, y: 0.93, z: -29.5, hint: 'inside the loose pipe, corgi side of the mud', side: -1, route: [[-51, 0.07, -29.5]] },
+    { id: 'loose_pipe_e', x: 44, y: 0.93, z: 29.5, hint: 'inside the loose pipe, cat side of the mud', side: -1, route: [[51, -0.07, 29.5]] },
+  ],
+  kibble: [
+    { id: 'pit_banner', x: -35.45, y: -1.25, z: -112.2, hint: 'on the corgi banner plinth', side: 0, route: [[-38, -2.4, -112]] },
+    { id: 'pit_footing', x: -16, y: -0.49, z: -100, hint: 'on a footing block in the pit', side: 0, route: [[-16, -2.4, -97.5]] },
+    { id: 'pit_ammo', x: -49, y: -0.08, z: -122, hint: 'on the tennis-ball ammo crate', side: 0, route: [[-49, -2.4, -119.5]] },
+    { id: 'flood_ballast_pit', x: -84.1, y: 1.6, z: -112.9, hint: 'on the pit floodlight ballast', side: 0, route: [[-85, -0.05, -109]] },
+    { id: 'trench_t3', x: -37, y: -1.45, z: -80, hint: 'in the cross trench', side: 0, route: [[-37, -2, -80]] },
+    { id: 'gangway_landing', x: -68.4, y: 10.95, z: -42, hint: 'on the gangway landing', side: 0, route: [[-68.3, 0, -63], [-68.3, 9.24, -46]] },
+    { id: 'container_pallet', x: -97.3, y: 1.72, z: -36.5, hint: 'on the pallets inside the west container', side: 0, route: [[-93.5, 0, -48], [-93.5, 0.3, -36.5]] },
+    { id: 'rebar_n', x: 24, y: 1.77, z: -12, hint: 'on the rebar bundle (north)', side: -1, route: [[23.2, -0.04, -9.6]] },
+    { id: 'ditch_west', x: -40, y: -1.35, z: 0, hint: 'on the ditch floor (wade in)', side: -1, route: [[-40, -0.47, 4]] },
+    { id: 'ditch_east', x: 40, y: -1.35, z: 0, hint: 'on the ditch floor (wade in)', side: -1, route: [[40, -0.47, -4]] },
+    { id: 'rebar_s', x: -24, y: 1.78, z: 12, hint: 'on the rebar bundle (south)', side: -1, route: [[-23.2, 0.01, 9.6]] },
+    { id: 'tunnel_invert', x: 91.5, y: 0.86, z: 23.6, hint: 'in the east tunnel, on the invert between two pipes', side: 1, route: [[91.5, 0, 10]] },
+    { id: 'pallet_stair_top', x: 74.4, y: 5.32, z: 39, hint: 'on top of the pallet stair', side: 1, route: LOT_STAIR.slice(0, 4) },
+    { id: 'scaffold_deck', x: 54, y: 9.55, z: 98.9, hint: 'on the scaffold deck', side: 1, route: [[70, 4.6, 98.9], [62, 8.12, 98.9]] },
+    { id: 'scaffold_nest', x: 46, y: 13.95, z: 99.5, hint: "in the scaffold's crow's nest", side: 1,
+      route: [[1, 4.6, 98.9], [7, 6.8, 98.9], [14, 9, 98.9], [26, 9, 99.95], [36, 11.2, 99.95], [42, 13.4, 99.95]] },
+    { id: 'heap_ammo', x: 50, y: 6.92, z: 122, hint: 'on the tuna-tin crates', side: 1, route: [[50, 4.6, 124.4]] },
+    { id: 'mid_pallets', x: 40, y: 2.79, z: 52, hint: 'on the tall pallet stack (south mud)', side: 1, route: [[43.5, -0.09, 52]] },
+    { id: 'mid_pallets_n', x: -40, y: 2.91, z: -52, hint: 'on the tall pallet stack (north mud)', side: 0, route: [[-43.5, 0.06, -52]] },
+  ],
+};
+
 export const PICKUP_LAYOUTS: Record<string, PickupLayout> = {
   'West Yard': {
     cores: [
@@ -200,6 +240,7 @@ export const PICKUP_LAYOUTS: Record<string, PickupLayout> = {
         route: [[81.5, -0.03, -40.5], [81.5, 0.2, -54.5], [86.2, 2.4, -54.8], [86.2, 4.1, -57.6]] },
     ],
   },
+  'The Lot': THE_LOT,
 };
 
 /** The pickup layout for a map (by WorldData.name), or null when the map has none. */

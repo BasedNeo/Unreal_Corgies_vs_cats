@@ -162,6 +162,9 @@ export function createLotField(seed: number): LotField {
     return h;
   }
 
+  /** W9: ~3 m patches that break the gravel rims up (0 = no gravel there). */
+  const rimBreak = (px: number, pz: number) => smoothstep(-0.3, 0.25, fbm2(nPatch, px / 3.2 + 17, pz / 3.2 - 5, 2));
+
   function surface(x: number, z: number): SurfaceSample {
     const edge = LOT_EDGE - Math.max(Math.abs(x), Math.abs(z));
     if (edge < -1) return { dirt: 0, sand: 0, mulch: 0, wild: 1 };        // the neighbours' ground beyond the fence
@@ -183,16 +186,18 @@ export function createLotField(seed: number): LotField {
       const w = smoothstep(0.05, 0.4, fbm2(nPatch, x / 8 + 31, z / 8, 2)) * 0.7;
       if (w > sand) sand = w;
     }
-    // pale spoil/gravel rims outline the carves at ground level (the pit and trench shapes read from afar)
+    // pale spoil/gravel rims outline the carves at ground level (the pit and trench shapes read from afar). W9: calmer —
+    // narrower, and broken into ~3 m spoil patches (the terrain material thresholds the weight at ~0.5), so they read as
+    // spilled gravel along the edge rather than a continuous white outline.
     {
       const pd = sdRect(x, z, PIT.x, PIT.z, PIT.hx, PIT.hz);
-      if (pd > 0 && pd < 5) { const w = 0.95 * (1 - smoothstep(1.6, 3.6, pd + jit * 0.8)) * smoothstep(0.6, 1.3, pd); if (w > sand) sand = w; }
+      if (pd > 0 && pd < 4) { const w = 0.95 * (1 - smoothstep(1.2, 2.8, pd + jit * 0.8)) * smoothstep(0.6, 1.3, pd) * rimBreak(x, z); if (w > sand) sand = w; }
     }
     for (const t of trenches) {
       if (!inBox(t.p.box, x, z)) continue;
       polyDist(t.p, x, z, tmp);
       const out = tmp.d - t.half;
-      if (out > 0.6 && out < 4 && tmp.s < t.p.total - 1) { const w = 0.9 * (1 - smoothstep(1.3, 2.8, out + jit * 0.6)) * smoothstep(0.6, 1.2, out); if (w > sand) sand = w; }
+      if (out > 0.6 && out < 3 && tmp.s < t.p.total - 1) { const w = 0.9 * (1 - smoothstep(1.0, 2.1, out + jit * 0.6)) * smoothstep(0.6, 1.2, out) * rimBreak(x, z); if (w > sand) sand = w; }
     }
     // dark wet mud: trench floors, the ditch banks, the haul roads and their ruts
     for (const t of trenches) {

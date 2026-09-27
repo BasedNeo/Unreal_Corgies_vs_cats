@@ -8,13 +8,15 @@
 //   Keys: 1-9 bookmarks · T/G time of day +/- (pins it) · WASD/QE fly (Shift fast) · drag to look · P print
 //   pose · R cycle weather override · L next lightning · [ / ] clock -/+ 30 s · F freeze clock
 // Exposes window.__cvc (ready, fps, drawCalls, triangles, world stats, bookmarks) for tools/probe.mjs.
+// W9 L3: the clock follows the map's own weather schedule (weather.ts WeatherKey: The Lot's rain-by-default bias), fed to
+// the view as its weather every frame (R still cycles fixed overrides), so the lab shows it before the world view does.
 import { debug } from '../src/client/debug/debug-hook';
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { createRenderContext } from '../src/client/engine/renderer';
 import { createWorldData } from '../src/shared/world/world-data';
 import { createWorldView } from '../src/client/world/world-view';
-import { findWeather, forEachStrike, sprinklerAt, WEATHER_KINDS, type WeatherKind } from '../src/shared/world/weather';
+import { findWeather, forEachStrike, sprinklerAt, weatherAt, WEATHER_KINDS, type WeatherKind, type WeatherSample } from '../src/shared/world/weather';
 import { AudioEngine } from '../src/client/audio/engine';
 import { createWeatherAudio } from '../src/client/audio/weather';
 import { toon } from '../src/client/style/style-webgpu.js';
@@ -40,12 +42,12 @@ async function main() {
   let clock = Number(params.get('tick') ?? 0);
   let frozen = params.has('freeze');
   const wxParam = params.get('wx') as WeatherKind | null;
-  if (wxParam && WEATHER_KINDS.includes(wxParam)) clock = findWeather(seed, wxParam, clock);
+  if (wxParam && WEATHER_KINDS.includes(wxParam)) clock = findWeather(data, wxParam, clock);
   /** Next near strike after `from` (optionally with its bearing in [b0, b1], math angle in XZ). */
   const nextBolt = (from: number, b0 = -Infinity, b1 = Infinity) => {
     let hit = -1;
     const inWin = (b: number) => { for (const k of [-1, 0, 1]) { const x = b + k * Math.PI * 2; if (x >= b0 && x <= b1) return true; } return false; };
-    for (let t = from; t < from + 60 * 60 * 40 && hit < 0; t += 600) forEachStrike(seed, t, t + 600, (s) => { if (hit < 0 && s.dist < 700 && s.tick > from && inWin(s.bearing)) hit = s.tick; });
+    for (let t = from; t < from + 60 * 60 * 40 && hit < 0; t += 600) forEachStrike(data, t, t + 600, (s) => { if (hit < 0 && s.dist < 700 && s.tick > from && inWin(s.bearing)) hit = s.tick; });
     return hit;
   };
   // &bolt=1: the next near strike whose bolt is in front of the camera (bearing within +-20 deg of the view)
@@ -53,9 +55,10 @@ async function main() {
   const sprId = params.get('spr');
   if (sprId) {
     const sp = data.sprinklers?.find((s) => s.id === sprId);
-    if (sp) for (let t = clock; t < clock + 60 * 600; t += 30) if (sprinklerAt(seed, sp, t).on >= 1) { clock = t + 60 * 4; break; }
+    if (sp) for (let t = clock; t < clock + 60 * 600; t += 30) if (sprinklerAt(data, sp, t).on >= 1) { clock = t + 60 * 4; break; }
   }
   let overrideIdx = -1;
+  const labWx: WeatherSample = weatherAt(data, 0);
   // &audio: weather ambience through the L5 audio engine (unlocks on the first click/key)
   const audioEngine = params.has('audio') ? new AudioEngine() : null;
   if (audioEngine) audioEngine.attachUnlock(window);
@@ -135,7 +138,7 @@ async function main() {
     setFrozen: (f: boolean) => { frozen = f; },
     frames: () => frames,
     nextBolt,
-    findWeather: (k: WeatherKind, from = 0) => findWeather(seed, k, from),
+    findWeather: (k: WeatherKind, from = 0) => findWeather(data, k, from),
     audioEngine, weatherAudio,
   });
 
@@ -176,6 +179,7 @@ async function main() {
     cam.rotation.set(pose.pitch, pose.yaw, 0, 'YXZ');
     cam.updateMatrixWorld();
     if (!frozen) clock += dt * 60;
+    if (overrideIdx < 0) view.setWeather(weatherAt(data, clock, labWx));      // the map's schedule (W9 weather bias)
     view.update(dt, cam, clock);
     weatherAudio?.update(view.weather, clock, cam, dt);
     ctx.renderer.info.reset();

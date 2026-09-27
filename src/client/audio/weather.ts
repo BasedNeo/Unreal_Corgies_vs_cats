@@ -118,7 +118,7 @@ export function createWeatherAudio(engine: AudioEngine, data: WorldData): Weathe
       let best = Infinity, sx = 0, sy = 0, sz = 0, son = 0;
       const e = listener.matrixWorld.elements, lx = e[12], ly = e[13], lz = e[14];
       if (Number.isFinite(tick)) for (const sp of data.sprinklers ?? []) {
-        sprinklerAt(data.seed, sp, tick, sprState);
+        sprinklerAt(data, sp, tick, sprState); // W9 L3: the world's schedule
         if (sprState.on <= 0) continue;
         const d = Math.hypot(sp.x - lx, sp.y - ly, sp.z - lz);
         if (d < best) { best = d; sx = sp.x; sy = sp.y; sz = sp.z; son = sprState.on; }
@@ -127,7 +127,7 @@ export function createWeatherAudio(engine: AudioEngine, data: WorldData): Weathe
       // thunder: find flashes since the last update, schedule each after its delay (sound travels)
       if (Number.isFinite(tick)) {
         if (Number.isFinite(lastTick) && tick > lastTick && tick - lastTick < TICK_HZ * 5) {
-          forEachStrike(data.seed, lastTick, tick, (s: Strike) => pending.push({ at: s.tick + s.thunderDelay * TICK_HZ, power: s.power, id: s.id }));
+          forEachStrike(data, lastTick, tick, (s: Strike) => pending.push({ at: s.tick + s.thunderDelay * TICK_HZ, power: s.power, id: s.id }));
         }
         lastTick = tick;
         for (let i = pending.length - 1; i >= 0; i--) {

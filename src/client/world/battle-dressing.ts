@@ -8,6 +8,8 @@
 //     muddy paw-print trails (alpha-tested decals hugging the terrain), splinters by the barricades.
 // Static except the cloth sway (GPU) and the floodlights' light hand-off. All materials from the style factory
 // (materials.ts toonFrom/toonNoInk, glow via floodlights.js). Deterministic: hash2 of the layout's seeds.
+// W9 L3: the floodlight list comes from floodlightSpecs(): WorldData.floodlights when a map fills it (The Lot's towers),
+// else the E4 battle layout's floods (the West Yard, unchanged). A map's towers need no battle layout.
 import * as THREE from 'three/webgpu';
 import {
   attribute, positionLocal, normalLocal, uv, time, sin, vec2, vec3, float, mix, smoothstep, length, max, abs, step, fract,
@@ -20,6 +22,7 @@ import { toonFrom, toonNoInk, WORLD_WEATHER } from './materials';
 import { worldColor } from './world-palette';
 import * as FLOODLIGHTS from '../style/floodlights.js';
 import * as STYLE_FACTORY from '../style/style-webgpu.js';
+import { STYLE } from '../style/style-tokens.js';
 
 export interface BattleDressingOptions {
   /** Quality tier: 'low' drops the clutter (casings, balls, paw prints, splinters). Default: the style's detail tier. */
@@ -36,7 +39,57 @@ export interface BattleDressing {
   dispose(): void;
 }
 
-type FloodApi = { group: THREE.Group; add(s: { pos: number[]; target: number[]; poolRadius?: number }): number; update(c: THREE.Camera): void; count: number };
+type FloodApi = { group: THREE.Group; add(s: FloodlightSpec): number; update(c: THREE.Camera): void; count: number };
+
+/** What the S4 rig (style/floodlights.js add()) is given per floodlight. Absent fields take the style's defaults. */
+export interface FloodlightSpec { pos: number[]; target: number[]; poolRadius?: number; intensity?: number; range?: number }
+
+/** Lamp-head -> pool throw (m) the style's floodlight defaults are tuned for (E4's poles and watchtowers: 10-13 m). */
+export const FLOOD_REF_THROW = 12;
+/** Largest fake pool (m) a far-throw tower gets. */
+const POOL_MAX = 22;
+/** Tower light on the ground relative to a pole's: towers light big pale floors (gravel, plywood decks) where two cones
+ *  overlap, and the toon ramp clips hard: at 1 (the pure inverse-square match) and at 0.45 The Lot's pit floor still
+ *  clipped to sodium white; 0.12 reads as a warm pool with a visible falloff (artifacts/l3/scratch/pit-ab.png). */
+export const FLOOD_TOWER_GAIN = 0.12;
+
+/**
+ * The floodlights of a world for the S4 rig. WorldData.floodlights (W9: towers of any height; the target is the pool's
+ * ground point) → the same lamp moved `s` = throw / FLOOD_REF_THROW times further: intensity x s² and range x s give
+ * the same light on the ground as a pole's (inverse-square; then x FLOOD_TOWER_GAIN), and the pool grows x s, shrunk
+ * until it lies on the ground it lights (it never overhangs a drop, e.g. the edge of a spoil heap). Without the field:
+ * the E4 battle layout's floods with their target snapped to the terrain, exactly as before (the West Yard unchanged).
+ */
+export function floodlightSpecs(data: WorldData, layout: BattleLayout | null = battleOf(data)): FloodlightSpec[] {
+  const field = data.floodlights;
+  if (field?.length) {
+    const T = STYLE.floodlight as { intensity: number; range: number; poolRadius: number };
+    return field.map((f) => {
+      const [px, py, pz] = f.pos, [tx, ty, tz] = f.target;
+      const s = Math.max(1, Math.hypot(px - tx, py - ty, pz - tz) / FLOOD_REF_THROW);
+      return {
+        pos: [px, py, pz], target: [tx, ty, tz],
+        intensity: Math.round(T.intensity * s * s * FLOOD_TOWER_GAIN), range: T.range * s,
+        poolRadius: poolOnGround(data, tx, ty, tz, Math.min(POOL_MAX, T.poolRadius * s)),
+      };
+    });
+  }
+  return (layout?.floods ?? []).map((f) => ({ pos: f.pos, target: [f.target[0], data.height(f.target[0], f.target[2]), f.target[2]], poolRadius: f.poolRadius }));
+}
+
+/** Largest radius <= r (m) whose pool disc at height y never floats over ground more than 0.6 m below it (checked out to
+ *  75 % of the radius, where the pool's falloff is still visible). */
+function poolOnGround(data: WorldData, x: number, y: number, z: number, r: number): number {
+  for (let it = 0; it < 16 && r > 2; it++, r *= 0.9) {
+    let ok = true;
+    for (let k = 0; k < 24 && ok; k++) {
+      const a = (k / 24) * Math.PI * 2, c = Math.cos(a), sn = Math.sin(a);
+      for (const f of [0.35, 0.55, 0.75]) if (data.height(x + c * r * f, z + sn * r * f) < y - 0.6) { ok = false; break; }
+    }
+    if (ok) return Math.round(r * 100) / 100;
+  }
+  return Math.max(2, Math.round(r * 100) / 100);
+}
 
 /** Tier from the style factory's material detail (fixed per tier by the renderer: 0 low, 1 medium, 2 high). */
 function styleTier(): 'low' | 'medium' | 'high' {
@@ -263,7 +316,8 @@ export function createBattleDressing(data: WorldData, opts: BattleDressingOption
   const disposables: { dispose(): void }[] = [];
   const counts = { casings: 0, balls: 0, paws: 0, splinters: 0, banners: 0, nets: 0, floods: 0, dressingTris: 0 };
   let floods: FloodApi | null = null;
-  if (!layout) {
+  const floodList = floodlightSpecs(data, layout);
+  if (!layout && !floodList.length) {
     return { group, update() {}, stats: () => ({ dressingDraws: 0 }), dispose() { group.removeFromParent(); } };
   }
   const add = (mesh: THREE.Mesh | null) => {
@@ -275,28 +329,27 @@ export function createBattleDressing(data: WorldData, opts: BattleDressingOption
   };
 
   // --- cloth
-  const banners = buildBanners(layout.banners);
-  add(banners);
-  counts.banners = layout.banners.length;
-  const nets = buildNets(layout.nets);
-  add(nets);
-  counts.nets = layout.nets.length;
+  if (layout) {
+    const banners = buildBanners(layout.banners);
+    add(banners);
+    counts.banners = layout.banners.length;
+    const nets = buildNets(layout.nets);
+    add(nets);
+    counts.nets = layout.nets.length;
+  }
 
   // --- floodlights (the style lane helper; if it is ever missing, the poles and ballast boxes stay, unlit)
   const create = (FLOODLIGHTS as unknown as Record<string, unknown>).createFloodlights as ((o: Record<string, unknown>) => FloodApi) | undefined;
-  if (typeof create === 'function' && layout.floods.length) {
-    floods = create({ tier, ...(opts.lights ? {} : { budget: 0 }), capacity: Math.max(8, layout.floods.length) });
-    for (const f of layout.floods) {
-      const ty = data.height(f.target[0], f.target[2]);
-      floods.add({ pos: f.pos, target: [f.target[0], ty, f.target[2]], poolRadius: f.poolRadius });
-    }
+  if (typeof create === 'function' && floodList.length) {
+    floods = create({ tier, ...(opts.lights ? {} : { budget: 0 }), capacity: Math.max(8, floodList.length) });
+    for (const f of floodList) floods.add(f);
     floods.group.traverse((o) => { o.userData.noCameraCollide = true; });
     group.add(floods.group);
-    counts.floods = layout.floods.length;
+    counts.floods = floodList.length;
   }
 
   // --- clutter (dropped on the low tier)
-  if (clutterOn) {
+  if (layout && clutterOn) {
     const by = (k: ClutterSpec['kind']) => layout.clutter.filter((c) => c.kind === k).flatMap((c) => scatter(data, c));
     const n = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), q = new THREE.Quaternion(), qy = new THREE.Quaternion(), e = new THREE.Euler();
     const sc = new THREE.Vector3(), p = new THREE.Vector3();

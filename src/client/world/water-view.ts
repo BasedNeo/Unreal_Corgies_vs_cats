@@ -1,8 +1,32 @@
 // Water surfaces for WorldData.water zones: polar-grid discs at surfaceY with a per-vertex `depth`
 // attribute (water depth over the terrain / pool floor) driving the stylized water material.
+// W9 L3: a zone's `tint` (a palette key, e.g. 'mud' for The Lot's ditch) becomes its shallow colour; the rest of the
+// water's look (deeper water darker, ripple rings, shore foam) follows it by brightness. Zones without a tint are
+// untouched (the West Yard's pond and pool).
 import * as THREE from 'three/webgpu';
+import { dot, uniform, vec3 } from 'three/tsl';
 import type { WaterZone, WorldData } from '../../shared/world/world-data';
 import { createWaterMaterial } from './materials';
+import { worldColor } from './world-palette';
+
+/** Rec. 709 luma of a linear colour. */
+const luma = (c: THREE.Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+
+/**
+ * Recolour a water material to a tint: every colour the default water produces is replaced by the tint scaled by that
+ * colour's brightness relative to the default shallow water, so the shallows are exactly the tint, deeper water a
+ * darker tint, ripples and the shore foam lighter ones (muddy foam, not white). One dot + one multiply per pixel.
+ */
+export function tintWater(m: THREE.MeshToonNodeMaterial, key: string): void {
+  const base = m.colorNode;
+  if (!base) return;
+  const tint = worldColor(key), ref = luma(worldColor('water'));
+  const t = uniform(new THREE.Color().copy(tint));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TSL node types are too narrow here
+  const b = base as any;
+  m.colorNode = t.mul(dot(b, vec3(0.2126, 0.7152, 0.0722)).div(ref));
+  m.userData.waterTint = key;
+}
 
 export function createWaterView(data: WorldData): { group: THREE.Group; dispose(): void } {
   const group = new THREE.Group();
@@ -11,6 +35,7 @@ export function createWaterView(data: WorldData): { group: THREE.Group; dispose(
   for (const w of data.water ?? []) {
     const geo = w.shape === 'circle' ? discGeometry(data, w) : rectGeometry(data, w);
     const mat = createWaterMaterial(new THREE.Vector2(w.x, w.z));
+    if (w.tint) tintWater(mat, w.tint);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = `water_${w.id}`;
     mesh.receiveShadow = true;

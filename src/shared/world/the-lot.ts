@@ -5,14 +5,20 @@
 // ditch on dry causeways. Layout numbers: lot/layout.ts; terrain: lot/terrain.ts; props: lot/props.ts, lot/pipes.ts;
 // fences and skyline: lot/scenery.ts. Deterministic from the seed (the seed moves the mud and the clutter jitter,
 // never the layout). No three, no DOM, no Math.random.
+// W9 L3 (M3 atmosphere + M5 gameplay) fills the optional WorldData fields: `floodlights` (the four towers: lamp bar ->
+// aim, for the S4 rig), `climbRoutes` (N1 links onto the container roof, the scaffold deck + nest, a pipe crown),
+// `bases` (Base Assault flags and ball stands), `tint: 'mud'` on the ditch zones, and `weatherBias` (rain by default,
+// lot/layout.ts LOT_WEATHER); the crane carries red aviation lights and a lit cab (WorldData.lamps).
 import type { Bookmark, District, Lamp, SpawnPoint, WaterZone, WorldData } from './world-types';
+import type { WeatherBias } from './weather';
 import { Kit } from './kit';
 import { bakeTerrainGrid, gridHeight, inGrid } from './terrain';
 import { createRng } from './noise';
 import { yawToward } from './queries';
 import {
-  CAT_SPAWN_XS, CAT_SPAWN_ZS, CONTAINER, CONTAINERS, CORGI_SPAWN_XS, CORGI_SPAWN_ZS, CRANE, DITCH, DITCH_SEGMENTS,
-  FLOOD_TOWERS, GRID_HALF, LOT_BOUNDS, LOT_HALF, LOT_NAME, LOT_TIME_OF_DAY, PALLET_STAIR, PIPE, PIT, TOILET, TUNNELS,
+  BASES, CAT_SPAWN_XS, CAT_SPAWN_ZS, CONTAINER, CONTAINERS, CORGI_SPAWN_XS, CORGI_SPAWN_ZS, CRANE, DITCH, DITCH_SEGMENTS,
+  FLOOD_TOWERS, GANGWAY, GRID_HALF, HEAP, LOT_BOUNDS, LOT_HALF, LOT_NAME, LOT_TIME_OF_DAY, LOT_WEATHER, PALLET_STAIR, PIPE, PIT,
+  SCAFFOLD, TOILET, TUNNELS,
 } from './lot/layout';
 import { createLotField } from './lot/terrain';
 import { addPipe, type PipePlaced } from './lot/pipes';
@@ -27,7 +33,10 @@ export { LOT_NAME } from './lot/layout';
 /** Pipes placed by the last build of each world (tests: collider == visual on the lathe facets). */
 export const LOT_PIPES = new WeakMap<WorldData, PipePlaced[]>();
 
-export function buildTheLot(seed = 1): WorldData {
+/** WorldData plus the W9 weather bias (the field travels with the world like its seed; weather.ts WeatherKey). */
+export type LotWorld = WorldData & { weatherBias: WeatherBias };
+
+export function buildTheLot(seed = 1): LotWorld {
   const rng = createRng(`thelot:${seed}`);
   const field = createLotField(seed);
   const terrain = bakeTerrainGrid(field.raw, -GRID_HALF, -GRID_HALF, 1, GRID_HALF * 2 + 1);
@@ -47,12 +56,12 @@ export function buildTheLot(seed = 1): WorldData {
   // ------------------------------------------------------------------ edges + skyline
   const fences = perimeter(kit);
   skyline(kit, rng);
-  const crane = towerCrane(kit, [-10, 60]);
+  const crane = towerCrane(kit, [-10, 60], lamps);
   portableToilet(kit, height, TOILET.x, TOILET.z, TOILET.yaw);
 
   // ------------------------------------------------------------------ The Foundation (corgi base)
   const pitY = PIT.floor;
-  bannerPole(kit.frame(-36, pitY, -112, 0.35), 0);
+  bannerPole(kit.frame(BASES[0].flag[0], pitY, BASES[0].flag[1], 0.35), 0);
   for (const [x, z, yaw] of [[-49, -122, 0.1], [-46.3, -121.6, -0.25], [-44, -99, 0.4], [-41.4, -98.4, 1.3]] as const) ammoCrate(kit, height, x, z, yaw + jit(0.08), 0);
   for (const x of [-28, -16]) for (const z of [-120, -110, -100]) footing(kit, height, x, z, jit(0.05));
   // cement-bag line on the pit's south rim (gaps: the foot ramp, the trench mouths), and at the ramp top
@@ -121,11 +130,17 @@ export function buildTheLot(seed = 1): WorldData {
 
   // ------------------------------------------------------------------ The Scaffolds (cat base)
   const scaf = scaffold(kit);
+  bannerPole(kit.frame(BASES[1].flag[0], HEAP.top, BASES[1].flag[1], 0.35 + Math.PI), 1);   // W9: the cats' flag (the pit pole's mirror)
   for (const [x, z, yaw, n] of [[7, 108, 0.2, 2], [22, 115, -0.3, 1], [30, 105.5, 0.1, 2], [4, 120, 0.6, 4]] as const) palletStack(kit, height, x, z, yaw + jit(0.06), n);
   for (const [x, z, yaw] of [[50, 122, -0.1], [50.2, 119.2, 0.2], [48.6, 106.4, 0.9]] as const) ammoCrate(kit, height, x, z, yaw + jit(0.08), 1);
 
   // ------------------------------------------------------------------ floodlight towers (lamps: sodium heads)
-  for (const t of FLOOD_TOWERS) floodTower(kit, height, t.x, t.z, t.aim, lamps);
+  // W9: one WorldData floodlight per tower for the S4 rig: the lens bar's centre -> the ground point it aims at
+  const floodlights: NonNullable<WorldData['floodlights']> = FLOOD_TOWERS.map((t) => {
+    const lens = floodTower(kit, height, t.x, t.z, t.aim, lamps);
+    const c = (k: 0 | 1 | 2) => Math.round((lens.reduce((a, p) => a + p[k], 0) / lens.length) * 1000) / 1000;
+    return { pos: [c(0), c(1), c(2)], target: [t.aim[0], height(t.aim[0], t.aim[1]), t.aim[1]] };
+  });
 
   // ------------------------------------------------------------------ water: the ditch between the causeways
   const water: WaterZone[] = DITCH_SEGMENTS.map(([x0, x1], i) => {
@@ -133,7 +148,7 @@ export function buildTheLot(seed = 1): WorldData {
     return {
       id: `ditch_${i}`, shape: 'rect', x: (x0 + x1) / 2, z: DITCH.z,
       hx: (x1 - x0) / 2 - DITCH.bank + toSurface, hz: DITCH.floorHz + toSurface,
-      surfaceY: DITCH.surface, bottomY: DITCH.floor, drag: 0.62,
+      surfaceY: DITCH.surface, bottomY: DITCH.floor, drag: 0.62, tint: 'mud',
     };
   });
 
@@ -169,7 +184,27 @@ export function buildTheLot(seed = 1): WorldData {
     { name: 'lot_hook', pos: [crane.hook[0] + 16, crane.hook[1] + 4, crane.hook[2] + 22], look: [crane.hook[0], crane.hook[1], crane.hook[2]], fov: 55 },
   ];
 
-  const data: WorldData = {
+  // ------------------------------------------------------------------ W9 M5: climb routes, bases
+  // Standing points (feet) the N1 link builder turns into climbs (ground -> deck) and descents; each point stands on its
+  // surface with a clear body above it (tests/unit/lot-nav.test.ts), validated per movement profile by nav-links.
+  // (The crow's nest needs no route: the scaffold deck's grid floods up the nest ramp, so deck, ramp and nest are one
+  // deck. The gangway turns west onto the roof while still on the landing: a diagonal would step off its end.)
+  const deckY = scaf.deckY, zMid = (SCAFFOLD.z0 + SCAFFOLD.z1) / 2;
+  const crown = pipes[2];                                    // the west tunnel's south pipe: the pallet stair lands on it
+  const roofX = CONTAINERS[1].x + CONTAINER.W / 2 - 3.1;     // 3.1 m in from the east container's east wall
+  const climbRoutes: NonNullable<WorldData['climbRoutes']> = [
+    { name: 'gangway', pts: [[GANGWAY.x, 0, -63], [GANGWAY.x, CONTAINER.H / 2, -53], [GANGWAY.x, CONTAINER.H, -43], [roofX, CONTAINER.H, -42.5], [roofX, CONTAINER.H, -30]] },
+    { name: 'scaffold_west', pts: [[1, HEAP.top, zMid], [7, (HEAP.top + deckY) / 2, zMid], [14, deckY, zMid]] },
+    { name: 'scaffold_east', pts: [[71, HEAP.top, zMid], [65, (HEAP.top + deckY) / 2, zMid], [58, deckY, zMid]] },
+    { name: 'pallet_stair', pts: [[58, 0, 39], [62.4, 1.17, 39], [66.4, 2.37, 39], [70.4, 3.57, 39], [74.4, 4.77, 39], [TUNNELS[0].x, crown.crownY, 38.5]] },
+  ];
+  const bases: NonNullable<WorldData['bases']> = BASES.map((b) => ({
+    team: b.team,
+    flag: [b.flag[0], height(b.flag[0], b.flag[1]), b.flag[1]],
+    ballStand: [b.stand[0], height(b.stand[0], b.stand[1]), b.stand[1]],
+  }));
+
+  const data: LotWorld = {
     seed,
     name: LOT_NAME,
     height,
@@ -191,24 +226,23 @@ export function buildTheLot(seed = 1): WorldData {
     bedLevel: -3, // the pit, trenches and ditch floors are dry mud (the ditch water covers its own bed)
     districts,
     lamps,
+    floodlights,
+    climbRoutes,
+    bases,
+    weatherBias: LOT_WEATHER,
     perches: [
       { id: 'lot_container_roof', name: 'Container roof', x: -71.4, y: CONTAINER.H, z: -30, yaw: Math.PI * 0.9, district: 'lot_canyon' },
       { id: 'lot_scaffold_deck', name: 'Scaffold deck', x: 26, y: scaf.deckY, z: 97.6, yaw: 0.12, district: 'lot_scaffolds' },
       { id: 'lot_scaffold_nest', name: "Scaffold crow's nest", x: 46, y: scaf.nestY, z: 97.8, yaw: -0.2, district: 'lot_scaffolds' },
-      { id: 'lot_pipe_crown', name: 'Pipe crown', x: 79.5, y: pipes[1].crownY, z: 29, yaw: 0.35, district: 'lot_pipeworks' },
+      // (W9: on the south pipe, the one the pallet stair lands on; the 1.8 m gaps between the crowns are no deck)
+      { id: 'lot_pipe_crown', name: 'Pipe crown', x: TUNNELS[0].x, y: crown.crownY, z: 40.5, yaw: 0.35, district: 'lot_pipeworks' },
     ],
   };
   LOT_PIPES.set(data, pipes);
   return data;
 }
 
-/** S4 hook: the floodlight towers of a built Lot as { pos (lamp bar centre), target (aim ground point) }. */
+/** The floodlight towers of a built Lot (WorldData.floodlights, in FLOOD_TOWERS order) with their ids and teams. */
 export function lotFloodlights(data: WorldData): { id: string; pos: [number, number, number]; target: [number, number, number]; team: 0 | 1 }[] {
-  const heads = (data.lamps ?? []).filter((l) => l.col === 'sodium');
-  return FLOOD_TOWERS.map((t) => {
-    const mine = heads.filter((l) => Math.hypot(l.x - t.x, l.z - t.z) < 6);
-    const n = Math.max(1, mine.length);
-    const pos: [number, number, number] = [mine.reduce((a, l) => a + l.x, 0) / n, mine.reduce((a, l) => a + l.y, 0) / n, mine.reduce((a, l) => a + l.z, 0) / n];
-    return { id: t.id, pos, target: [t.aim[0], data.height(t.aim[0], t.aim[1]), t.aim[1]], team: t.team };
-  });
+  return (data.floodlights ?? []).map((f, i) => ({ id: FLOOD_TOWERS[i].id, pos: f.pos, target: f.target, team: FLOOD_TOWERS[i].team }));
 }

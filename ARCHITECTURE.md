@@ -18,7 +18,8 @@ src/shared/                        PURE contracts + data (runs everywhere; no th
   world/                           WorldData contract (world-types), West Yard + Garden builders, terrain,
                                    queries (height/surface/concealment), weather/time-of-day from tick, kit;
                                    maps.ts: the map registry (MAP_IDS, mapForMode, mapsForMode; W8)
-                                   the-lot.ts + lot/ (layout, terrain, pipes, props, scenery): The Lot (W8 M2)
+                                   the-lot.ts + lot/ (layout, terrain, pipes, props, scenery): The Lot (W8 M2); WorldData floodlights /
+                                   climbRoutes / bases / weatherBias (W9 L3)
                                    fortifications.ts (W7 E4): the Yard War front as data: both forward bases
                                    (kibble-sack walls, MG nest, bird-table watchtower, flag, armory, motor pool,
                                    floodlights, hedgehogs, barricades) plus trenches and craters; BattleLayout
@@ -47,6 +48,9 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
                                    launched from the sim's own aim on the Throw release; one integrator step shared with the
                                    client preview (shared/content/ordnance.ts); interact/ordnance-kiosk.ts restock;
                                    ai/ordnance-ai.ts a pure bot throw planner (brain.ts think: room bots, never carriers)
+  ai/lanes.ts                      W9 L3 lane goals: a room bot picks a lane per life (weights, seed-hashed) and walks its
+                                   waypoints (tactics goal 'lane'), sweeping back home along another; maps list lanes (The Lot:
+                                   lot/layout.ts LOT_LANES); marksmen skip lanes so the perches stay manned
   ai/base-assault-ai.ts            W9 G4b base-assault roles per team (attack via a rally point, carry, escort, defend,
                                    return, chase), re-planned every 0.5 s with hysteresis; goal kind 'ball' in tactics.ts;
                                    the ball-run override in brain.ts sits above the HFSM modes

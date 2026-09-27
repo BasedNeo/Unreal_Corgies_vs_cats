@@ -133,13 +133,13 @@ export function stepWorldEffects(data: WorldData, e: SimEntity, dt: number, emit
   // ---- G1: weather + sprinklers (riders are moved by their vehicle) ----
   if (e.flags & EFlag.Mounted) { c.move = baseMoveStats(c.move); return r; }
   const t = envTick(e, clock);
-  let wet = weatherParamsAt(data.seed, t, wx).wet;
+  let wet = weatherParamsAt(data, t, wx).wet;
   const sps = data.sprinklers;
   if (sps) {
     for (const sp of sps) {
       const dx = x - sp.x, dz = z - sp.z, rr = sp.reach + 1;
       if (dx * dx + dz * dz > rr * rr || y > sp.y + 4) continue;
-      const st = sprinklerAt(data.seed, sp, t, sprState);
+      const st = sprinklerAt(data, sp, t, sprState);
       if (st.on <= 0) continue;
       if (st.on > wet && inSprinklerSweep(sp, x, z)) wet = st.on;
       if (inSprinklerJet(sp, st, x, z) < 0) continue;

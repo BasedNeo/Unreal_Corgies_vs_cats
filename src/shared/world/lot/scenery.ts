@@ -1,7 +1,7 @@
 // The Lot's edges and skyline: plywood hoarding (N, E, S) with the site gate, the West Yard's board fence (W) with
 // the West Yard itself reading beyond it, the neighbours' house over the north hoarding, the tower crane south of the
 // lot, and a ring of rooftops and trees. Everything outside LOT_EDGE is visual only (unreachable, no colliders).
-import type { FenceRun } from '../world-types';
+import type { FenceRun, Lamp } from '../world-types';
 import type { Kit } from '../kit';
 import type { Rng } from '../noise';
 import { CRANE, GATE, LOT_EDGE } from './layout';
@@ -163,7 +163,12 @@ function member(kit: Kit, a: [number, number, number], b: [number, number, numbe
  * over the lot, a counter-jib with ballast, a trolley, and a pallet of cement bags hanging on the hook.
  * Returns the jib's direction, top height and hook point (bookmarks, M3 lamps).
  */
-export function towerCrane(kit: Kit, target: [number, number]): { dir: [number, number]; top: number; hook: [number, number, number]; tip: [number, number, number] } {
+/**
+ * The tower crane (visual only). W9 L3: its lamps go into `lamps` (glow tubes, WorldData.lamps: no real lights): a red
+ * aviation light at the jib tip and at the apex (two crossed tubes each, so they read from any side) and the cab's
+ * warm lit window (five tubes over the glass).
+ */
+export function towerCrane(kit: Kit, target: [number, number], lamps: Lamp[] = []): { dir: [number, number]; top: number; hook: [number, number, number]; tip: [number, number, number]; lights: [number, number, number][] } {
   const { x, z, mast: M, jib: J, counter: C } = CRANE;
   const Y = 'hazardOchre';
   const base = kit.frame(x, 0, z, 0);
@@ -217,8 +222,20 @@ export function towerCrane(kit: Kit, target: [number, number]): { dir: [number, 
   top.cyl(0, (JB - 1.2 + (hookY - M)) / 2, hookD, 0.06, JB - 1.2 - (hookY - M), 0.06, 'catBlack', { seg: 4, g: 'noink' });
   top.box(0, hookY - M - 0.8, hookD, 1.4, 1.6, 1.0, Y, { bev: 0.15 });
   top.box(0, hookY - M - 5.4, hookD, 4.8, 0.6, 4.0, 'plywood', { bev: 0.05 });
-  for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) top.box(-1.2 + c * 2.4, hookY - M - 4.8 + r * 0.55, hookD, 2.3, 0.55, 3.8, r ? 'canvas' : 'sandbag', { bev: 0.15 });
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) top.box(-1.2 + c * 2.4, hookY - M - 4.8 + r * 0.55, hookD, 2.3, 0.55, 3.8, r ? 'canvas' : 'bannerRag', { bev: 0.15 });   // (W9: pale cement sacks)
   for (const s of [-1, 1]) top.cyl(s * 1.2, hookY - M - 3.2, hookD, 0.04, 3.2, 0.04, 'catBlack', { seg: 4, g: 'noink', roll: s * 0.35 });
   const hook = w(0, hookY - M - 5.4, hookD), tip = w(0, JB, J);
-  return { dir, top: M, hook, tip };
+  // W9 L3 lamps: local +z runs along the jib (lamp yaw = the frame's yaw), local +x is yaw + PI/2
+  const lamp = (lx: number, ly: number, lz: number, len: number, along: boolean, col: string) => {
+    const [px, py, pz] = w(lx, ly, lz);
+    lamps.push({ x: px, y: py, z: pz, len, yaw: along ? yaw : yaw + Math.PI / 2, col });
+    return [px, py, pz] as [number, number, number];
+  };
+  const lights: [number, number, number][] = [];
+  for (const [lx, ly, lz] of [[0, JB + 1.4, J - 0.4], [0, 20.5, 0]] as const) {
+    lights.push(lamp(lx, ly, lz, 1.1, true, 'laserRed'));
+    lamp(lx, ly, lz, 1.1, false, 'laserRed');
+  }
+  for (let i = 0; i < 5; i++) lamp(3.2, 4.6 - 0.84 + i * 0.42, 5.53, 2.7, false, 'lampTube');
+  return { dir, top: M, hook, tip, lights };
 }

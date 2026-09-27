@@ -136,14 +136,14 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
   let pinned = opts.timeOfDay !== undefined;
   let clock = NaN;                          // server tick (NaN until a tick-driven update)
   let override: WeatherKind | Partial<WeatherSample> | null = null;
-  const sample: WeatherSample = weatherAt(data.seed, 0);
+  const sample: WeatherSample = weatherAt(data, 0); // W9 L3: the world's schedule (its seed + weather bias)
   const applied: SkyWeather = { cloud: -1, rain: 0, storm: 0, fog: 0, dark: 0, flash: 0, boltBearing: 0, boltPower: 0, boltSeed: 0 };
   const baseSat = opts.grade?.saturation.value ?? 1;
   const windDir = new THREE.Vector2(0.8, 0.45).normalize();
   let rainMs = 0, weatherMs = 0;
 
   function resolveWeather(): void {
-    if (Number.isFinite(clock)) weatherAt(data.seed, clock, sample);
+    if (Number.isFinite(clock)) weatherAt(data, clock, sample); // W9 L3: the world's schedule
     else Object.assign(sample, WEATHER_PARAMS.clear, { kind: 'clear', from: 'clear', to: 'clear', blend: 0, flash: 0, strike: null });
     if (override) {
       if (typeof override === 'string') {

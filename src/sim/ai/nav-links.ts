@@ -6,6 +6,9 @@
 //           inside the routes, not decks.
 //   links   hop sequences between grids: a list of legs, each a standing point to land on. Derived from
 //             - the Rooftops climb routes (ROOF_ROUTES, D3): ground -> crates/scaffold -> roof, and back down;
+//             - W9: every WorldData.climbRoutes entry the same way (a route may also start on a deck: The Lot's
+//               scaffold deck -> crow's nest); its end seeds a deck (The Lot: the container roof, the scaffold deck
+//               and nest, a pipe crown);
 //             - stepping stones up to a perch above its deck (roof -> AC unit -> crow's nest), found geometrically;
 //             - drops: off a deck's edge (over the parapet) onto open ground or a lower deck, spread along the edge.
 //           Jump pads add none: no West Yard pad launches onto a deck (the Corgi porch deck by the mini trampoline is
@@ -180,19 +183,25 @@ function buildLinkSet(sim: Sim, g0: NavGrid): NavLinkSet | null {
     set.links.push({ id: set.links.length, name, kind, from, to, fromGrid, toGrid, fromCell, toCell, legs: pts.slice(1), cost });
   };
 
-  // 1. the Rooftops climb routes (ground -> roof) and the same standing points back down
+  // 1. climb routes (ground or a lower deck -> a deck) and the same standing points back down: the Rooftops routes
+  //    (D3, worlds with the rooftops district) and the world's own WorldData.climbRoutes (W9), in that order
   const onThisWorld = (pts: readonly (readonly [number, number, number])[]) =>
     pts.every(([x, y, z]) => Math.abs(surfaceAt(data, x, z, y + 0.5).y - y) < 0.15);
-  if (data.districts?.some((d) => d.id === 'rooftops')) {
-    for (const [name, raw] of Object.entries(ROOF_ROUTES)) {
-      if (!onThisWorld(raw)) continue;
-      const pts = raw.map(([x, y, z]) => ({ x, y, z }));
-      const top = pts[pts.length - 1];
-      const deck = deckOf(top.x, top.y, top.z);
-      if (!deck || groundCell(pts[0].x, pts[0].y, pts[0].z) < 0) continue;
-      add(`${name} climb`, 'climb', pts, 0, deck);
-      add(`${name} descent`, 'descend', pts.slice().reverse(), deck, 0);
-    }
+  type Route = [name: string, pts: readonly (readonly [number, number, number])[], deckStart: boolean];
+  const routes: Route[] = [
+    ...(data.districts?.some((d) => d.id === 'rooftops') ? Object.entries(ROOF_ROUTES).map(([n, p]): Route => [n, p, false]) : []),
+    ...(data.climbRoutes ?? []).map((r): Route => [r.name, r.pts, true]),
+  ];
+  for (const [name, raw, deckStart] of routes) {
+    if (!onThisWorld(raw)) continue;
+    const pts = raw.map(([x, y, z]) => ({ x, y, z }));
+    const top = pts[pts.length - 1];
+    const deck = deckOf(top.x, top.y, top.z);
+    if (!deck) continue;
+    const start = groundCell(pts[0].x, pts[0].y, pts[0].z) >= 0 ? 0 : deckStart ? deckOf(pts[0].x, pts[0].y, pts[0].z) || -1 : -1;
+    if (start < 0 || start === deck) continue;
+    add(`${name} climb`, 'climb', pts, start, deck);
+    add(`${name} descent`, 'descend', pts.slice().reverse(), deck, start);
   }
   if (!set.decks.length) { set.buildMs = performance.now() - t0; return null; }
 

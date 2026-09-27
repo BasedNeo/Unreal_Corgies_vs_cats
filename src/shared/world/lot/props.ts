@@ -127,7 +127,8 @@ export function bagWall(kit: Kit, height: HeightFn, x0: number, z0: number, x1: 
     const lens = r % 2 ? [bl / 2, ...Array<number>(n - 1).fill(bl), bl / 2] : Array<number>(n).fill(bl);
     let z = -len / 2;
     lens.forEach((l, k) => {
-      f.box(0, r * BH + BH / 2, z + l / 2, D, BH, l, (r + k) % 3 === 1 ? 'canvas' : 'sandbag', { bev: Math.min(0.15, l / 4) });
+      // (W9: pale paper cement sacks, a canvas one in three: the W8 sandbag browns read near-black in the canyon's shade)
+      f.box(0, r * BH + BH / 2, z + l / 2, D, BH, l, (r + k) % 3 === 1 ? 'canvas' : 'bannerRag', { bev: Math.min(0.15, l / 4) });
       z += l;
     });
   }

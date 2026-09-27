@@ -214,7 +214,7 @@ export function createGardenView(data: WorldData, opts: { density?: number } = {
     update(tick, dt) {
       live = 0;
       jets.forEach((j, i) => {
-        sprinklerAt(data.seed, j.sp, tick, j.st);
+        sprinklerAt(data, j.sp, tick, j.st); // W9 L3: the world's schedule
         j.mesh.visible = j.st.on > 0.005;
         if (j.mesh.visible) live++;
         j.U.on.value = j.st.on;

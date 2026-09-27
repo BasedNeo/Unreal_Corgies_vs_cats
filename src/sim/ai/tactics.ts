@@ -74,6 +74,7 @@ import {
 import type { Archetype } from './archetypes';
 import { type NavGrid, cellX, cellZ, findPath, isWalkable, lineWalkable, nearestWalkable, randomCell } from './nav';
 import { canReach } from './nav-links';
+import { laneGoal } from './lanes';
 import { BALL_HELP, ballTrip, baseAssaultGoal, isCarrier, type BaBot } from './base-assault-ai';
 
 export interface TacticsState {
@@ -94,8 +95,9 @@ export interface TacticsState {
   chokeAt: number;
   /** Skyraider: next deliberate hop; the tick the current hop started. */
   hopAt: number;
-  /** Objective/core goal (kind '' = none; 'post' = an adventure sentry's waypoint), re-evaluated every ~0.5 s. */
-  goal: '' | 'core' | 'step' | 'post' | 'ball'; // G4b: 'ball' = a base-assault role goal (base-assault-ai.ts)
+  /** Objective/core goal (kind '' = none; 'post' = an adventure sentry's waypoint; 'lane' = a lane waypoint, lanes.ts),
+   *  re-evaluated every ~0.5 s. */
+  goal: '' | 'core' | 'step' | 'post' | 'lane' | 'ball'; // G4b: 'ball' = a base-assault role goal (base-assault-ai.ts)
   gx: number; gz: number; gy: number; gr: number;
   /** Objective step: the zone/point center (gx/gz is the bot's own spot in a hold zone). */
   cx: number; cz: number;
@@ -479,10 +481,15 @@ function pickPad(sim: Sim, e: SimEntity, chars: SimEntity[], pads: CorePadInfo[]
 
 /**
  * Pick (or keep) the objective/core goal for a patrolling bot; writes t.goal/gx/gz/... ('' = none, patrol as usual).
- * Re-evaluated every 0.5 s.
+ * Re-evaluated every 0.5 s. W9 L3: with nothing else to do, a room bot walks its lane (lanes.ts; maps with lanes only).
  */
 export function updateObjectiveGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, chars: SimEntity[]): void {
   if (sim.tick < t.goalAt) return;
+  objectiveGoal(sim, e, t, g, chars);
+  if (!t.goal) laneGoal(sim, e, t);
+}
+
+function objectiveGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, chars: SimEntity[]): void {
   t.goalAt = sim.tick + 30;
   const prev = t.goal, prevId = t.goalId;
   t.goal = '';

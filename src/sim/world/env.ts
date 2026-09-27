@@ -37,11 +37,11 @@ export const CONCEAL_FLAG_LEVEL = 0.5;
 
 const cache = new WeakMap<Sim, { tick: number; w: WeatherParams }>();
 
-/** Weather parameters at the sim's current tick (seeded by the world seed). */
+/** Weather parameters at the sim's current tick (the world's schedule: its seed and W9 weather bias). */
 export function simWeather(sim: Sim): WeatherParams {
   let c = cache.get(sim);
   if (!c) { c = { tick: -1, w: { ...WEATHER_PARAMS.clear } }; cache.set(sim, c); }
-  if (c.tick !== sim.tick) { weatherParamsAt(sim.worldData.seed, sim.tick, c.w); c.tick = sim.tick; }
+  if (c.tick !== sim.tick) { weatherParamsAt(sim.worldData, sim.tick, c.w); c.tick = sim.tick; }
   return c.w;
 }
 

@@ -30,6 +30,10 @@ export const LOT_BOUNDS = 156;
 export const GRID_HALF = 164;
 /** Dusk. */
 export const LOT_TIME_OF_DAY = 0.74;
+/** W9 L3: rain by default (weather.ts WeatherBias, minutes as [min, span]): a match opens overcast and the rain rolls
+ *  in after 1.3-1.8 min, the first cycle always storms (and 85 % of the later ones), then more rain; a 1-2 min dry
+ *  break and an overcast lead-in per 13 min cycle. Wet ~3/4 of the time; the West Yard keeps the default (~1/3). */
+export const LOT_WEATHER = { id: 'the_lot', open: [1.3, 0.5], rain: [2, 1.5], storm: [1.5, 1], stormChance: 0.85, clear: [1, 1], overcast: [0.8, 0.7] } as const;
 
 // ------------------------------------------------------------------------------------------------ bases
 /** Corgi base: the foundation pit (flat floor inside the rect, steep 2.2:1 walls outside it). */
@@ -66,7 +70,7 @@ export const CAUSEWAYS = { canyon: [-106, -68], middle: [-14, 14], pipes: [68, 1
 export const CONTAINER = { L: 24, W: 9.6, H: 10.4, wall: 0.4, floor: 0.3, doorW: 3.6, doorH: 7.2 } as const;
 export const CONTAINERS: readonly { id: string; x: number; z: number; col: string; stripe: string; door: { side: 1 | -1; z: number } }[] = [
   { id: 'c_west', x: -95.5, z: -32, col: 'garageSiding2', stripe: 'garageSiding', door: { side: 1, z: -25 } },
-  { id: 'c_east', x: -74.5, z: -32, col: 'khaki', stripe: 'olive', door: { side: -1, z: -39 } },
+  { id: 'c_east', x: -74.5, z: -32, col: 'hull', stripe: 'olive', door: { side: -1, z: -39 } },   // (W9: khaki -> hull: it stands in the west container's shade at dusk)
 ];
 /** The gangway up to c_east's roof (east side, climbing south to a landing flush with the roof). */
 export const GANGWAY = { x: -68.3, width: 2.4, zLow: -62, zTop: -44, landing: [-44, -40] as const } as const;
@@ -125,15 +129,35 @@ export const CAT_SPAWN_ZS = [105, 111, 117, 123] as const;
 export const FLOOD_TOWERS: readonly { id: string; x: number; z: number; aim: readonly [number, number]; team: 0 | 1 }[] = [
   { id: 'flood_pit_west', x: -85, z: -112, aim: [-58, -110], team: 0 },
   { id: 'flood_pit_east', x: 5.5, z: -121, aim: [-22, -108], team: 0 },
-  { id: 'flood_heap_west', x: 20, z: 123.5, aim: [26, 99], team: 1 },
-  { id: 'flood_heap_east', x: 44, z: 123.5, aim: [44, 99], team: 1 },
+  { id: 'flood_heap_west', x: 20, z: 123.5, aim: [26, 106], team: 1 },
+  { id: 'flood_heap_east', x: 44, z: 123.5, aim: [44, 106], team: 1 },
 ];
+// (W9 L3: the heap towers aim at the heap top in front of the scaffold, so the fake pool lies on the ground it lights;
+// the real spot cone still covers the scaffold deck.)
 /** Mast height (feet of the lamp bar) and lamp heads per tower. */
 export const FLOOD = { mast: 22, heads: 4 } as const;
 
 // ------------------------------------------------------------------------------------------------ landmarks
 /** Tower crane (visual only, outside the south hoarding): base, mast height, jib length and heading (toward the lot). */
 export const CRANE = { x: -30, z: 188, mast: 96, jib: 118, counter: 32 } as const;
+/** W9 L3 Base Assault (WorldData.bases): each team's flag (score here) and ball stand, point-symmetric. The corgis'
+ *  flag is the pit's banner pole, the cats' a matching pole on the heap top; the stands sit on open floor 9 m from
+ *  their flag toward the lot. */
+export const BASES = [
+  { team: 0, flag: [-36, -112], stand: [-40, -105] },
+  { team: 1, flag: [36, 112], stand: [40, 105] },
+] as const;
+/** W9 L3 (M5): the lanes bots walk between the bases (src/sim/ai/lanes.ts picks one per bot and life by weight),
+ *  listed from the corgi end (north) to the cat end (south); cats walk them backwards. Points are [x, z] on the ground
+ *  grid, or [x, z, s]: linger s seconds there (the lane's hot spot). Container Canyon (between the containers, or
+ *  through the west one), the Mud (the middle causeway), the Pipeworks (through the west or the east tunnel). */
+export const LOT_LANES: readonly { id: string; weight: number; pts: readonly (readonly number[])[] }[] = [
+  { id: 'canyon', weight: 0.23, pts: [[-63, -86], [-86, -53], [-85, -32, 4], [-86, -12], [-87, 6], [-84, 40], [-50, 78], [-12, 100]] },
+  { id: 'canyon_w', weight: 0.16, pts: [[-63, -86], [-95.5, -50], [-95.5, -32, 3], [-95.5, -14], [-92, 6], [-84, 40], [-50, 78], [-12, 100]] },
+  { id: 'mud', weight: 0.17, pts: [[12, -109], [6, -62], [0, -28, 2], [0, 0], [0, 28, 2], [-6, 62], [-12, 100]] },
+  { id: 'pipes_w', weight: 0.24, pts: [[12, -109], [45, -82], [80, -45], [87, -12], [87, 6], [79.5, 11, 2], [79.5, 29, 4], [79.5, 47], [66, 64], [63, 86]] },
+  { id: 'pipes_e', weight: 0.2, pts: [[12, -109], [45, -82], [80, -45], [87, -12], [87, 6], [91.5, 11, 2], [91.5, 29, 3], [91.5, 47], [66, 64], [63, 86]] },
+];
 /** Portable toilet by the east hoarding. */
 export const TOILET = { x: 118, z: -120, yaw: -Math.PI / 2 } as const;
 /** Site gate in the east hoarding (visual; closed). */

@@ -284,7 +284,7 @@ describe('The Lot: spawns, lamps, perches, districts, bookmarks', () => {
   it('floodlights: 4 towers x 4 sodium heads, two per base, aimed at open ground; the container tubes', () => {
     const lamps = data.lamps ?? [];
     expect(lamps.filter((l) => l.col === 'sodium').length).toBe(16);
-    expect(lamps.filter((l) => l.col === 'lampTube').length).toBe(4);
+    expect(lamps.filter((l) => l.col === 'lampTube').length).toBe(4 + 5);             // + the crane cab's lit window (W9)
     const floods = lotFloodlights(data);
     expect(floods.length).toBe(4);
     expect(floods.filter((f) => f.team === 0).length).toBe(2);
@@ -292,7 +292,28 @@ describe('The Lot: spawns, lamps, perches, districts, bookmarks', () => {
       expect(f.pos[1] - f.target[1]).toBeGreaterThan(18);
       expect(Math.hypot(f.pos[0] - f.target[0], f.pos[2] - f.target[2])).toBeGreaterThan(8);
       expect(occupiedAt(data, f.target[0], f.target[1] + 0.5, f.target[2])).toBe(false);
+      expect(Math.abs(f.target[1] - data.height(f.target[0], f.target[2])), `${f.id} target on the ground`).toBeLessThan(0.01);
+      // the lamp bar's centre: the mean of its tower's four sodium lenses
+      const lens = lamps.filter((l) => l.col === 'sodium' && Math.hypot(l.x - f.pos[0], l.z - f.pos[2]) < 4);
+      expect(lens.length, f.id).toBe(4);
+      expect(Math.abs(lens.reduce((a, l) => a + l.y, 0) / 4 - f.pos[1])).toBeLessThan(0.01);
     }
+    // W9 C9 field: the same list (the S4 rig reads data.floodlights), the pit towers light the pit floor
+    expect(data.floodlights).toHaveLength(4);
+    for (const f of floods.filter((q) => q.team === 0)) expect(f.target[1]).toBeCloseTo(PIT.floor, 3);
+    for (const f of floods.filter((q) => q.team === 1)) expect(f.target[1]).toBeCloseTo(HEAP.top, 3);
+  });
+
+  it('W9 atmosphere data: crane aviation lights and cab glass, muddy ditch water, rain by default', () => {
+    const red = (data.lamps ?? []).filter((l) => l.col === 'laserRed');
+    expect(red.length).toBe(4);                                                         // jib tip + apex, two crossed tubes each
+    expect(Math.min(...red.map((l) => l.y))).toBeGreaterThan(95);                        // over the 96 m mast top
+    const cab = (data.lamps ?? []).filter((l) => l.col === 'lampTube' && l.y > 90);
+    expect(cab.length).toBe(5);
+    expect((data.water ?? []).map((w) => [w.id, w.tint])).toEqual([0, 1, 2, 3].map((i) => [`ditch_${i}`, 'mud']));
+    const bias = (data as WorldData & { weatherBias?: { id: string } }).weatherBias;
+    expect(bias?.id).toBe('the_lot');
+    expect((createWorldData(1) as WorldData & { weatherBias?: unknown }).weatherBias).toBeUndefined();
   });
 
   it('perches stand on real surfaces with room for a character; districts name the lanes', () => {
