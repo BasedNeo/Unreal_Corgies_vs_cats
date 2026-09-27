@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Q1 verification probe (read-only): shipping-config yard-skirmish outcomes for the lineups players actually get.
 //   offline default (main.ts): bots '3,0' → you + 2 corgi bots vs PvE waves
-//   online default (server/config.ts): BOTS 0,4 → you alone + 4 room cats (team-fill accuracy) + PvE waves
+//   online default (server/config.ts): the same bots '3,0' since W6 (W9 Q4 P2-9: the old 0,4 row described no real player)
 // "You" is a human slot fed by the bot brain through Room.handle (like tools/soak.mjs's net-bot) — a competent
 // stand-in, not a human. Also an AFK variant (you never send input) to see how the squad carries a new player.
 //   npx tsx tools/qa-difficulty.mjs [--seconds 480] [--seeds 1,2]
@@ -58,5 +58,4 @@ for (const seed of SEEDS) {
   if (!MODES.includes('skirmish')) continue;
   await run('offline default (3,0) competent you', [3, 0], false, seed);
   await run('offline default (3,0) AFK you', [3, 0], true, seed);
-  await run('online default (0,4) competent you', [0, 4], false, seed);
 }

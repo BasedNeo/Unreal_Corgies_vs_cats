@@ -115,7 +115,7 @@ async function soakMode(mode) {
   const T = {
     errors: [], ticks: 0, tickMs: [], wallMs: [], cpuMs: [], aiMs: [], snapBytes: 0, wireBytes: 0, snaps: 0, results: [], heap: [],
     kills: 0, deaths: [0, 0], shots: 0, hitShots: 0, hits: 0, crits: 0, explosions: 0, abilities: 0, reloads: 0,
-    firstLiveTick: -1, firstHitTick: -1, drama: [], matchesEnded: 0, winners: [], maxWave: 0,
+    firstLiveTick: -1, firstHitTick: -1, drama: [], matchesEnded: 0, winners: [], maxWave: 0, steals: 0, captures: 0,
     deadTicks: 0, charTicks: 0, stuckMax: 0, stuckBots: new Set(), kd: new Map(), midLeader: null,
   };
   const drain = sim.drainEvents.bind(sim);
@@ -134,7 +134,10 @@ async function soakMode(mode) {
       else if (e.e === 'explode') T.explosions++;
       else if (e.e === 'ability') T.abilities++;
       else if (e.e === 'reload') T.reloads++;
-      else if (e.e === 'score' && (e.reason === 'wave' || e.reason === 'win' || e.reason === 'captured' || e.reason === 'ball taken')) T.drama.push(sim.tick);
+      else if (e.e === 'score' && (e.reason === 'wave' || e.reason === 'win' || e.reason === 'captured' || e.reason === 'ball taken')) {
+        T.drama.push(sim.tick);
+        if (e.reason === 'ball taken') T.steals++; else if (e.reason === 'captured') T.captures++;
+      }
       for (const k in e) if (typeof e[k] === 'number' && !Number.isFinite(e[k])) T.errors.push(`non-finite ${k} in ${e.e} event`);
     }
     return evs;
@@ -261,6 +264,7 @@ async function soakMode(mode) {
     topPlayerShare: r2(kdTotal ? top / kdTotal : 0),
     comeback: T.midLeader !== null && T.midLeader !== -1 && finalWinner !== -1 && finalWinner !== T.midLeader,
     events: { knockout: T.kills, drama: T.drama.length },
+    objective: mode === 'base-assault' ? { steals: T.steals, captures: T.captures } : null,
     desyncEvents: 0, stuckEvents: T.stuckBots.size, clippingEvents: 0, conservationViolations: 0, crashes: 0,
     fps: { p5: null, p50: null }, rttMs: { p50: null, p95: null }, inputLatencyMs: { p95: null },
   };
@@ -314,6 +318,10 @@ for (const s of sessions) {
   // Boss-rush (one long boss fight) and adventure (chapter 1 takes a bot squad ~65 s) needn't finish inside a short
   // soak: for them completion is reported, not required.
   if (!FULL && !s.completed && !OPEN_ENDED.has(s.mode)) fails.push(`${s.mode}: no match completed in ${s.durationSec}s`);
+  // W9 INT9 (Q4 P2-9): the soak's 45 s Base Assault match rarely reaches a capture, but a match without a single steal
+  // means the objective is broken (the capture flow itself is proven by base-assault-room.test.ts: a scripted human
+  // captures three times). Captures are reported below.
+  if (s.objective && s.objective.steals === 0) fails.push(`${s.mode}: no ball was stolen in ${s.durationSec}s`);
 }
 mkdirSync(dirname(OUT), { recursive: true });
 writeFileSync(OUT, JSON.stringify({ at: new Date().toISOString(), seed: SEED, map: MAP || 'west_yard', seconds: SECONDS, full: FULL, netbot: NETBOT, machine: { cores, load: [r2(load0), r2(load1)] }, sessions }, null, 2));
@@ -322,6 +330,7 @@ for (const s of sessions) {
   const sc = s.score;
   console.log(`${s.mode.padEnd(16)} score ${sc.total} (R ${sc.realism} · I ${sc.intensity} · F ${sc.fairness}) | ${s.durationSec}s sim in ${s.wallMs} ms | matches ${s.matchesEnded}: ${s.results.join(', ') || `none (wave ${s.maxWave}, ${s.finalScore.join(':')})`}`);
   console.log(`  kills ${s.kills} · hit ${Math.round(s.hitRate * 100)}% · crit ${Math.round(s.critRate * 100)}% · boom ${s.explosions} · abil ${s.abilities} · ttfe ${s.timeToFirstEngagementSec ?? '-'}s · dead ${Math.round(s.deadTimeFrac * 100)}% · downtime ${s.maxDowntimeSec}s · drama ${sc.dramaPerPlayerMinute}/p-min · top ${s.topPlayerShare}`);
+  if (s.objective) console.log(`  ball: steals ${s.objective.steals} · captures ${s.objective.captures}`);
   console.log(`  tick p50 ${s.tickMs.p50} p95 ${s.tickMs.p95} max ${s.tickMs.max} ms (best of ${s.repeats}${s.deterministic ? ', deterministic' : ', NON-DETERMINISTIC'}; single run p95 ${s.tickSingleRunMs.p95} · raw wall ${s.tickWallMs.p95} · cpu ${s.tickCpuMs.p95}; nav build ${s.navBuildMs} ms) · ai p95 ${s.aiMs.p95} ms · stuck max ${s.stuckMaxSec}s · errors ${s.errors}${s.netbot ? ` · net-bot k${s.netbot.kills}/d${s.netbot.deaths} snap ${s.snapshotKBps} KB/s wire (${s.snapshotRawJsonKBps} raw JSON)` : ''}`);
   if (s.heapMB) console.log(`  heap ${s.heapMB.first} → ${s.heapMB.last} MB over ${s.heapMB.samples} samples, ${s.heapMB.growthPerMin >= 0 ? '+' : ''}${s.heapMB.growthPerMin} MB/min after minute 1${s.heapMB.gc ? '' : ' (no --expose-gc: noisy)'}`);
   const sm = s.systemMsPerTick;

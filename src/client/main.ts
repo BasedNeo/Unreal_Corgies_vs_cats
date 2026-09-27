@@ -80,7 +80,10 @@ async function main(): Promise<void> {
   const serverUrl = serverUrlForPage(); // ?server / ?online / ?room / page served by server/prod.ts
   let mode = params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish';
   // Skirmish: a corgi squad of bots with you; cat waves come from the match rules. TDM / core-rush: bot-filled teams.
-  const botsFor = (m: string) => (params.get('bots') ?? (m === 'team-deathmatch' || m === 'core-rush' || m === 'base-assault' ? '4,4' : m === 'adventure' ? '4,0' : '3,0')).split(',').map(Number) as [number, number];
+  const botsFor = (m: string) => (params.get('bots') ?? (m === 'team-deathmatch' || m === 'core-rush' || m === 'base-assault' ? '4,4' : m === 'adventure' ? '4,0' : '3,0')).split(',').map(Number)
+    // W9 INT9 (Q4 P2-7): Base Assault is built for 4 v 4; ?bots= caps it at 8 a side (12 v 12 plus balls, stands and rings
+    // went over the 400-draw budget)
+    .map((n) => (m === 'base-assault' ? Math.min(n, 8) : n)) as [number, number];
   // Adventure chapter (?chapter=, or the menu's chapter picker); the authority validates it.
   let chapter = /^[a-z0-9_]{1,32}$/.test(params.get('chapter') ?? '') ? params.get('chapter')! : undefined;
   // ?boss=<id> (boss-rush showcase; '1' = the Vac-Tank): E1's Madame Pointillé is ?boss=madame_pointille.
