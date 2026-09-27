@@ -319,10 +319,13 @@ export function scaffold(kit: Kit): { deckY: number; nestY: number } {
   f.solid('rail', (S.x0 + S.x1) / 2, Y1 + 2.4, S.z0 - 0.15, S.x1 - S.x0, 0.2, 0.2, 'steel', { bev: 0 });
   f.solid('rail', (nx0 + nx1) / 2, Y2 + 2.4, S.z0 - 0.15, nx1 - nx0, 0.2, 0.2, 'steel', { bev: 0 });
   f.solid('rail', (nx0 + nx1) / 2, Y2 + 2.4, S.z1 + 0.15, nx1 - nx0, 0.2, 0.2, 'steel', { bev: 0 });
-  // facade braces in the end bays (north face, outside the standards)
+  // facade braces in the end bays (north face, outside the standards). The low end meets its standard 1.8 m up, over a
+  // pet's head: a brace down to heap level wedged pets walking the heap-top path under it (W9 F2: a bot pinned 6.5 s
+  // at (15.3, 96); the nav probe at the cell centre cleared it by 0.13 m).
+  const braceLo = base + 1.8;
   for (const [xa, xb] of [[xs[0], xs[1]], [xs[4], xs[5]]]) {
-    const len = Math.hypot(xb - xa, Y1 - T - base), roll = Math.atan2(Y1 - T - base, xb - xa) * (xa === xs[0] ? 1 : -1);
-    f.solid('brace', (xa + xb) / 2, (base + Y1 - T) / 2, S.z0 - 0.35, len, 0.2, 0.2, 'steel', { roll, bev: 0 });
+    const len = Math.hypot(xb - xa, Y1 - T - braceLo), roll = Math.atan2(Y1 - T - braceLo, xb - xa) * (xa === xs[0] ? 1 : -1);
+    f.solid('brace', (xa + xb) / 2, (braceLo + Y1 - T) / 2, S.z0 - 0.35, len, 0.2, 0.2, 'steel', { roll, bev: 0 });
   }
   // cat banner hanging off deck 1's north edge (cloth: visual only, above head height) + a flag on the nest
   for (const bx of [xs[1] + 4.8, xs[4] + 4.8]) {
