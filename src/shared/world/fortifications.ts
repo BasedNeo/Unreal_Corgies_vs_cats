@@ -493,9 +493,14 @@ const FOB: PieceDef[] = [
       out.banners.push(t.pennant);
     },
   },
-  // flag: the corgis' at the kiosk plaza; the cats' by the cat tree (clear of the RC-plane approach to the shed)
+  // flag: the cats' by the cat tree (clear of the RC-plane approach to the shed), at the east end of their spawn row;
+  // the corgis' mirrors it at the east end of theirs, behind the armory (0.6 m off the exact mirror: spawn clearance).
+  // W9 F1 (Q4 P1-1): Base Assault stands its ball beside each team's flag. The corgis' flag used to sit mid-row at the
+  // kiosk plaza, where a respawning corgi (on the spawn farthest from the thieves) came back 27-35 m from the stand and
+  // in the fight within seconds; a cat's comes back 42-48 m behind a fleeing corgi thief. The corgis' side won 25 : 12
+  // and 24 : 6 with the sides swapped; cover on the cat thief's exit did not move that (five single-piece tries).
   {
-    id: 'flag', at: { x: -33.8, z: -67.4, yaw: 0 }, cat: { x: 30.2, z: 68.6, yaw: Math.PI }, span: [0.9, 0.9],
+    id: 'flag', at: { x: -13.1, z: -69.2, yaw: 0 }, cat: { x: 30.2, z: 68.6, yaw: Math.PI }, span: [0.9, 0.9],
     build: (f, side, pal, seed, out) => { out.banners.push(flagPole(f, pal, side, seed)); },
   },
   // armory: tennis-ball crates under a camo net, between the motor pool and the watchtower (the cats': beside their

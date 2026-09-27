@@ -579,3 +579,20 @@ Browser (`npx vite preview --port 5306 --strictPort` of a build; labs need `npx 
 - `node tools/qa4-shots.mjs --base http://localhost:5306 --out artifacts/q4/gallery/after`
 - e2e without holding :4173: a copy of `playwright.config.ts` with the port changed, then
   `npx playwright test -c playwright.q4.config.ts tests/e2e/smoke.spec.ts tests/e2e/modes.spec.ts tests/e2e/locker.spec.ts`
+
+---
+
+## Resolution (lead, after the fix lanes)
+- **P1-1, fixed by F1 (`docs/handoff/F1.md`), and not by cover.** Five single cover pieces, one per loop, left the
+  corgi side at 67–84 % of captures. The cause was respawn distance: the spawn rule respawns a bot at its team's spawn
+  farthest from the enemy, and the corgi stand stood mid-row, 27–35 m from it (killers back in the fight after a median
+  7.6–11 s), while the cat stand sat at the end of its row (42–48 m, 12–15 s). F1 moved the corgi flag, and the stand
+  beside it, to mirror the cats' (−33.8, −67.4) → (−13.1, −69.2). Seeds 6–15: base 25 : 26 (49 %), mirror 27 : 27
+  (50 %); the line-of-sight gap pooled 26.6 → 5.5; stuck max 11 → 2 s (the P2-2 spot was inside the old ring).
+  - This report's §2.3 cover rows measured moved bases, not crates: `qa4-ba.mjs coveredWorld()` built an unregistered
+    world, so Base Assault fell back to spawn-centroid bases. Fixed (`registerBattle`).
+- **P2-1 fixed by the lead** (`Room.fillBots` trims carriers last, with a test). **P2-7:** `?bots=` capped at 8 a side
+  in Base Assault. **P2-9:** the soak counts steals and captures and fails a match without a steal;
+  `qa-difficulty.mjs` lost the stale lineup.
+- **P2-2 to P2-5** (parked karts, bot grenades, The Lot's lanes in Base Assault, the Canyon share): fix lane F2
+  (`docs/handoff/F2.md`).

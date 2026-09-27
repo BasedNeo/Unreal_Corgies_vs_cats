@@ -3,6 +3,8 @@
 // kart exits, adventure steps, spawn groups, barricade spots or pickup routes (the runtime sites and pads land exactly
 // where they did before E4), terrain stamps (trenches, craters) never move an existing prop, both species climb the
 // bird-table watchtowers, the walls are chest cover a pet shoots over, and bots still path everywhere.
+// W9 F1 (Q4 P1-1): the two team flags mirror each other, so Base Assault's stands (beside the flags) do too: each
+// defending team respawns 45+ m from its own stand and both thieves' runs home are equally exposed (Q4's metric).
 import { describe, it, expect, beforeAll } from 'vitest';
 import { Sim } from '../../src/sim/sim';
 import type { SimEntity } from '../../src/sim/entity';
@@ -180,6 +182,37 @@ describe('E4: collider == visual', () => {
     }
     expect(checked).toBeGreaterThanOrEqual(20);
   });
+});
+
+describe('W9 F1: the flags mirror each other, so the Base Assault bases do', () => {
+  it('the corgi flag pole is the cat flag pole turned about MIRROR (within 0.6 m: spawn clearance)', () => {
+    const flags = battle.banners.filter((b) => b.icon !== false);
+    expect(flags.length).toBe(2);
+    const [c, k] = [flags.find((b) => b.team === 0)!, flags.find((b) => b.team === 1)!];
+    const [mx, mz] = mirrorXZ(k.x, k.z);
+    expect(Math.hypot(c.x - mx, c.z - mz)).toBeLessThan(0.62);
+    expect(c.w).toBe(k.w);
+  });
+
+  it('Base Assault: stands mirror (3 m), defenders respawn 45+ m out, both exits equally exposed (Q4\'s metric, 3 maps)', async () => {
+    // (a flag mid-row left the corgis' west spawn 27 m from their stand: a respawned corgi was back on the cat thief in
+    // seconds, and the corgis' side won 25 : 12, 6 : 24 swapped. Terrain varies by seed, so pool 3 maps.)
+    const ex: Exposure[] = [];
+    for (const seed of [1, 2, 3]) ex.push(await exitExposure(seed === 1 ? data : createWorldData(seed), seed));
+    for (const e of ex) {
+      const [mx, mz] = mirrorXZ(e.stands[1].x, e.stands[1].z);
+      expect(Math.hypot(e.stands[0].x - mx, e.stands[0].z - mz), 'stands mirror').toBeLessThan(3);
+      for (const t of [0, 1] as const) {
+        // pickSpawn puts a respawning defender on the own spawn farthest from the enemy: with thieves at the stand, the far end
+        const far = Math.max(...data.spawns.filter((s) => s.team === t).map((s) => Math.hypot(s.x - e.stands[t].x, s.z - e.stands[t].z)));
+        expect(far, `team ${t}: farthest own spawn`).toBeGreaterThan(45);
+      }
+      expect(Math.abs(e.cat.routeM - e.corgi.routeM) / Math.max(e.cat.routeM, e.corgi.routeM), 'runs home').toBeLessThan(0.1);
+    }
+    const mean = (k: 'cat' | 'corgi') => ex.reduce((a, x) => a + x[k].mean, 0) / ex.length;
+    console.log(`[f1] exposure 10-60 m out, seeds 1-3: cat thief ${mean('cat').toFixed(1)} %, corgi thief ${mean('corgi').toFixed(1)} % · routes ${ex.map((e) => `${e.cat.routeM}/${e.corgi.routeM}`).join(' ')} m`);
+    expect(Math.abs(mean('cat') - mean('corgi'))).toBeLessThanOrEqual(10);
+  }, 120_000);
 });
 
 describe('E4: nothing gameplay-relevant moved or got blocked', () => {
@@ -436,3 +469,53 @@ describe('E4: cover and navigation', () => {
     }
   });
 });
+
+// ------------------------------------------------------------------------------------------------ F1 helpers
+
+type Exposure = Record<'cat' | 'corgi', { mean: number; per10: number[]; routeM: number }> & { stands: { x: number; z: number }[] };
+/**
+ * Q4's line-of-sight metric (tools/qa4-ba.mjs los) on a West Yard map: for each thief, its nav route home from the enemy
+ * stand to its own flag; per 1 m of the route, the share of the defenders' spawns and 8 guard spots 9 m round their
+ * stand (eye 1.0 m, target 0.8 m, within 60 m) with a clear line; the mean of the 10 m bins from 10 to 60 m.
+ */
+async function exitExposure(w: WorldData, seed: number): Promise<Exposure> {
+  const { Room } = await import('../../src/host/room');
+  const { baseAssaultState } = await import('../../src/sim/match');
+  const sim = await Sim.create({ seed, world: w });
+  const room = new Room(sim, { mode: 'base-assault', botsPerTeam: [0, 0] });
+  for (let i = 0; i < 30; i++) room.tick();
+  const st = baseAssaultState(sim)!;
+  const g = navGridFor(sim);
+  const H = (x: number, z: number) => w.height(x, z);
+  const out = { stands: st.spots.map((s) => ({ x: s.stand.x, z: s.stand.z })) } as Exposure;
+  for (const thief of [0, 1] as const) {
+    const def = 1 - thief, s = st.spots[def].stand, f = st.spots[thief].flag;
+    const p: number[] = [];
+    findPath(g, s.x, s.z, f.x, f.z, p);
+    const pts: [number, number][] = [];
+    let px = s.x, pz = s.z;
+    for (let i = 0; i < p.length; i += 2) {
+      const L = Math.hypot(p[i] - px, p[i + 1] - pz);
+      for (let k = 0; k < L; k += 1) pts.push([px + ((p[i] - px) * k) / L, pz + ((p[i + 1] - pz) * k) / L]);
+      px = p[i]; pz = p[i + 1];
+    }
+    const watch = [...w.spawns.filter((q) => q.team === def).map((q) => [q.x, q.z]),
+      ...Array.from({ length: 8 }, (_, k) => [s.x + Math.cos((k / 8) * Math.PI * 2) * 9, s.z + Math.sin((k / 8) * Math.PI * 2) * 9])];
+    const per10: number[] = [];
+    for (let b = 10; b < 60; b += 10) {
+      let seen = 0, n = 0;
+      for (let i = b; i < Math.min(b + 10, pts.length); i++) {
+        const [x, z] = pts[i];
+        for (const [wx, wz] of watch) {
+          if (Math.hypot(wx - x, wz - z) > 60) continue;
+          n++;
+          if (worldLineClear(sim, wx, H(wx, wz) + 1.0, wz, x, H(x, z) + 0.8, z)) seen++;
+        }
+      }
+      per10.push(n ? Math.round((100 * seen) / n) : 0);
+    }
+    out[thief ? 'cat' : 'corgi'] = { mean: per10.reduce((a, v) => a + v, 0) / per10.length, per10, routeM: pts.length };
+  }
+  room.dispose();                                                                   // (disposes its sim)
+  return out;
+}

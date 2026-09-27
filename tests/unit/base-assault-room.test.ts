@@ -76,9 +76,11 @@ describe('base-assault in a Room: a human vs bots, steal → carry → capture �
     expect(match().phase).toBe('ended');
     expect(wonAt).toBeLessThan(400);
     expect(match().winner).toBe(Team.Corgis);
-    expect(match().score).toEqual([3, 0]);
-    expect(captures).toHaveLength(3);
-    expect(captures.every((e) => e.team === Team.Corgis && e.pts === 1)).toBe(true);
+    // (W9 F1: since the West Yard's bases mirror each other the cat bots score too, so only the corgis' 3 are pinned)
+    expect(match().score[Team.Corgis]).toBe(3);
+    expect(match().score[Team.Cats]).toBeLessThan(3);
+    expect(captures.filter((e) => e.team === Team.Corgis)).toHaveLength(3);
+    expect(captures.every((e) => e.pts === 1)).toBe(true);
     expect(reasons.filter((e) => e.reason === BA_REASON.taken && e.team === Team.Corgis).length).toBeGreaterThanOrEqual(3);
     expect(events.some((e) => e.e === 'pickup' && e.id === slot.entity)).toBe(true);
     // the roster credits the capturer; the snapshot carried the balls to the client

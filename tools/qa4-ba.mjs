@@ -30,6 +30,7 @@ import { BASE_MOVE } from '../src/shared/content/classes';
 import { BA_BALL_SEED, BA_REASON, BallState } from '../src/shared/content/modes';
 import { baseAssaultBalls, baseAssaultState, checkBallInvariants } from '../src/sim/match';
 import { surfaceAt } from '../src/shared/world/queries';
+import { battleOf, registerBattle } from '../src/shared/world/fortifications';
 import { baRoleOf } from '../src/sim/ai/base-assault-ai';
 import { ordnanceStats } from '../src/sim/combat';
 import { Btn, emptyInput } from '../src/shared/input';
@@ -114,7 +115,13 @@ async function coveredWorld(seed, map) {
   }
   room.dispose();
   console.error(`[qa4-ba] cover crates at ${JSON.stringify(added)}`);
-  return { ...base, props };
+  // W9 F1: a spread copy is a new object, and the E4 battle layout is registered per WorldData object (battleOf), so
+  // an unregistered copy lost it: Base Assault fell back to the spawn centroids and moved both stands and flags (the
+  // first cover runs measured a different map). Register the copy with the base map's layout.
+  const covered = { ...base, props };
+  const layout = battleOf(base);
+  if (layout) registerBattle([covered], layout);
+  return covered;
 }
 
 // ------------------------------------------------------------------------------------------------ one match
