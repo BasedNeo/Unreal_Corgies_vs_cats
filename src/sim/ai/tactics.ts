@@ -75,7 +75,7 @@ import type { Archetype } from './archetypes';
 import { type NavGrid, cellX, cellZ, findPath, isWalkable, lineWalkable, nearestWalkable, randomCell } from './nav';
 import { canReach } from './nav-links';
 import { laneGoal } from './lanes';
-import { BALL_HELP, ballTrip, baseAssaultGoal, isCarrier, type BaBot } from './base-assault-ai';
+import { BALL_HELP, baPushCount, ballTrip, baseAssaultGoal, isCarrier, type BaBot } from './base-assault-ai';
 
 export interface TacticsState {
   /** No ability press before this tick (after a press, refused or not). */
@@ -496,7 +496,14 @@ function objectiveGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, char
   t.kiosk = false; t.destroy = false; t.walk = false; t.prop = -1; t.vehicle = false; t.plane = false; t.glide = false;
   if (isAdventureMode(sim)) { adventureGoal(sim, e, t, g, chars, prev, prevId); return; }
   if (e.combat?.pve || e.kind !== EntityKind.Bot) return;
-  if (roomModeOf(sim) === 'base-assault') { baseAssaultGoal(sim, e, t, g, chars, prev, prevId); return; } // G4b: roles + ball runs
+  if (roomModeOf(sim) === 'base-assault') {
+    baseAssaultGoal(sim, e, t, g, chars, prev, prevId); // G4b: roles + ball runs
+    // W10 N3: the team's pilot flies from the attackers (the surplus: never a carrier, guard, escort, returner or chaser),
+    // once its team has made its first storm: the opening push goes in with everyone (a pilot at kick-off cost 14 % of
+    // the captures; after the first storm 3 %, within noise, with a flight in 19 of 20 matches: docs/handoff/N3.md §3)
+    if (t.ba?.role === 'attack' && baPushCount(sim)[e.team as 0 | 1] > 0 && buddyInTrouble(sim, e, chars) === null) planeGoal(sim, e, t, chars, prev, prevId);
+    return;
+  }
   const hpFrac = e.health ? e.health.hp / e.health.max : 1;
   const buddy = buddyInTrouble(sim, e, chars) !== null;
   if (!buddy && planeGoal(sim, e, t, chars, prev, prevId)) return; // B2b: the team's pilot heads for the Rooftop Hangar
@@ -1318,10 +1325,11 @@ export function vehicleThink(sim: Sim, e: SimEntity, ai: VehicleBrain, ctx: Vehi
 }
 
 // ---------------------------------------------------------------- the RC plane and the Ear Glide (B2b)
-//   pilot   in team-deathmatch, core-rush and yard-skirmish each team sends one pilot to the neutral Rooftop Hangar:
-//           its lowest-id Overwatch or Skyraider room bot (≥ 60 % health, no teammate flying, no human heading for the
-//           hangar, a route up N1's climb links). The goal sits on the roof (t.gy), so the brain climbs there; E vends,
-//           E boards (a plane parked empty up there is boarded as is).
+//   pilot   in team-deathmatch, core-rush, yard-skirmish and base-assault each team sends one pilot to the neutral
+//           Rooftop Hangar: its lowest-id Overwatch or Skyraider room bot (≥ 60 % health, no teammate flying, no human
+//           heading for the hangar, a route up N1's climb links; in base-assault only while its role is attack and after
+//           its team's first storm, W10 N3, and never a ball carrier: it can't mount). The goal sits on the roof (t.gy),
+//           so the brain climbs there; E vends, E boards (a plane parked empty up there is boarded as is).
 //   sortie  strafing runs (drive.ts flyPlane) on the best enemy on foot in the open: close to the plane, hurt, near
 //           the pilot's teammates (the contested ground), re-picked every 1.5 s; nobody to hit → a circuit over the
 //           middle of the yard. Bails out (E in the air) below 35 % hull, or under fire below 45 % health.
@@ -1332,7 +1340,7 @@ export function vehicleThink(sim: Sim, e: SimEntity, ai: VehicleBrain, ctx: Vehi
 
 /** Room bots that fly: the marksman (it perches on the Rooftops by the hangar) and the flier (it flies best). */
 const PILOT_CLASSES: readonly string[] = ['overwatch', 'skyraider'];
-const PLANE_MODES = new Set(['team-deathmatch', 'core-rush', 'yard-skirmish']);
+const PLANE_MODES = new Set(['team-deathmatch', 'core-rush', 'yard-skirmish', 'base-assault']);
 /** Bail out below these fractions (hull; pilot health while being shot). */
 const PLANE_BAIL_HP = 0.35, PILOT_BAIL_HP = 0.45;
 /** A pilot stands this far (m) from the hangar kiosk, toward the pad; the hangar is boarded from within HANGAR_NEAR m. */
@@ -1361,7 +1369,7 @@ function isPilotClass(e: SimEntity): boolean {
 
 /** PvP: is `e` its team's pilot right now? Sets the hangar goal (on the roof: the brain climbs) and returns true. */
 function planeGoal(sim: Sim, e: SimEntity, t: TacticsState, chars: SimEntity[], prev: string, prevId: EntityId): boolean {
-  if (!isPilotClass(e) || !PLANE_MODES.has(roomModeOf(sim)) || matchEnded(sim)) return false;
+  if (isCarrier(e) || !isPilotClass(e) || !PLANE_MODES.has(roomModeOf(sim)) || matchEnded(sim)) return false; // N3: carriers never fly
   if ((sim.state.aiConfig as { vehicles?: boolean } | undefined)?.vehicles === false) return false;
   const h = hangarOf(sim);
   if (!h?.terminal) return false;

@@ -150,13 +150,15 @@ export const BASES = [
 /** W9 L3 (M5): the lanes bots walk between the bases (src/sim/ai/lanes.ts picks one per bot and life by weight),
  *  listed from the corgi end (north) to the cat end (south); cats walk them backwards. Points are [x, z] on the ground
  *  grid, or [x, z, s]: linger s seconds there (the lane's hot spot). Container Canyon (between the containers, or
- *  through the west one), the Mud (the middle causeway), the Pipeworks (through the west or the east tunnel). */
+ *  through the west one), the Mud (the middle causeway), the Pipeworks (through the west or the east tunnel).
+ *  Weights: W9 F2's tuned set (Q4 P2-5: the canyon lanes up, the Mud lane down; L3's first set was 0.23 / 0.16 / 0.17 /
+ *  0.24 / 0.20), folded in here from lanes.ts in W10 N3 (the picks are bit-identical: tests/unit/lot-lanes.test.ts). */
 export const LOT_LANES: readonly { id: string; weight: number; pts: readonly (readonly number[])[] }[] = [
-  { id: 'canyon', weight: 0.23, pts: [[-63, -86], [-86, -53], [-85, -32, 4], [-86, -12], [-87, 6], [-84, 40], [-50, 78], [-12, 100]] },
-  { id: 'canyon_w', weight: 0.16, pts: [[-63, -86], [-95.5, -50], [-95.5, -32, 3], [-95.5, -14], [-92, 6], [-84, 40], [-50, 78], [-12, 100]] },
-  { id: 'mud', weight: 0.17, pts: [[12, -109], [6, -62], [0, -28, 2], [0, 0], [0, 28, 2], [-6, 62], [-12, 100]] },
-  { id: 'pipes_w', weight: 0.24, pts: [[12, -109], [45, -82], [80, -45], [87, -12], [87, 6], [79.5, 11, 2], [79.5, 29, 4], [79.5, 47], [66, 64], [63, 86]] },
-  { id: 'pipes_e', weight: 0.2, pts: [[12, -109], [45, -82], [80, -45], [87, -12], [87, 6], [91.5, 11, 2], [91.5, 29, 3], [91.5, 47], [66, 64], [63, 86]] },
+  { id: 'canyon', weight: 0.28, pts: [[-63, -86], [-86, -53], [-85, -32, 4], [-86, -12], [-87, 6], [-84, 40], [-50, 78], [-12, 100]] },
+  { id: 'canyon_w', weight: 0.2, pts: [[-63, -86], [-95.5, -50], [-95.5, -32, 3], [-95.5, -14], [-92, 6], [-84, 40], [-50, 78], [-12, 100]] },
+  { id: 'mud', weight: 0.12, pts: [[12, -109], [6, -62], [0, -28, 2], [0, 0], [0, 28, 2], [-6, 62], [-12, 100]] },
+  { id: 'pipes_w', weight: 0.22, pts: [[12, -109], [45, -82], [80, -45], [87, -12], [87, 6], [79.5, 11, 2], [79.5, 29, 4], [79.5, 47], [66, 64], [63, 86]] },
+  { id: 'pipes_e', weight: 0.18, pts: [[12, -109], [45, -82], [80, -45], [87, -12], [87, 6], [91.5, 11, 2], [91.5, 29, 3], [91.5, 47], [66, 64], [63, 86]] },
 ];
 /** Portable toilet by the east hoarding. */
 export const TOILET = { x: 118, z: -120, yaw: -Math.PI / 2 } as const;

@@ -175,7 +175,10 @@ async function soakMode(mode) {
   const track = new Map();
   const sampleEvery = TICK_HZ / 2;
 
-  const ticksTotal = Math.round(SECONDS * TICK_HZ);
+  // W10 (lead): the soak's 3-wave skirmish match ends anywhere from 53 to 141 s (bot-only, 6 seeds, pooled mean 77-83 s
+  // both before and after F2's parked karts): chaos, not a regression. A 60 s window passed only by luck (58 s), so
+  // skirmish gets 150 s; every other mode keeps --seconds.
+  const ticksTotal = Math.round((mode === 'yard-skirmish' ? Math.max(SECONDS, 150) : SECONDS) * TICK_HZ);
   let lastPhase = room.match.phase, mid = Math.floor(ticksTotal / 2);
   const wall0 = performance.now();
   // the soak's own per-tick telemetry grows ~0.11 MB/min (4 number arrays): take it out, it isn't the room's

@@ -20,9 +20,18 @@
 // N1 decks: buildDeckGrid() floods an ELEVATED walkable surface (a roof, a platform) from a seed point into its own
 // small NavGrid over prop tops (ground = the surface height per cell). findPath & co. work on it unchanged; the
 // link layer (nav-links.ts) joins decks and the ground grid through validated hop sequences.
+//
+// W10 N3 thin obstacles: beams, posts and poles (a box whose two smaller half extents are <= THIN_HALF, an upright
+// cylinder of radius <= THIN_HALF) are rasterized into the ground grid on top of the probe. The probe tests a capsule
+// at the cell CENTRE from 0.45 m up, so a 0.2 m beam crossing a cell away from its centre, or low under the probe's
+// floor, left the cell open: the West Yard's hedgehogs (E4, three pitched 0.2 m beams) were closed for 1-3 of the 5-9
+// cells their beams cross, bots pathed into their reach and pinned there 1-4 s (F1 §7, G4b §7). A thin prop now closes
+// every cell whose body column (THIN_FLOOR over the ground to the probe's top) it actually intersects: exact box-vs-box
+// SAT, no inflation (a cell the beam only passes beside stays open: F2's one-cell walkway under the Lot's brace).
+// Analytic over the few cells of each thin prop's AABB, once per grid build: no Rapier query, no per-tick cost.
 import type { Collider } from '@dimforge/rapier3d-compat';
 import type { Sim } from '../sim';
-import type { PropBox, WorldData } from '../../shared/world/world-data';
+import type { PropBox, PropCylinder, WorldData } from '../../shared/world/world-data';
 import { WORLD_RAY_FILTER } from '../combat/geometry';
 import { Layer } from '../rapier';
 import { isStaticWorldCollider, isTerrainCollider } from '../world/build';
@@ -37,6 +46,12 @@ const PROBE_HALF = 0.12;
 const MAX_SLOPE = 1.11;
 /** Max ground height change between neighbouring cells a bot will walk. */
 const MAX_STEP = 0.6;
+/** W10 N3: a box whose two smaller half extents, or a cylinder whose radius, are at most this is a thin obstacle. */
+export const THIN_HALF = 0.2;
+/** W10 N3: a thin obstacle closes the cells it crosses from this height over the ground up (a pitched beam's low end
+ *  wedges a pet or lets it climb on: the KCC's autostep needs a 0.2 m wide top, exactly a beam's); the top is the
+ *  probe's. */
+export const THIN_FLOOR = 0.08;
 const MAX_EXPANSIONS = 9000;
 const HEURISTIC_WEIGHT = 1.25;
 /** Every expansion pushes at most 8 entries. */
@@ -59,6 +74,8 @@ export interface NavGrid {
   walkable: number;
   /** Rapier shape queries used by the build (the rest were resolved analytically). */
   queries: number;
+  /** W10 N3: cells the probe left open that a thin obstacle closed (0 on decks). */
+  thin: number;
   // A* scratch (grids are shared between sims of the same world; searches are synchronous)
   g: Float32Array;
   parent: Int32Array;
@@ -335,22 +352,112 @@ function mergeOpened(g: NavGrid, opened: number[]): void {
 
 interface Aabb { x0: number; x1: number; z0: number; z1: number; y0: number; y1: number }
 
+/** R = Ry(yaw) · Rx(pitch) · Rz(roll) of a prop box, row-major into m (column j = the box's local axis j in world). */
+function rotYXZ(p: PropBox, m: Float64Array): void {
+  const cy = Math.cos(p.rotY), sy = Math.sin(p.rotY), cp = Math.cos(p.pitch ?? 0), sp = Math.sin(p.pitch ?? 0), cr = Math.cos(p.roll ?? 0), sr = Math.sin(p.roll ?? 0);
+  m[0] = cy * cr + sy * sp * sr; m[1] = -cy * sr + sy * sp * cr; m[2] = sy * cp;
+  m[3] = cp * sr; m[4] = cp * cr; m[5] = -sp;
+  m[6] = -sy * cr + cy * sp * sr; m[7] = sy * sr + cy * sp * cr; m[8] = cy * cp;
+}
+
+/** World AABB of one prop box (rotated YXZ): half extent along world axis i = Σ_j |R_ij| h_j. */
+function boxAabb(p: PropBox, m: Float64Array): Aabb {
+  rotYXZ(p, m);
+  const ex = Math.abs(m[0]) * p.hx + Math.abs(m[1]) * p.hy + Math.abs(m[2]) * p.hz;
+  const ey = Math.abs(m[3]) * p.hx + Math.abs(m[4]) * p.hy + Math.abs(m[5]) * p.hz;
+  const ez = Math.abs(m[6]) * p.hx + Math.abs(m[7]) * p.hy + Math.abs(m[8]) * p.hz;
+  return { x0: p.x - ex, x1: p.x + ex, z0: p.z - ez, z1: p.z + ez, y0: p.y - ey, y1: p.y + ey };
+}
+
 /** World AABBs of the static props the world lane turns into colliders (boxes rotated YXZ). */
 function propAabbs(d: WorldData): Aabb[] {
   const out: Aabb[] = [];
-  for (const p of d.props) {
-    // R = Ry(yaw) · Rx(pitch) · Rz(roll); AABB half extent along world axis i = Σ_j |R_ij| h_j
-    const cy = Math.cos(p.rotY), sy = Math.sin(p.rotY), cp = Math.cos(p.pitch ?? 0), sp = Math.sin(p.pitch ?? 0), cr = Math.cos(p.roll ?? 0), sr = Math.sin(p.roll ?? 0);
-    const r00 = cy * cr + sy * sp * sr, r01 = -cy * sr + sy * sp * cr, r02 = sy * cp;
-    const r10 = cp * sr, r11 = cp * cr, r12 = -sp;
-    const r20 = -sy * cr + cy * sp * sr, r21 = sy * sr + cy * sp * cr, r22 = cy * cp;
-    const ex = Math.abs(r00) * p.hx + Math.abs(r01) * p.hy + Math.abs(r02) * p.hz;
-    const ey = Math.abs(r10) * p.hx + Math.abs(r11) * p.hy + Math.abs(r12) * p.hz;
-    const ez = Math.abs(r20) * p.hx + Math.abs(r21) * p.hy + Math.abs(r22) * p.hz;
-    out.push({ x0: p.x - ex, x1: p.x + ex, z0: p.z - ez, z1: p.z + ez, y0: p.y - ey, y1: p.y + ey });
-  }
+  const m = new Float64Array(9);
+  for (const p of d.props) out.push(boxAabb(p, m));
   for (const c of d.cylinders ?? []) out.push({ x0: c.x - c.r, x1: c.x + c.r, z0: c.z - c.r, z1: c.z + c.r, y0: c.y - c.hh, y1: c.y + c.hh });
   return out;
+}
+
+// ------------------------------------------------------------------------------------------ W10 N3 thin obstacles
+
+/** A beam, post or pole: the two smaller half extents are at most THIN_HALF (the largest is its length). */
+export function isThinBox(p: PropBox): boolean {
+  const mid = p.hx + p.hy + p.hz - Math.max(p.hx, p.hy, p.hz) - Math.min(p.hx, p.hy, p.hz);
+  return mid <= THIN_HALF;
+}
+
+export function isThinCylinder(c: PropCylinder): boolean {
+  return c.r <= THIN_HALF;
+}
+
+/**
+ * Does the oriented box p (rotation m: rotYXZ) intersect the axis-aligned box centred (cx, cy, cz) with half extents
+ * (ax, ay, az)? The separating-axis test (Ericson, Real-Time Collision Detection §4.4.1): the 3 + 3 face axes and the 9
+ * edge cross products; the epsilon keeps near-parallel edge pairs from inventing a separating axis.
+ */
+function boxHitsAabb(p: PropBox, m: Float64Array, cx: number, cy: number, cz: number, ax: number, ay: number, az: number): boolean {
+  const E = 1e-6;
+  const tx = p.x - cx, ty = p.y - cy, tz = p.z - cz, bx = p.hx, by = p.hy, bz = p.hz;
+  const r00 = m[0], r01 = m[1], r02 = m[2], r10 = m[3], r11 = m[4], r12 = m[5], r20 = m[6], r21 = m[7], r22 = m[8];
+  const a00 = Math.abs(r00) + E, a01 = Math.abs(r01) + E, a02 = Math.abs(r02) + E;
+  const a10 = Math.abs(r10) + E, a11 = Math.abs(r11) + E, a12 = Math.abs(r12) + E;
+  const a20 = Math.abs(r20) + E, a21 = Math.abs(r21) + E, a22 = Math.abs(r22) + E;
+  // the world axes (the cell's faces)
+  if (Math.abs(tx) > ax + bx * a00 + by * a01 + bz * a02) return false;
+  if (Math.abs(ty) > ay + bx * a10 + by * a11 + bz * a12) return false;
+  if (Math.abs(tz) > az + bx * a20 + by * a21 + bz * a22) return false;
+  // the box's axes
+  if (Math.abs(tx * r00 + ty * r10 + tz * r20) > ax * a00 + ay * a10 + az * a20 + bx) return false;
+  if (Math.abs(tx * r01 + ty * r11 + tz * r21) > ax * a01 + ay * a11 + az * a21 + by) return false;
+  if (Math.abs(tx * r02 + ty * r12 + tz * r22) > ax * a02 + ay * a12 + az * a22 + bz) return false;
+  // world axis i x box axis j
+  if (Math.abs(tz * r10 - ty * r20) > ay * a20 + az * a10 + by * a02 + bz * a01) return false;
+  if (Math.abs(tz * r11 - ty * r21) > ay * a21 + az * a11 + bx * a02 + bz * a00) return false;
+  if (Math.abs(tz * r12 - ty * r22) > ay * a22 + az * a12 + bx * a01 + by * a00) return false;
+  if (Math.abs(tx * r20 - tz * r00) > ax * a20 + az * a00 + by * a12 + bz * a11) return false;
+  if (Math.abs(tx * r21 - tz * r01) > ax * a21 + az * a01 + bx * a12 + bz * a10) return false;
+  if (Math.abs(tx * r22 - tz * r02) > ax * a22 + az * a02 + bx * a11 + by * a10) return false;
+  if (Math.abs(ty * r00 - tx * r10) > ax * a10 + ay * a00 + by * a22 + bz * a21) return false;
+  if (Math.abs(ty * r01 - tx * r11) > ax * a11 + ay * a01 + bx * a22 + bz * a20) return false;
+  if (Math.abs(ty * r02 - tx * r12) > ax * a12 + ay * a02 + bx * a21 + by * a20) return false;
+  return true;
+}
+
+/**
+ * W10 N3: the cells of a ground grid (its lattice and per-cell ground) that a thin obstacle of the world crosses at body
+ * height: the obstacle's solid intersects the cell's column from THIN_FLOOR over the cell's ground to the probe's top.
+ * Sorted cell indices (interior cells only: the border never walks).
+ */
+export function thinObstacleCells(data: WorldData, g: Pick<NavGrid, 'ox' | 'oz' | 'cell' | 'w' | 'h' | 'ground'>): Int32Array {
+  const lo = THIN_FLOOR, hi = CLEARANCE + 2 * (PROBE_RADIUS + PROBE_HALF);
+  const half = g.cell / 2, midY = (lo + hi) / 2, bandHalf = (hi - lo) / 2;
+  const hit = new Uint8Array(g.w * g.h);
+  const cells: number[] = [];
+  const m = new Float64Array(9);
+  /** Cell range of an AABB (interior cells), visiting each cell whose column the AABB reaches vertically. */
+  const scan = (a: Aabb, test: (x: number, z: number, gy: number) => boolean): void => {
+    const ix0 = Math.max(1, Math.floor((a.x0 - g.ox) / g.cell)), ix1 = Math.min(g.w - 2, Math.floor((a.x1 - g.ox) / g.cell));
+    const iz0 = Math.max(1, Math.floor((a.z0 - g.oz) / g.cell)), iz1 = Math.min(g.h - 2, Math.floor((a.z1 - g.oz) / g.cell));
+    for (let iz = iz0; iz <= iz1; iz++) for (let ix = ix0; ix <= ix1; ix++) {
+      const i = iz * g.w + ix;
+      if (hit[i]) continue;
+      const gy = g.ground[i];
+      if (a.y1 < gy + lo || a.y0 > gy + hi) continue;
+      if (test(g.ox + (ix + 0.5) * g.cell, g.oz + (iz + 0.5) * g.cell, gy)) { hit[i] = 1; cells.push(i); }
+    }
+  };
+  for (const p of data.props) {
+    if (!isThinBox(p)) continue;
+    scan(boxAabb(p, m), (x, z, gy) => boxHitsAabb(p, m, x, gy + midY, z, half, bandHalf, half));
+  }
+  for (const c of data.cylinders ?? []) {
+    if (!isThinCylinder(c)) continue;
+    scan({ x0: c.x - c.r, x1: c.x + c.r, z0: c.z - c.r, z1: c.z + c.r, y0: c.y - c.hh, y1: c.y + c.hh }, (x, z) => {
+      const dx = Math.max(0, Math.abs(c.x - x) - half), dz = Math.max(0, Math.abs(c.z - z) - half);
+      return dx * dx + dz * dz < c.r * c.r;
+    });
+  }
+  return Int32Array.from(cells).sort();
 }
 
 /** Static-world collider count and the terrain collider (trimesh or heightfield), if any. Only buildStaticWorld's
@@ -450,9 +557,12 @@ export function buildNavGrid(sim: Sim): NavGrid {
       if (onPad(data, x, z)) cost[i] = 6;
     }
   }
+  // W10 N3: thin obstacles close every cell they cross at body height (the probe above saw them at cell centres only)
+  let thin = 0;
+  for (const i of thinObstacleCells(data, { ox, oz, cell, w, h, ground })) if (walk[i]) { walk[i] = 0; walkable--; thin++; }
   const grid: NavGrid = {
     cell, ox, oz, w, h, walk, ground, cost, region: new Int32Array(n).fill(-1), regionSize: [], mainRegion: -1,
-    buildMs: 0, walkable, queries,
+    buildMs: 0, walkable, queries, thin,
     g: new Float32Array(n), parent: new Int32Array(n), open: new Uint32Array(n), closed: new Uint32Array(n),
     heap: new Int32Array(heapCap(n)), heapF: new Float32Array(heapCap(n)), search: 0,
   };
@@ -552,7 +662,7 @@ export function buildDeckGrid(sim: Sim, x: number, y: number, z: number): NavGri
   }
   const grid: NavGrid = {
     cell, ox: gx0 + ix0 * cell, oz: gz0 + iz0 * cell, w, h, walk, ground, cost, region: new Int32Array(n).fill(-1), regionSize: [], mainRegion: -1,
-    buildMs: 0, walkable, queries,
+    buildMs: 0, walkable, queries, thin: 0,
     g: new Float32Array(n), parent: new Int32Array(n), open: new Uint32Array(n), closed: new Uint32Array(n),
     heap: new Int32Array(heapCap(n)), heapF: new Float32Array(heapCap(n)), search: 0,
   };

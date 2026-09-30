@@ -1,4 +1,4 @@
-// W9 L3 (M5) on The Lot: bots use all three lanes (src/sim/ai/lanes.ts, lot/layout.ts LOT_LANES).
+// W9 L3 (M5) on The Lot: bots use all three lanes (src/sim/ai/lanes.ts, lot/layout.ts LOT_LANES: paths and weights).
 //   - the pick is a pure, deterministic function of (world seed, bot, life) and follows the weights;
 //   - every waypoint stands on walkable ground in the main nav region and each leg is a grid path (both directions);
 //   - who walks lanes: TDM room bots, not marksmen (they take the perches), not PvE waves; the West Yard has no lanes;
@@ -16,9 +16,42 @@ import { districtAt } from '../../src/shared/world/queries';
 import { EntityKind } from '../../src/shared/types';
 import type { SimEntity } from '../../src/sim/entity';
 
+/** FNV-1a of the picks' digits. */
+function fnv(s: string): string {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
+  return h.toString(16);
+}
+
+describe('lanes: the weights are the map\'s data (W10 N3)', () => {
+  it('LANES_BY_MAP carries LOT_LANES itself, with W9 F2\'s tuned weights', () => {
+    expect(LANES_BY_MAP[LOT_NAME]).toBe(LOT_LANES);
+    expect(Object.fromEntries(LOT_LANES.map((l) => [l.id, l.weight]))).toEqual({ canyon: 0.28, canyon_w: 0.2, mud: 0.12, pipes_w: 0.22, pipes_e: 0.18 });
+  });
+  it('every pick is bit-identical to W9 F2\'s (lanes.ts LOT_WEIGHTS over LOT_LANES\' paths): per life, sweep-back legs, BA pushes', () => {
+    // the digest was taken on HEAD c783329 (F2's LOT_WEIGHTS in lanes.ts) with this exact loop: 8 seeds x 64 bots x 16
+    // lives (leg 0 and sweep legs 1-3, as lanes.ts pickFor keys them) + both teams' 64 Base Assault push cycles (F2's
+    // base-assault-ai laneFor key: 7919 + team)
+    const L = LANES_BY_MAP[LOT_NAME];
+    let s = '';
+    for (let seed = 1; seed <= 8; seed++) {
+      for (let id = 0; id < 64; id++) for (let life = 0; life < 16; life++) {
+        s += pickLane(L, seed, id, life);
+        for (let leg = 1; leg <= 3; leg++) s += pickLane(L, seed, id, life * 7919 + leg);
+      }
+      for (const team of [0, 1]) for (let cycle = 0; cycle < 64; cycle++) s += pickLane(L, seed, 7919 + team, cycle);
+    }
+    expect(s.length).toBe(33792);
+    const counts = [0, 0, 0, 0, 0];
+    for (const c of s) counts[+c]++;
+    expect(counts).toEqual([9435, 6749, 4048, 7463, 6097]);
+    expect(fnv(s)).toBe('7c0e1eb1');
+  });
+});
+
 describe('lanes: the pick', () => {
   it('is deterministic per (seed, bot, life) and follows the weights', () => {
-    // F2 (Q4 P2-5): the paths are LOT_LANES', the weights lanes.ts's tuned set
+    // F2 (Q4 P2-5) tuned the weights; W10 N3 moved them into LOT_LANES (the map's data)
     const LANES = LANES_BY_MAP[LOT_NAME];
     expect(LANES.map((l) => [l.id, l.pts])).toEqual(LOT_LANES.map((l) => [l.id, l.pts]));
     expect([...LANE_MODES]).toEqual(['team-deathmatch']);

@@ -28,16 +28,14 @@ export interface LaneDef {
 }
 
 /**
- * W9 F2 (mode-1, Q4 P2-5): The Lot's lane weights, applied over LOT_LANES' paths (lot/layout.ts, the world lane's data;
- * fold these in there when it next changes). On Q4's seeds 5-8 the canyon lanes (0.23 + 0.16) gave Container Canyon
- * 0.22 of the Mud's bot-seconds (the gate is 0.25; L3's seeds 1-4: 0.29). The Mud lane loses weight to the canyon
- * lanes: the Mud gets its traffic anyway (it is the middle every fight and respawn crosses).
+ * Lanes per map (WorldData.name), weights and all from the map's data. W10 N3: The Lot's weights are W9 F2's tuned set
+ * (Q4 P2-5: on Q4's seeds 5-8 L3's canyon lanes, 0.23 + 0.16, gave Container Canyon 0.22 of the Mud's bot-seconds
+ * against a 0.25 gate; the Mud lane gave weight to the canyon lanes, and the Mud keeps its traffic: it is the middle
+ * every fight and respawn crosses). F2 kept them here over LOT_LANES' paths; they now live in LOT_LANES itself.
+ * A WorldData field would carry the lanes in the map itself (hand-back snippet).
  */
-const LOT_WEIGHTS: Readonly<Record<string, number>> = { canyon: 0.28, canyon_w: 0.2, mud: 0.12, pipes_w: 0.22, pipes_e: 0.18 };
-
-/** Lanes per map (WorldData.name). A WorldData field would carry them in the map itself (hand-back snippet). */
 export const LANES_BY_MAP: Readonly<Record<string, readonly LaneDef[]>> = {
-  [LOT_NAME]: LOT_LANES.map((l) => ({ ...l, weight: LOT_WEIGHTS[l.id] ?? l.weight })),
+  [LOT_NAME]: LOT_LANES,
 };
 /** Room modes whose idle bots walk lanes. */
 export const LANE_MODES: ReadonlySet<string> = new Set(['team-deathmatch']);
