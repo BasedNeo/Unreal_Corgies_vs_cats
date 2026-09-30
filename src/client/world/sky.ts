@@ -12,13 +12,16 @@
 // (STYLE.mood.minCloud); clouds are soft layered billows with dark undersides instead of flat cartoon puffs; the fog is
 // a node (distance exp² + a ground haze that pools in low ground, thicker in rain); and the sky drives the style's
 // shared uniforms: STYLE_ENV (reflection colours for wet ground/metal) and STYLE_WEATHER (wet, rain, dark).
+// W10 P5: the sky also drives the exposure (STYLE_EXPOSURE, from YARD_RAMPS.exposure: P4's dusk lift at low sun, in storm
+// and at night, back to the pre-P4 exposure by day) and hands the world's interiors to the style (setStyleInteriors), so
+// its fill light stays out of tunnels and containers.
 import * as THREE from 'three/webgpu';
 import {
   positionLocal, normalize, uniform, vec3, vec2, float, mix, smoothstep, max, dot, pow, step, fract, sin,
   mx_fractal_noise_float, time, floor, clamp, abs, positionWorld, cameraPosition, length, exp, fog as fogOf,
 } from 'three/tsl';
 import { STYLE } from '../style/style-tokens.js';
-import { STYLE_ENV, STYLE_WEATHER } from '../style/style-webgpu.js';
+import { STYLE_ENV, STYLE_WEATHER, STYLE_EXPOSURE, setStyleInteriors, styleInteriors } from '../style/style-webgpu.js';
 
 type RGB = [number, number, number];
 const hex = (h: number): RGB => { const c = new THREE.Color(h); return [c.r, c.g, c.b]; };
@@ -42,11 +45,19 @@ export const YARD_RAMPS = {
   // W9 P4 sky fill: the anti-sun "rim" light is the dusk sky's fill for everything seen against the low sun (backlit
   // views: deck, flank). Strongest while the sun is low (×2.5 at t = 0.74), back to the old level by mid-afternoon;
   // was [[-10, 0.5], [0, 0.9], [20, 1.0]].
-  rimI: [[-10, 0.6], [-3, 1.2], [0, 2.2], [6, 2.4], [16, 1.6], [30, 1.1], [42, 1.0]] as [number, number][],
+  // W10 P5: back to the base level by 18 deg (was [16, 1.6], [30, 1.1]), so the afternoon (t = 0.68, e = 18 deg) is lit as
+  // before P4; the dusk keys (e <= 6) are P4's.
+  rimI: [[-10, 0.6], [-3, 1.2], [0, 2.2], [6, 2.4], [12, 1.6], [18, 1.0], [42, 1.0]] as [number, number][],
   // W9 P4: the fill's height (the up component of its direction, was a fixed 0.35 ≈ 19°): near-horizontal while the sun
   // is low (≈ 3°), like the anti-sun horizon glow, so it lights the faces turned from the sun and grazes the ground.
   // At 19° the strong dusk fill washed the floodlit sodium pools out to cream (saturation 0.58 → 0.38, The Lot's pit).
   rimUp: [[-10, 0.35], [-3, 0.35], [0, 0.05], [8, 0.05], [20, 0.35]] as [number, number][],
+  // W10 P5 exposure by time of day: a multiplier on STYLE.grade.exposure (1.25, P4's dusk value; STYLE_EXPOSURE). P4's
+  // global 1.25 made daytime ~18 % brighter than pre-P4 (noon overview luma 104 -> 123) and washed out bright moments.
+  // 1 while the sun is low (the dusk lift at t = 0.74, e = 2.6 deg) and at night; by day 0.78 (1.25 x 0.78 = 0.975: the
+  // pre-P4 exposure, less the ~2 % P4's lighter vignette adds). A storm keeps the lift at any hour (apply: lerp to 1 by
+  // the weather's storm).
+  exposure: [[-3, 1], [6, 1], [16, 0.78], [42, 0.78]] as [number, number][],
   hemiSky: [[-12, hex(0x243052)], [0, hex(0x6a6a8c)], [12, hex(0x74849c)], [40, hex(0x8092a8)]] as [number, RGB][],
   hemiGround: [[-12, hex(0x16130f)], [0, hex(0x2c241b)], [20, hex(0x3a3024)]] as [number, RGB][],
   hemiI: [[-12, 0.6], [0, 0.82], [20, 0.95]] as [number, number][],
@@ -113,8 +124,14 @@ export interface YardSky {
   dispose(): void;
 }
 
-export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; shadowSize?: number; shadowMap?: number; clouds?: boolean; /** W9 L3: fog density × this (maps larger than the West Yard see proportionally farther) */ fogScale?: number } = {}): YardSky {
+export function createYardSky(scene: THREE.Scene, opts: {
+  timeOfDay?: number; shadowSize?: number; shadowMap?: number; clouds?: boolean;
+  /** W9 L3: fog density × this (maps larger than the West Yard see proportionally farther) */ fogScale?: number;
+  /** W10 P5: WorldData.interiors, boxes the sky fill does not reach (tunnels, containers); set on the style while this sky lives */
+  interiors?: { min: [number, number, number]; max: [number, number, number] }[];
+} = {}): YardSky {
   const fogScale = opts.fogScale ?? 1;
+  const interiors = setStyleInteriors(opts.interiors ?? []);
   // --- style light rig: reuse createStyleLights() output if the renderer added it ---
   let rig = scene.getObjectByName('style_lights') as THREE.Group | undefined;
   let ownRig = false;
@@ -131,7 +148,7 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
   scene.add(target);
   sun.target = target;
   const rimTarget = new THREE.Object3D(); scene.add(rimTarget);
-  if (rim) rim.target = rimTarget;
+  if (rim) { rim.target = rimTarget; rim.userData.skyFill = true; } // W10 P5: the fill; interiors shut it out
 
   // Shadows: one map, orthographic box centered ahead of the camera, texel-snapped (no shimmer).
   const S = opts.shadowSize ?? 62;
@@ -254,6 +271,8 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
     sun.intensity = base.key * (s.night ? 0.32 : ramp(YARD_RAMPS.sunI, e)) * (1 - 0.85 * W.dark) + base.key * 0.6 * W.flash;
     if (rim) { setRGB(rim.color, ramp(YARD_RAMPS.rim, e)); rim.intensity = base.rim * ramp(YARD_RAMPS.rimI, e) * (1 - 0.45 * W.dark); }
     rimUp = ramp(YARD_RAMPS.rimUp, e);
+    // W10 P5: exposure follows the sun (P4's dusk lift at low sun and at night, pre-P4 by day); storms keep the lift
+    (STYLE_EXPOSURE as { value: number }).value = lerp(ramp(YARD_RAMPS.exposure, s.night ? -10 : e), 1, Math.min(1, Math.max(0, storm)));
     if (hemi) {
       const hs = weatherTint(ramp(YARD_RAMPS.hemiSky, e), tintH, grey * 0.85, W.dark * 0.35);
       setRGB(hemi.color, hs.map((v, i) => lerp(v, [0.8, 0.84, 1.0][i], Math.min(1, W.flash))) as RGB);
@@ -265,7 +284,8 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
     // aerial perspective: distance tints toward the sky's blue, not a beige-green wall (L2 critique)
     fog.color.copy(c3).lerp(new THREE.Color().setRGB(...zen), 0.3).multiplyScalar(1 - 0.3 * storm);
     fog.color.lerp(new THREE.Color(0xc9d0e4), Math.min(1, W.flash * 0.3));
-    baseFog = ramp(YARD_RAMPS.fogDensity, e) * (1 + 1.5 * W.fog + 0.8 * W.rain) * fogScale;
+    wxFog = 1 + 1.5 * W.fog + 0.8 * W.rain;
+    baseFog = ramp(YARD_RAMPS.fogDensity, e) * wxFog * fogScale;
     fog.density = baseFog;
     (FU.density as { value: number }).value = baseFog;
     (scene.background as THREE.Color).copy(fog.color);
@@ -288,6 +308,7 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
   let rimUp = 0.35; // the fill's height (YARD_RAMPS.rimUp), set by apply()
   let state = sunState(tod);
   let baseFog = 0.003;
+  let wxFog = 1; // the weather's fog multiplier (apply)
   apply(state);
 
   return {
@@ -298,7 +319,11 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
     update(camera, focus) {
       dome.position.copy(camera.position);
       // less aerial haze when looking down from high up (overviews), full haze at player height
-      fog.density = baseFog * Math.max(0.5, Math.min(1, 1 - (camera.position.y - 12) / 130));
+      // W10 P5: a camera far above the ground also sees through the weather's extra fog: the floor of this factor falls
+      // with wxFog ^ STYLE.mood.highFog.wx (rain and storm), so the storm overview reads its structure; low cameras
+      // (players, the lineups) keep the full weather
+      const H = STYLE.mood.highFog;
+      fog.density = baseFog * Math.max(H.floor / Math.pow(wxFog, H.wx), Math.min(1, 1 - (camera.position.y - H.from) / H.span));
       (FU.density as { value: number }).value = fog.density;
       // shadow box centered ~35 m ahead of the camera on the ground (or at the given focus)
       const hgt = Math.max(0, camera.position.y);
@@ -336,6 +361,7 @@ export function createYardSky(scene: THREE.Scene, opts: { timeOfDay?: number; sh
       sun.castShadow = false;
       if (scene.fog === fog) scene.fog = null;
       if (scene.fogNode) scene.fogNode = null;
+      if (styleInteriors() === interiors) setStyleInteriors([]); // only its own (a newer sky may have set its world's)
     },
   };
 }

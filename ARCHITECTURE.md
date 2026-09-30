@@ -117,6 +117,9 @@ src/client/
                                    real lights (world-view calls lamps.update), instanced battle clutter; terrain-view
                                    bakes the `battle` ground channels (scorch, mud, puddles, ruts)
                                    W7 P3: prim-mesh crease ink in 33 m tiles, drawn within 40 m (CREASE_DRAW_DISTANCE)
+                                   W10 P5: sky.ts drives STYLE_EXPOSURE from the time of day and hands
+                                   WorldData.interiors (the-lot.ts lotInteriors) to the hardened material, which keeps
+                                   the sky fill out of those boxes; high cameras thin the storm fog (STYLE.mood.highFog)
   ui/  audio/  fx/                 comic HUD + menus (MATCH selector, room browser, LOCKER) + chat + tips + settings ·
                                    W10 U3: ui/awards.ts (AwardsTally from events + roster, the awards card); the kill feed
                                    reads death.wpn. W10 AU2: audio/presets-objective.ts + music-tension.ts (Base Assault

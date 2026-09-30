@@ -21,6 +21,8 @@
 //   2 high: + second grime octave, wall streaks, specular anti-aliasing
 // W9 P4: toon({ rim }) compiles in a character rim + fill (STYLE.rim, STYLE_RIM): a cool Fresnel edge plus a flat fill,
 // as light on the albedo, growing with distance, at every detail level (the low tier gets the same read).
+// W10 P5: the exposure follows the sky's time of day (STYLE_EXPOSURE, a pre-tone-map multiply); the sky fill and the
+// character rim + fill stay out of WorldData.interiors (STYLE_INTERIORS: a box test per fragment, no pass, no light).
 //
 // Differences from WebGL that matter:
 // - Ink hull comes from TSL toonOutlinePass: it outlines ONLY toon materials (isMeshToonMaterial /
@@ -34,7 +36,7 @@ import {
   positionLocal, normalLocal, positionGeometry, positionWorld, normalWorld, normalView, normalWorldGeometry,
   positionViewDirection, cameraPosition, reflect, fwidth, length, clamp, abs, floor, sqrt,
   mx_noise_float, materialReference, attribute, diffuseColor, roughness, metalness, specularColor,
-  BRDF_Lambert, F_Schlick,
+  BRDF_Lambert, F_Schlick, uniformArray, Loop,
 } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
@@ -60,6 +62,81 @@ export const STYLE_ENV = {
 
 /** W9 P4 character rim + fill (STYLE.rim): colour × gain (a live hook: e.g. a menu or a cutscene can dim it; 1 in play). */
 export const STYLE_RIM = { color: uniform(new THREE.Color(STYLE.rim.color)), gain: uniform(1) };
+
+/**
+ * W10 P5 exposure by time of day: a multiplier on the tone-mapping exposure (STYLE.grade.exposure, the dusk value), applied
+ * to the linear HDR colour just before tone mapping (the same maths as renderer.toneMappingExposure). The sky writes it
+ * from its time-of-day ramp (sky.ts YARD_RAMPS.exposure): 1 at dusk, in storm and at night, lower by day.
+ */
+export const STYLE_EXPOSURE = uniform(1);
+
+/**
+ * W10 P5 interiors (WorldData.interiors): world-space boxes where the sky fill (the anti-sun directional light, flagged
+ * `userData.skyFill`) and the character rim + fill do not reach. Two vec4 per box (min, max); `count` boxes are live.
+ * The sky sets them from the world (createYardSky({ interiors })); no interiors = the loop never runs.
+ */
+export const STYLE_INTERIORS = {
+  boxes: uniformArray(Array.from({ length: 2 * STYLE.interior.max }, () => new THREE.Vector4()), 'vec4'),
+  count: uniform(0, 'int'),
+};
+let interiorsSet = null;
+/**
+ * Sets the interior boxes (world space; at most STYLE.interior.max, the rest are ignored). Returns the list it keeps, so
+ * an owner can clear only its own (styleInteriors() === mine) on dispose.
+ * @param {{ min: number[], max: number[] }[] | null | undefined} boxes
+ */
+export function setStyleInteriors(boxes) {
+  const list = boxes ?? [];
+  const n = Math.min(list.length, STYLE.interior.max);
+  const arr = STYLE_INTERIORS.boxes.array;
+  for (let i = 0; i < n; i++) {
+    const { min: lo, max: hi } = list[i];
+    arr[2 * i].set(Math.min(lo[0], hi[0]), Math.min(lo[1], hi[1]), Math.min(lo[2], hi[2]), 0);
+    arr[2 * i + 1].set(Math.max(lo[0], hi[0]), Math.max(lo[1], hi[1]), Math.max(lo[2], hi[2]), 0);
+  }
+  for (let i = 2 * n; i < arr.length; i++) arr[i].set(0, 0, 0, 0);
+  STYLE_INTERIORS.count.value = n;
+  interiorsSet = list;
+  return list;
+}
+/** The interior list last passed to setStyleInteriors (null before the first call). */
+export const styleInteriors = () => interiorsSet;
+
+/**
+ * CPU twin of the shader's interior test (tests, tools): 1 where the sky reaches a surface point `p` with unit normal
+ * `n`, 0 inside an interior. Same maths as interiorOpen below.
+ * @param {number[]} p @param {number[]} n @param {{ min: number[], max: number[] }[]} [boxes]
+ */
+export function interiorOpenAt(p, n, boxes = interiorsSet ?? []) {
+  const I = STYLE.interior;
+  const q = [0, 1, 2].map((k) => p[k] + n[k] * I.probe);
+  let shut = 0;
+  for (const b of boxes.slice(0, I.max)) {
+    let d = Infinity;
+    for (let k = 0; k < 3; k++) d = Math.min(d, q[k] - Math.min(b.min[k], b.max[k]), Math.max(b.min[k], b.max[k]) - q[k]);
+    const x = Math.min(1, Math.max(0, d / I.feather));
+    shut = Math.max(shut, x * x * (3 - 2 * x));
+  }
+  return 1 - shut;
+}
+
+/**
+ * 1 where the sky reaches a surface, 0 inside an interior: the point `probe` m in front of the surface (along its normal:
+ * the air it faces) is tested against every box, feathered over `feather` m inside the box faces. An inner pipe or
+ * container wall faces the inside (0); its outer shell and roof face out (1); light spills `feather` m into a mouth.
+ */
+const interiorOpen = Fn(() => {
+  const I = STYLE.interior;
+  const p = positionWorld.add(normalWorld.mul(I.probe));
+  const shut = float(0).toVar('interiorShut');
+  Loop(STYLE_INTERIORS.count, ({ i }) => {
+    const lo = STYLE_INTERIORS.boxes.element(i.mul(2)).xyz;
+    const hi = STYLE_INTERIORS.boxes.element(i.mul(2).add(1)).xyz;
+    const d = min(p.sub(lo), hi.sub(p));
+    shut.assign(max(shut, smoothstep(0, I.feather, min(min(d.x, d.y), d.z))));
+  });
+  return float(1).sub(shut);
+});
 
 let detail = 2;
 /** Tier → material detail (see the header). */
@@ -96,9 +173,12 @@ const envFresnel = Fn(({ f0, dotNV, rough }) => {
 });
 
 export class HardenedLightingModel extends THREE.LightingModel {
-  constructor(level = 2, rim = false) { super(); this.level = level; this.rim = rim; }
+  /** `open` (W10 P5): 1 where the sky reaches, 0 inside an interior (interiorOpen); null = everywhere open. */
+  constructor(level = 2, rim = false, open = null) { super(); this.level = level; this.rim = rim; this.open = open; }
 
-  direct({ lightDirection, lightColor, reflectedLight }) {
+  direct({ lightDirection, lightColor, lightNode, reflectedLight }) {
+    // W10 P5: the sky fill (sky.ts: the anti-sun directional, no shadow) does not reach inside WorldData.interiors
+    if (this.open && lightNode?.light?.userData?.skyFill) lightColor = lightColor.mul(this.open);
     const dotNL = normalView.dot(lightDirection);
     reflectedLight.directDiffuse.addAssign(rampIrradiance({ dotNL }).mul(lightColor).mul(BRDF_Lambert({ diffuseColor: diffuseColor.rgb })));
     if (this.level >= 1) {
@@ -135,7 +215,9 @@ export class HardenedLightingModel extends THREE.LightingModel {
       const R = STYLE.rim;
       const edge = float(1).sub(N.dot(V).clamp()).pow(R.power);
       const far = smoothstep(R.near, R.far, length(cameraPosition.sub(positionWorld)));
-      const k = edge.mul(mix(float(R.nearGain), float(R.farGain), far)).add(mix(float(R.nearFill), float(R.farFill), far));
+      let k = edge.mul(mix(float(R.nearGain), float(R.farGain), far)).add(mix(float(R.nearFill), float(R.farFill), far));
+      // W10 P5: inside an interior the rim + fill fades to STYLE.interior.charKeep (a pet in a tunnel is lit by the tunnel)
+      if (this.open) k = k.mul(mix(float(STYLE.interior.charKeep), float(1), this.open));
       reflectedLight.indirectDiffuse.addAssign(diffuseColor.rgb.mul(STYLE_RIM.color).mul(k.mul(STYLE_RIM.gain).mul(materialReference('rim', 'float'))));
     }
   }
@@ -206,7 +288,7 @@ export class HardenedToonMaterial extends THREE.MeshToonNodeMaterial {
     return `${super.customProgramCacheKey()}|hd${this.detail}${this.surfaceAttr ? 's' : ''}${this.puddle > 0 ? 'p' : ''}${this.rim > 0 ? 'r' : ''}`;
   }
 
-  setupLightingModel() { return new HardenedLightingModel(this.detail, this.rim > 0); }
+  setupLightingModel() { return new HardenedLightingModel(this.detail, this.rim > 0, this._open); }
 
   /** W9 P4: a rim material (a character) sheds STYLE.rim.fogCut of the fog/haze: it keeps its read through a storm. */
   setupFog(builder, outputNode) {
@@ -299,6 +381,8 @@ export class HardenedToonMaterial extends THREE.MeshToonNodeMaterial {
     super.setupDiffuseColor(builder);
     this._w = this._weathering(builder);
     diffuseColor.assign(vec4(this._w.albedo, diffuseColor.a));
+    // W10 P5: evaluated once per fragment, before lighting (setupLightingModel hands it to the lighting model)
+    this._open = interiorOpen().toVar('hardOpen');
   }
 
   setupVariants(builder) {
@@ -432,6 +516,7 @@ export function createStyleLights() {
   const L = STYLE.lights, g = new THREE.Group();
   const key = new THREE.DirectionalLight(L.key.color, L.key.intensity); key.position.fromArray(L.key.dir).multiplyScalar(10);
   const rim = new THREE.DirectionalLight(L.rim.color, L.rim.intensity); rim.position.fromArray(L.rim.dir).multiplyScalar(10);
+  rim.userData.skyFill = true; // W10 P5: the sky drives it as the dusk fill; interiors (STYLE_INTERIORS) shut it out
   g.add(key, rim, new THREE.HemisphereLight(L.ambientSky, L.ambientGround, L.ambientIntensity));
   g.name = 'style_lights';
   return g;
@@ -517,7 +602,8 @@ export function buildComicOutput(scene, camera, opts = {}) {
   const b = { ...STYLE.bloom, ...opts.bloom };
   const bloomPass = bloom(scenePass, b.strength, b.radius, b.threshold);
   const grade = createGrade(opts.grade);
-  const outputNode = grade.node(renderOutput(scenePass.add(bloomPass)));
+  // W10 P5: × STYLE_EXPOSURE before tone mapping = the exposure follows the sky's time of day (no pass, one multiply)
+  const outputNode = grade.node(renderOutput(scenePass.add(bloomPass).mul(STYLE_EXPOSURE)));
   return { outputNode, scenePass, bloomPass, grade, uniforms: { ink, thickness, inkFar } };
 }
 

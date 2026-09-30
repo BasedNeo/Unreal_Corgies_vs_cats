@@ -9,6 +9,8 @@
 // aim, for the S4 rig), `climbRoutes` (N1 links onto the container roof, the scaffold deck + nest, a pipe crown),
 // `bases` (Base Assault flags and ball stands), `tint: 'mud'` on the ditch zones, and `weatherBias` (rain by default,
 // lot/layout.ts LOT_WEATHER); the crane carries red aviation lights and a lit cab (WorldData.lamps).
+// W10 P5 fills `interiors` (C10): the pipes' bores and the site-office containers' insides, where the sky fill does not
+// reach (lotInteriors, from the same placements as the geometry).
 import type { Bookmark, District, Lamp, SpawnPoint, WaterZone, WorldData } from './world-types';
 import type { WeatherBias } from './weather';
 import { Kit } from './kit';
@@ -204,6 +206,9 @@ export function buildTheLot(seed = 1): LotWorld {
     ballStand: [b.stand[0], height(b.stand[0], b.stand[1]), b.stand[1]],
   }));
 
+  // ------------------------------------------------------------------ W10 P5: interiors (the sky fill stays out)
+  const interiors = lotInteriors(pipes, CONTAINERS.map((c) => ({ x: c.x, z: c.z, y0: groundMin(height, c.x, c.z, CONTAINER.W / 2, CONTAINER.L / 2) })));
+
   const data: LotWorld = {
     seed,
     name: LOT_NAME,
@@ -229,6 +234,7 @@ export function buildTheLot(seed = 1): LotWorld {
     floodlights,
     climbRoutes,
     bases,
+    interiors,
     weatherBias: LOT_WEATHER,
     perches: [
       { id: 'lot_container_roof', name: 'Container roof', x: -71.4, y: CONTAINER.H, z: -30, yaw: Math.PI * 0.9, district: 'lot_canyon' },
@@ -240,6 +246,33 @@ export function buildTheLot(seed = 1): LotWorld {
   };
   LOT_PIPES.set(data, pipes);
   return data;
+}
+
+type Box = NonNullable<WorldData['interiors']>[number];
+const mm = (v: number) => Math.round(v * 1000) / 1000;
+
+/**
+ * W10 P5: WorldData.interiors of The Lot (boxes where the sky fill is suppressed, C10), from the placed geometry:
+ * - every pipe segment's bore: mouth to mouth along its axis, and the inner facets' apothem (ri cos(pi/seg): the flat
+ *   inner floor, crown and sides lie on the box faces) across it. The pipes lie along x or z (yaw a multiple of pi/2);
+ * - every site-office container: through its closed walls (the outer wall faces; 0.5 m under the floor slab up to the
+ *   roof's top), open end to open end. A box face is where the style's feather lets light in, so only the open ends
+ *   sit on faces; walls, floor and roof lie inside the box (their inner faces shut), their outer faces look out of it.
+ * The gaps between tunnel segments (the firing windows) stay outside, so the sky lights them. (A pipe's box stops at
+ * the bore: a square around its round shell would catch the shell's shoulders.)
+ */
+export function lotInteriors(pipes: readonly PipePlaced[], containers: readonly { x: number; z: number; y0: number }[]): Box[] {
+  const out: Box[] = [];
+  const a = PIPE.ri * Math.cos(Math.PI / PIPE.seg);
+  for (const p of pipes) {
+    const ax = Math.abs(Math.cos(p.yaw)), az = Math.abs(Math.sin(p.yaw));
+    const hx = ax * PIPE.len / 2 + az * a, hz = az * PIPE.len / 2 + ax * a;
+    out.push({ min: [mm(p.x - hx), mm(p.y - a), mm(p.z - hz)], max: [mm(p.x + hx), mm(p.y + a), mm(p.z + hz)] });
+  }
+  const { L, W, H } = CONTAINER;
+  // (0.5 m under the 0.3 m floor slab: the wall-floor seam lies deeper than the feather; the roof's top is the box top)
+  for (const c of containers) out.push({ min: [mm(c.x - W / 2), mm(c.y0 - 0.5), mm(c.z - L / 2)], max: [mm(c.x + W / 2), mm(c.y0 + H), mm(c.z + L / 2)] });
+  return out;
 }
 
 /** The floodlight towers of a built Lot (WorldData.floodlights, in FLOOD_TOWERS order) with their ids and teams. */

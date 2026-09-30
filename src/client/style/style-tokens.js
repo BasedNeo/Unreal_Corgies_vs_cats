@@ -134,8 +134,17 @@ export const STYLE = {
   // fogCut: the share of the atmospheric fog/haze a rim material (a character) sheds, so a pet keeps its value and team
   // colour through a storm's haze at range (storm: ~52 % fog at 35 m → ~21 %); near characters are barely fogged anyway.
   rim: { color: 0xa9c0e6, power: 2.2, near: 8, far: 30, nearGain: 0.35, farGain: 1.1, nearFill: 0.0, farFill: 0.45, fogCut: 0.6 },
+  // W10 P5 interiors (WorldData.interiors, style-webgpu.js STYLE_INTERIORS): the sky fill (an unshadowed directional) and
+  // the character rim + fill stay out of tunnels and containers. A surface is inside when the point `probe` m in front
+  // of it (along its normal: the air it faces) is inside a box, feathered over `feather` m from the faces (probe >
+  // feather, so an inner wall on a box face is fully shut while its outer shell stays lit). `charKeep`: the share of the
+  // character rim + fill a pet keeps inside. `max`: boxes per world (a fixed uniform array).
+  interior: { probe: 0.45, feather: 0.4, charKeep: 0.25, max: 16 },
   // Battle mood: clear weather still keeps broken cloud and haze (the sky never looks like a picnic).
-  mood: { minCloud: 0.42, haze: 0.35, hazeHeight: 7, sunMaxElevation: 42 },
+  // highFog (sky.ts update): the distance fog thins for high cameras, from 1 at `from` m to `floor` over `span` m; W10 P5:
+  // the floor falls with the weather's fog multiplier ^ `wx` (storm x3.0 -> floor 0.29), so a storm overview (The Lot's
+  // crane view, 114 m) sees through the rain's extra density; cameras under ~77 m (players, the West Yard) are unchanged.
+  mood: { minCloud: 0.42, haze: 0.35, hazeHeight: 7, sunMaxElevation: 42, highFog: { from: 12, span: 130, floor: 0.5, wx: 0.5 } },
   // Sodium floodlights (style/floodlights.js): real spot lights up to the tier's budget (lights cost every lit pixel
   // and adding one recompiles every material, so the count is fixed at build), fake light pools beyond it.
   floodlight: {

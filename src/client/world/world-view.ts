@@ -130,6 +130,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
     shadowMap: opts.shadowMapSize ?? P.shadowMapSize,
     clouds: P.clouds,
     fogScale: 118 / (edge + 1), // W9 L3: the fog's distances scale with the map (West Yard: 118 / 118 = 1)
+    interiors: data.interiors, // W10 P5: the sky fill stays out of these boxes (tunnels, containers)
   });
   scene.add(root);
 
