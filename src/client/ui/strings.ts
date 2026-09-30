@@ -3,6 +3,7 @@
 import type { ClassId } from '../../shared/types';
 import { ABILITIES } from '../../shared/content/abilities';
 import { COMBAT_RULES } from '../../shared/content/weapons';
+import { BASE_ASSAULT } from '../../shared/content/modes';
 
 export const TITLE = { left: 'CORGIS', vs: 'VS', right: 'CATS', tagline: 'The backyard war for the last tennis ball.' };
 
@@ -63,6 +64,11 @@ export const TIP_TEXT = {
   basics: '[WASD] move · [MOUSE] aim · [LMB] fire · hold [RMB] to zoom',
   kiosk: 'Press [E] at the Ordnance Kiosk to change kit',
   moves: 'Crouch [C] while sprinting [SHIFT] to slide · crouch in the air to ground-pound',
+  // W10 U3: Base Assault, first Base Assault match only (tips.ts BA_TIP_IDS)
+  ba_goal: `Steal their squeaky ball from its stand, run it home, touch your flag's ring to capture · first to ${BASE_ASSAULT.captureLimit}`,
+  ba_carry: 'Escort your carrier home: with the ball it runs slower and can\'t glide or ride',
+  ba_home: 'They have our ball! We can only capture while our own ball is home: stop their carrier',
+  ba_return: `Our ball is down: touch it to send it home now, or it goes back by itself in ${BASE_ASSAULT.returnTime} s`,
 } as const;
 
 export const TIP_STRINGS = { tag: 'TIP', resetLabel: 'FIRST-MATCH TIPS', resetButton: 'SHOW AGAIN', resetDone: 'RESET ✓', resetNote: 'Tips show again in your next match' };
@@ -99,7 +105,7 @@ export const QUALITY_STRINGS = {
 // ---- A1 (adventure): chapter picker, captions, chapter-complete card ----
 export const ADVENTURE_STRINGS = {
   matchLabel: 'ADVENTURE',
-  matchHint: 'Story mode: six chapters, solo with pups or co-op',
+  matchHint: 'Story mode: seven chapters, solo with pups or co-op',
   pickerTitle: 'THE LAST TENNIS BALL',
   pickerNote: 'pick a chapter',
   chapter: 'CHAPTER',
@@ -179,4 +185,36 @@ export const REWARD_STRINGS = {
   } as Record<string, string>,
   medal: (m: 'gold' | 'silver' | 'bronze') => `${m[0].toUpperCase()}${m.slice(1)} paw`,
   firstWin: (mode: string) => `First ${MODE_NAMES[mode] ?? mode} win`,
+};
+
+// ---- W10 U3 (ux-3): the match awards card ----
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** Award names and stat lines (ui/awards.ts AWARD_IDS). Names work for both species: a cat can be a GUARD DOG. */
+export const AWARD_STRINGS = {
+  title: 'MATCH AWARDS',
+  you: 'YOU',
+  /** Joins tied winners: "Rex & Pup 2", "Rex, Pup 2 & Cat 6". */
+  join: (names: readonly string[]) => (names.length < 2 ? names[0] ?? '' : `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`),
+  tie: 'TIE',
+  names: {
+    best_in_show: 'BEST IN SHOW', heavy_paws: 'HEAVY PAWS', lob_star: 'LOB STAR', bullseye: 'BULLSEYE', on_a_roll: 'ON A ROLL',
+    underdog: 'UNDERDOG', chew_toy: 'CHEW TOY', first_bite: 'FIRST BITE', special_delivery: 'SPECIAL DELIVERY',
+    sticky_paws: 'STICKY PAWS', guard_dog: 'GUARD DOG', marathon: 'MARATHON', pad_patrol: 'PAD PATROL',
+  } as Record<string, string>,
+  stat: {
+    best_in_show: (v: number) => `top score · ${v.toLocaleString('en-US')}`,
+    heavy_paws: (v: number) => plural(v, 'knockout'),
+    lob_star: (v: number, species: 'corgi' | 'cat' | 'mixed') => plural(v, species === 'cat' ? 'hairball knockout' : species === 'corgi' ? 'grenade knockout' : 'throwable knockout'),
+    bullseye: (v: number) => plural(v, 'critical hit'),
+    on_a_roll: (v: number) => `${v} knockouts in one life`,
+    underdog: (v: number) => `${plural(v, 'knockout')} while behind`,
+    chew_toy: (v: number) => `soaked ${Math.round(v).toLocaleString('en-US')} damage`,
+    first_bite: () => 'the first knockout',
+    special_delivery: (v: number) => plural(v, 'capture'),
+    sticky_paws: (v: number) => plural(v, 'steal'),
+    guard_dog: (stops: number, returns: number) => (stops && returns ? `${plural(stops, 'stop')} · ${plural(returns, 'return')}`
+      : stops ? plural(stops, 'carrier stopped', 'carriers stopped') : plural(returns, 'return')),
+    marathon: (v: number) => `carried the ball ${Math.round(v)} s`,
+    pad_patrol: (v: number) => `took ${plural(v, 'pad')}`,
+  },
 };

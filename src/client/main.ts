@@ -14,6 +14,7 @@ import { DEFAULT_MAP, MAPS, mapForRoom } from '../shared/world/maps';
 import { worldReloadSearch } from './net/map-sync';
 import { MatchTally, currentLook, recordMatch } from './profile'; // P2
 import { createRewardCard } from './ui/rewards'; // U2
+import { AwardsTally, createAwardsCard } from './ui/awards'; // W10 U3
 import { createWorldView } from './world/world-view';
 import { districtAt, surfaceAt } from '../shared/world/queries';
 import { createWorkerTransport, createWebSocketTransport, type NetEmulation, type Transport } from './net/transport';
@@ -232,6 +233,11 @@ async function main(): Promise<void> {
   // P2/U2: the local player's result at each match / chapter end → XP, unlocks, the reward card (never blocks anything)
   const tally = new MatchTally();
   const rewards = createRewardCard(ui, { sound: () => audio.ui('open') });
+  // W10 U3: match awards from the event stream + roster; the card comes up just after a PvP match ends, then the scoreboard
+  const awardsTally = new AwardsTally();
+  const awardsCard = createAwardsCard(ui, { sound: () => audio.ui('open') });
+  /** The authority's clock (the tick of the snapshot being read): carry times stay exact at any frame rate. */
+  const serverSec = () => (net?.latest()?.tick ?? 0) / (net?.tickHz || 60);
   applySettings(hud.settings);
   if (autoStart) await startSession(params.get('name') ?? hud.settings.name ?? 'Rex', urlCls, urlTeam);
   else hud.showMenu(true);
@@ -256,6 +262,14 @@ async function main(): Promise<void> {
     ui.appendChild(btn);
   });
   bus.on('roster', (r) => nameplates.setRoster(r));
+  // W10 U3: the awards read every snapshot's MatchState (NetClient emits it before that snapshot's events), not frames:
+  // a slow first frame must not miss the warmup
+  bus.on('match', (ms) => {
+    const awards = awardsTally.update({ match: ms, roster: net?.roster ?? [], localId: net?.localEntity ?? -1, now: serverSec(),
+      mode: !serverUrl && mode === 'boss-rush' ? 'boss-rush' : undefined });
+    if (awards) awardsCard.show(awards);
+    awardsCard.sync(ms);
+  });
   bus.on('notice', (t) => hud.serverNotice(t));
   bus.on('chat', (m) => hud.chat(m.from, m.text, m.team));
   // Kill cam state: who knocked the local player out (from the death event) and the swinging view.
@@ -290,6 +304,7 @@ async function main(): Promise<void> {
     hud.onGameEvent(ev);
     hitFx.onGameEvent(ev, net?.localEntity ?? -1); // X3: the hitmarker
     tally.onEvent(ev, net?.localEntity ?? -1); // P2
+    awardsTally.onEvent(ev, serverSec()); // W10 U3
   });
 
   let acc = 0, seq = 0, last = performance.now(), fpsFrames = 0, fpsStart = last, menuT = 0;
@@ -415,7 +430,7 @@ async function main(): Promise<void> {
     debug.local = local ? { x: local.x, y: local.y, z: local.z, hp: local.hp, flags: local.flags } : null;
     debug.ready = !!local && debug.frames > 5;
     if ((local || !net) && debug.frames > 2) hideLoading();
-    hud.update({ cueUp, local, match: net?.match ?? null, roster: net?.roster ?? [], fps: debug.fps, rttMs: net?.stats.rttMs ?? 0, locked: input.locked || params.has('autoplay') || !net, backend: ctx.backend, transport: transport?.kind ?? 'none', states });
+    hud.update({ cueUp, local, match: net?.match ?? null, roster: net?.roster ?? [], fps: debug.fps, rttMs: net?.stats.rttMs ?? 0, locked: input.locked || params.has('autoplay') || !net, backend: ctx.backend, transport: transport?.kind ?? 'none', states, holdScoreboard: awardsCard.up }); // W10 U3: awards, then the scoreboard
     hitFx.update();
     assaultHud.update({ states, localId, roster: net?.roster ?? [], match: net?.match ?? null, camera: ctx.camera, ballAt: (t) => assault.ballPosition(t) }, dt); // G4a
   });

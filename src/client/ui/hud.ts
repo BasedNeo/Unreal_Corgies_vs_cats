@@ -17,7 +17,7 @@ import { WEAPON_FX, WeaponTable } from '../fx/weapon-fx';
 import { ensureFonts } from './fonts';
 import { injectHudStyle } from './hud-style';
 import { classIcon, weaponGlyph, WEAPON_GLYPHS } from './icons';
-import { KillFeed, seatedGlyph, type FeedParty } from './kill-feed';
+import { KillFeed, killGlyph, seatedGlyph, type FeedParty } from './kill-feed';
 import { createMenu, createSettingsPanel, firstPad, PadNav, type Menu, type MenuDeps, type PlayOptions, type UiSoundKind } from './menu';
 import { buildScoreboard, renderScoreboardHtml } from './scoreboard';
 import { counterFirst, objectiveForTeam, scoreboardMeta } from './objective';
@@ -25,7 +25,7 @@ import { loadSettings, saveSettings, safeStorage, type KV, type QualitySetting, 
 import { ABILITY_COOLDOWN_ESTIMATE, CONTROLS, DEATH_QUIPS, RELOAD_ESTIMATE, RESPAWN_ESTIMATE, TEAM_NAMES } from './strings';
 import { createChat } from './chat';
 import { isPresenceNotice } from './chat-model';
-import { TipScheduler, createTipView } from './tips';
+import { TipScheduler, baseAssaultTipFacts, createTipView } from './tips';
 import { bootQuality, reloadUrl } from './quality-note';
 import type { RoomPoller } from './rooms';
 import { findInteractTarget } from '../interact/targets';
@@ -57,6 +57,8 @@ export interface HudModel {
   magSize?: number;
   /** 0..1 reload progress (else estimated from the local `reload` event). */
   reloadFrac?: number;
+  /** W10 U3: the match-end awards card is up: the automatic end-of-match scoreboard waits for it (Tab still opens it). */
+  holdScoreboard?: boolean;
   /** Show the fps/backend/rtt line (default true). */
   showDebug?: boolean;
 }
@@ -611,6 +613,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
         tipView.show(tips.update(tdt, {
           active: playing, phase: M?.phase ?? null, nearKiosk: alive && nearKiosk,
           moving: !!L && Math.hypot(L.vx, L.vz) > 1, firing: (f & EFlag.Firing) !== 0, aiming: (f & EFlag.Aiming) !== 0,
+          ba: tips.baFinished ? null : baseAssaultTipFacts(states, localId, M?.mode ?? ''), // W10 U3: Base Assault tips
         }));
       }
       if (dead) {
@@ -624,7 +627,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
       // ---- scoreboard (Tab / gamepad Back / forced / match end)
       const pad = firstPad();
       padBack = !!pad && !!pad.buttons[8]?.pressed;
-      const sbOpen = !inMenu && (tabHeld || sbForced || padBack || (M?.phase === 'ended' && M.mode !== 'adventure' && now > bannerUntil - 3.5));
+      const sbOpen = !inMenu && (tabHeld || sbForced || padBack || (M?.phase === 'ended' && M.mode !== 'adventure' && now > bannerUntil - 3.5 && !m.holdScoreboard));
       show(sb, sbOpen);
       if (sbOpen && now - sbRenderedAt > 0.25) {
         sbRenderedAt = now;
@@ -679,9 +682,9 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
           const self = by === ev.id || by < 0;
           const lh = lastHitOn.get(ev.id);
           const exploded = !self && (lastExplodeBy.get(by) ?? -9) > now - 0.5;
-          const wpn = lastWpnBy.get(by);
-          const ride = !self && !exploded ? seatedGlyph(states, by) : null; // a kill from a seat: the vehicle, not a stale gun
-          const glyph = self ? 'fall' : exploded ? 'boom' : ride ?? (wpn !== undefined ? WEAPON_FX[weapons.id(wpn)].glyph : 'paw');
+          // W10 U3: the death event's own weapon first (C10 wpn: a throwable's glyph, the gun); without it the old guesses
+          const glyph = killGlyph({ self, exploded, ride: self ? null : seatedGlyph(states, by), wpn: ev.wpn, lastWpn: lastWpnBy.get(by),
+            gunGlyph: (w) => { const id = weapons.id(w); return id === 'unknown' ? null : WEAPON_FX[id].glyph; } });
           feed.push({ killer: self ? null : party(by), victim: party(ev.id), glyph, crit: !!lh && lh.src === by && lh.crit && now - lh.t < 0.5 }, now);
           deathBy.set(ev.id, { by: self ? -1 : by, t: now });
           if (deathBy.size > 64) deathBy.clear();
