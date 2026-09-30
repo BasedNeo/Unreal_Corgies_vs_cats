@@ -206,6 +206,31 @@ At 35 m under the dusk rig a pet is 20–30 px, mostly ink, and seen from behind
 - **A container restart kills processes, not files.** Commits, lanes' edits and scratch folders survived; verifies and
   measurements had to be re-run, and the stopped lanes resumed with their own context.
 
+
+## 14. Depth without new plumbing (W10 A7, U3, AU2, P5, N3)
+- **A light can stay out of a room without a shadow map.** Give the lighting model a per-fragment "open" factor from
+  a small uniform array of interior boxes (tunnels, containers), tested at a point 0.45 m in front of the surface, and
+  scale only the fill by it. No new light, pass or program variant. The loop runs zero times on a map without
+  interiors. P5: a pipe mouth went from 43.6 to 23.6 luma at dusk.
+- **An exposure lift tuned for dusk re-lights the whole day.** A match starts in daytime (t 0.40–0.46), so a global
+  1.25 hit the common case (+15 to +34 %). Drive exposure from the time of day instead (a ramp: 1 at dusk, night and
+  storm; 0.78 by 16° of sun).
+- **A grey storm view from above is fog, not light.** At 114 m the camera looks through 200–300 m of air. Thin the
+  weather's extra fog density for high cameras only: contrast went 18.8 → 23.5, and player views are unchanged.
+- **Credit that no event names can still be exact.** The roster's authoritative score minus the score the client can
+  attribute from events leaves the rest, such as who returned the ball. U3's awards need no protocol change.
+- **Warnings mask under weather, not guns.** A storm's rain bed was the main masker at 2–5 kHz. Measure a cue's
+  headroom in its own band against the loudest continuous layer. AU2 renders and measures audio offline in the Node
+  unit suite, with a small Web Audio renderer that matches Chromium's timing.
+- **Thin props need exact rasterization in the nav grid.** A probe at each cell centre misses a 0.2 m beam that
+  crosses the cell off-centre. Close any cell whose body column a thin prop's box crosses (box-vs-box SAT). When a
+  change must leave a map untouched, prove it with match digests, not with statistics within noise.
+- **Score a mode the way the game scores it.** The Base Assault bench reported the horn winner, not first to 3, and a
+  first scoring pass got same-tick 3 : 3 draws wrong. `tools/qa5-ba-sum.mjs` groups same-tick captures as the sim does.
+  An independent verifier should re-derive the result from the rule, not from the tool's summary line (Q5).
+- **A chapter on a second map needs the map rule in the runner too.** A sim builds one world, so the runner loads
+  only chapters whose map is its own, and online rooms advance along their own map.
+
 ---
 
 ## Proposed skill updates (evidence-backed; the skills are read-only here, so apply them via skill-creator)
@@ -240,3 +265,14 @@ At 35 m under the dusk rig a pet is 20–30 px, mostly ink, and seen from behind
    replay the same seeds on a mirrored map (swapped spawns and bases)." Evidence: Q4's 25 : 12 → swapped 6 : 24.
 6. **game-design-psychology**, under objective modes: "Solo objective bots never finish the objective: give teams roles
    and a rally point before the objective." Evidence: G4b, 7–11 steals and 0 captures per match without it.
+
+### Wave 10 proposals (evidence-backed; apply via skill-creator)
+7. **threejs-toon-comic-style-system**, under "Things that go wrong":
+   - "Sky fill leaks into tunnels and containers": use a per-fragment interior-box mask on the fill term, not a
+     shadow map.
+   - "The whole day is too bright after a dusk exposure lift": drive exposure from the time of day.
+
+   Evidence: P5, `docs/handoff/P5.md`.
+8. **game-sprint-gates**, under "Budgets and statistics": "Audio is gated by measurement. Render the mix offline and
+   gate each warning cue's in-band headroom over the loudest continuous layer, not over the guns." Evidence: AU2's
+   fuse tick went from −23 dB to +4 to +13 dB.
