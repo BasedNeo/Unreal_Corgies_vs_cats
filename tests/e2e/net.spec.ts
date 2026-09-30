@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Browser } from '@playwright/test';
+import { test, expect, chromium, type Page, type Browser } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -54,7 +54,9 @@ function killGroup(s: ChildProcess, sig: NodeJS.Signals): void {
   try { if (s.pid) process.kill(-s.pid, sig); } catch { s.kill(sig); }
 }
 
+const extraBrowsers: Browser[] = [];
 test.afterEach(async () => {
+  for (const b of extraBrowsers.splice(0)) await b.close().catch(() => {});
   for (const s of servers.splice(0)) {
     await new Promise<void>((resolve) => {
       s.proc.once('exit', () => resolve());
@@ -110,8 +112,13 @@ async function holdAndCheck(mover: Page, viewer: Page): Promise<number> {
 }
 
 async function twoClients(browser: Browser, pageUrl: (name: string, team: number) => string, shot: string): Promise<void> {
+  // W11: client B gets a browser (and a GPU process) of its own, like a second player on another machine. Two contexts
+  // of one headless Chromium share one SwiftShader GPU process, so A's continuous rendering starved B's first-frame
+  // shader compile (B sat at frame 1 for ~150 s, and the readiness wait timed out on a slow runner).
+  const browserB = await chromium.launch(test.info().project.use.launchOptions);
+  extraBrowsers.push(browserB);
   const ctxA = await browser.newContext({ viewport: { width: 480, height: 270 } });
-  const ctxB = await browser.newContext({ viewport: { width: 480, height: 270 } });
+  const ctxB = await browserB.newContext({ viewport: { width: 480, height: 270 } });
   const a = await ctxA.newPage();
   const b = await ctxB.newPage();
   await open(a, pageUrl('Alpha', 0));

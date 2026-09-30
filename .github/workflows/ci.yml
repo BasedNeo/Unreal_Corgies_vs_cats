@@ -6,7 +6,7 @@ on:
 jobs:
   gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35 # W11: run 139 was cancelled at 20 min (a 6 min browser install + unit + e2e)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
