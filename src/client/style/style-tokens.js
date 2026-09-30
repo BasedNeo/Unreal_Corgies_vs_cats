@@ -138,8 +138,10 @@ export const STYLE = {
   // the character rim + fill stay out of tunnels and containers. A surface is inside when the point `probe` m in front
   // of it (along its normal: the air it faces) is inside a box, feathered over `feather` m from the faces (probe >
   // feather, so an inner wall on a box face is fully shut while its outer shell stays lit). `charKeep`: the share of the
-  // character rim + fill a pet keeps inside. `max`: boxes per world (a fixed uniform array).
-  interior: { probe: 0.45, feather: 0.4, charKeep: 0.25, max: 16 },
+  // character rim + fill a pet keeps inside. `charSky` (W11, Q5 P2-2): the share of the sky fill a pet keeps inside (its
+  // main light at short range: without it pets in tunnels read as black silhouettes). `max`: boxes per world (a fixed
+  // uniform array).
+  interior: { probe: 0.45, feather: 0.4, charKeep: 0.25, charSky: 1, max: 16 },
   // W11 P-GLB1 pbr() (authored PBR GLB assets): `env` scales the fake sky reflection (× env.intensity), `wetK` how much the
   // weather's wetness reaches the asset, `normalScale` / `aoIntensity` multiply the asset's own; `interiors`: the sky fill
   // stays out of WorldData.interiors like it does for toon().

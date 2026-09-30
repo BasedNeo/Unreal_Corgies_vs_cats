@@ -192,7 +192,8 @@ export class HardenedLightingModel extends THREE.LightingModel {
 
   direct({ lightDirection, lightColor, lightNode, reflectedLight }) {
     // W10 P5: the sky fill (sky.ts: the anti-sun directional, no shadow) does not reach inside WorldData.interiors
-    if (this.open && lightNode?.light?.userData?.skyFill) lightColor = lightColor.mul(this.open);
+    // W11 (Q5 P2-2): characters keep STYLE.interior.charSky of it, so a pet in a tunnel still reads (and shows its team)
+    if (this.open && lightNode?.light?.userData?.skyFill) lightColor = lightColor.mul(this.rim ? mix(float(STYLE.interior.charSky), float(1), this.open) : this.open);
     const dotNL = normalView.dot(lightDirection);
     reflectedLight.directDiffuse.addAssign(rampIrradiance({ dotNL }).mul(lightColor).mul(BRDF_Lambert({ diffuseColor: diffuseColor.rgb })));
     if (this.level >= 1) {
