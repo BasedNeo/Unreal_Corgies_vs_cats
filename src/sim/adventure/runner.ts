@@ -25,6 +25,7 @@ import {
   chapterById, medalFor, roomChapterAfter, type ChapterDef, type ChapterStep,
 } from '../../shared/content/chapters';
 import { occupiedAt, surfaceAt, waterAt, yawToward } from '../../shared/world/queries';
+import { sanitizeMap } from '../../shared/world/maps';
 import type { MatchRules } from '../combat/state';
 import { respawnNow } from '../combat/damage';
 import { creditRoster } from '../interact/state';
@@ -744,7 +745,7 @@ function update(sim: Sim, dt: number): void {
       if (adventureConfig(sim).holdResult) break; // offline: the player picks what's next on the card
       st.timer = Math.max(0, st.timer - dt);
       if (st.timer <= 0) {
-        const next = adventureConfig(sim).advance === false ? def : roomChapterAfter(def);
+        const next = adventureConfig(sim).advance === false ? def : chapterAfterOnMap(sim, def);
         sim.emit({ e: 'score', team: Team.Corgis, pts: 0, reason: 'reset' });
         sim.emit({ e: 'score', team: Team.Cats, pts: 0, reason: 'reset' });
         loadChapter(sim, next);
@@ -811,6 +812,31 @@ function fold(sim: Sim, rt: AdventureRuntime, st: AdventureState): void {
   b.flags = (st.contested || (step?.stealth && st.alarm)) && st.phase === 'live' ? EFlag.Busy : 0;
 }
 
+// ---------------------------------------------------------------------------------------------- chapters and maps
+// W10 A7: a chapter names its map (C10: ChapterDef.map, absent = the West Yard) and a sim's world is built once, for
+// the room's map (mapForRoom: the guard, the worker and the page). So the runner only ever loads a chapter of the
+// sim's own map: a room asked for a chapter of another map plays this map's first chapter, and an online room moves
+// on to the next chapter ON ITS MAP (after chapter 6 a West Yard room goes back to chapter 1; a room on The Lot
+// replays chapter 7). A hand-made test world (no registry id) plays any chapter.
+
+/** Can this sim play `def`? Its world is the chapter's map (a world without a registry id plays anything). */
+export function chapterFitsSim(sim: Sim, def: ChapterDef): boolean {
+  const map = sim.worldData.map;
+  return map === undefined || sanitizeMap(map) === sanitizeMap(def.map);
+}
+
+/** `def` if this sim can play it, else the first chapter of the sim's map (else `def`: nothing fits). */
+export function chapterForSim(sim: Sim, def: ChapterDef): ChapterDef {
+  return chapterFitsSim(sim, def) ? def : CHAPTERS.find((c) => chapterFitsSim(sim, c)) ?? def;
+}
+
+/** The chapter an online room moves on to after `def`: roomChapterAfter's order, skipping chapters of other maps. */
+export function chapterAfterOnMap(sim: Sim, def: ChapterDef): ChapterDef {
+  let next = roomChapterAfter(def);
+  for (let i = 0; i < CHAPTERS.length && !chapterFitsSim(sim, next); i++) next = roomChapterAfter(next);
+  return chapterFitsSim(sim, next) ? next : def;
+}
+
 // ---------------------------------------------------------------------------------------------- systems
 export const adventureSetupSystem: SimSystem = {
   name: 'adventure-setup',
@@ -819,7 +845,7 @@ export const adventureSetupSystem: SimSystem = {
     if (!isAdventureMode(sim) || adventureRuntime(sim)?.setup) return;
     const cfg = adventureConfig(sim);
     const room = sim.state.room as { chapter?: string } | undefined;
-    loadChapter(sim, cfg.chapter ?? chapterById(room?.chapter) ?? CHAPTERS[0]);
+    loadChapter(sim, cfg.chapter ?? chapterForSim(sim, chapterById(room?.chapter) ?? CHAPTERS[0]));
   },
 };
 

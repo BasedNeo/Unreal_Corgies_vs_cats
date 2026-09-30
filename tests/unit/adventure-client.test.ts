@@ -82,13 +82,14 @@ describe('adventure progress (localStorage cvc.adventure)', () => {
     expect(recordCompletion('yard_day', 1, 'bronze', mem).newBest).toBe(false); // worse: kept silver
     expect(loadProgress(mem).medals.yard_day).toBe('silver');
     expect(recordCompletion('yard_day', 1, 'gold', mem).progress.medals.yard_day).toBe('gold');
-    expect(withCompletion({ unlocked: 6, medals: {} }, 'last_ball', 6, 'gold').unlocked).toBe(6); // capped at six
+    expect(withCompletion({ unlocked: 6, medals: {} }, 'last_ball', 6, 'gold').unlocked).toBe(7); // W10 A7: chapter 6 unlocks chapter 7
+    expect(withCompletion({ unlocked: 7, medals: {} }, 'night_shift', 7, 'gold').unlocked).toBe(7); // capped at seven
     for (const junk of ['{', '"x"', '{"unlocked":"9","medals":[1]}', '{"unlocked":99,"medals":{"yard_day":"platinum","nope":"gold"}}']) {
       mem.setItem(PROGRESS_KEY, junk);
       const p = loadProgress(mem);
       expect(p.medals).toEqual({});
       expect(p.unlocked).toBeGreaterThanOrEqual(1);
-      expect(p.unlocked).toBeLessThanOrEqual(6);
+      expect(p.unlocked).toBeLessThanOrEqual(7);
     }
     const boom = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
     expect(loadProgress(boom)).toEqual({ unlocked: 1, medals: {} });
@@ -101,7 +102,8 @@ describe('adventure progress (localStorage cvc.adventure)', () => {
     expect([medalFor(100, 120), medalFor(120, 120), medalFor(170, 120), medalFor(181, 120)]).toEqual(['gold', 'gold', 'silver', 'bronze']);
     expect(defaultChapter({ unlocked: 1, medals: {} }).id).toBe('yard_day');
     expect(defaultChapter({ unlocked: 2, medals: {} }).id).toBe('tall_grass');
-    expect(defaultChapter({ unlocked: 6, medals: {} }).id).toBe(CHAPTERS[CHAPTERS.length - 1].id); // 3–6 not playable yet
+    expect(defaultChapter({ unlocked: 6, medals: {} }).id).toBe('last_ball');
+    expect(defaultChapter({ unlocked: 7, medals: {} }).id).toBe(CHAPTERS[CHAPTERS.length - 1].id); // W10 A7: chapter 7
     expect(nextChapter('yard_day')?.id).toBe('tall_grass');
   });
 });

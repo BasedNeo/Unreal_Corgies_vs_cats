@@ -29,6 +29,7 @@
 // barricades stand again and the vehicles of the steps so far are parked again (A2, src/sim/adventure/props.ts).
 import { Team, type ClassId } from '../types';
 import { OBJECTIVE_CHAIN_IDS, ADVENTURE_CHAIN_INDEX, type ObjectiveChain, type ObjectiveDef, type ObjectiveTrigger } from './objectives';
+import { NIGHT_SHIFT } from './chapters-lot'; // W10 A7: chapter 7 on The Lot
 
 // ---------------------------------------------------------------------------------------------- contract types
 // The lead's contract (ADVENTURE.md) verbatim, plus A2's OPTIONAL fields (marked A2; every one may be left out, so
@@ -483,9 +484,9 @@ const LAST_BALL: ChapterDef = {
 };
 
 /** Playable chapters, in order. */
-export const CHAPTERS: readonly ChapterDef[] = [YARD_DAY, TALL_GRASS, GARAGE_JOB, LASER_DAWN, PORCH_SIEGE, LAST_BALL];
+export const CHAPTERS: readonly ChapterDef[] = [YARD_DAY, TALL_GRASS, GARAGE_JOB, LASER_DAWN, PORCH_SIEGE, LAST_BALL, NIGHT_SHIFT];
 
-/** The six chapter slots of the adventure (menu picker): a slot is playable once CHAPTERS has its index. */
+/** The chapter slots of the adventure (menu picker; W10 A7: seven): a slot is playable once CHAPTERS has its index. */
 export const CHAPTER_PLAN: ReadonlyArray<{ index: number; id: string; title: string; district: string; cls: ClassId }> = [
   { index: 1, id: 'yard_day', title: 'Yard Day', district: 'West Yard', cls: 'assault' },
   { index: 2, id: 'tall_grass', title: 'The Tall Grass', district: 'The Garden', cls: 'infiltrator' },
@@ -493,6 +494,7 @@ export const CHAPTER_PLAN: ReadonlyArray<{ index: number; id: string; title: str
   { index: 4, id: 'laser_dawn', title: 'Laser Pointer at Dawn', district: 'The Rooftops', cls: 'overwatch' },
   { index: 5, id: 'porch_siege', title: 'The Porch Siege', district: 'West Yard deck', cls: 'warden' },
   { index: 6, id: 'last_ball', title: 'The Last Tennis Ball', district: 'The Sky', cls: 'skyraider' },
+  { index: 7, id: NIGHT_SHIFT.id, title: NIGHT_SHIFT.title, district: NIGHT_SHIFT.district, cls: NIGHT_SHIFT.cls }, // W10 A7
 ];
 
 export function chapterById(id: string | undefined | null): ChapterDef | null {

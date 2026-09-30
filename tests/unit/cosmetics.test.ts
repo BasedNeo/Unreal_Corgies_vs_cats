@@ -25,12 +25,13 @@ describe('cosmetics content', () => {
     }
   });
 
-  it('has the species-true coats, the neckwear and 4 taunt packs per species, one default per slot', () => {
+  it('has the species-true coats, the neckwear and 4 taunt packs per species (+ the corgis\' chapter 7 pack), one default per slot', () => {
     expect(cosmeticsFor(Species.Corgi, 'coat').map((c) => c.id)).toEqual(['corgi_red', 'corgi_tricolor', 'corgi_sable', 'corgi_merle']);
     expect(cosmeticsFor(Species.Cat, 'coat').map((c) => c.id)).toEqual(['cat_tabby', 'cat_tuxedo', 'cat_calico', 'cat_siamese']);
     for (const sp of SPECIES) {
       expect(cosmeticsFor(sp, 'neck').map((c) => c.id).sort()).toEqual(['neck_bandana', 'neck_bowtie', 'neck_nametag', 'neck_none', 'neck_spiked']);
-      expect(cosmeticsFor(sp, 'taunt')).toHaveLength(5); // 4 per species + Base Assault's shared 'Fetch This!' (W9)
+      // 4 per species + Base Assault's shared 'Fetch This!' (W9) + the corgis' Night Shift (W10 A7, chapter 7's gold paw)
+      expect(cosmeticsFor(sp, 'taunt')).toHaveLength(sp === Species.Corgi ? 6 : 5);
       for (const slot of ['coat', 'neck', 'taunt', 'rank'] as const) {
         const defaults = cosmeticsFor(sp, slot).filter((c) => c.unlock.kind === 'default');
         expect(defaults.map((d) => d.id)).toEqual([defaultLook(sp)[slot]]);

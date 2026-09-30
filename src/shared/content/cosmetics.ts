@@ -69,6 +69,7 @@ export const COSMETICS: readonly CosmeticDef[] = [
   { id: 'taunt_corgi_herder', slot: 'taunt', species: 'corgi', name: 'Herding Dog', unlock: win('yard-skirmish') },
   { id: 'taunt_corgi_sploot', slot: 'taunt', species: 'corgi', name: 'Low Rider', unlock: gold('tall_grass') },
   { id: 'taunt_corgi_snack', slot: 'taunt', species: 'corgi', name: 'Snack Attack', unlock: win('boss-rush') },
+  { id: 'taunt_corgi_nightshift', slot: 'taunt', species: 'corgi', name: 'Night Shift', unlock: gold('night_shift') }, // W10 A7
   { id: 'taunt_cat_classic', slot: 'taunt', species: 'cat', name: 'Aloof (classic)', unlock: D },
   { id: 'taunt_cat_royal', slot: 'taunt', species: 'cat', name: 'Royal Highness', unlock: win('team-deathmatch') },
   { id: 'taunt_cat_hunter', slot: 'taunt', species: 'cat', name: 'Apex Hunter', unlock: gold('porch_siege') },
@@ -92,6 +93,7 @@ export const TAUNT_PACKS: Readonly<Record<string, readonly string[]>> = {
   taunt_corgi_herder: ['Back in the flock!', 'Nip nip. Move it!', 'I herd you like losing.', 'Line up, fluffballs.', 'Ankle check!'],
   taunt_corgi_sploot: ['Behold: the sploot.', 'Low rider, high score.', 'Stubby legs, big plays.', 'Loaf mode: engaged.', 'Fluff butt, tough butt.'],
   taunt_corgi_snack: ['Will win for treats.', 'Snack time. You are the snack.', 'Crumbs. Everywhere. You.', 'Bacon-powered!', 'Bark bark, treat please!'],
+  taunt_corgi_nightshift: ['Clocked in. You clocked out.', 'Night shift never naps.', 'Overtime? For you? Free.', 'Hard hat. Soft paws.', 'Sirens off. Tails up.'], // W10 A7
   taunt_cat_classic: TAUNTS[Species.Cat],
   taunt_cat_royal: ['You may kiss the paw.', 'Peasant.', 'I own this yard. And you.', 'Bow before the floof.', 'Your defeat bores me.'],
   taunt_cat_hunter: ['Pounce. Pounce. Win.', 'You squeak like a toy.', 'Stalk. Wiggle. Gotcha.', 'Caught one!', 'Red dot? Red YOU.'],

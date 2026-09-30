@@ -7,7 +7,7 @@
 //                      (Enter) / REPLAY (Backspace); progress is saved to localStorage `cvc.adventure` (progress.ts)
 // Reads only the adventure beacon (model.ts), MatchState.timeLeft and game events. Nothing here decides an outcome.
 import type { EntityState, GameEvent, MatchState } from '../../shared/protocol';
-import { ALARM_BARKS, REGROUP_BARK, afterChapter, chapterByIndex, type ChapterDef } from '../../shared/content/chapters';
+import { ALARM_BARKS, CHAPTERS, REGROUP_BARK, afterChapter, chapterByIndex, type ChapterDef } from '../../shared/content/chapters';
 import { CLASSES } from '../../shared/content/classes';
 import { PALETTE } from '../style/style-tokens.js';
 import { classIcon } from '../ui/icons';
@@ -174,7 +174,10 @@ export function createAdventureHud(uiRoot: HTMLElement, opts: AdventureHudOption
   const nextOf = (def: ChapterDef) => chapterByIndex(def.index + 1);
   const renderCard = (v: AdventureView, match: MatchState | null) => {
     const def = v.chapter;
-    const after = afterChapter(def);
+    // W10 A7: an online room stays on its map (runner.ts chapterAfterOnMap): name what it will really load
+    const onMap = (c: ChapterDef) => (c.map ?? 'west_yard') === (def.map ?? 'west_yard');
+    const roomNext = opts.roomAdvances ? (CHAPTERS.slice(def.index).find(onMap) ?? CHAPTERS.find(onMap)) : undefined;
+    const after = !opts.roomAdvances ? afterChapter(def) : roomNext === def ? 'soon' : roomNext && roomNext.index === def.index + 1 ? 'next' : 'end';
     const end = after === 'end';
     const left = Math.max(0, Math.ceil(match?.timeLeft ?? 0));
     const key = `${def.id}:${v.medal}:${v.time}:${newBest}:${opts.roomAdvances ? left : ''}`;

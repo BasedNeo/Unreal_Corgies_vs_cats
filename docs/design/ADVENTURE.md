@@ -22,6 +22,7 @@ one class kit (§5). The finale is the Vac-Tank.
 | 4 | **Laser Pointer at Dawn** | The Rooftops | Overwatch | climb to a perch (reach) → duel the Siamese sniper elite (defeat boss) → cover the squad's crossing (survive 40 s) | laser duel (t = dawn) |
 | 5 | **The Porch Siege** | West Yard deck | Warden | fortify the porch (interact ×2: barricades) → hold the porch through 3 waves (hold + survive) | wave defense |
 | 6 | **The Last Tennis Ball** | The Sky → shed | Skyraider | glide off the garage roof to the shed (reach, airborne) → take the RC plane (interact) → fly to the shed roof (reach) → beat the Vac-Tank (defeat boss) → grab the ball (interact) | boss finale |
+| 7 | **Night Shift at The Lot** | The Lot | Infiltrator | sneak through the Pipeworks (reach, stealth) → pull the siren fuse (interact, stealth) → grab the stash (collect 4) → hold the scaffold (hold 40 s) → drive home (reach, vehicle) | the kart getaway (W10 A7) |
 
 ## Contract (lead-owned; lanes build against it)
 - **Mode** `adventure`. The chapter comes from `sim.state.room.chapter` (a chapter id) and is set by the Room from

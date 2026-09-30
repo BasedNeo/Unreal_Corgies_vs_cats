@@ -24,13 +24,19 @@ function withAdventure() {
 
 let data: WorldData;
 let grid: NavGrid;
+/** W10 A7: each chapter is checked on its own map (ChapterDef.map; absent = the West Yard). */
+const worlds = new Map<string, { data: WorldData; grid: NavGrid }>();
 beforeAll(async () => {
-  data = createWorldData(1);
-  const sim = await Sim.create({ seed: 1 });
-  sim.step();
-  grid = navGridFor(sim);
-  sim.dispose();
+  for (const map of ['west_yard', 'the_lot']) {
+    const sim = await Sim.create({ seed: 1, map });
+    sim.step();
+    worlds.set(map, { data: createWorldData(1, map), grid: navGridFor(sim) });
+    sim.dispose();
+  }
+  ({ data, grid } = worlds.get('west_yard')!);
 });
+/** Point the checks at a chapter's map. */
+const onMapOf = (c: ChapterDef) => { ({ data, grid } = worlds.get(c.map ?? 'west_yard')!); };
 
 const walkable = (x: number, z: number) => {
   const c = cellIndex(grid, x, z);
@@ -65,9 +71,9 @@ function playOut(sim: Sim, room: Room, maxSeconds: number): RunResult {
 }
 
 describe('chapter data', () => {
-  it('all six chapters are playable and match their slots; captions are 2–3 punchy lines', () => {
-    expect(CHAPTER_PLAN.map((s) => s.index)).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(CHAPTERS.map((c) => c.id)).toEqual(['yard_day', 'tall_grass', 'garage_job', 'laser_dawn', 'porch_siege', 'last_ball']);
+  it('all seven chapters are playable and match their slots; captions are 2–3 punchy lines', () => {
+    expect(CHAPTER_PLAN.map((s) => s.index)).toEqual([1, 2, 3, 4, 5, 6, 7]); // W10 A7: chapter 7 on The Lot
+    expect(CHAPTERS.map((c) => c.id)).toEqual(['yard_day', 'tall_grass', 'garage_job', 'laser_dawn', 'porch_siege', 'last_ball', 'night_shift']);
     for (const c of CHAPTERS) {
       const slot = CHAPTER_PLAN[c.index - 1];
       expect([c.id, c.title, c.cls, c.district]).toEqual([slot.id, slot.title, slot.cls, slot.district]);
@@ -84,6 +90,7 @@ describe('chapter data', () => {
 
   it('every point sits on real walkable ground; spawns are known and placeable; collect has enough spots', () => {
     for (const c of CHAPTERS) {
+      onMapOf(c);
       expect(walkable(c.start.x, c.start.z), `${c.id} start`).toBe(true);
       for (const s of c.steps) {
         const t = s.trigger;
@@ -112,6 +119,7 @@ describe('chapter data', () => {
         if (s.stealth) expect(s.alarm?.length, `${s.id} has an alarm`).toBeGreaterThan(0);
       }
     }
+    onMapOf(CHAPTERS[0]);
   });
 
   it('chapter 1: the kiosk steps sit on the corgi Ordnance Kiosk that an adventure room places at runtime', async () => {

@@ -29,10 +29,10 @@ describe('chapters 3–6 on the client', () => {
         if (s.trigger.type === 'interact') expect(chain.steps[i].trigger).toMatchObject({ type: 'interact', params: { prompt: s.trigger.params.prompt } });
       }
     }
-    expect(CHAPTERS.map((c) => nextChapter(c.id)?.id ?? null)).toEqual(['tall_grass', 'garage_job', 'laser_dawn', 'porch_siege', 'last_ball', null]);
+    expect(CHAPTERS.map((c) => nextChapter(c.id)?.id ?? null)).toEqual(['tall_grass', 'garage_job', 'laser_dawn', 'porch_siege', 'last_ball', 'night_shift', null]); // W10 A7: ch7
     // the finale is THE END: the card offers the main menu, and an online room goes back to chapter 1 (Q2 P2-6)
-    expect(CHAPTERS.map((c) => afterChapter(c))).toEqual(['next', 'next', 'next', 'next', 'next', 'end']);
-    expect(CHAPTERS.map((c) => roomChapterAfter(c).id)).toEqual(['tall_grass', 'garage_job', 'laser_dawn', 'porch_siege', 'last_ball', 'yard_day']);
+    expect(CHAPTERS.map((c) => afterChapter(c))).toEqual(['next', 'next', 'next', 'next', 'next', 'next', 'end']);
+    expect(CHAPTERS.map((c) => roomChapterAfter(c).id)).toEqual(['tall_grass', 'garage_job', 'laser_dawn', 'porch_siege', 'last_ball', 'night_shift', 'yard_day']);
     const unbuilt = { ...CHAPTERS[5], id: 'x_ch5', index: 5 }; // a planned-but-unbuilt next chapter: rooms replay
     expect(afterChapter({ ...CHAPTERS[0], id: 'x', index: 99 })).toBe('end');
     expect([afterChapter(unbuilt), roomChapterAfter(unbuilt).id]).toEqual(['soon', 'x_ch5']);

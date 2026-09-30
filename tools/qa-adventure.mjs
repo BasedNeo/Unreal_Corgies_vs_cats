@@ -28,7 +28,7 @@ const systems = () => { const s = createDefaultSystems(); return s.some((x) => x
 const pct = (a, p) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))] ?? 0; };
 
 async function room(chapter, seed, { bots = [4, 0], cfg } = {}) {
-  const sim = await Sim.create({ seed, systems: systems() });
+  const sim = await Sim.create({ seed, map: chapterById(chapter)?.map, systems: systems() }); // W10 A7: the chapter's map
   if (cfg) sim.state.adventureConfig = cfg;
   const r = new Room(sim, { mode: 'adventure', chapter, botsPerTeam: bots });
   const events = [];
