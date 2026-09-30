@@ -22,3 +22,25 @@ jobs:
           name: gate-artifacts
           path: artifacts/
           if-no-files-found: ignore
+  godot:
+    # W12: the Godot game is the main build. Its headless tests run on every push.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GODOT_VERSION: 4.7.2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}
+      - name: Install Godot ${{ env.GODOT_VERSION }}
+        run: |
+          if [ ! -x ~/godot/godot ]; then
+            mkdir -p ~/godot && cd ~/godot
+            curl -fsSL -o g.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+            unzip -q g.zip && mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot && rm g.zip
+          fi
+      - name: Godot headless tests
+        run: ~/godot/godot --headless --path engines/godot --script res://tests/run.gd
+

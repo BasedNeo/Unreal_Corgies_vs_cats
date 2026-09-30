@@ -1,0 +1,25 @@
+; Corgis vs Cats: the Godot 4 game (Wave 12). Launch: npm run godot (or: godot --path engines/godot).
+config_version=5
+
+[application]
+config/name="Corgis vs Cats"
+config/description="Corgi Company vs Cat Cadre: hold the slab on The Lot."
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7")
+
+[autoload]
+GameInput="*res://game/input_setup.gd"
+Proof="*res://proof.gd"
+
+[display]
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+
+[physics]
+common/physics_ticks_per_second=60
+
+[rendering]
+renderer/rendering_method="forward_plus"
+renderer/rendering_method.mobile="mobile"
+anti_aliasing/quality/msaa_3d=2

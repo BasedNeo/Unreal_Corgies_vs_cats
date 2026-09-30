@@ -8,7 +8,14 @@ authoritative **TypeScript simulation** runs in a Web Worker offline or on a Nod
 the same code and protocol in both. Everything is procedural (characters, world, audio); there are no licensed
 assets. Original IP.
 
-## Play
+## Play the Godot game (Wave 12: the main build)
+```bash
+# Install Godot 4.7+ from https://godotengine.org/download (macOS: drag Godot.app to /Applications)
+npm run godot               # opens the match (or: godot --path engines/godot)
+```
+The Godot project lives in `engines/godot/` (see its README). Look: stylised-realistic, a wet night on The Lot.
+
+## Play the web twin (Three.js)
 ```bash
 npm install
 npm run dev                 # http://localhost:5173 → main menu → pick a MATCH → PLAY
