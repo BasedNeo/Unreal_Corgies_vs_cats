@@ -140,6 +140,10 @@ export const STYLE = {
   // feather, so an inner wall on a box face is fully shut while its outer shell stays lit). `charKeep`: the share of the
   // character rim + fill a pet keeps inside. `max`: boxes per world (a fixed uniform array).
   interior: { probe: 0.45, feather: 0.4, charKeep: 0.25, max: 16 },
+  // W11 P-GLB1 pbr() (authored PBR GLB assets): `env` scales the fake sky reflection (× env.intensity), `wetK` how much the
+  // weather's wetness reaches the asset, `normalScale` / `aoIntensity` multiply the asset's own; `interiors`: the sky fill
+  // stays out of WorldData.interiors like it does for toon().
+  pbr: { env: 1.0, wetK: 0.85, normalScale: 1.0, aoIntensity: 1.0, interiors: true },
   // Battle mood: clear weather still keeps broken cloud and haze (the sky never looks like a picnic).
   // highFog (sky.ts update): the distance fog thins for high cameras, from 1 at `from` m to `floor` over `span` m; W10 P5:
   // the floor falls with the weather's fog multiplier ^ `wx` (storm x3.0 -> floor 0.29), so a storm overview (The Lot's

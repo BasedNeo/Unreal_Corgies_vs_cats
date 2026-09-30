@@ -24,6 +24,10 @@
 // W10 P5: the exposure follows the sky's time of day (STYLE_EXPOSURE, a pre-tone-map multiply); the sky fill and the
 // character rim + fill stay out of WorldData.interiors (STYLE_INTERIORS: a box test per fragment, no pass, no light).
 //
+// W11 P-GLB1: pbr(gltfMaterial) is the one sanctioned entry point for authored PBR assets (shared GLBs): the asset keeps its
+// own baseColor / ORM / normal maps and three's GGX lighting, inside the style rig (the same lights, sky reflection,
+// weather wetness, interiors, exposure and grade); no ink hull (it is not a toon material). toon/glow/stylize unchanged.
+//
 // Differences from WebGL that matter:
 // - Ink hull comes from TSL toonOutlinePass: it outlines ONLY toon materials (isMeshToonMaterial /
 //   isMeshToonNodeMaterial), with ONE global thickness/color. Glass/glow must therefore be non-toon materials
@@ -36,7 +40,7 @@ import {
   positionLocal, normalLocal, positionGeometry, positionWorld, normalWorld, normalView, normalWorldGeometry,
   positionViewDirection, cameraPosition, reflect, fwidth, length, clamp, abs, floor, sqrt,
   mx_noise_float, materialReference, attribute, diffuseColor, roughness, metalness, specularColor,
-  BRDF_Lambert, F_Schlick, uniformArray, Loop,
+  BRDF_Lambert, F_Schlick, uniformArray, Loop, materialColor, materialRoughness, cameraWorldMatrix,
 } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
@@ -510,6 +514,97 @@ export function stylize(root, { creases = true, creaseDeg, remap, surface } = {}
     if (creases && !o.isInstancedMesh) addCreaseInk(o, creaseDeg ? { thresholdDeg: creaseDeg } : {});
   });
   return root;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// W11 P-GLB1: authored PBR assets (shared GLBs, docs/design/ASSET_PIPELINE.md stage 5)
+
+/** Rain exposure of a surface by its world normal's y: up-facing soaks fully, walls partly, undersides barely. */
+const soakExposure = (ny) => mix(mix(float(STYLE.wet.underSoak), float(STYLE.wet.sideSoak), smoothstep(-0.7, 0.0, ny)), float(1), smoothstep(0.2, 0.75, ny));
+
+/**
+ * pbr()'s lighting: three's physically based model (GGX, the asset's own roughness / metalness / occlusion / normal
+ * maps) plus the rig's fake sky reflection (STYLE_ENV: the style has no env map, so without it metal reads black), and
+ * the W10 P5 interiors (the sky fill does not reach inside WorldData.interiors).
+ */
+class StylePbrLightingModel extends THREE.PhysicalLightingModel {
+  /** @param {any} open 1 where the sky reaches, 0 inside an interior (null = everywhere open) @param {number} env gain */
+  constructor(open, env) { super(); this.open = open; this.env = env; }
+
+  direct(params, builder) {
+    if (this.open && params.lightNode?.light?.userData?.skyFill) params = { ...params, lightColor: params.lightColor.mul(this.open) };
+    super.direct(params, builder);
+  }
+
+  indirect(builder) {
+    super.indirect(builder);
+    const { ambientOcclusion, reflectedLight } = builder.context;
+    // the shading normal (normal-mapped) reflected in view space, then to world for the sky lookup
+    const Rv = reflect(positionViewDirection.negate(), normalView);
+    const R = normalize(cameraWorldMatrix.mul(vec4(Rv, 0)).xyz);
+    const sky = mix(STYLE_ENV.horizon, STYLE_ENV.zenith, smoothstep(0.03, 0.6, R.y));
+    const sharp = mix(STYLE_ENV.ground, sky, smoothstep(-0.14, 0.03, R.y));
+    const blurred = mix(STYLE_ENV.ground, STYLE_ENV.horizon.add(STYLE_ENV.zenith).mul(0.5), 0.55);
+    const env = mix(sharp, blurred, roughness.clamp(0, 1));
+    const F = envFresnel({ f0: specularColor, dotNV: normalView.dot(positionViewDirection).clamp(), rough: roughness });
+    const dim = float(1).sub(STYLE_WEATHER.dark.mul(STYLE.env.stormDim));
+    const ao = ambientOcclusion ?? float(1);
+    reflectedLight.indirectSpecular.addAssign(env.mul(F).mul(STYLE_ENV.intensity.mul(this.env)).mul(dim).mul(ao));
+  }
+}
+
+/** The material pbr() returns: a MeshStandardNodeMaterial lit by StylePbrLightingModel. */
+export class StylePbrMaterial extends THREE.MeshStandardNodeMaterial {
+  static get type() { return 'StylePbrNodeMaterial'; }
+  constructor(params) {
+    super(params);
+    this.isStylePbrMaterial = true;
+    /** 1 where the sky reaches (interiorOpen), null = no interior test. */
+    this.openNode = null;
+    /** Sky-reflection gain (× STYLE_ENV.intensity). */
+    this.envGain = 1;
+  }
+  customProgramCacheKey() { return `${super.customProgramCacheKey()}|spbr${this.openNode ? 'i' : ''}${this.envGain}`; }
+  setupLightingModel() { return new StylePbrLightingModel(this.openNode, this.envGain); }
+}
+
+/**
+ * W11 P-GLB1: the sanctioned entry point for authored PBR assets (a shared GLB's materials, docs/design/ASSET_PIPELINE.md).
+ * Keeps the source material's maps (baseColor, the ORM pair: occlusion R / roughness G / metalness B, normal, emissive)
+ * and factors, and puts it inside the style rig: the same lights, the fake sky reflection (STYLE_ENV), weather wetness
+ * (STYLE_WEATHER.wet darkens the albedo and drops the roughness toward a sheen, up-facing parts soak most), the W10 P5
+ * interiors, and the post chain (exposure, bloom, grade). Not a toon material: no ink hull, no toon ramp (the
+ * "stylised-real" side of the W11 A/B; stylize() is the toon side). Cached: the same source + opts give one instance.
+ * @param {any} src a GLTFLoader material (MeshStandardMaterial / MeshPhysicalMaterial)
+ * @param {{ env?: number, wetK?: number, normalScale?: number, aoIntensity?: number, interiors?: boolean }} [opts]
+ *   overrides of STYLE.pbr
+ */
+export function pbr(src, opts = {}) {
+  const P = { ...STYLE.pbr, ...opts };
+  const key = matKey({ pbr: src.uuid, ...P });
+  let m = materialCache.get(key);
+  if (m) return m;
+  m = new StylePbrMaterial();
+  m.name = src.name;
+  if (src.color) m.color.copy(src.color);
+  for (const k of ['map', 'roughnessMap', 'metalnessMap', 'aoMap', 'normalMap', 'emissiveMap']) m[k] = src[k] ?? null;
+  m.roughness = src.roughness ?? 1;
+  m.metalness = src.metalness ?? 0;
+  m.aoMapIntensity = (src.aoMapIntensity ?? 1) * P.aoIntensity;
+  if (src.normalScale) m.normalScale.copy(src.normalScale).multiplyScalar(P.normalScale);
+  if (src.emissive) m.emissive.copy(src.emissive);
+  m.emissiveIntensity = src.emissiveIntensity ?? 1;
+  m.side = src.side ?? THREE.FrontSide;
+  m.vertexColors = !!src.vertexColors;
+  // weather: the albedo darkens (porous paint, rust) and the roughness falls toward a wet sheen
+  const wet = STYLE_WEATHER.wet.mul(P.wetK).mul(soakExposure(normalWorld.y)).clamp(0, 1);
+  m.colorNode = materialColor.mul(mix(float(1), float(STYLE.wet.darken), wet.mul(0.8)));
+  m.roughnessNode = mix(materialRoughness, materialRoughness.mul(STYLE.wet.roughKeep).add(STYLE.wet.rough), wet);
+  m.openNode = P.interiors ? interiorOpen() : null;
+  m.envGain = P.env;
+  m.userData.style = 'pbr';
+  materialCache.set(key, m);
+  return m;
 }
 
 export function createStyleLights() {

@@ -1,0 +1,3 @@
+# Godot's import cache and the GLBs copied in by run.sh
+.godot/
+_import/

@@ -147,6 +147,8 @@ assets/                            W11 shared-GLB pipeline: masters/ (master GLB
                                    (versions, budgets, sizes, provenance, licence) · docs/design/ASSET_PIPELINE.md
 public/assets/kits/                web GLB variants (meshopt / WebP) that the client loads
 tools/assets/  tools/godot/        bpy build / refine / bake scripts + validate-glb.mjs · Godot 4 headless import check
+src/client/assets/kit-glb.ts       GLTFLoader → instanced LOD meshes for kit pieces (?kit=glb; ?kitlook=stylize for the toon
+                                   side); the style factory's pbr() keeps a GLB's PBR maps inside the rig and grade
 
 Repository layout rules (W11). The repo started as an Unreal plan; only docs/legacy/ (two Unreal-era docs) remains from
 it, with no engine files. The web game owns the root. Any engine project (a future Unreal or Godot game client) lives

@@ -1,0 +1,12 @@
+; Minimal Godot 4 project (W11 P-GLB1): the asset-compatibility gate for shared GLBs (docs/design/ASSET_PIPELINE.md).
+; Run: bash tools/godot/run.sh <file.glb>  (headless import + validate_glb.gd; exit 0 = PASS)
+config_version=5
+
+[application]
+
+config/name="CvC GLB gate"
+config/features=PackedStringArray("4.7")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"

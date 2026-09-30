@@ -19,11 +19,11 @@ Godot is the asset-compatibility gate, and the door to a native client later; it
 |---|---|---|
 | 0 Concept / style bible | Mood board (armoured corgi, rainy dock at dusk) plus `style-tokens.js`, `STYLE_GUIDE`, and the Lot hero bookmarks | live |
 | 1 Image-to-3D (Scenario, Tripo, Hunyuan, Meshy, Rodin) | `assets/incoming/<asset>/` holds generated originals, never edited in place | **blocked:** `api.cloud.scenario.com` is denied by the environment's network policy and no key is set. Until then, assets are scripted in Blender (bpy) |
-| 2A Environment / prop refinement | Blender 5 headless (`bpy` 5.0.1 from PyPI, Python 3.11) scripts in `tools/assets/`: pivots, meters, LOD0/1/2, `COL_` proxies, PBR bake, naming | live (P-GLB1) |
+| 2A Environment / prop refinement | Blender 5 headless (`bpy` 5.0.1 from PyPI, Python 3.11) scripts in `tools/assets/`: pivots, meters, LOD0/1/2, `COL_` proxies, PBR bake, naming | **proven**: `build-container.py` is deterministic (byte-identical rebuilds) |
 | 2B Characters (Cartwheel; Mixamo) | One master GLB per character with named actions | **blocked:** Scenario access; Mixamo is a web login, a human step (W12) |
-| 3 Validation | `tools/assets/validate-glb.mjs` (glTF-Transform): scale, pivot, names, LODs, `COL_`, triangle and texture budgets, file size | live (P-GLB1) |
-| 4 Godot | Godot 4 headless in `tools/godot/`: imports every master GLB and checks its tree, AABB, materials and LODs | live (P-GLB1) |
-| 5 Three.js | `GLTFLoader` → style factory (`stylize()` or `pbr()`), instanced, behind a flag until the owner picks the look | live (P-GLB1) |
+| 3 Validation | `tools/assets/validate-glb.mjs` (glTF-Transform): scale, pivot, names, LODs, `COL_`, triangle and texture budgets, file size | **proven**: the master and the web variant pass; a broken copy fails with 30 errors |
+| 4 Godot | Godot 4 headless in `tools/godot/`: imports every master GLB and checks its tree, AABB, materials and LODs | **proven** with Godot 4.7.2: the master imports and loads. Godot rejects the web variant (`EXT_meshopt_compression`, `KHR_mesh_quantization`), so Godot always takes the master |
+| 5 Three.js | `GLTFLoader` → style factory (`stylize()` or `pbr()`), instanced, behind a flag until the owner picks the look | **proven** behind `?kit=glb`: instanced LODs, `COL_` equals the sim within 1 cm, Lot 4v4 high 236 draws (230 off) |
 | 6 Three.js enhancement ("Astra" pass) | Non-destructive TSL material and lighting work in the style layer only; GLBs are never modified | live (the style system) |
 | Grok Imagine multi-view projection | Phase 1 (Blender camera rig plus depth / normal / shaded passes): P-GLB2. Phase 2 (API) | **blocked:** `api.x.ai` denied, no key |
 

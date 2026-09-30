@@ -29,6 +29,7 @@ import { QUALITY, toQualityTier, type QualityTier } from '../engine/quality';
 import { createLampsView } from './lamps-view';
 import { createDestructView, type DestructView } from './destruct-view';
 import { surfaceAt } from '../../shared/world/queries';
+import { createContainerKitView, kitFlag, splitContainerPrims, type KitView } from '../assets/kit-glb';
 
 /** Post grade uniforms (createComicPipeline(...).grade.uniforms) the weather may desaturate. */
 export interface GradeUniforms { saturation: { value: number } }
@@ -97,8 +98,13 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
 
   const fence = data.fences?.length ? createFenceView(data.fences, data.height) : null;
   if (fence) root.add(fence.boards);
-  const props = buildPrimMeshes([...(data.prims ?? []), ...(fence?.prims ?? [])], { far: edge + 8 });
+  // W11 P-GLB1: ?kit=glb draws The Lot's containers from the shared GLB (instanced; ?kitlook=stylize = the toon A/B side)
+  const kitLook = kitFlag();
+  const kitSplit = kitLook ? splitContainerPrims(data) : null;
+  const props = buildPrimMeshes([...(kitSplit ? kitSplit.rest : data.prims ?? []), ...(fence?.prims ?? [])], { far: edge + 8 });
   root.add(props.group);
+  const kit: KitView | null = kitSplit?.placements.length && kitLook ? createContainerKitView(kitSplit, kitLook, { far: edge + 8 }) : null;
+  if (kit) root.add(kit.group);
   // crease ink is built in every tier and only hidden on low, so the tier can switch live
   const setPropCreases = (on: boolean) => { for (const m of props.meshes) for (const c of m.children) if (c.userData.styleInk) c.visible = on; };
   setPropCreases(P.propCreases);
@@ -204,6 +210,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
       sky.update(camera);
       lamps.update(camera);
       foliage?.update(camera);
+      kit?.update(camera);
     },
     stats() {
       return {
@@ -219,6 +226,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
         ...lamps.stats(),
         ...destruct.stats(),
         ...(foliage?.stats() ?? {}),
+        ...(kit?.stats() ?? {}),
       };
     },
     dispose() {
@@ -227,6 +235,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
       terrain.dispose();
       terrainMat.material.dispose();
       disposePrimMeshes(props);
+      kit?.dispose();
       fence?.dispose();
       water.dispose();
       foliage?.dispose();
