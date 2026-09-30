@@ -7,3 +7,19 @@ playwright-report/
 *.log
 .DS_Store
 dist-server/
+
+# W11 asset pipeline: tool caches and editor backups (sources are scripts; masters live in assets/masters/)
+__pycache__/
+*.pyc
+.venv*/
+*.blend
+*.blend1
+*.blend@
+tools/godot/.godot/
+# Engine build products, ignored defensively. Engine projects never live at the repo root: an Unreal or Godot game
+# project goes under engines/<engine>/ (see ARCHITECTURE.md → Repository layout), so these only match inside it.
+engines/*/Binaries/
+engines/*/DerivedDataCache/
+engines/*/Intermediate/
+engines/*/Saved/
+engines/*/.godot/

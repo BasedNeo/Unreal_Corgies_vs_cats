@@ -1,7 +1,12 @@
-# Procedural-first project: binary assets are exceptions. If prepared models/textures/audio start landing in
-# public/, enable Git LFS for them (game-dev-github) before committing the first one.
+# Procedural-first project: binary assets are exceptions. W11: GLB kit pieces land raw (a web variant ≤ 600 KB, a
+# master with PNG textures), with sizes gated in assets/manifest.json. Switch assets/masters/ to Git LFS when committed
+# binaries pass 200 MB in total, or when .blend / FBX / 2K sources start landing; install git-lfs first. LFS
+# bandwidth quotas also bill CI checkouts.
 *.png binary
 *.jpg binary
 *.glb binary
 *.spz binary
 *.wasm binary
+*.webp binary
+*.ktx2 binary
+*.bin binary

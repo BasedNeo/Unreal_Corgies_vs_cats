@@ -142,6 +142,17 @@ tools/                             gate, boundaries, probe, soak, net-bots, char
 labs/                              lane labs: characters, world, juice (HUD/FX), vehicles, boss, interact
 tests/unit/  tests/e2e/            Vitest (sim/host/net/world/combat/ai/ui/fx) · Playwright (smoke, 2-client net)
 docs/                              handoff/ (lane reports) · sprints/ (validated lane plans) · legacy/ (Unreal era)
+assets/                            W11 shared-GLB pipeline: masters/ (master GLBs, PNG textures: the source of truth
+                                   Godot imports) · incoming/ (untouched generator originals) · manifest.json
+                                   (versions, budgets, sizes, provenance, licence) · docs/design/ASSET_PIPELINE.md
+public/assets/kits/                web GLB variants (meshopt / WebP) that the client loads
+tools/assets/  tools/godot/        bpy build / refine / bake scripts + validate-glb.mjs · Godot 4 headless import check
+
+Repository layout rules (W11). The repo started as an Unreal plan; only docs/legacy/ (two Unreal-era docs) remains from
+it, with no engine files. The web game owns the root. Any engine project (a future Unreal or Godot game client) lives
+under engines/<engine>/ with its own .uproject / project.godot, never at the root. Its build folders (Binaries/,
+Intermediate/, Saved/, DerivedDataCache/, .godot/) are git-ignored there. Folder names stay lowercase, and no two
+paths may differ only by case (macOS and Windows checkouts).
 ```
 
 ## Data flow
