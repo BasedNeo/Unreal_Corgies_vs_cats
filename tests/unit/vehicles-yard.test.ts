@@ -217,7 +217,9 @@ describe('vehicles on the West Yard', () => {
     // Budget check is informative on shared/loaded machines; hard-fail only on a gross regression (the budget scales
     // with CPU oversubscription: load 12 on 4 cores measured 2.96 ms for a 0.3 ms idle cost).
     const load = Math.max(1, os.loadavg()[0] / Math.max(1, os.cpus().length));
-    expect(perTick).toBeLessThan(process.env.CI ? 0.6 : 2.5 * load);
+    // W11: CI's ceiling is a gross-regression bound, 2x today's cost. The same code measures 0.53-0.69 ms here at W9 and
+    // at W11 (load 7 on 4 cores) and 0.705 ms on GitHub's runner, so the old 0.6 failed on noise, not on a regression.
+    expect(perTick).toBeLessThan(process.env.CI ? 1.2 : 2.5 * load);
     expect([...sim.entities.values()].filter((e) => e.kind === EntityKind.Terminal && e.terminal?.id === 'kart_terminal')).toHaveLength(2); // Kart-O-Matics only (+ R1's hangar)
   }, 120_000); // a 30 s full-room soak: ~18 s alone, 53 s measured at load 19 on 4 cores (the budget above scales with load too)
 });
