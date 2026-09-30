@@ -155,6 +155,35 @@ export function squadKitFor(cls: ClassId | null | undefined, maxHp: number): Squ
   return null;
 }
 
+/** W11 F3: the archetypes a chapter spawns as cats (spawnChapterCat: the class kit + the archetype's hp). */
+const PVE_IDS: readonly ArchetypeId[] = ['grunt', 'sniper', 'brute', 'kitten', 'alley_raider', 'tabby_heavy'];
+
+/**
+ * W11 F3 (P2-1): the archetype behind a cat bot's snapshot (its class and max hp), for presentation (the sentry's drawn
+ * sight, client/adventure/views.ts): the PvE archetype of this class whose hp override is this max hp, else the PvE
+ * archetype of this class without an hp override (grunt, sniper), else the class's team-fill profile. Each PvE hp is
+ * unique for its class (the same premise as squadKitFor, tested there). Pure.
+ */
+export function archetypeForSnapshot(cls: ClassId | null | undefined, maxHp: number): Archetype {
+  let plain: Archetype | null = null;
+  for (const id of PVE_IDS) {
+    const a = ARCHETYPES[id];
+    if (a.cls !== cls) continue;
+    if (a.hp === maxHp) return a;
+    if (a.hp === undefined && !plain) plain = a;
+  }
+  return plain ?? archetypeForClass(cls ?? null);
+}
+
+/**
+ * W11 F3 (P2-1): the range (m) at which archetype `a` spots a character in the open, in weather of sight multiplier
+ * `weatherSight` (WeatherParams.sight: 1 clear … 0.6 storm). The brain's perception uses exactly this (brain.ts perceive),
+ * and the sentry cone's far arc is drawn at exactly this, so what the player sees is what the cat sees.
+ */
+export function detectionRange(a: Pick<Archetype, 'sightRange'>, weatherSight: number): number {
+  return a.sightRange * weatherSight;
+}
+
 /**
  * K3 frontal guard: the damage multiplier for a hit on a bot of archetype `arch` at (x, z) facing `yaw` (0 = -Z) from an
  * attacker at (ax, az): `1 - guard.reduce` when the attacker is within the guard arc of the facing, else 1 (and 1 for

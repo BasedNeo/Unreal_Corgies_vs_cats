@@ -21,6 +21,9 @@
 //                                   only).
 //   mix bus                         a sub-bus on sfx: −6 dB at full combat intensity (the S2 engine-loop duck is
 //                                   −4.4 dB), and the engine's danger duck (a fuse ticking at your feet) on top.
+//                                   W11 F3 (P2-6): the combat duck is full from AMB.combatFull of intensity (a nearby
+//                                   rifle every 0.5 s reaches it in ~4 s; a firefight at once), not only at 1, which a
+//                                   firefight seldom holds; and the steel voice has a soft ceiling (presets-site.ts).
 // Wiring (main.ts), next to the weather audio:
 //   const siteAudio = createSiteAmbience(audio, worldData);
 //   siteAudio.update(worldView.weather, ctx.camera, dt);       // per frame, after weatherAudio.update
@@ -97,6 +100,8 @@ export const AMB = {
   idle: 3,
   /** Sub-bus duck at full combat intensity. */
   combatDuck: 0.5,
+  /** W11 F3: the combat intensity at which the duck is full (it ramps linearly from 0). */
+  combatFull: 0.35,
   /** Source levels (play gains) from the AU2 renders (docs/handoff/AU2.md §4). */
   gain: { steel: 0.5, tarp: 0.42, flood: 0.07, ditch: 0.5, bed: 0.35, drip: 0.5, creak: 0.35, distant: 1 },
 } as const;
@@ -225,6 +230,12 @@ export function siteMix(e: SiteEmitters, w: Readonly<Pick<WeatherParams, 'rain' 
   return out;
 }
 
+/** W11 F3 (P2-6): the site sub-bus's combat duck for a combat intensity: 1 at peace, 1 − AMB.combatDuck from
+ *  AMB.combatFull up (pure). */
+export function combatGain(intensity: number): number {
+  return 1 - AMB.combatDuck * Math.min(1, Math.max(0, intensity) / AMB.combatFull);
+}
+
 // ------------------------------------------------------------------------------------------------ runtime
 
 export interface SiteAmbience {
@@ -322,7 +333,7 @@ export function createSiteAmbience(audio: { readonly engine: AudioEngine; readon
       const duck = engine.bedDuck();
       // the sub-bus: combat duck × danger duck (fast when a fuse ticks)
       if (bus) {
-        const v = (1 - AMB.combatDuck * Math.min(1, Math.max(0, audio.intensity))) * duck;
+        const v = combatGain(audio.intensity) * duck;
         if (Math.abs(v - busLast) > 0.01) { busLast = v; setT(bus.gain, v, duck < 1 ? 0.08 : 0.4); }
       }
       if (acc >= 0.1) {
@@ -369,7 +380,7 @@ export function createSiteAmbience(audio: { readonly engine: AudioEngine; readon
         if (bed && ctx) setT(bed.level.gain, mix.bed, 1);
       }
       // one-shots (their gains take the ducks at trigger time)
-      const oneDuck = (1 - AMB.combatDuck * Math.min(1, Math.max(0, audio.intensity))) * duck;
+      const oneDuck = combatGain(audio.intensity) * duck;
       if (mix.dripRate > 0 && rand() < mix.dripRate * dt) {
         // a near site, not always the nearest (each drop picks the nearest after a random stretch)
         let best = -1, bd = Infinity;

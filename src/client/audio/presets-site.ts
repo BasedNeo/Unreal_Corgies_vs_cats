@@ -2,7 +2,9 @@
 //   loops (positional, built once, gains driven per update)
 //     rain on steel   sparse "dust" (white noise through a threshold waveshaper: single-sample clicks whose rate follows
 //                     the input gain) ringing three steel-panel modes, a hollow box drum under them, and a dense
-//                     patter layer for a downpour. `inside` opens the drum: standing in a container, it roars overhead
+//                     patter layer for a downpour. `inside` opens the drum: standing in a container, it roars overhead.
+//                     W11 F3 (P2-6): the voice ends in a soft ceiling (steelCeiling: linear to STEEL_KNEE, a tanh
+//                     shoulder to STEEL_CEIL), so the rare coinciding drops no longer drive the mix to +6 dBFS
 //     rain on tarp    softer, lower dust through a fabric "thup" band; a wind flutter (an LFO-chopped low band) in gusts
 //     floodlight hum  the ballast's 100 Hz hum and harmonics, a thin buzz, and rain sizzling on the hot lens
 //     ditch           a slow gurgle of the drainage ditch running after rain, and drops plopping into it
@@ -90,22 +92,44 @@ function dust(k: Kit, rate: number): { drive: GainNode; clicks: WaveShaperNode }
   return { drive, clicks };
 }
 
+/** W11 F3 (P2-6): the steel voice's soft ceiling: unity below the knee, a tanh shoulder above it, `STEEL_CEIL` at full
+ *  scale (and beyond: a WaveShaper holds its curve's ends). The click layer's crest was ~26 dB: single drops ringing three
+ *  high-Q panel modes, summed with the drum, drove the sfx bus to +10 dBFS inside a container in a storm. */
+export const STEEL_KNEE = 0.8, STEEL_CEIL = 1;
+const ceilCurves = new WeakMap<BaseAudioContext, Float32Array<ArrayBuffer>>();
+export function steelCeiling(ctx: BaseAudioContext): Float32Array<ArrayBuffer> {
+  let c = ceilCurves.get(ctx);
+  if (!c) {
+    const n = 4097, top = STEEL_CEIL - STEEL_KNEE;
+    c = new Float32Array(new ArrayBuffer(n * 4));
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1, a = Math.abs(x);
+      c[i] = a <= STEEL_KNEE ? x : Math.sign(x) * (STEEL_KNEE + top * Math.tanh((a - STEEL_KNEE) / top));
+    }
+    ceilCurves.set(ctx, c);
+  }
+  return c;
+}
+
 /** Rain on a steel container. Knobs: ping (dust drive = drop rate), pingLvl, drum (the box resonance: low outside,
  *  full inside), dense (a downpour's patter). */
 export interface SteelRain extends LoopVoice { ping: GainNode; pingLvl: GainNode; drum: GainNode; dense: GainNode }
 export function steelRain(ctx: BaseAudioContext, offset = 0): SteelRain {
   const k = kit(ctx, offset);
   const out = g0(k, 1);
-  const pingLvl = g0(k, 0, out);
+  // the layers sum into `mix`, then the soft ceiling (W11 F3), then `out`
+  const ceil = k.ctx.createWaveShaper(); ceil.curve = steelCeiling(k.ctx); ceil.connect(out); k.nodes.push(ceil);
+  const mix = g0(k, 1, ceil);
+  const pingLvl = g0(k, 0, mix);
   const d = dust(k, 0.97 + 0.05 * Math.sin(offset * 3));
   // three steel-panel modes (a little detuned per container)
   for (const [f, q, lv] of [[870, 14, 1.05], [1690, 16, 0.85], [2950, 18, 0.62]] as const) {
     d.clicks.connect(bq(k, 'bandpass', f * (1 + 0.03 * Math.sin(offset * 7 + f)), q, g0(k, lv * 90, pingLvl)));
   }
   // the box drum: the same drops through the container's hollow low band
-  const drum = g0(k, 0, out);
+  const drum = g0(k, 0, mix);
   d.clicks.connect(bq(k, 'bandpass', 175, 1.2, g0(k, 40, drum)));
-  const dense = g0(k, 0, out);
+  const dense = g0(k, 0, mix);
   loopSrc(k, 'pink', 1.05, bq(k, 'peaking', 900, 2, bq(k, 'bandpass', 1900, 0.7, dense), 5));
   return { out, nodes: k.nodes, sources: k.sources, ping: d.drive, pingLvl, drum, dense };
 }

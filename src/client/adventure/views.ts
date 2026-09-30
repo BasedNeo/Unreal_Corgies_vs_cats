@@ -3,6 +3,10 @@
 //                    tall grass, depth test off, so a player sneaking in it can read them): an orange fan
 //                    out to CONE_RANGE with a dashed inner arc at CONE_CLOSE (inside it even a still corgi in tall grass
 //                    is seen); a cat that turns alerted flashes red. Gone once the alarm is up (everyone hunts).
+//                    W11 F3 (P2-1): and a dashed far arc at the range the cat really spots a pet in the open, its
+//                    archetype's sight × the weather's sight multiplier (archetypes.ts detectionRange, the brain's own
+//                    number), across its field of view: 45 m for a grunt in clear weather, 27 m in a storm. The fan
+//                    stays the grass-reach read it was built for (the Garden); the arc is the honest limit (The Lot).
 //   · items          collect items (chapters.ts snapshot convention): a burlap catnip sack with a leafy tuft, bobbing
 //                    over a glowing ground ring; the last tennis ball (A2: fuzzy yellow-green with its white seam);
 //                    unknown kinds draw as a glowing bundle.
@@ -11,7 +15,8 @@ import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { releaseObject3D } from '../engine/release';
 import type { EntityState } from '../../shared/protocol';
-import { EFlag, EntityKind, Team } from '../../shared/types';
+import { CLASS_IDS, EFlag, EntityKind, Team } from '../../shared/types';
+import { archetypeForSnapshot, detectionRange } from '../../sim/ai/archetypes';
 import { ADVENTURE_ITEM_IDS, ADVENTURE_ITEM_SEED } from '../../shared/content/chapters';
 import { glow, stylize, toon } from '../style/style-webgpu.js';
 import { PALETTE } from '../style/style-tokens.js';
@@ -23,9 +28,18 @@ export const CONE_CLOSE = 5;
 /** Half-angle of a cat's sight cone (the AI archetypes' 55°). */
 export const CONE_HALF = (55 * Math.PI) / 180;
 
+/** W11 F3: the far arc's band width at unit radius (0.54 m at a grunt's 45 m) and its dash count. */
+const SIGHT_BAND = 0.012, SIGHT_DASHES = 15;
+
+/** W11 F3: the radius (m) a sentry's far arc is drawn at, from its snapshot and the weather's sight multiplier. */
+export function sentrySightRange(s: Pick<EntityState, 'cls' | 'maxHp'>, weatherSight: number): number {
+  return detectionRange(archetypeForSnapshot(CLASS_IDS[s.cls], s.maxHp), weatherSight);
+}
+
 export interface AdventureViews {
   readonly group: THREE.Group;
-  sync(states: ReadonlyMap<number, EntityState>, view: AdventureView | null, dt: number): void;
+  /** `weatherSight` (W11 F3): the weather's AI sight multiplier (WorldView.weather.sight; 1 when absent). */
+  sync(states: ReadonlyMap<number, EntityState>, view: AdventureView | null, dt: number, weatherSight?: number): void;
   stats(): { cones: number; items: number };
   dispose(): void;
 }
@@ -57,6 +71,18 @@ function coneGeometry(): THREE.BufferGeometry {
   return merged;
 }
 
+/** W11 F3: the far arc at unit radius (scaled by the sight range): dashes on the outer edge across ±half. */
+function sightArcGeometry(half: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < SIGHT_DASHES; i++) {
+    const a0 = -half + (i / SIGHT_DASHES) * 2 * half, a1 = a0 + (2 * half / SIGHT_DASHES) * 0.6;
+    parts.push(band(1 - SIGHT_BAND, 1, half, 4, a0, a1));
+  }
+  const merged = mergeGeometries(parts.map((p) => p.toNonIndexed()), false)!;
+  for (const p of parts) p.dispose();
+  return merged;
+}
+
 interface ItemView { root: THREE.Group; body: THREE.Group; ring: THREE.Mesh; t: number }
 
 export function createAdventureViews(scene: THREE.Scene): AdventureViews {
@@ -70,6 +96,11 @@ export function createAdventureViews(scene: THREE.Scene): AdventureViews {
   const calm = overlay(glow(PALETTE.glowOrange, 1.05));
   const hot = overlay(glow(PALETTE.laserRed, 1.6));
   const cones = new Map<number, THREE.Mesh>();
+  // W11 F3: the far arcs (one geometry per field of view; dimmer than the fan, red when alerted like it)
+  const arcGeos = new Map<number, THREE.BufferGeometry>();
+  const arcGeo = (half: number) => { let g = arcGeos.get(half); if (!g) { g = sightArcGeometry(half); arcGeos.set(half, g); } return g; };
+  const calmFar = overlay(glow(PALETTE.glowOrange, 0.8));
+  const hotFar = overlay(glow(PALETTE.laserRed, 1.3));
   // item parts (shared geometry)
   const sackGeo = new THREE.SphereGeometry(0.3, 14, 10);
   sackGeo.scale(1, 0.9, 1);
@@ -135,7 +166,7 @@ export function createAdventureViews(scene: THREE.Scene): AdventureViews {
   const seen = new Set<number>();
   return {
     group,
-    sync(states, view, dt) {
+    sync(states, view, dt, weatherSight = 1) {
       seen.clear();
       // items
       for (const s of states.values()) {
@@ -165,12 +196,22 @@ export function createAdventureViews(scene: THREE.Scene): AdventureViews {
             m.userData.noCameraCollide = true;
             m.castShadow = false; m.receiveShadow = false;
             m.renderOrder = 4;
+            const far = new THREE.Mesh(arcGeo(archetypeForSnapshot(CLASS_IDS[s.cls], s.maxHp).fovHalf), calmFar);
+            far.name = 'sentry_sight';
+            far.userData.noCameraCollide = true;
+            far.castShadow = false; far.receiveShadow = false;
+            far.renderOrder = 4;
+            m.add(far);
             group.add(m);
             cones.set(s.id, m);
           }
           m.position.set(s.x, s.y + 0.12, s.z);
           m.rotation.y = s.yaw;
           m.material = s.flags & EFlag.Alerted ? hot : calm;
+          const far = m.children[0] as THREE.Mesh;
+          const r = sentrySightRange(s, weatherSight);
+          far.scale.set(r, 1, r);
+          far.material = s.flags & EFlag.Alerted ? hotFar : calmFar;
         }
       }
       for (const [id, m] of cones) if (!seen.has(id)) { m.removeFromParent(); releaseObject3D(m); cones.delete(id); }
@@ -180,6 +221,8 @@ export function createAdventureViews(scene: THREE.Scene): AdventureViews {
       group.removeFromParent();
       for (const g of [coneGeo, sackGeo, neckGeo, twineGeo, leafGeo, patchGeo, ringGeo, bundleGeo, ballGeo, seamGeo]) g.dispose();
       calm.dispose(); hot.dispose();
+      for (const g of arcGeos.values()) g.dispose();
+      calmFar.dispose(); hotFar.dispose(); arcGeos.clear();
       cones.clear(); items.clear();
     },
   };

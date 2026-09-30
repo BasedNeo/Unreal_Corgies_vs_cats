@@ -349,7 +349,7 @@ async function main(): Promise<void> {
     const result = tally.update({ match: net?.match ?? null, localId, states, dt, adventure: adventure.view,
       mode: !serverUrl && mode === 'boss-rush' ? 'boss-rush' : undefined }); // P2: boss-rush runs as yard-skirmish
     if (result) rewards.show(recordMatch(result), result.mode === 'adventure' ? 'chapter' : 'match');
-    advViews.sync(states, adventure.view, pdt);
+    advViews.sync(states, adventure.view, pdt, worldView.weather.sight); // W11 F3: the sentries' real sight range
     interact.sync(states, pdt);
     prompts.update(states, localId, dt);
     rush.sync(states, states.get(localId)?.team ?? 0, ctx.camera, dt);

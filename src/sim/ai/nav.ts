@@ -104,10 +104,22 @@ export function sharedNavGrid(sim: Sim): NavGrid {
 }
 
 function sharedGridFor(sim: Sim): NavGrid {
-  const key = signature(sim.worldData);
+  const thin = thinPassFor(sim);
+  const key = signature(sim.worldData) + (thin ? '' : '|no-thin');
   let g = cache.get(key);
-  if (!g) { g = buildNavGrid(sim); cache.set(key, g); }
+  if (!g) { g = buildNavGrid(sim, thin); cache.set(key, g); }
   return g;
+}
+
+/**
+ * W11 F3 (P1-1): does this sim's grid take N3's thin pass? Every map and mode does, except Base Assault on the West Yard.
+ * There the thin pass tilted the mode to the corgis' side (first to 3 on seeds 1-40: 23 : 7 with it, 18 : 15 without,
+ * 11 : 16 before Wave 10), and there its pins were already short without it (the flag F1 moved keeps the ball runs off
+ * the kart-gate hedgehog; worst hedgehog pin 1 s in N3's and F3's matches). docs/handoff/F3.md has the arms. A room
+ * sets its mode before its bots first path (Room writes sim.state.room), so the grid is keyed by the flag too.
+ */
+export function thinPassFor(sim: Sim): boolean {
+  return !((sim.state.room as { mode?: string } | undefined)?.mode === 'base-assault' && sim.worldData.name === 'West Yard');
 }
 
 /** The nav grid bots of this sim path on: the shared grid, or the sim's own copy when it has dynamic blockers. */
@@ -487,7 +499,7 @@ function onPad(d: WorldData, x: number, z: number): boolean {
 /** Probe filter of the shared grids (ground and decks): the static world only, never a sim's own colliders (D1). */
 const staticWorldOnly = (c: Collider): boolean => isStaticWorldCollider(c);
 
-export function buildNavGrid(sim: Sim): NavGrid {
+export function buildNavGrid(sim: Sim, thinPass = true): NavGrid {
   const t0 = performance.now();
   const data = sim.worldData;
   const cell = NAV_CELL;
@@ -557,9 +569,10 @@ export function buildNavGrid(sim: Sim): NavGrid {
       if (onPad(data, x, z)) cost[i] = 6;
     }
   }
-  // W10 N3: thin obstacles close every cell they cross at body height (the probe above saw them at cell centres only)
+  // W10 N3: thin obstacles close every cell they cross at body height (the probe above saw them at cell centres only;
+  // W11 F3: not for Base Assault on the West Yard, thinPassFor)
   let thin = 0;
-  for (const i of thinObstacleCells(data, { ox, oz, cell, w, h, ground })) if (walk[i]) { walk[i] = 0; walkable--; thin++; }
+  if (thinPass) for (const i of thinObstacleCells(data, { ox, oz, cell, w, h, ground })) if (walk[i]) { walk[i] = 0; walkable--; thin++; }
   const grid: NavGrid = {
     cell, ox, oz, w, h, walk, ground, cost, region: new Int32Array(n).fill(-1), regionSize: [], mainRegion: -1,
     buildMs: 0, walkable, queries, thin,

@@ -33,7 +33,7 @@ import { WEAPONS, AIM_RAY, type WeaponDef, type WeaponId } from '../../shared/co
 import { ABILITIES, abilityDef } from '../../shared/content/abilities';
 import { combatBus, ensureCombat, equipWeapon, eyeHeight, characterHeight, isStealthed } from '../combat/state';
 import { worldLineClear } from '../combat/geometry';
-import { ARCHETYPES, archetypeForClass, type Archetype, type ArchetypeId } from './archetypes';
+import { ARCHETYPES, archetypeForClass, detectionRange, type Archetype, type ArchetypeId } from './archetypes';
 import { type NavGrid, cellIndex, cellX, cellZ, findPath, isWalkable, lineWalkable, nearestWalkable, randomCell } from './nav';
 import {
   CONTEST_PENALTY, MISS_PENALTY, type LegOut, type NavBot, type NavLinkSet, type NavSpot, type ProfileLinks, clearMiss, countMiss,
@@ -215,7 +215,7 @@ function perceive(sim: Sim, e: SimEntity, ai: AiState, a: Archetype, ctx: AiCont
   const cosFov = Math.cos(a.fovHalf), cosTrack = Math.cos(100 * DEG);
   const attacker = e.health && sim.tick - e.health.lastDamageTick < 120 ? e.health.lastAttacker : -1;
   let best: SimEntity | null = null, bestScore = Infinity;
-  const sight = a.sightRange * weatherSightMult(sim);
+  const sight = detectionRange(a, weatherSightMult(sim)); // W11 F3: the sentry cone's far arc is drawn at this
   ai.seen.length = 0; // W9 X4 hook
   for (const t of ctx.chars) {
     if (t.team === e.team || t === e) continue;
