@@ -25,7 +25,9 @@ is copied into this project.
   - `spawn_points(team: int) -> Array[Vector3]` (0 = Corgi Company, 1 = Cat Cadre);
   - `slab() -> {center: Vector3, size: Vector2}`, the one control slab;
   - `floodlights() -> Array[{pos: Vector3, target: Vector3}]`;
-  - `nav_region() -> NavigationRegion3D`, baked, for bots.
+  - `nav_region() -> NavigationRegion3D`, baked, for bots; `nav_ready()` is true once the nav map serves paths
+    (about 11 physics frames after `built`).
+  - `look/` also reads `World.data.lamps` for the practicals (to become a `lamps()` accessor).
 - **Groups (set by the world, read by the look):** `ground` (terrain), `kit` (GLB pieces), `prims` (box and
   cylinder props), `world_static` (all static colliders).
 - **Physics layers:** 1 world, 2 pets, 3 hitboxes (rifle rays hit 1 and 3).
