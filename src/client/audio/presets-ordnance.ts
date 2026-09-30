@@ -7,6 +7,11 @@
 //             chest punch, air crack) + the faction's layer: a squeal snapping into a rubber POP / a gloopy SPLAT
 //             with drips after
 // The pet joke stays a layer; the thump underneath is a weapon (HARDENED: the humour is in the soldiering).
+// W10 AU2 (audio-2), the mix: rendered in a storm firefight (tests/unit/audio-w10-mix.test.ts) the peeps sat ~24 dB
+// under the rain + guns in their own band. A tick now knows whom it threatens: an enemy throwable (or your own) near
+// the local CHARACTER (engine.focus, not the camera) plays up to FUSE_THREAT.boost louder, at priority 3 in its own
+// limiter category ('fuse', so gunfire can never steal it), and raises the engine's danger duck: the weather and site
+// ambience beds dip while it ticks. A teammate's throwable, or one far away, sounds exactly as before.
 import { ad, ahr, filter, gain, glide, noiseSrc, osc, softClip, type Voice } from './synth';
 import type { AudioEngine, PlayOptions } from './engine';
 import type { OrdnanceCue } from '../fx/ordnance-view';
@@ -91,6 +96,17 @@ export const fusePeep: Recipe = (v, k) => {
   return 0.06;
 };
 
+/** W10 AU2: the squeaker's peep for the player it threatens (k = urgency): X4's peep with a shrill upper partial at
+ *  4.6-5.6 kHz, the band where rain and gunfire leave the most room, so the warning reads in a storm firefight. */
+export const fuseAlarm: Recipe = (v, k) => {
+  const t = v.t, u = Math.max(0, Math.min(1, k));
+  fusePeep(v, u);
+  const g = gain(v);
+  ad(g.gain, t, 0.002, 0.12 + 0.08 * u, 0.045);
+  osc(v, 'triangle', 4600 + 1000 * u, filter(v, 'bandpass', 4600 + 1000 * u, 4, g), 0.06);
+  return 0.06;
+};
+
 /** The hairball's wick spitting (k = urgency): a short crackle of filtered noise. */
 export const wickCrackle: Recipe = (v, k) => {
   const t = v.t, u = Math.max(0, Math.min(1, k));
@@ -159,7 +175,7 @@ export const wetSplat: Recipe = (v) => {
 };
 
 /** Every recipe (tests schedule them all on the strict fake context). */
-export const ORDNANCE_SFX = { pinPing, throwWhoosh, squeak, wetThup, fusePeep, wickCrackle, concussion, squeakPop, wetSplat } as const;
+export const ORDNANCE_SFX = { pinPing, throwWhoosh, squeak, wetThup, fusePeep, wickCrackle, concussion, squeakPop, wetSplat, fuseAlarm } as const;
 
 // ------------------------------------------------------------------------------------------------ director
 
@@ -174,8 +190,31 @@ export interface OrdnanceAudio {
  * Gains follow X3's offline renders (docs/handoff/X3.md §5, a local Squeaker shot ≈ −26): a squeak sits under a rifle
  * shot, the peeps are texture, the thump + faction layer land 2–4 dB over a mortar shot, still under the boom.
  */
-export function createOrdnanceAudio(engine: AudioEngine): OrdnanceAudio {
+/** W10 AU2: how a fuse tick treats the player it threatens (distances from the local character, m). */
+export const FUSE_THREAT = {
+  /** Full threat within `near` (the 4 m blast falloff + a step), none beyond `far`. */
+  near: 4.5, far: 10,
+  /** Tick gain × (1 + boost × threat), per faction (the hairball's crackle sits high, where little masks it). */
+  boost: [9, 4.5] as readonly [number, number],
+  /** Above this threat the squeaker peeps its alarm voice (fuseAlarm) and the tick takes priority 3. */
+  alarm: 0.25,
+  /** Danger duck = threat × (floor + (1 − floor) × urgency), held this long after each tick (s). */
+  duckFloor: 0.7, hold: 0.5,
+} as const;
+
+/** 0..1: how much a live throwable at distance `d` from the local character threatens it. */
+export function fuseThreat(d: number): number {
+  return Math.max(0, Math.min(1, (FUSE_THREAT.far - d) / (FUSE_THREAT.far - FUSE_THREAT.near)));
+}
+
+/** What the director needs: `play`, and (for the threat-aware ticks) the engine's focus and danger duck. */
+export type OrdnanceEngine = Pick<AudioEngine, 'play'> & Partial<Pick<AudioEngine, 'focus' | 'focusDistance' | 'raiseDanger'>>;
+
+export function createOrdnanceAudio(engine: OrdnanceEngine): OrdnanceAudio {
   const counts = { throw: 0, bounce: 0, tick: 0, blast: 0 };
+  /** A throwable that can hurt the local character: an enemy's, or its own (self damage 35 %; friendly fire off). */
+  const hostile = (c: OrdnanceCue) => c.local || !engine.focus || c.kind !== (engine.focus.species === 1 ? 1 : 0);
+  const threatOf = (c: OrdnanceCue) => (engine.focusDistance && hostile(c) ? fuseThreat(engine.focusDistance(c.x, c.y, c.z)) : 0);
   const o: PlayOptions = {};
   const set = (c: OrdnanceCue, gainV: number, priority: number, category: string, refDist: number, maxDist: number, k: number) => {
     o.gain = gainV; o.priority = priority; o.category = category; o.refDist = refDist; o.maxDist = maxDist; o.k = k; o.bus = 'sfx';
@@ -194,9 +233,13 @@ export function createOrdnanceAudio(engine: AudioEngine): OrdnanceAudio {
         case 'bounce':
           engine.play(c.kind === 0 ? squeak : wetThup, set(c, 0.55 + 0.3 * c.k, 1, 'impact', 4, 40, c.k));
           break;
-        case 'tick':
-          engine.play(c.kind === 0 ? fusePeep : wickCrackle, set(c, 0.35 + 0.35 * c.k, c.k > 0.6 ? 2 : 1, 'fx', 3, 28, c.k));
+        case 'tick': {
+          const threat = threatOf(c), alarm = threat > FUSE_THREAT.alarm;
+          const g = (0.35 + 0.35 * c.k) * (1 + FUSE_THREAT.boost[c.kind] * threat);
+          engine.play(c.kind === 0 ? (alarm ? fuseAlarm : fusePeep) : wickCrackle, set(c, g, alarm ? 3 : c.k > 0.6 ? 2 : 1, 'fuse', 3, 28, c.k));
+          if (threat > 0) engine.raiseDanger?.(threat * (FUSE_THREAT.duckFloor + (1 - FUSE_THREAT.duckFloor) * c.k), FUSE_THREAT.hold);
           break;
+        }
         case 'blast':
           engine.play(concussion, set(c, 0.85, 3, 'impact', 8, 120, c.k));
           engine.play(c.kind === 0 ? squeakPop : wetSplat, set(c, 0.6, 2, 'impact', 6, 70, c.k));

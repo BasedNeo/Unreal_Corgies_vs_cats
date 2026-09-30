@@ -31,6 +31,11 @@ export interface Volumes { master: number; music: number; sfx: number }
 
 interface Live { info: VoiceInfo; out: GainNode; nodes: AudioNode[] }
 
+/** W10 AU2: the danger duck. A live enemy throwable at the local character's feet raises `danger` (0..1) with a hold;
+ *  continuous ambience beds (weather.ts, site-ambience.ts) scale by bedDuck() so the fuse tick cuts through, then the
+ *  world comes back. One-shots (guns, hits, calls) never duck: the fight stays the fight. */
+export const DANGER = { bedDuck: 0.72, release: 0.35 } as const;
+
 export class AudioEngine {
   ctx: AudioContext | null = null;
   master: GainNode | null = null;
@@ -43,6 +48,11 @@ export class AudioEngine {
   private seed = 0x2545f491;
   private onReady: Array<(ctx: AudioContext) => void> = [];
   private unlockBound = () => { void this.unlock(); };
+  /** W10 AU2: where the local character is (the camera looks at it; the ears are the camera) and its species; set by
+   *  GameAudio.update. Threat-aware cues (a fuse near YOU) measure from here; null = unknown (use the listener). */
+  focus: { x: number; y: number; z: number; species: number } | null = null;
+  private dangerPeak = 0;
+  private dangerHold = -1;
 
   constructor(maxVoices = 28) {
     this.limiter = new VoiceLimiter(maxVoices);
@@ -123,6 +133,37 @@ export class AudioEngine {
       l.setPosition(px, py, pz);
       l.setOrientation(fx, fy, fz, ux, uy, uz);
     }
+  }
+
+  /** W10 AU2: raise the danger duck to at least `level` (0..1), held for `hold` s on the audio clock. */
+  raiseDanger(level: number, hold: number): void {
+    if (level <= 0 || level < this.danger) return;
+    this.dangerPeak = Math.min(1, level);
+    this.dangerHold = (this.ctx?.currentTime ?? 0) + hold;
+  }
+
+  /** The current danger (decays after its hold with DANGER.release). */
+  get danger(): number {
+    if (this.dangerPeak <= 0) return 0;
+    const now = this.ctx?.currentTime ?? 0;
+    if (now <= this.dangerHold) return this.dangerPeak;
+    const v = this.dangerPeak * Math.exp(-(now - this.dangerHold) / DANGER.release);
+    if (v < 1e-3) { this.dangerPeak = 0; return 0; }
+    return v;
+  }
+
+  /** Gain multiplier for continuous ambience beds under the danger duck: exactly 1 when there is no danger. */
+  bedDuck(): number {
+    const d = this.danger;
+    return d > 0 ? 1 - DANGER.bedDuck * d : 1;
+  }
+
+  /** Distance from the local character (focus) or, without one, the listener. */
+  focusDistance(x: number, y: number, z: number): number {
+    const f = this.focus;
+    if (!f) return this.distanceTo(x, y, z);
+    const dx = x - f.x, dy = y - f.y, dz = z - f.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
   }
 
   /** Per-frame hot path (footsteps, engine loops): sqrt of a sum — V8's Math.hypot allocates on every call. */

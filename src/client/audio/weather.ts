@@ -5,6 +5,8 @@
 //   thunder     one-shot rumble (+ a crack for near strikes), scheduled strike.thunderDelay seconds
 //               after each lightning flash (deterministic strikes: every client hears the same storm)
 //   sprinkler   spatial "tch-tch-tch" hiss at the nearest running garden sprinkler
+// W10 AU2: the beds (rain, roar, wind, sprinkler) scale by engine.bedDuck(), exactly 1 unless a live enemy throwable
+// ticks at the local character's feet (presets-ordnance.ts), when they dip fast so the fuse cuts through.
 // Loops start silent and follow their targets with setTargetAtTime (no clicks). Nothing is created
 // before the engine's AudioContext exists (first user gesture). Wiring (main.ts):
 //   const weatherAudio = createWeatherAudio(audio.engine, worldData);
@@ -139,11 +141,12 @@ export function createWeatherAudio(engine: AudioEngine, data: WorldData): Weathe
         }
       }
       if (!L) return;
-      set(L.rain.gain, levels.rain, 0.6);
-      set(L.roar.gain, levels.roar, 0.8);
-      set(L.wind.gain, levels.wind * (0.75 + 0.25 * Math.sin(clock * 0.37) * Math.sin(clock * 0.23 + 1)), 0.5);
+      const duck = engine.bedDuck(), fast = duck < 1;
+      set(L.rain.gain, levels.rain * duck, fast ? 0.08 : 0.6);
+      set(L.roar.gain, levels.roar * duck, fast ? 0.08 : 0.8);
+      set(L.wind.gain, levels.wind * (0.75 + 0.25 * Math.sin(clock * 0.37) * Math.sin(clock * 0.23 + 1)) * duck, fast ? 0.08 : 0.5);
       set(L.windBp.Q, 1.2 + 1.2 * w.storm, 1);
-      set(L.spr.gain, levels.sprinkler, 0.25);
+      set(L.spr.gain, levels.sprinkler * duck, fast ? 0.08 : 0.25);
       if (son > 0) {
         const ctx = engine.ctx!;
         const P = L.sprPan;

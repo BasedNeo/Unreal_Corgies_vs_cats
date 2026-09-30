@@ -28,6 +28,7 @@ import { createFx } from './fx';
 import { createAudio } from './audio';
 import { createHitFeedback } from './ui/hit-feedback'; // X3
 import { createWeatherAudio } from './audio/weather';
+import { createSiteAmbience } from './audio/site-ambience'; // W10 AU2
 import { Nameplates } from './views/nameplates';
 import { BossBar } from './views/boss-bar';
 import { createBossTelegraphFx } from './procgen/boss';
@@ -151,6 +152,9 @@ async function main(): Promise<void> {
   const nameplates = new Nameplates(ui);
   const audio = createAudio();
   const weatherAudio = createWeatherAudio(audio.engine, worldData);
+  // W10 AU2: the site's ambience from the world data (The Lot: rain on steel and tarps, drips, the crane, floodlight hum,
+  // the ditch, far site noise; the West Yard has none of these features: nothing is built there)
+  const siteAudio = createSiteAmbience(audio, worldData);
   // X3: FX + audio know the world, so impacts classify by surface (metal, wood, water…) and mark props, not just terrain
   const fx = createFx(ctx.scene, ctx.camera, views, { heightAt: (x, z) => worldData.height(x, z), world: worldData });
   // X4: throwables (the authority throws on the Throw release; the view draws them from snapshots + the arc preview)
@@ -175,6 +179,7 @@ async function main(): Promise<void> {
       views.setBlobShadows(!QUALITY[settingTier].shadows);
     }
     audio.setQuality(st.quality);
+    siteAudio.setQuality(st.quality); // W10 AU2: 'low' keeps one container and one floodlight loop
   };
   const hud = createHud(ui, {
     play(o) {
@@ -212,7 +217,7 @@ async function main(): Promise<void> {
   hud.setUiSound((k) => audio.ui(k));
   const prompts = createInteractPrompts(ui, { send: (msg) => net?.transport.send(msg), sound: (k) => audio.ui(k) });
   const planeHud = createPlaneHud(ui);
-  const assaultHud = createBaseAssaultHud(ui, { audio }); // G4a (idle in other modes)
+  const assaultHud = createBaseAssaultHud(ui, {}); // G4a (idle in other modes); W10 AU2: its sounds now play in the audio module
   const ordHud = createOrdnanceHud(document.getElementById('cvc-hud') ?? ui); // X4
   // A1: intro/outro captions, step barks, the squad-down beat, the chapter-complete card (+ device progress)
   const adventureUrl = (id: string) => {
@@ -412,6 +417,7 @@ async function main(): Promise<void> {
     const wTick = net?.connected ? net.renderTime(now) * net.tickHz : undefined;
     worldView.update(dt, ctx.camera, wTick);
     weatherAudio.update(worldView.weather, worldView.tick, ctx.camera, dt);
+    siteAudio.update(worldView.weather, ctx.camera, dt); // W10 AU2
     fx.update(dt, states, localId);
     audio.update(ctx.camera, states, localId, dt);
     nameplates.update(states, localId, local?.team ?? 0, ctx.camera, (id) => views.get(id)?.avatar.height ?? 1.4);

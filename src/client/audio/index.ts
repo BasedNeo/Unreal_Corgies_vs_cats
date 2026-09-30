@@ -1,6 +1,8 @@
 // OWNER: L5 (juice). Audio director: maps GameEvents and entity motion to procedural sounds and drives the
 // adaptive music from combat intensity. S2 added vehicle engine loops (vehicle-loops.ts), vehicle/destructible
-// event voices (abilitySfx) and the adventure step/chapter stingers.
+// event voices (abilitySfx) and the adventure step/chapter stingers. W10 AU2: Base Assault's ball voices, calls and
+// capture fanfare (presets-objective.ts) replace the generic pickup chime / score sting for its events, and its carrier
+// tension drives the music's pulse layer (music-tension.ts); engine.focus follows the local character.
 //
 //   const audio = createAudio();                                   // attaches first-gesture unlock
 //   bus.on('game', (ev) => audio.onGameEvent(ev));
@@ -17,6 +19,7 @@ import { Music } from './music';
 import { speak } from './gibberish';
 import * as S from './presets';
 import { VehicleLoops } from './vehicle-loops';
+import { createObjectiveAudio, type ObjectiveAudio } from './presets-objective';
 import { WeaponTable, WEAPON_FX, type WeaponFxId } from '../fx/weapon-fx';
 import { SurfaceMap, makeSurfaceHit, type SurfaceWorld } from '../fx/surfaces';
 import { impactDelay } from '../fx/delays';
@@ -101,6 +104,8 @@ export interface GameAudio {
   setWorld(world: SurfaceWorld | null): void;
   /** Current combat intensity (0..1). */
   readonly intensity: number;
+  /** W10 AU2: Base Assault audio (cue counts, the carrier tension). */
+  readonly objective: ObjectiveAudio;
   dispose(): void;
 }
 
@@ -138,6 +143,8 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
   // jingle waits one frame (it is dropped if the fanfare comes), and the fanfare mutes the team sting while it plays.
   let pendingStep = false;
   let fanfareUntil = -1;
+  const objective = createObjectiveAudio(engine);
+  const focus = { x: 0, y: 0, z: 0, species: 0 };
 
   engine.whenReady((ctx) => {
     loops = new VehicleLoops(engine, ctx, engine.buses!.sfx);
@@ -192,6 +199,7 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
 
   const audio: GameAudio = {
     engine,
+    objective,
     get intensity() { return intensity.level; },
     unlock: () => engine.unlock(),
 
@@ -211,8 +219,13 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
           engine.play(SCORE_STINGERS.step, { bus: 'ui', gain: 0.85, priority: 2, category: 'ui' });
         }
       }
+      // W10 AU2: the local character (threat-aware cues measure from it) and the carrier tension
+      const me = st.get(lid);
+      if (me && (me.flags & EFlag.Dead) === 0) { focus.x = me.x; focus.y = me.y + 0.6; focus.z = me.z; focus.species = me.species; engine.focus = focus; }
+      else engine.focus = null;
+      const tension = objective.update(st, lid, dt);
       intensity.update(dt);
-      if (music && clock - musicSetAt > 0.25) { music.setIntensity(intensity.level); musicSetAt = clock; }
+      if (music && clock - musicSetAt > 0.25) { music.setIntensity(intensity.level); music.setTension(tension.level, tension.hunted); musicSetAt = clock; }
       if (stepPhase.size > 96) stepPhase.forEach((_, id) => { if (!st.has(id)) stepPhase.delete(id); });
     },
 
@@ -279,6 +292,7 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
           engine.play(S.boom, { x: ev.x, y: ev.y, z: ev.z, k: ev.r / 3, priority: 3, category: 'impact', maxDist: 120, refDist: 8 });
           break;
         case 'pickup':
+          if (objective.onGameEvent(ev, localId, states)) break; // W10 AU2: the squeaky ball changes hands
           engine.play(S.chime, ev.id === localId ? { bus: 'ui', priority: 2, category: 'ui' } : at(ev.id, { priority: 1, category: 'fx' }));
           break;
         case 'bark': {
@@ -293,6 +307,7 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
           break;
         }
         case 'score': {
+          if (objective.onGameEvent(ev, localId, states)) break; // W10 AU2: Base Assault's own cues
           if (ev.reason === 'step') { pendingStep = true; break; }
           if (ev.reason === 'chapter') {
             pendingStep = false;

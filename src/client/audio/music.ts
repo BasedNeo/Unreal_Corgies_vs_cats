@@ -3,10 +3,12 @@
 //   bed    — soft pad chords + marimba-ish plucks + walking bass (always on, ducks a little in combat)
 //   groove — kick/snare/hats + driving gritty bass (fades in as fights start)
 //   stabs  — brass-ish chord stabs + tom fills (only when things get hot)
+//   pulse  — W10 AU2: the carrier tension layer (heartbeat + rising pulse, music-tension.ts), from setTension()
 // Notes are scheduled ahead on the audio clock with a lookahead timer (no drift, no main-thread timing jitter).
 import { layerGains } from './intensity';
 import { drive } from './presets';
 import { midiHz, noise } from './synth';
+import { pulseGain, scheduleTension } from './music-tension';
 
 const BPM = 108;
 const STEP = 60 / BPM / 4; // 16th note
@@ -27,13 +29,15 @@ const PLUCK: number[][] = [
 export class Music {
   private ctx: AudioContext;
   private out: GainNode;
-  private bed: GainNode; private groove: GainNode; private stabs: GainNode;
+  private bed: GainNode; private groove: GainNode; private stabs: GainNode; private pulse: GainNode;
   private grit: WaveShaperNode;
   private timer: ReturnType<typeof setInterval> | null = null;
   private nextTime = 0;
   private step = 0;
   private level = 0;
   private gains = { bed: 1, groove: 0, stabs: 0 };
+  private tension = 0;
+  private hunted = false;
 
   constructor(ctx: AudioContext, dest: AudioNode) {
     this.ctx = ctx;
@@ -41,7 +45,7 @@ export class Music {
     this.out.gain.value = 0.0001;
     this.out.connect(dest);
     const mk = (v: number) => { const g = ctx.createGain(); g.gain.value = v; g.connect(this.out); return g; };
-    this.bed = mk(1); this.groove = mk(0.0001); this.stabs = mk(0.0001);
+    this.bed = mk(1); this.groove = mk(0.0001); this.stabs = mk(0.0001); this.pulse = mk(0.0001);
     this.grit = drive(ctx, 2.2);
     this.grit.connect(this.groove);
   }
@@ -79,7 +83,17 @@ export class Music {
     set(this.stabs, g.stabs, g.stabs > this.gains.stabs ? 0.4 : 2);
     set(this.bed, g.bed, 1.5);
     this.gains = g;
+    set(this.pulse, pulseGain(this.tension, g.groove), 0.4);
   }
+
+  /** W10 AU2: carrier tension 0..1 (presets-objective.ts objectiveTension, smoothed) and its flavour. */
+  setTension(level: number, hunted: boolean): void {
+    this.tension = Math.max(0, Math.min(1, level));
+    this.hunted = hunted;
+    this.pulse.gain.setTargetAtTime(pulseGain(this.tension, this.gains.groove), this.ctx.currentTime, 0.4);
+  }
+
+  get tensionLevel(): number { return this.tension; }
 
   get intensity(): number { return this.level; }
 
@@ -114,6 +128,8 @@ export class Music {
       if (s === 14) this.hat(t, 0.06, 0.16);
       if (s % 2 === 0) this.bass(midiHz(chord.root + (s === 6 || s === 14 ? 12 : 0)), t, STEP * 1.6, this.grit, 'sawtooth', 0.22);
     }
+    // --- pulse (W10 AU2: the carrier tension layer) ---
+    if (this.tension >= 0.05) scheduleTension(this.ctx, this.pulse, s, t, chord.root, this.tension, this.hunted);
     // --- stabs ---
     if (stabsOn) {
       if (s === 6 || s === 14 || (s === 3 && bar % 2 === 1)) this.stab(chord.tones, t);

@@ -60,6 +60,8 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
                                    steal / carry (EFlag.Carrier: 0.75× speed, no glide, no rides) / drop / return /
                                    capture, stalemate relief; bases from WorldData.bases → battleOf flags → spawns
   adventure/                       A1 mode adventure: setup 95 + runner 790 (chapter steps and triggers, spawns and
+                                   W10 A7: the runner plays only chapters of its sim's map (chapterForSim); online rooms
+                                   advance along their map (chapterAfterOnMap); chapters-lot.ts = chapter 7 on The Lot
                                    sentries, stealth alarm, checkpoints with fail forward, MatchState/beacon fold);
                                    A2 props.ts: pup kits per chapter, parked karts, barricades (lasting barrier walls)
   ai/brain.ts propShot · tactics   A2: bots shoot a destroy step's props (propTarget), sentries walk their posts
@@ -116,6 +118,9 @@ src/client/
                                    bakes the `battle` ground channels (scorch, mud, puddles, ruts)
                                    W7 P3: prim-mesh crease ink in 33 m tiles, drawn within 40 m (CREASE_DRAW_DISTANCE)
   ui/  audio/  fx/                 comic HUD + menus (MATCH selector, room browser, LOCKER) + chat + tips + settings ·
+                                   W10 U3: ui/awards.ts (AwardsTally from events + roster, the awards card); the kill feed
+                                   reads death.wpn. W10 AU2: audio/presets-objective.ts + music-tension.ts (Base Assault
+                                   calls, fanfare, heartbeat), site-ambience.ts + presets-site.ts (world-data ambience)
                                    reward card (rewards.ts, never interactive) ·
                                    procedural audio + music (S2: vehicle-loops.ts engine loops from snapshot states,
                                    presets-engines.ts; vehicle/break voices; adventure stingers) · pooled FX + words ·

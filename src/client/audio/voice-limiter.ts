@@ -27,6 +27,9 @@ export const DEFAULT_CATEGORY_CAPS: Readonly<Record<string, number>> = {
   foot: 6, fire: 8, hit: 6, voice: 4, impact: 6, ui: 4, fx: 8,
   // S2 vehicle engine loops: at most 4 audible + 2 fading out (vehicle-loops.ts keeps to this itself)
   engine: 6,
+  // W10 AU2: fuse ticks in their own category (gunfire and fx can never crowd them out); the site ambience's one-shots
+  // (drips, creaks, distant clanks) and its positional loops (rain on metal / tarps, floodlight hum), all priority 0
+  fuse: 4, amb: 3, ambloop: 6,
 };
 
 export class VoiceLimiter {
