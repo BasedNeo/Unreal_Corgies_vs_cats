@@ -19,6 +19,13 @@
 // view: KitPiece describes a piece (url, LOD distances, look options), createKitView draws any piece at its placements,
 // and createLotKitView bundles The Lot's two (containers + bag walls) for world-view's ?kit=glb branch. A bag wall of
 // length len is m = round(len / 4.8) modules, each stretched along its z by len / (m x 4.8).
+//
+// W11 P-GLB3: batch 1 of the Lot kit. LOT_KIT is the table of pieces world-view draws (containers, bag walls, the
+// Pipeworks pipe, the footing block, the floodlight mast and its lamp housings); each entry has a split that finds its
+// procedural prims (rebuilt with the same props.ts / pipes.ts builder and matched one for one) and its placements, from
+// what the entries before it left. KitPlacement gains `pitch` (Euler YXZ after yaw, as the prims and colliders turn),
+// for the lamp housings that the world data aims down at each tower's target. Every piece keeps its procedural stand-in
+// until its GLB is drawn, and for good if the load fails.
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
@@ -27,8 +34,9 @@ import { worldColor } from '../world/world-palette';
 import { buildPrimMeshes, disposePrimMeshes } from '../world/prim-mesh';
 import type { VisualPrim, WorldData } from '../../shared/world/world-types';
 import { Kit } from '../../shared/world/kit';
-import { bagWall, container } from '../../shared/world/lot/props';
-import { CONTAINER, CONTAINERS } from '../../shared/world/lot/layout';
+import { bagWall, container, floodTower, footing } from '../../shared/world/lot/props';
+import { addPipe } from '../../shared/world/lot/pipes';
+import { CONTAINER, CONTAINERS, FLOOD, FLOOD_TOWERS, PIPE } from '../../shared/world/lot/layout';
 
 export type KitLook = 'pbr' | 'stylize';
 
@@ -47,8 +55,11 @@ export function kitFlag(search: string = typeof location !== 'undefined' ? locat
   return q.get('kitlook') === 'stylize' ? 'stylize' : 'pbr';
 }
 
-/** Where one instance of a kit piece stands: base centre (x, y, z), turn about +Y, palette colour, stretch along z. */
-export interface KitPlacement { id: string; x: number; y: number; z: number; yaw: number; col: string; sz?: number }
+/**
+ * Where one instance of a kit piece stands: base centre (x, y, z), turn about +Y, palette colour, stretch along z, and
+ * (P-GLB3) a pitch about the turned x axis (Euler 'YXZ': R = Ry(yaw) Rx(pitch), about the base centre).
+ */
+export interface KitPlacement { id: string; x: number; y: number; z: number; yaw: number; col: string; sz?: number; pitch?: number }
 
 /** One shared-GLB kit piece as the client draws it. */
 export interface KitPiece {
@@ -210,8 +221,9 @@ export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; pla
   const cur = placements.map(() => -1);
   const zero = new THREE.Matrix4().makeScale(0, 0, 0);
   const up = new THREE.Vector3(0, 1, 0);
-  const mats = placements.map((p) => new THREE.Matrix4().compose(new THREE.Vector3(p.x, p.y, p.z), new THREE.Quaternion().setFromAxisAngle(up, p.yaw), new THREE.Vector3(1, 1, p.sz ?? 1)));
-  const centres = placements.map((p) => new THREE.Vector3(p.x, p.y + piece.centreY, p.z));
+  const turn = (p: KitPlacement) => (p.pitch ? new THREE.Quaternion().setFromEuler(new THREE.Euler(p.pitch, p.yaw, 0, 'YXZ')) : new THREE.Quaternion().setFromAxisAngle(up, p.yaw));
+  const mats = placements.map((p) => new THREE.Matrix4().compose(new THREE.Vector3(p.x, p.y, p.z), turn(p), new THREE.Vector3(1, 1, p.sz ?? 1)));
+  const centres = placements.map((p) => new THREE.Vector3(0, piece.centreY, 0).applyQuaternion(turn(p)).add(new THREE.Vector3(p.x, p.y, p.z)));
   const cam = new THREE.Vector3();
   let disposed = false;
 
@@ -300,21 +312,158 @@ export function createContainerKitView(split: { containers: VisualPrim[]; placem
   return createKitView(KIT_CONTAINER_PIECE, { prims: split.containers, placements: split.placements }, look, opts);
 }
 
-/** The Lot's kit split: containers first, then the bag walls from what is left; `rest` is everything else. */
-export function splitLotKitPrims(data: WorldData) {
-  const containers = splitContainerPrims(data);
-  const bags = splitBagWallPrims(data, containers.rest);
-  return { rest: bags.rest, containers, bags };
+// ------------------------------------------------------------------------------------------------ batch 1 (P-GLB3)
+const kitUrl = (name: string) => `${import.meta.env?.BASE_URL ?? '/'}assets/kits/${name}.glb`;
+
+/** A piece's split: the procedural prims it replaces (matched), what is left (rest), its placements, and `missing` (rebuilt prims not found: 0 when the data is consistent). */
+export interface KitSplit { rest: VisualPrim[]; matched: VisualPrim[]; placements: KitPlacement[]; missing: number }
+
+/**
+ * Batch 1's LOD distances: LOD0 at every distance. The four pieces are cheap (144-484 triangles; all 34 instances of LOD0
+ * cost about 6.5 k triangles) and a LOD mesh is one instanced draw plus its shadow draw, so switching LODs would add up to
+ * four draws per piece to save a few thousand triangles (measured, Lot 4v4 high: 222 draws with the flag off, 248-250
+ * with per-instance LODs on these four, 232-234 with LOD0 only). The GLBs keep LOD1 / LOD2 (the standard; Godot and a later far tier use them).
+ */
+export const KIT_LOD0_ONLY = [Infinity, Infinity] as const;
+
+export const KIT_PIPE = 'Kit_Lot_Pipe_01';
+const PIPE_COS = Math.cos(Math.PI / PIPE.seg);
+export const KIT_PIPE_PIECE: KitPiece = {
+  name: KIT_PIPE, url: kitUrl(KIT_PIPE), lodDist: KIT_LOD0_ONLY, centreY: PIPE.ro * PIPE_COS, paintTint: false,
+  // concrete: no metal scratches; a finer, shallower bump
+  pbrOpts: { scratch: 0, detailBump: [0.003, 0.0006] }, toonSurface: 'world',
+};
+
+/** Is `q` a Lot drainage pipe's ring (pipes.ts addPipe() with layout.ts PIPE)? */
+const isPipeRing = (q: VisualPrim) => q.s === 'ring' && q.seg === PIPE.seg && Math.abs(q.a - PIPE.ro) < 1e-6 && Math.abs(q.b - PIPE.len) < 1e-6 && Math.abs(q.c - (PIPE.ro - PIPE.ri)) < 1e-6;
+
+/**
+ * The Lot's drainage pipes: placements from their ring prims (the base centre is the outer floor facet, ro cos(pi/N)
+ * under the axis; the kit's axis runs along its z, so the turn is the pipe's heading + pi/2), and the ring prims rebuilt
+ * with addPipe() at those placements and matched one for one.
+ */
+export function splitPipePrims(data: WorldData, prims: readonly VisualPrim[] = data.prims ?? []): KitSplit {
+  const placements = prims.filter(isPipeRing).map((q, i) => ({ id: `pipe_${i}`, x: q.x, y: q.y - PIPE.ro * PIPE_COS, z: q.z, yaw: (q.yaw ?? 0) + Math.PI / 2, col: q.col }));
+  const kit = new Kit();
+  for (const p of placements) addPipe(kit, PIPE, p.x, p.y, p.z, p.yaw - Math.PI / 2, p.col);
+  const r = matchPrims(prims, kit.prims);
+  return { rest: r.rest, matched: r.matched, placements, missing: r.missing };
+}
+
+export const KIT_FOOTING = 'Kit_Lot_Footing_01';
+export const KIT_FOOTING_PIECE: KitPiece = {
+  name: KIT_FOOTING, url: kitUrl(KIT_FOOTING), lodDist: KIT_LOD0_ONLY, centreY: 0.7, paintTint: false,
+  pbrOpts: { scratch: 0, detailBump: [0.003, 0.0006] }, toonSurface: 'world',
+};
+
+/** Footing blocks from their 'footing' colliders (base centre, turn), rebuilt with props.ts footing() and matched. */
+export function splitFootingPrims(data: WorldData, prims: readonly VisualPrim[] = data.prims ?? []): KitSplit {
+  const kit = new Kit();
+  const placements = data.props.filter((p) => p.type === 'footing').map((f, i) => {
+    const base = f.y - f.hy;
+    footing(kit, () => base + 0.04, f.x, f.z, f.rotY ?? 0);          // footing() sinks its block 0.04 under the ground
+    return { id: `footing_${i}`, x: f.x, y: base, z: f.z, yaw: f.rotY ?? 0, col: 'concrete' };
+  });
+  const r = matchPrims(prims, kit.prims);
+  return { rest: r.rest, matched: r.matched, placements, missing: r.missing };
+}
+
+export const KIT_FLOODMAST = 'Kit_Lot_FloodMast_01';
+export const KIT_FLOODLAMP = 'Kit_Lot_FloodLamp_01';
+export const KIT_FLOODMAST_PIECE: KitPiece = {
+  name: KIT_FLOODMAST, url: kitUrl(KIT_FLOODMAST), lodDist: KIT_LOD0_ONLY, centreY: 11, paintTint: false,
+  pbrOpts: {}, toonSurface: 'metal',
+};
+export const KIT_FLOODLAMP_PIECE: KitPiece = {
+  name: KIT_FLOODLAMP, url: kitUrl(KIT_FLOODLAMP), lodDist: KIT_LOD0_ONLY, centreY: 0.475, paintTint: false,
+  pbrOpts: {}, toonSurface: 'metal',
+};
+
+/**
+ * The Lot's floodlight towers rebuilt with props.ts floodTower() from their colliders (the base's bottom, and the
+ * ground height at the aim that gives the housings' pitch), split into the mast half (base, plates, mast), the lamp
+ * bar (stays procedural) and the housings. Placements: the mast at the flood_base collider (yaw 0), each housing at its
+ * flood_head collider turned by its yaw and pitch, the kit's base centre T(0, -hy, 0) under the box centre.
+ */
+function lotFloodTowers(data: WorldData) {
+  const bases = data.props.filter((p) => p.type === 'flood_base');
+  const heads = data.props.filter((p) => p.type === 'flood_head');
+  const bars = data.props.filter((p) => p.type === 'flood_bar');
+  const mast = new Kit(), lamp = new Kit();
+  const masts: KitPlacement[] = [], lamps: KitPlacement[] = [];
+  for (const b of bases) {
+    const t = FLOOD_TOWERS.find((f) => Math.abs(f.x - b.x) < 1e-6 && Math.abs(f.z - b.z) < 1e-6);
+    const mine = heads.filter((h) => Math.hypot(h.x - b.x, h.z - b.z) < 4);
+    const bar = bars.find((h) => Math.hypot(h.x - b.x, h.z - b.z) < 1e-6);
+    if (!t || !mine.length || !bar) continue;
+    const y0 = b.y - b.hy;                                         // floodTower(): y0 = groundMin(...) - 0.05
+    const gy = y0 + FLOOD.mast - Math.hypot(t.aim[0] - t.x, t.aim[1] - t.z) * Math.tan(mine[0].pitch ?? 0);
+    const k = new Kit();
+    floodTower(k, (x, z) => (Math.hypot(x - t.x, z - t.z) < 5 ? y0 + 0.05 : gy), t.x, t.z, t.aim, []);
+    for (const q of k.prims) {
+      if (q.pitch) lamp.prims.push(q);
+      else if (!(q.s === 'box' && Math.abs(q.x - bar.x) < 1e-6 && Math.abs(q.y - bar.y) < 1e-6 && Math.abs(q.z - bar.z) < 1e-6)) mast.prims.push(q);   // the lamp bar stays procedural
+    }
+    masts.push({ id: `${t.id}_mast`, x: b.x, y: y0, z: b.z, yaw: 0, col: 'hazardOchre' });
+    mine.forEach((h, j) => {
+      const o = new THREE.Vector3(0, -h.hy, 0).applyEuler(new THREE.Euler(h.pitch ?? 0, h.rotY ?? 0, 0, 'YXZ'));
+      lamps.push({ id: `${t.id}_lamp${j}`, x: h.x + o.x, y: h.y + o.y, z: h.z + o.z, yaw: h.rotY ?? 0, pitch: h.pitch ?? 0, col: 'camoBlack' });
+    });
+  }
+  return { mast: mast.prims, lamp: lamp.prims, masts, lamps };
+}
+
+export function splitFloodMastPrims(data: WorldData, prims: readonly VisualPrim[] = data.prims ?? []): KitSplit {
+  const t = lotFloodTowers(data);
+  const r = matchPrims(prims, t.mast);
+  return { rest: r.rest, matched: r.matched, placements: t.masts, missing: r.missing };
+}
+
+export function splitFloodLampPrims(data: WorldData, prims: readonly VisualPrim[] = data.prims ?? []): KitSplit {
+  const t = lotFloodTowers(data);
+  const r = matchPrims(prims, t.lamp);
+  return { rest: r.rest, matched: r.matched, placements: t.lamps, missing: r.missing };
+}
+
+/** One row of the kit table: a piece and how to find it in the world data. */
+export interface KitEntry { piece: KitPiece; split(data: WorldData, prims: readonly VisualPrim[]): KitSplit }
+
+/** The Lot's kit, in split order (each entry splits what the ones before it left). */
+export const LOT_KIT: readonly KitEntry[] = [
+  { piece: KIT_CONTAINER_PIECE, split: (d, p) => { const r = splitContainerPrims(d, p); return { rest: r.rest, matched: r.containers, placements: r.placements, missing: r.missing }; } },
+  { piece: KIT_BAGWALL_PIECE, split: (d, p) => { const r = splitBagWallPrims(d, p); return { rest: r.rest, matched: r.walls, placements: r.placements, missing: r.missing }; } },
+  { piece: KIT_PIPE_PIECE, split: splitPipePrims },
+  { piece: KIT_FOOTING_PIECE, split: splitFootingPrims },
+  { piece: KIT_FLOODMAST_PIECE, split: splitFloodMastPrims },
+  { piece: KIT_FLOODLAMP_PIECE, split: splitFloodLampPrims },
+];
+
+/**
+ * The Lot's kit split: every LOT_KIT entry in order; `rest` is everything no piece took. `containers` and `bags` keep
+ * P-GLB1b's shape (world-view and its tests read them).
+ */
+export function splitLotKitPrims(data: WorldData, table: readonly KitEntry[] = LOT_KIT) {
+  let rest: VisualPrim[] = [...(data.prims ?? [])];
+  const pieces = table.map((e) => {
+    const s = e.split(data, rest);
+    rest = s.rest;
+    return { piece: e.piece, ...s };
+  });
+  const at = (name: string) => pieces.find((p) => p.piece.name === name);
+  const c = at(KIT_CONTAINER), b = at(KIT_BAGWALL);
+  return {
+    rest, pieces,
+    containers: { containers: c?.matched ?? [], placements: c?.placements ?? [], missing: c?.missing ?? 0 },
+    bags: { walls: b?.matched ?? [], placements: b?.placements ?? [], missing: b?.missing ?? 0 },
+  };
 }
 
 /**
- * Every Lot kit piece in one view (world-view's ?kit=glb branch): containers + bag walls. stats() sums the pieces
+ * Every Lot kit piece that has placements, in one view (world-view's ?kit=glb branch). stats() sums the pieces
  * (kitLoaded = pieces drawn from their GLB) and adds per-piece kitTriangles_<name>.
  */
 export function createLotKitView(split: ReturnType<typeof splitLotKitPrims>, look: KitLook, opts: { far?: number } = {}): KitView {
-  const views: [KitPiece, KitView][] = [];
-  if (split.containers.placements.length) views.push([KIT_CONTAINER_PIECE, createKitView(KIT_CONTAINER_PIECE, { prims: split.containers.containers, placements: split.containers.placements }, look, opts)]);
-  if (split.bags.placements.length) views.push([KIT_BAGWALL_PIECE, createKitView(KIT_BAGWALL_PIECE, { prims: split.bags.walls, placements: split.bags.placements }, look, opts)]);
+  const views: [KitPiece, KitView][] = split.pieces.filter((p) => p.placements.length).map((p) => [p.piece, createKitView(p.piece, { prims: p.matched, placements: p.placements }, look, opts)]);
   const group = new THREE.Group();
   group.name = 'kit_glb';
   for (const [, v] of views) group.add(v.group);

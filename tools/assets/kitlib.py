@@ -238,12 +238,21 @@ def build_kit(name, lod_meshes_fn, colliders, alb, rough, metal, nrm, out, atlas
     gnode.node_tree = grp
     nt.links.new(sep.outputs['Red'], gnode.inputs['Occlusion'])
 
-    # ---- COL_ proxies (after the AO bake: they would occlude it): node at the box centre, mesh = +-half extents
-    for i, (typ, cc, size) in enumerate(colliders):
+    # ---- COL_ proxies (after the AO bake: they would occlude it): node at the box centre, mesh = +-half extents.
+    # P-GLB3: an optional 4th element is a 3x3 rotation (game axes; an oriented box, extras.collider = 'obb', for sim
+    # colliders that are turned about their own centre like the pipe facets) and a 5th a dict of extra extras.
+    for i, cdef in enumerate(colliders):
+        typ, cc, size = cdef[:3]
         ob = bpy.data.objects.new(f'COL_{name}_{i}', box_col_mesh(f'COL_{name}_{i}', size))
         ob.location = g2b(cc)
         ob['collider'] = 'box'
+        if len(cdef) > 3 and cdef[3] is not None:
+            ob.rotation_mode = 'QUATERNION'
+            ob.rotation_quaternion = rot_g2b(cdef[3])
+            ob['collider'] = 'obb'
         ob['sim_type'] = typ
+        for k, v in (cdef[4].items() if len(cdef) > 4 else ()):
+            ob[k] = v
         sc.collection.objects.link(ob)
         ob.parent = root
 
@@ -264,3 +273,244 @@ def report(info, root):
     info = dict(info)
     info['glb'] = os.path.relpath(info['glb'], root)
     print('BUILD', json.dumps(info))
+
+
+# ================================================================================================ P-GLB3 (batch 1)
+# Shared by build-pipe.py, build-footing.py and build-floodtower.py: game-axes rotations, the palette, a generic face
+# atlas (faces are rectangles in metres, shelf-packed at the largest texel density that fits), per-face painting into
+# baseColor / roughness / metalness / height (-> tangent-space normal) / paint mask, and a polygon mesh builder with
+# smooth groups (vertices are welded only inside one group, so a hard edge is simply two groups).
+def rot_g2b(R):
+    """A 3x3 rotation in game axes -> the Blender quaternion (B R B^T, B = g2b as a matrix)."""
+    from mathutils import Matrix
+    B = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], float)
+    Rb = B @ np.asarray(R, float) @ B.T
+    return Matrix([list(map(float, r)) for r in Rb]).to_quaternion()
+
+
+def rot_x(a):
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[1, 0, 0], [0, c, -s], [0, s, c]], float)
+
+
+def rot_y(a):
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]], float)
+
+
+def rot_z(a):
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], float)
+
+
+def palette(root, key):
+    """A palette colour (sRGB floats) by name: src/client/world/world-palette.ts, then style-tokens.js's PALETTE."""
+    import re
+    for f in (('src', 'client', 'world', 'world-palette.ts'), ('src', 'client', 'style', 'style-tokens.js')):
+        m = re.search(r'\b' + key + r':\s*0x([0-9a-fA-F]{6})', open(os.path.join(root, *f), encoding='utf8').read())
+        if m:
+            return hex_srgb(int(m.group(1), 16))
+    raise KeyError(key)
+
+
+def shelf_pack(items, atlas, pad, reserve=0):
+    """items: [(id, w_px, h_px)] -> {id: (x, y, w, h, rot)} (x, y = the rect inside its gutter) or None if it does not
+    fit. Tall rects turn 90 degrees; shelves fill from the bottom; `reserve` px stay free at the top."""
+    its = []
+    for fid, w, h in items:
+        rot = h > w
+        its.append((fid, h, w, rot) if rot else (fid, w, h, rot))
+    its.sort(key=lambda it: (-it[2], -it[1], it[0]))
+    x = y = shelf = 0
+    rects = {}
+    for fid, w, h, rot in its:
+        W2, H2 = w + 2 * pad, h + 2 * pad
+        if W2 > atlas:
+            return None
+        if x + W2 > atlas:
+            x, y, shelf = 0, y + shelf, 0
+        if y + H2 > atlas - reserve:
+            return None
+        rects[fid] = (x + pad, y + pad, w, h, rot)
+        x += W2
+        shelf = max(shelf, H2)
+    return rects
+
+
+def solve_atlas(faces, atlas, pad, density, reserve=0):
+    """faces: [dict(id, kind, w, h)] in metres. The largest px/m (to 0.01) at which every face, at density[kind] x that,
+    fits the atlas. Returns (px_per_m, rects)."""
+    def items(scale):
+        return [(f['id'], max(4, int(math.ceil(f['w'] * density[f['kind']] * scale))),
+                 max(4, int(math.ceil(f['h'] * density[f['kind']] * scale)))) for f in faces]
+    lo, hi = 1.0, 2048.0
+    best = None
+    while hi - lo > 0.01:
+        mid = (lo + hi) / 2
+        r = shelf_pack(items(mid), atlas, pad, reserve)
+        if r is None:
+            hi = mid
+        else:
+            lo, best = mid, r
+    return round(lo, 2), best
+
+
+def face_uv(rect, face, s, t, atlas):
+    """Atlas UV of face-local metres (s along its width w, t along its height h)."""
+    x, y, w, h, rot = rect
+    if rot:
+        return ((x + t / face['h'] * w) / atlas, (y + (face['w'] - s) / face['w'] * h) / atlas)
+    return ((x + s / face['w'] * w) / atlas, (y + t / face['h'] * h) / atlas)
+
+
+def paint_faces(faces, rects, paint, atlas, pad, base_rgb, base_rough=0.8):
+    """Paints every face into its rect (and its gutter, continuing the face's metres). paint(face, S, T) -> (rgb, rough,
+    metal, height_m, mask) on metre grids S (0..w), T (0..h); the face's own s0 / t0 offsets are added by the painter
+    when it wants continuous noise across faces. Returns alb, rough, metal, nrm (tangent space), mask."""
+    alb = np.zeros((atlas, atlas, 3)); alb[:] = base_rgb
+    rough = np.full((atlas, atlas), base_rough)
+    metal = np.zeros((atlas, atlas))
+    mask = np.zeros((atlas, atlas))
+    nrm = np.zeros((atlas, atlas, 3)); nrm[..., 2] = 1
+    for f in faces:
+        x, y, w, h, rot = rects[f['id']]
+        Ui, Vj = np.meshgrid(np.arange(-pad, w + pad) + 0.5, np.arange(-pad, h + pad) + 0.5)
+        if rot:
+            ku, kv = w / f['h'], h / f['w']
+            T, S = Ui / ku, f['w'] - Vj / kv
+        else:
+            ku, kv = w / f['w'], h / f['h']
+            S, T = Ui / ku, Vj / kv
+        c, r, mt, hgt, mk = paint(f, S, T)
+        hgt = np.broadcast_to(hgt, S.shape)
+        dhu = np.gradient(hgt, axis=1) * ku
+        dhv = np.gradient(hgt, axis=0) * kv
+        n = np.stack([-dhu, -dhv, np.ones_like(hgt)], -1)
+        n /= np.linalg.norm(n, axis=-1, keepdims=True)
+        ys, xs = slice(y - pad, y + h + pad), slice(x - pad, x + w + pad)
+        alb[ys, xs] = np.clip(c, 0, 1)
+        rough[ys, xs] = np.clip(np.broadcast_to(r, S.shape), 0.04, 1)
+        metal[ys, xs] = np.clip(np.broadcast_to(mt, S.shape), 0, 1)
+        mask[ys, xs] = np.clip(np.broadcast_to(mk, S.shape), 0, 1)
+        nrm[ys, xs] = n
+    return alb, rough, metal, nrm, mask
+
+
+def poly_mesh(name, polys, mat=None):
+    """polys: [(verts in game axes, uvs, smooth_group or None)]. Vertices are welded (by position, 0.1 mm) only inside
+    one smooth group; None = flat, never welded. One UV map; a polygon is smooth when it has a group."""
+    verts, faces, uvs, smooth, keys = [], [], [], [], {}
+    for q, uv, grp in polys:
+        f = []
+        for v in q:
+            if grp is None:
+                verts.append(g2b(v)); f.append(len(verts) - 1)
+                continue
+            k = (grp,) + tuple(int(round(c * 1e4)) for c in v)
+            if k not in keys:
+                verts.append(g2b(v)); keys[k] = len(verts) - 1
+            f.append(keys[k])
+        faces.append(tuple(f))
+        uvs.extend(uv)
+        smooth.append(grp is not None)
+    me = bpy.data.meshes.new(name)
+    me.from_pydata([tuple(map(float, v)) for v in verts], [], faces)
+    me.validate(clean_customdata=False)
+    layer = me.uv_layers.new(name='UVMap')
+    layer.data.foreach_set('uv', [float(c) for u in uvs for c in u])
+    for poly, sm in zip(me.polygons, smooth):
+        poly.use_smooth = sm
+    if mat:
+        me.materials.append(mat)
+    me.update()
+    return me
+
+
+def box_faces(pid, size, kinds, seed=0.0):
+    """Atlas faces of an axis-aligned box part: one per face key whose kind is not None. size = (x, y, z) m.
+    Face (w, h): +-x -> (z, y), +-y -> (x, z), +-z -> (x, y)."""
+    dims = {'x': (size[2], size[1]), 'y': (size[0], size[2]), 'z': (size[0], size[1])}
+    out = []
+    for key, kind in kinds.items():
+        if kind is None:
+            continue
+        w, h = dims[key[1]]
+        out.append(dict(id=f'{pid}{key}', kind=kind, w=w, h=h, key=key, part=pid, seed=seed))
+    return out
+
+
+def box_polys(pid, c, size, kinds, rects, atlas, faces_by_id, ch=0.0, grp=None, xf=None):
+    """Polygons of an axis-aligned box part (game axes) with its faces' atlas UVs. ch > 0: chamfered edges (a strip per
+    edge, a triangle per corner) that sample the texel at the nearest face's border. xf(v) optionally transforms every
+    vertex (e.g. a rotation about the part's centre). Face-local (s, t): +x: s = -z..., chosen so s x t = outward N."""
+    c = np.asarray(c, float); h = np.asarray(size, float) / 2
+    polys = []
+    # (axis, sign) -> (s axis, s sign, t axis, t sign): s runs along the face's width, t along its height
+    frames = {'+x': (2, -1, 1, 1), '-x': (2, 1, 1, 1), '+y': (0, 1, 2, -1), '-y': (0, 1, 2, 1),
+              '+z': (0, 1, 1, 1), '-z': (0, -1, 1, 1)}
+    X = (lambda v: v) if xf is None else xf
+    for key, (sa, ss, ta, ts) in frames.items():
+        kind = kinds.get(key)
+        if kind is None:
+            continue
+        a, sg = 'xyz'.index(key[1]), (1 if key[0] == '+' else -1)
+        f = faces_by_id[f'{pid}{key}']
+        q, uv = [], []
+        for ds, dt in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            v = c.copy()
+            v[a] += sg * h[a]
+            v[sa] += ss * ds * (h[sa] - ch)
+            v[ta] += ts * dt * (h[ta] - ch)
+            s_m = (ds + 1) / 2 * f['w'] + (-ds) * ch
+            t_m = (dt + 1) / 2 * f['h'] + (-dt) * ch
+            q.append(X(v)); uv.append(face_uv(rects[f['id']], f, s_m, t_m, atlas))
+        polys.append((q, uv, grp))
+    if ch > 0:
+        # edge strips and corner triangles: UVs clamp to the nearest face border texel (worn edges come from the face)
+        for a in range(3):
+            b, d = [k for k in range(3) if k != a]
+            for sb in (-1, 1):
+                for sd in (-1, 1):
+                    kb, kd = ('+' if sb > 0 else '-') + 'xyz'[b], ('+' if sd > 0 else '-') + 'xyz'[d]
+                    if kinds.get(kb) is None and kinds.get(kd) is None:
+                        continue
+                    fk = kb if kinds.get(kb) is not None else kd
+                    f = faces_by_id[f'{pid}{fk}']
+                    p00 = c.copy(); p00[a] -= h[a] - ch; p00[b] += sb * h[b]; p00[d] += sd * (h[d] - ch)
+                    p01 = c.copy(); p01[a] += h[a] - ch; p01[b] += sb * h[b]; p01[d] += sd * (h[d] - ch)
+                    p11 = c.copy(); p11[a] += h[a] - ch; p11[b] += sb * (h[b] - ch); p11[d] += sd * h[d]
+                    p10 = c.copy(); p10[a] -= h[a] - ch; p10[b] += sb * (h[b] - ch); p10[d] += sd * h[d]
+                    q = [p00, p01, p11, p10]
+                    nrm = np.zeros(3); nrm[b] = sb; nrm[d] = sd
+                    if np.dot(np.cross(q[1] - q[0], q[2] - q[0]), nrm) < 0:
+                        q = q[::-1]
+                    uv = [edge_uv(rects[f['id']], f, v, c, h, fk, atlas) for v in q]
+                    polys.append(([X(v) for v in q], uv, grp))
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                for sz in (-1, 1):
+                    kx, ky, kz = ('+' if sx > 0 else '-') + 'x', ('+' if sy > 0 else '-') + 'y', ('+' if sz > 0 else '-') + 'z'
+                    if all(kinds.get(k) is None for k in (kx, ky, kz)):
+                        continue
+                    fk = next(k for k in (ky, kx, kz) if kinds.get(k) is not None)
+                    f = faces_by_id[f'{pid}{fk}']
+                    s = np.array([sx, sy, sz], float)
+                    tri = []
+                    for a in range(3):
+                        v = c + s * (h - ch); v[a] = c[a] + s[a] * h[a]
+                        tri.append(v)
+                    if np.dot(np.cross(tri[1] - tri[0], tri[2] - tri[0]), s) < 0:
+                        tri = tri[::-1]
+                    uv = [edge_uv(rects[f['id']], f, v, c, h, fk, atlas) for v in tri]
+                    polys.append(([X(v) for v in tri], uv, grp))
+    return polys
+
+
+def edge_uv(rect, f, v, c, h, key, atlas):
+    """UV of a chamfer vertex: its projection onto face `key`, clamped into the face (the border texel)."""
+    frames = {'+x': (2, -1, 1, 1), '-x': (2, 1, 1, 1), '+y': (0, 1, 2, -1), '-y': (0, 1, 2, 1),
+              '+z': (0, 1, 1, 1), '-z': (0, -1, 1, 1)}
+    sa, ss, ta, ts = frames[key]
+    s_m = np.clip((ss * (v[sa] - c[sa]) + h[sa]), 0, 2 * h[sa]) / (2 * h[sa]) * f['w']
+    t_m = np.clip((ts * (v[ta] - c[ta]) + h[ta]), 0, 2 * h[ta]) / (2 * h[ta]) * f['h']
+    return face_uv(rect, f, float(s_m), float(t_m), atlas)

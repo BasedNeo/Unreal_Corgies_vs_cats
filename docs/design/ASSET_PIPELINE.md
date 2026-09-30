@@ -32,7 +32,9 @@ Godot is the asset-compatibility gate, and the door to a native client later; it
 - **Names:** `Kit_<Set>_<Thing>_<NN>` (for example `Kit_Lot_Container20_01`), `Char_<Species>_<Class>`, and actions
   `Idle`, `Walk`, `Run`, `Attack_01`.
   - LOD nodes are `<name>_LOD0|1|2`.
-  - Collision nodes are `COL_<name>_<n>` boxes; they are never rendered.
+  - Collision nodes are `COL_<name>_<n>` boxes; they are never rendered. An axis-aligned box is the default; a
+    rotated one carries `extras.obb` (P-GLB3, for the pipes' diagonal facets). A cylinder collider is exported as its
+    bounding box, with the shape recorded in extras.
 - **PBR:** baseColor, ORM and normal at 1024² for kit pieces (2048² for heroes only).
   - **Paint mask (P-GLB1b):** the baseColor **alpha** channel. 1 = paint that the game tints per instance, 0 = everything
     that keeps its own colour (rust, grime, frame, glass). It is stored as `1 + 254 × mask` (never 0: lossy WebP may
@@ -54,3 +56,12 @@ shared-GLB rule keeps that door open at no cost; revisit it when the game target
 The mood-board renders are offline photoreal. A 24-pet browser shooter cannot match them frame for frame, but PBR GLB
 assets can move the game a long way towards them: baked wear, wet response and armour plates. The slice's A/B (the
 current HARDENED toon vs `pbr()`) is the owner's decision point: keep the ink, or go stylised-real.
+
+## Open pipeline items (after batch 1)
+- **Draw headroom:** batch 1 draws LOD0 only on the web. Per-instance LODs cost +12.6 % draws (over budget). Proper
+  distance LODs for many kinds need one batched path (for example `BatchedMesh`), not one `InstancedMesh` per kind
+  per LOD.
+- **Inside interiors, `pbr()` has no toon ramp floor.** The GLB tunnel is 11 % darker than the procedural one; a style
+  call.
+- **The palette under the cool sky fill:** blue-tinted concrete and steel at play distance. This sits with the owner's
+  look decision (the toon HARDENED look, or stylised-real).

@@ -89,7 +89,9 @@ describe('P-GLB1b ?kit=glb bag-wall split', () => {
     const s = splitLotKitPrims(data);
     expect(s.containers.missing).toBe(0);
     expect(s.bags.missing).toBe(0);
-    expect(s.rest.length + s.containers.containers.length + s.bags.walls.length).toBe(data.prims!.length);
+    // (P-GLB3: the LOT_KIT table splits more pieces after these two; they are counted in glb-lot-batch1.test.ts)
+    const later = s.pieces.slice(2).reduce((n, p) => n + p.matched.length, 0);
+    expect(s.rest.length + s.containers.containers.length + s.bags.walls.length + later).toBe(data.prims!.length);
   });
 
   it('the West Yard has no bag walls (only props.ts bagWall() emits "bags"): nothing to split', () => {

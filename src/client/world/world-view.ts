@@ -98,13 +98,13 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
 
   const fence = data.fences?.length ? createFenceView(data.fences, data.height) : null;
   if (fence) root.add(fence.boards);
-  // W11 P-GLB1: ?kit=glb draws The Lot's containers (P-GLB1b: and bag walls) from the shared GLBs (instanced;
-  // ?kitlook=stylize = the toon A/B side)
+  // W11 P-GLB1: ?kit=glb draws The Lot's containers (P-GLB1b: and bag walls; P-GLB3: the LOT_KIT table, + pipes,
+  // footings, floodlight masts and lamps) from the shared GLBs (instanced; ?kitlook=stylize = the toon A/B side)
   const kitLook = kitFlag();
   const kitSplit = kitLook ? splitLotKitPrims(data) : null;
   const props = buildPrimMeshes([...(kitSplit ? kitSplit.rest : data.prims ?? []), ...(fence?.prims ?? [])], { far: edge + 8 });
   root.add(props.group);
-  const kit: KitView | null = kitLook && kitSplit && (kitSplit.containers.placements.length || kitSplit.bags.placements.length) ? createLotKitView(kitSplit, kitLook, { far: edge + 8 }) : null;
+  const kit: KitView | null = kitLook && kitSplit && kitSplit.pieces.some((p) => p.placements.length) ? createLotKitView(kitSplit, kitLook, { far: edge + 8 }) : null;
   if (kit) root.add(kit.group);
   // crease ink is built in every tier and only hidden on low, so the tier can switch live
   const setPropCreases = (on: boolean) => { for (const m of props.meshes) for (const c of m.children) if (c.userData.styleInk) c.visible = on; };

@@ -10,7 +10,9 @@
 //   LODs    triangle budgets LOD0 <= 2500, LOD1 <= 800, LOD2 <= 200, each LOD cheaper than the one before, footprints
 //           within 15 cm of LOD0, TRIANGLES mode, POSITION/NORMAL/TEXCOORD_0 present (TANGENT recommended)
 //   COL_    every collision node is an axis-aligned box (one primitive, 8 corner positions, 12 triangles, no rotation),
-//           has no material (never rendered) and extras.collider = 'box'
+//           has no material (never rendered) and extras.collider = 'box'. P-GLB3: or an oriented box, extras.collider =
+//           'obb': the same box in the node's own space, turned by the node's rotation (a unit quaternion), for sim
+//           colliders that are turned about their centre (the pipe facets)
 //   PBR     every visual primitive has a material with baseColor, ORM (occlusion + metallicRoughness = one texture) and
 //           normal textures, alpha OPAQUE; textures square, power of two, 1024^2 for kits (2048^2 only with --hero)
 //   files   master: PNG images, no compression extensions (the file Godot imports); web variant: EXT_meshopt_compression +
@@ -63,7 +65,40 @@ function worldPositions(node) {
   return out;
 }
 
-/** COL_ boxes of a document in the root's space: { name, min, max, center, half }. */
+/** Mesh positions of a node in its own space (no transform). */
+function localPositions(node) {
+  const out = [];
+  for (const p of node.getMesh().listPrimitives()) {
+    const pos = p.getAttribute('POSITION');
+    for (let i = 0; i < pos.getCount(); i++) out.push(pos.getElement(i, [0, 0, 0]));
+  }
+  return out;
+}
+
+/**
+ * P-GLB3: COL_ boxes of a document as oriented boxes in the root's space: { name, collider ('box' | 'obb'), sim_type,
+ * center, half (along the box's own axes), axes (3 unit vectors: the node's turned x, y, z), corners (8) }.
+ */
+export function colliderObbs(doc) {
+  const out = [];
+  for (const n of doc.getRoot().listNodes()) {
+    if (!n.getName().startsWith('COL_') || !n.getMesh()) continue;
+    const m = n.getWorldMatrix();
+    const ls = localPositions(n);
+    const lmin = [0, 1, 2].map((k) => Math.min(...ls.map((p) => p[k]))), lmax = [0, 1, 2].map((k) => Math.max(...ls.map((p) => p[k])));
+    const lc = lmin.map((v, k) => (v + lmax[k]) / 2);
+    const xf = (v) => [0, 1, 2].map((r) => m[r] * v[0] + m[4 + r] * v[1] + m[8 + r] * v[2] + m[12 + r]);
+    const axes = [0, 1, 2].map((k) => { const a = [m[4 * k], m[4 * k + 1], m[4 * k + 2]]; const l = Math.hypot(...a); return { a: a.map((v) => v / l), l }; });
+    out.push({
+      name: n.getName(), collider: n.getExtras()?.collider, sim_type: n.getExtras()?.sim_type,
+      center: xf(lc), half: [0, 1, 2].map((k) => ((lmax[k] - lmin[k]) / 2) * axes[k].l), axes: axes.map((x) => x.a),
+      corners: worldPositions(n),
+    });
+  }
+  return out;
+}
+
+/** COL_ boxes of a document in the root's space: { name, min, max, center, half } (the world AABB of each). */
 export function colliderBoxes(doc) {
   const out = [];
   for (const n of doc.getRoot().listNodes()) {
@@ -183,7 +218,10 @@ export async function validateGlb(path, opts = {}) {
     if (!colRe.test(cn)) err(`collision node "${cn}" must be named COL_${name}_<n>`);
     const mesh = c.getMesh();
     if (!mesh) { err(`${cn}: no mesh`); continue; }
-    if (!isIdentityRot(c.getRotation())) err(`${cn}: rotated (COL_ boxes are axis-aligned)`);
+    const obb = c.getExtras()?.collider === 'obb';
+    const q = c.getRotation();
+    if (!obb && !isIdentityRot(q)) err(`${cn}: rotated (COL_ boxes are axis-aligned; an oriented box says extras.collider = "obb")`);
+    if (obb && Math.abs(Math.hypot(...q) - 1) > 1e-5) err(`${cn}: obb rotation is not a unit quaternion`);
     const prims = mesh.listPrimitives();
     if (prims.length !== 1) err(`${cn}: ${prims.length} primitives (1 box)`);
     if (prims.some((p) => p.getMaterial())) err(`${cn}: has a material (collision is never rendered)`);
@@ -191,9 +229,11 @@ export async function validateGlb(path, opts = {}) {
     const ps = worldPositions(c);
     const uniq = new Set(ps.map((p) => p.map((v) => v.toFixed(4)).join(',')));
     if (uniq.size !== 8) err(`${cn}: ${uniq.size} distinct corners (a box has 8)`);
-    const min = [0, 1, 2].map((k) => Math.min(...ps.map((p) => p[k]))), max = [0, 1, 2].map((k) => Math.max(...ps.map((p) => p[k])));
-    if (ps.some((p) => p.some((v, k) => Math.abs(v - min[k]) > 1e-4 && Math.abs(v - max[k]) > 1e-4))) err(`${cn}: not an axis-aligned box`);
-    if (c.getExtras()?.collider !== 'box') err(`${cn}: extras.collider must be "box"`);
+    // the box test runs in the node's own space for an obb (its mesh is the unturned box), in the root's otherwise
+    const ls = obb ? localPositions(c) : ps;
+    const min = [0, 1, 2].map((k) => Math.min(...ls.map((p) => p[k]))), max = [0, 1, 2].map((k) => Math.max(...ls.map((p) => p[k])));
+    if (ls.some((p) => p.some((v, k) => Math.abs(v - min[k]) > 1e-4 && Math.abs(v - max[k]) > 1e-4))) err(`${cn}: not an axis-aligned box${obb ? ' in its own space' : ''}`);
+    if (!['box', 'obb'].includes(c.getExtras()?.collider)) err(`${cn}: extras.collider must be "box" (or "obb")`);
     if (b0 && min.some((v, k) => v < b0.min[k] - 0.5) || b0 && max.some((v, k) => v > b0.max[k] + 0.5)) err(`${cn}: outside the visual bounds by more than 0.5 m`);
   }
 
