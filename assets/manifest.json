@@ -22,7 +22,7 @@
         "web_bytes": 614400
       },
       "provenance": {
-        "source": "tools/assets/build-container.py (bpy): geometry, LODs, COL_ boxes, UV atlas, painted textures, Cycles AO bake, glTF export. No .blend is kept; the script is the source.",
+        "source": "tools/assets/build-container.py + tools/assets/kitlib.py (bpy): geometry, LODs, COL_ boxes, UV atlas, painted textures (P-GLB1b: paint mask in the baseColor alpha; rust as edge wear + run-off streaks from drip sources), Cycles AO bake, glTF export. No .blend is kept; the scripts are the source.",
         "web_variant": "tools/assets/make-web-variant.mjs (glTF-Transform dedup, prune, textureCompress WebP q84 / normal q92, meshopt medium)",
         "command": "<venv>/bin/python tools/assets/build-container.py && node tools/assets/make-web-variant.mjs assets/masters/Kit_Lot_Container20_01.glb",
         "deterministic": "two builds give byte-identical GLB and PNGs (sha256 in files)",
@@ -48,14 +48,14 @@
       "files": {
         "master": {
           "path": "assets/masters/Kit_Lot_Container20_01.glb",
-          "bytes": 2350164,
-          "sha256": "9b2aab23215454150e2617d540b0aca046a38f61e91cb68417e097a730087a74",
+          "bytes": 2551644,
+          "sha256": "d830b96e6df9458822584096137cb49c7aa82cef6647c31c5de339e44b43a2fe",
           "validator": "PASS"
         },
         "web": {
           "path": "public/assets/kits/Kit_Lot_Container20_01.glb",
-          "bytes": 245840,
-          "sha256": "d984a02a70b016e77131ea763d88dd637ec922fb767c9fd1322702ecb4ca39d1",
+          "bytes": 329464,
+          "sha256": "1e0932b105ba42c090c13e59633b076bd9f64e0b9e8cc8ea70b9d782d93ae236",
           "validator": "PASS",
           "extensions": [
             "EXT_meshopt_compression",
@@ -66,18 +66,18 @@
         "textures": {
           "baseColor": {
             "path": "assets/masters/Kit_Lot_Container20_01_baseColor.png",
-            "bytes": 918534,
-            "sha256": "0389b59203734ace8ff1eb6ef6349991a856ea305a304aea024512fc946310a4"
+            "bytes": 1170304,
+            "sha256": "4b9d9550e011d9372091b68fcf7d2a3b7e5b926df813a9b5390e3f5cfafce4e9"
           },
           "orm": {
             "path": "assets/masters/Kit_Lot_Container20_01_orm.png",
-            "bytes": 880874,
-            "sha256": "518a3e11ab63c3143bbee83c67d0bc5421318e450429b2ddf9fc1d3c0c92de60"
+            "bytes": 791644,
+            "sha256": "9367999c13a0d6443de875d3fa17c58fb5b7e9fd870bd9e8877ffe10f8423955"
           },
           "normal": {
             "path": "assets/masters/Kit_Lot_Container20_01_normal.png",
-            "bytes": 427289,
-            "sha256": "d016111699dd77b1f4b5a1cd2cb8d4be23976ba8138710d7a677aca6d7e78d28"
+            "bytes": 466233,
+            "sha256": "d0fefae5719ea579f48568bded9cef47399fd5886fadca40f08ce10dd4c6dd36"
           }
         }
       },
@@ -98,7 +98,106 @@
           12.1
         ]
       },
-      "colliders": 13
+      "colliders": 13,
+      "version": 2,
+      "paint_mask": "baseColor alpha: 1 = paint the game tints per instance (pbr({ paintTint }) via the per-instance paintTint attribute), 0 = rust, grime, frame, door, glass, floor; stored as 1 + 254 x mask (no texel at alpha 0, so a lossy WebP encoder keeps the colour underneath)"
+    },
+    {
+      "name": "Kit_Lot_BagWall_01",
+      "kind": "kit",
+      "set": "Lot",
+      "version": 1,
+      "description": "One 4.8 m module of The Lot's cement-bag (sandbag) wall: two rows of woven sacks in running bond (row 0: two full sacks; row 1: a half, a full, a half), flattened under their weight, pinched at the tied ends; pale paper and canvas sacks, printed stencil band, mud on the lower row.",
+      "size_m": [
+        1.77,
+        1.1,
+        4.86
+      ],
+      "scale_note": "World metres at the game's pet scale: the section is props.ts bagWall()'s D x rows*BH = 1.6 x 1.1 m and the module two of its nominal 2.4 m sacks (read from props.ts). size_m adds the sacks' bulge. The game tiles m = round(len / 4.8) modules along each wall, stretched along z by len / (m x 4.8) (0.90-1.15 on The Lot).",
+      "axes": "+Y up; the wall runs along z (bagWall()'s own frame), +x is the printed face; pivot at the base centre on the ground",
+      "budgets": {
+        "LOD0": 2500,
+        "LOD1": 800,
+        "LOD2": 200,
+        "texture_px": 1024,
+        "web_bytes": 614400
+      },
+      "provenance": {
+        "source": "tools/assets/build-bagwall.py + tools/assets/kitlib.py (bpy): superellipsoid sacks with fold and wrinkle displacement, LOD0 5 x 16x12 / LOD1 5 x 8x6 / LOD2 one 8x4 hull per row, 1 COL_ box, one 512x256 atlas slot per sack (about 120 px/m), painted textures, Cycles AO bake (1.2 m), glTF export. No .blend is kept; the scripts are the source.",
+        "web_variant": "tools/assets/make-web-variant.mjs (glTF-Transform dedup, prune, textureCompress WebP q84 / normal q92, meshopt medium)",
+        "command": "<venv>/bin/python tools/assets/build-bagwall.py && node tools/assets/make-web-variant.mjs assets/masters/Kit_Lot_BagWall_01.glb",
+        "deterministic": "two builds give byte-identical GLB and PNGs (sha256 in files)",
+        "generator_inputs": "none: no image-to-3D model, no reference images, no paid API (Scenario / Grok blocked by the network policy)",
+        "why": "the Lot prop that most often stands next to the containers in the hero views: the two canyon-mouth walls 5.4 and 5.9 m off the containers' north ends are lot_container_canyon's foreground, three more walls are in lot_corgi_base (8 walls on the map)"
+      },
+      "licence": "Original work of the Corgis vs Cats project, generated by its own scripts; no third-party content.",
+      "collision": "one COL_ box per module = the sim's bags collider of a 4.8 m wall; tests/unit/glb-bagwall-colliders.test.ts tiles the modules along every Lot bag wall and checks their union equals each sim box within 1 cm",
+      "tools": {
+        "blender_bpy": "5.0.1",
+        "python": "3.11.15",
+        "godot": "4.7.2.stable.official.ed1daf0bf",
+        "gltf-transform": "4.5.1",
+        "meshoptimizer": "1.3.0",
+        "sharp": "0.35.5"
+      },
+      "godot": {
+        "version": "4.7.2.stable.official.ed1daf0bf",
+        "command": "GODOT=<godot binary> bash tools/godot/run.sh <glb>"
+      },
+      "files": {
+        "master": {
+          "path": "assets/masters/Kit_Lot_BagWall_01.glb",
+          "bytes": 2302936,
+          "sha256": "f8bc6e6938b23937643f6aa4d6794f6a11f18c7da7982955e11a1409247f1f34",
+          "validator": "PASS"
+        },
+        "web": {
+          "path": "public/assets/kits/Kit_Lot_BagWall_01.glb",
+          "bytes": 216384,
+          "sha256": "74cebb45b863e93f7e2a2adb52931cd4afbec08801c65f15029e3de60fd35e4c",
+          "validator": "PASS",
+          "extensions": [
+            "EXT_meshopt_compression",
+            "EXT_texture_webp",
+            "KHR_mesh_quantization"
+          ]
+        },
+        "textures": {
+          "baseColor": {
+            "path": "assets/masters/Kit_Lot_BagWall_01_baseColor.png",
+            "bytes": 756026,
+            "sha256": "88679412e975d5e066570783a5e95b3fbeffb1eb294773b8d34b1f7f69d3ade4"
+          },
+          "orm": {
+            "path": "assets/masters/Kit_Lot_BagWall_01_orm.png",
+            "bytes": 566862,
+            "sha256": "21642c973f29e45b8b15c98af988d7a426971475116860548c63821f20f07fb5"
+          },
+          "normal": {
+            "path": "assets/masters/Kit_Lot_BagWall_01_normal.png",
+            "bytes": 889874,
+            "sha256": "41b187e1bdcd5dce51fbb5404d9e3e35183675fe4822eda6042ad6a859f7b19b"
+          }
+        }
+      },
+      "tris": {
+        "LOD0": 1760,
+        "LOD1": 400,
+        "LOD2": 96
+      },
+      "bounds_m": {
+        "min": [
+          -0.8741,
+          0,
+          -2.43
+        ],
+        "max": [
+          0.8993,
+          1.1009,
+          2.4322
+        ]
+      },
+      "colliders": 1
     }
   ]
 }

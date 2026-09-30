@@ -143,7 +143,19 @@ export const STYLE = {
   // W11 P-GLB1 pbr() (authored PBR GLB assets): `env` scales the fake sky reflection (× env.intensity), `wetK` how much the
   // weather's wetness reaches the asset, `normalScale` / `aoIntensity` multiply the asset's own; `interiors`: the sky fill
   // stays out of WorldData.interiors like it does for toon().
-  pbr: { env: 1.0, wetK: 0.85, normalScale: 1.0, aoIntensity: 1.0, interiors: true },
+  // W11 P-GLB1b (stage 6, style-webgpu.js pbr()): `wrap` / `shadeFloor` the shade-side diffuse read, max(saturate((N.L +
+  // w) / (1 + w)), floor): 0.5 tracks the toon ramp's half-lambert, 0.14 = bandFloor on faces turned from the sky fill;
+  // `aoIntensity` 1.0 -> 0.6 (the bake is also multiplied lightly into the
+  // baseColor, so the full aoMap on top darkened the ambient-lit shade side twice); `paintTint` (per call) tints only the
+  // paint mask (baseColor alpha) with the geometry's per-instance `paintTint`; detail: two world-space noise scales
+  // (1/m) as a bump (m), albedo mottling and roughness breakup, `scratch` micro-scratch strength (0 = none) at
+  // `scratchFreq` (1/m, x/z then y: level marks on walls); `rivulets` rain running down walls; `puddle` coverage on
+  // flat tops (like SURFACES.ground.puddle).
+  pbr: {
+    env: 1.0, wetK: 0.85, normalScale: 1.0, aoIntensity: 0.6, interiors: true, wrap: 0.5, shadeFloor: 0.14, paintTint: false,
+    detailFreq: [3.1, 23], detailBump: [0.004, 0.0007], detailAlbedo: 0.07, detailRough: 0.08,
+    scratch: 0.4, scratchFreq: [1.3, 12], rivulets: 0.8, puddle: 0.35,
+  },
   // Battle mood: clear weather still keeps broken cloud and haze (the sky never looks like a picnic).
   // highFog (sky.ts update): the distance fog thins for high cameras, from 1 at `from` m to `floor` over `span` m; W10 P5:
   // the floor falls with the weather's fog multiplier ^ `wx` (storm x3.0 -> floor 0.29), so a storm overview (The Lot's

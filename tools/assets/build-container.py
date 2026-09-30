@@ -21,8 +21,13 @@
 # chips, hazard band, plywood floor); the normal map comes from the height; the occlusion is BAKED by Cycles (AO,
 # LOD0 on a ground plane) and multiplied lightly into the base colour as well. Determinism: fixed seeds, fixed
 # Cycles seed/samples/threads, no denoiser; two runs give byte-identical files (the README records the hashes).
+#
+# W11 P-GLB1b: the shared half (noise, meshes, material, AO bake, COL_ boxes, export) moved to kitlib.py. The baseColor
+# ALPHA is the PAINT MASK (1 = paint the game tints per instance; 0 = rust, grime, frame, door, glass, floor; stored as
+# 1 + 254 x mask so no texel is fully transparent). Rust is now edge wear (the foot, the eaves under the rail, the
+# corners at the posts, face borders of the frame) plus run-off streaks hanging from drip sources (the top rail, the
+# window sills, the door head), strongest in the corrugation valleys, instead of isotropic patches.
 import argparse
-import json
 import math
 import os
 import re
@@ -30,6 +35,9 @@ import sys
 
 import bpy
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from kitlib import Noise, sstep, mix, col, g2b, make_mesh, build_kit, report  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..'))
@@ -203,46 +211,7 @@ EDGE_PX = 12   # the shared worn-edge texels (top-right corner block), used by e
 
 
 # ------------------------------------------------------------------------------------------------ painting
-class Noise:
-    def __init__(self, seed):
-        self.t = np.random.default_rng(seed).random((256, 256))
-
-    def v(self, x, y):
-        xi, yi = np.floor(x).astype(np.int64), np.floor(y).astype(np.int64)
-        fx, fy = x - xi, y - yi
-        u, w = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
-        T = self.t
-        a, b = T[yi & 255, xi & 255], T[yi & 255, (xi + 1) & 255]
-        c, d = T[(yi + 1) & 255, xi & 255], T[(yi + 1) & 255, (xi + 1) & 255]
-        return (a * (1 - u) + b * u) * (1 - w) + (c * (1 - u) + d * u) * w
-
-    def fbm(self, x, y, octaves=4):
-        s, amp, norm = 0.0, 0.5, 0.0
-        for o in range(octaves):
-            s = s + self.v(x * (2 ** o) + 31.7 * o, y * (2 ** o) - 17.3 * o) * amp
-            norm += amp
-            amp *= 0.5
-        return s / norm
-
-
 NZ = Noise(20260930)
-
-
-def sstep(e0, e1, x):
-    t = np.clip((x - e0) / (e1 - e0), 0, 1)
-    return t * t * (3 - 2 * t)
-
-
-def mix(a, b, t):
-    a, b, t = np.asarray(a, float), np.asarray(b, float), np.asarray(t, float)
-    rgb = lambda x: x.ndim in (1, 3) and x.shape[-1] == 3
-    if t.ndim == 2 and (rgb(a) or rgb(b)):
-        t = t[..., None]
-    return a * (1 - t) + b * t
-
-
-def col(*rgb):
-    return np.array(rgb, float)
 
 
 PAINT = col(0.74, 0.72, 0.69)      # neutral light paint; the game tints each instance to its palette colour
@@ -259,44 +228,101 @@ def corrugation(u, pitch, amp):
     return amp * np.clip(1.7 * np.sin(2 * np.pi * u / pitch), -1, 1)
 
 
-def paint(kind, S, T, u01, v01, seed):
-    """Albedo (sRGB), roughness, metalness and height (m) of one face's texels. S, T are absolute face metres."""
+# Drip sources of the outer side walls: (s0, s1, t, strength) in the face's (S, T) metres. Water runs off the top rail,
+# the window sills and the door head and leaves the rust / dirt run-off streaks hanging from them. On the +x face
+# S = -z, on the -x face S = +z (face_frame: s = t x N with t = +y).
+def drip_sources(key):
+    if key not in ('+x', '-x'):
+        return []
+    sgn = -1 if key == '+x' else 1
+    out = [(-HZ, HZ, H - 0.42, 1.0)]
+    for wz in (-6.5, 6.5):
+        if key == '+x' and abs(wz - DZ) < DOOR_W / 2 + 2:
+            continue
+        out.append((sgn * wz - 2.1, sgn * wz + 2.1, 6.6 - 1.5, 0.85))
+    if key == '+x':
+        out.append((sgn * DZ - DOOR_W / 2 - 0.3, sgn * DZ + DOOR_W / 2 + 0.3, DOOR_H, 0.9))
+    return out
+
+
+def runoff(S, T, sources, seed, valley, thin=True):
+    """Run-off streaks (0..1) hanging from drip sources: columns picked by 1D noise along S (thin, uneven widths), each
+    with its own length (mostly short, a few long), thinning and breaking up as they run down; stronger in the
+    corrugation valleys, where the water runs."""
+    out = np.zeros_like(S)
+    if not sources:
+        return out
+    f = 4.2 if thin else 1.6
+    colsel = np.maximum(NZ.fbm(S * f + seed * 3.1, 7.5 + seed * 0.37, 3), 0.92 * NZ.fbm(S * f * 2.3 - seed, 19.1, 2))
+    length = 0.7 + 5.0 * NZ.v(S * 0.8 + 11.0 + seed, 3.0 + seed * 0.1) ** 2
+    brk = sstep(0.25, 0.6, NZ.fbm(S * 7.0 + seed, T * 0.6 + 2.0, 3))
+    for s0, s1, t, k in sources:
+        inside = sstep(s0 - 0.05, s0 + 0.25, S) * sstep(s1 + 0.05, s1 - 0.25, S)
+        d = t - T
+        run = np.clip(d, 0, None) / length                               # 0 at the source, 1 at the streak's length
+        width = sstep(0.58 + 0.1 * np.clip(run, 0, 1), 0.66 + 0.1 * np.clip(run, 0, 1), colsel)
+        fade = np.exp(-run) * sstep(-0.06, 0.02, d)
+        out = np.maximum(out, width * fade * inside * k * (0.45 + 0.55 * np.maximum(brk, sstep(0.6, 0.0, run))))
+    return np.clip(out * (0.55 + 0.45 * valley), 0, 1)
+
+
+def paint(kind, S, T, u01, v01, seed, key='+x', dims=(1.0, 1.0)):
+    """Albedo (sRGB), roughness, metalness, height (m) and PAINT MASK (0..1) of one face's texels. S, T are absolute
+    face metres; `key` the face's side ('+x' ...); dims its (width, height) in metres."""
     n1 = NZ.fbm(S * 0.28 + seed, T * 0.28 - seed)
     n2 = NZ.fbm(S * 1.1 - seed * 0.7, T * 1.1 + 9.1)
     n3 = NZ.fbm(S * 4.3 + 3.3, T * 4.3 + seed * 0.3, 3)
     zero = np.zeros_like(S)
+    # distance to the face border (m): edge wear lives there
+    ed = np.minimum(np.minimum(u01, 1 - u01) * dims[0], np.minimum(v01, 1 - v01) * dims[1])
+    rustc = lambda: mix(RUST, RUST_DARK, sstep(0.3, 0.75, n3))
     if kind in ('corr_out', 'corr_in', 'roof', 'ceiling'):
         inner = kind in ('corr_in', 'ceiling')
-        if kind in ('roof', 'ceiling'):
-            h = corrugation(T, 1.2, 0.05)          # transverse roof ribs
-        else:
-            h = corrugation(S, L / 21, 0.13)       # 21 side ribs over 24 m (a real 20 ft side x4)
-        valley = sstep(0.02, -0.08, h / 0.13)
+        roofish = kind in ('roof', 'ceiling')
+        amp = 0.05 if roofish else 0.13
+        h = corrugation(T, 1.2, amp) if roofish else corrugation(S, L / 21, amp)   # 21 side ribs over 24 m
+        valley = sstep(0.02, -0.08, h / amp)
+        crest = sstep(0.35, 0.95, h / amp)
         base = PAINT * (0.9 + 0.16 * n1)[..., None]
         if not inner:
             base = mix(base, base * 1.07 + 0.02, sstep(6.5, 10.0, T) * 0.5)      # sun-faded upper wall
+        src = drip_sources(key) if kind == 'corr_out' else []
+        dirt_run = runoff(S, T, src, seed + 1.7, valley, thin=False)             # broad dirty run-off
+        rust_run = runoff(S, T, src, seed, valley, thin=True)                    # thin rust streaks
         grime = sstep(2.4, 0.3, T + 1.2 * (n2 - 0.5)) * (0.75 if not inner else 0.9)   # the dirt band at the foot
-        streak = sstep(0.56, 0.78, NZ.fbm(S * 2.6 + seed, T * 0.11 + 4.0, 3)) * sstep(1.0, 9.8, T)
-        grime = np.maximum(grime, streak * (0.55 + 0.35 * valley))
+        grime = np.maximum(grime, dirt_run * 0.55)
         if kind == 'roof':
             stains = sstep(0.5, 0.75, NZ.fbm(S * 0.45 + 2.0, T * 0.45 - 5.0))
-            grime = np.maximum(grime * 0 + 0.25 + 0.2 * valley, stains * 0.75)
+            grime = np.maximum(0.25 + 0.2 * valley, stains * 0.75)
         if inner:
             grime = np.maximum(grime, 0.35 + 0.15 * n2)
-        rust_p = sstep(0.7, 0.77, NZ.fbm(S * 0.55 + 5.0 + seed, T * 0.55 + 9.0) + 0.22 * (n3 - 0.5)
-                       + 0.12 * sstep(1.4, 0.4, T) + 0.1 * sstep(9.3, 9.9, T) + (0.02 if kind == 'roof' else 0))
-        rust_s = sstep(0.6, 0.86, NZ.fbm(S * 2.2 + 40.0 + seed, T * 0.16, 3)) * (0.3 + 0.7 * sstep(3.0, 9.8, T)) * (0 if kind in ('roof', 'ceiling') else 1)
-        chips = sstep(0.8, 0.84, n3 + 0.28 * (n2 - 0.5)) * (1 - rust_p)
+        # edge wear (rust): the foot (rising up the valleys), the eaves under the rail, the corners at the posts
+        brk = 0.4 * (n3 - 0.5) + 0.3 * (n2 - 0.5)
+        if roofish:
+            e = np.maximum(sstep(HX - 0.9, HX - 0.1, np.abs(S)), sstep(HZ - 0.9, HZ - 0.1, np.abs(T))) + 0.25 * valley
+        else:
+            vs = 0.5 - 0.5 * np.sin(2 * np.pi * S / (L / 21))                  # 1 in a valley (smooth, for the rise)
+            rise = (0.1 + 0.5 * NZ.v(np.floor(S / (L / 21)) * 5.3 + seed, 1.7)) * vs   # rust climbs the valleys unevenly
+            e = np.maximum.reduce([sstep(1.2, 0.3, T - rise - 0.6 * (n1 - 0.5)), sstep(H - 0.85, H - 0.45, T) * 0.75,
+                                   sstep(HZ - 0.9, HZ - 0.1, np.abs(S)) * 0.85])
+        rust_e = sstep(0.5, 0.66, e + brk) * (0.5 if inner else 1.0)
+        # scrapes (bare metal, part rusted): horizontal marks at knock height, stretched noise
+        scrape = sstep(0.8, 0.86, NZ.fbm(S * 0.3 + seed, T * 7.0 + 3.0, 3)) * sstep(3.8, 1.2, T) * (0 if roofish else 1)
+        knock = 0.3 + 0.7 * sstep(3.5, 0.8, T) if not roofish else 0.5          # chips: mostly low on the wall, crests, edges
+        chips = sstep(0.87, 0.9, n3 + 0.28 * (n2 - 0.5) + 0.08 * crest + 0.2 * sstep(0.25, 0.0, ed)) * knock * (1 - rust_e)
+        steel_hit = np.maximum(scrape, chips)
         c = mix(base, GRIME * (0.9 + 0.2 * n3)[..., None], grime * 0.72)
-        c = mix(c, RUST * 1.1, rust_s * 0.55)
-        c = mix(c, mix(RUST, RUST_DARK, n3), rust_p)
-        c = mix(c, STEEL * (0.8 + 0.3 * n3)[..., None], chips * 0.8)
+        c = mix(c, RUST * 1.12, rust_run * 0.62)
+        c = mix(c, rustc(), rust_e)
+        bare = mix(STEEL * (0.8 + 0.3 * n3)[..., None], RUST * 0.9, sstep(0.4, 0.7, n2))
+        c = mix(c, bare, steel_hit * 0.8)
         if inner:
             c = c * 0.78
-        rough = 0.5 + 0.22 * grime + 0.35 * rust_p - 0.15 * chips + 0.06 * (n3 - 0.5)
-        metal = chips * 0.85
-        h = h + 0.01 * (n2 - 0.5) - 0.006 * rust_p * n3
-        return c, rough, metal, h
+        mask = (1 - grime * 0.72) * (1 - rust_run * 0.62) * (1 - rust_e) * (1 - steel_hit * 0.8)
+        rough = 0.5 + 0.22 * grime + 0.33 * rust_e + 0.15 * rust_run - 0.12 * steel_hit + 0.06 * (n3 - 0.5)
+        metal = steel_hit * 0.7 * (1 - sstep(0.4, 0.7, n2))
+        h = h + 0.01 * (n2 - 0.5) - 0.006 * rust_e * n3 - 0.002 * scrape
+        return c, rough, metal, h, mask
     if kind == 'floor':
         plank = np.floor(S / 1.2)
         tint = NZ.v(plank * 3.7, plank * 1.3 + 0.5)
@@ -308,7 +334,7 @@ def paint(kind, S, T, u01, v01, seed):
         c = mix(base, MUD, dirt * 0.8)
         c = mix(c, base * 1.35, scuff)
         c = mix(c, col(0.08, 0.06, 0.05), seam)
-        return c, 0.82 - 0.1 * scuff + 0.08 * dirt, zero, -0.02 * seam
+        return c, 0.82 - 0.1 * scuff + 0.08 * dirt, zero, -0.02 * seam, zero
     if kind in ('frame', 'casting', 'bar', 'lamp'):
         if kind == 'bar':
             base, rough0, metal0 = STEEL * 1.1, 0.38, 0.9
@@ -317,42 +343,55 @@ def paint(kind, S, T, u01, v01, seed):
         else:
             base, rough0, metal0 = GUN * (0.85 if kind == 'casting' else 1.0), 0.5, 0.25
         base = base * (0.88 + 0.24 * n1)[..., None]
-        rust_p = sstep(0.62, 0.72, NZ.fbm(S * 1.4 + seed, T * 1.4 - seed) + 0.25 * (n3 - 0.5) + (0.08 if kind == 'casting' else 0))
+        # edge wear at the face borders, rust at the foot, streaks hanging from the top of vertical faces
+        brk = 0.4 * (n3 - 0.5) + 0.25 * (n2 - 0.5)
+        vertical = key[1] != 'y'
+        e = np.maximum(sstep(0.07, 0.0, ed) * 0.85, sstep(1.2, 0.2, T) * (0.9 if vertical else 0.0))
+        rust_e = sstep(0.58, 0.72, e + brk + (0.1 if kind == 'casting' else 0.0))
+        run = runoff(S, T, [(-1e3, 1e3, T.max() + 0.01, 0.8)], seed, np.ones_like(S)) if vertical and dims[1] > 1.5 else zero
         grime = sstep(1.6, 0.2, T) * 0.6
         c = mix(base, GRIME, grime * 0.6)
-        c = mix(c, mix(RUST, RUST_DARK, n3), rust_p * (0 if kind == 'lamp' else 1))
-        h = 0.004 * (n2 - 0.5)
+        k = 0 if kind == 'lamp' else 1
+        c = mix(c, RUST * 1.05, run * 0.55 * k)
+        c = mix(c, rustc(), rust_e * k)
+        h = 0.004 * (n2 - 0.5) - 0.003 * rust_e * n3
         if kind == 'casting':
             hole = ((u01 - 0.5) / 0.3) ** 2 + ((v01 - 0.5) / 0.2) ** 2 < 1.0
             c = np.where(hole[..., None], col(0.03, 0.03, 0.03), c)
             h = np.where(hole, -0.05, h)
-        return c, rough0 + 0.3 * rust_p + 0.15 * grime, metal0 * (1 - rust_p), h
+        rk = np.maximum(rust_e, run * 0.5) * k
+        return c, rough0 + 0.3 * rk + 0.15 * grime, metal0 * (1 - rk), h, zero
     if kind == 'door':
         h = corrugation(S, 0.62, 0.05)
+        valley = sstep(0.01, -0.03, h / 0.05)
         base = col(0.49, 0.52, 0.55) * (0.88 + 0.22 * n1)[..., None]
-        rust_p = sstep(0.64, 0.74, NZ.fbm(S * 0.9 + seed, T * 0.9) + 0.25 * sstep(1.2, 0.3, T))
-        grime = np.maximum(sstep(2.0, 0.4, T) * 0.7, sstep(0.6, 0.8, NZ.fbm(S * 2.5, T * 0.14, 3)) * 0.5)
+        brk = 0.4 * (n3 - 0.5) + 0.3 * (n2 - 0.5)
+        rust_e = sstep(0.5, 0.66, np.maximum(sstep(1.3, 0.3, T - 0.4 * valley), sstep(0.2, 0.0, ed)) + brk)
+        run = runoff(S, T, [(-1e3, 1e3, T.max() - 0.05, 0.9)], seed, valley)
+        grime = np.maximum(sstep(2.0, 0.4, T) * 0.7, runoff(S, T, [(-1e3, 1e3, T.max() - 0.05, 1.0)], seed + 2.2, valley, thin=False) * 0.45)
         c = mix(base, GRIME, grime * 0.7)
-        c = mix(c, mix(RUST, RUST_DARK, n3), rust_p)
-        return c, 0.45 + 0.25 * grime + 0.3 * rust_p, 0.35 * (1 - rust_p), h
+        c = mix(c, RUST * 1.1, run * 0.6)
+        c = mix(c, rustc(), rust_e)
+        return c, 0.45 + 0.25 * grime + 0.3 * rust_e + 0.12 * run, 0.35 * (1 - rust_e), h, zero
     if kind == 'hazard':
         stripe = np.mod((S + T) / 0.9, 1.0) < 0.5
         base = np.where(stripe[..., None], col(0.78, 0.56, 0.14), col(0.07, 0.07, 0.07))
-        worn = sstep(0.62, 0.7, n3 + 0.2 * (n2 - 0.5))
+        worn = sstep(0.62, 0.7, n3 + 0.2 * (n2 - 0.5) + 0.3 * sstep(0.08, 0.0, ed))
         c = mix(base * (0.85 + 0.2 * n1)[..., None], GUN, worn)
-        c = mix(c, RUST, sstep(0.7, 0.8, n2) * 0.6)
-        return c, 0.55 + 0.2 * worn, 0.2 * worn, 0.003 * (n2 - 0.5)
+        c = mix(c, rustc(), sstep(0.62, 0.74, n2 + 0.3 * sstep(0.1, 0.0, ed)) * 0.8)
+        return c, 0.55 + 0.2 * worn, 0.2 * worn, 0.003 * (n2 - 0.5), zero
     if kind == 'window':
         bw = 0.28
         us, vs = u01 * 4.2, v01 * 3.0            # the face's metres (4.2 x 3.0 m frame)
         frame = (us < bw) | (us > 4.2 - bw) | (vs < bw) | (vs > 3.0 - bw) | (np.abs(us - 2.1) < 0.07)
         trim = col(0.86, 0.84, 0.78) * (0.85 + 0.2 * n1)[..., None]
         trim = mix(trim, GRIME, sstep(0.55, 0.8, n2) * 0.5)
+        trim = mix(trim, RUST, sstep(0.3, 0.0, vs) * sstep(0.45, 0.75, n3) * 0.7)   # the sill rusts
         glass = mix(col(0.07, 0.15, 0.18), col(0.2, 0.19, 0.16), sstep(0.8, 0.0, vs) * 0.6 + 0.15 * n2)
         c = np.where(frame[..., None], trim, glass)
         rough = np.where(frame, 0.5, 0.06 + 0.12 * sstep(0.9, 0.0, vs))
         h = np.where(frame, 0.01, 0.0)
-        return c, rough, zero, h
+        return c, rough, zero, h, zero
     raise ValueError(kind)
 
 
@@ -360,6 +399,7 @@ def paint_atlas(faces, rects):
     alb = np.zeros((ATLAS, ATLAS, 3)); alb[:] = GUN
     rough = np.full((ATLAS, ATLAS), 0.6)
     metal = np.zeros((ATLAS, ATLAS))
+    mask = np.zeros((ATLAS, ATLAS))
     nrm = np.zeros((ATLAS, ATLAS, 3)); nrm[..., 2] = 1
     for f in faces:
         x, y, w, h, rot = rects[f['id']]
@@ -375,7 +415,7 @@ def paint_atlas(faces, rects):
             S = f['s0'] + Ui / ku
             T = f['t0'] + Vj / kv
         u01, v01 = (S - f['s0']) / (f['s1'] - f['s0']), (T - f['t0']) / (f['t1'] - f['t0'])
-        c, r, mt, hgt = paint(f['kind'], S, T, u01, v01, f['seed'])
+        c, r, mt, hgt, mk = paint(f['kind'], S, T, u01, v01, f['seed'], f['key'], (f['s1'] - f['s0'], f['t1'] - f['t0']))
         hgt = np.broadcast_to(hgt, S.shape)
         # tangent-space normal from the height, in the texel axes: n = (-dh/du, -dh/dv, 1) (metres along +u, +v)
         dhu = np.gradient(hgt, axis=1) * ku
@@ -386,20 +426,16 @@ def paint_atlas(faces, rects):
         alb[ys, xs] = np.clip(c, 0, 1)
         rough[ys, xs] = np.clip(np.broadcast_to(r, S.shape), 0.04, 1)
         metal[ys, xs] = np.clip(np.broadcast_to(mt, S.shape), 0, 1)
+        mask[ys, xs] = np.clip(np.broadcast_to(mk, S.shape), 0, 1)
         nrm[ys, xs] = n
-    # the shared worn-edge block (chamfers): bare, slightly polished steel, flat normal
+    # the shared worn-edge block (chamfers): paint worn through to rusty steel, flat normal
     e = slice(ATLAS - EDGE_PX, ATLAS)
-    alb[e, e] = col(0.56, 0.56, 0.55)
-    rough[e, e] = 0.36
-    metal[e, e] = 0.85
+    alb[e, e] = col(0.36, 0.25, 0.18)
+    rough[e, e] = 0.55
+    metal[e, e] = 0.35
+    mask[e, e] = 0.0
     nrm[e, e] = (0, 0, 1)
-    return alb, rough, metal, nrm
-
-
-# ------------------------------------------------------------------------------------------------ geometry
-def g2b(p):
-    """Game axes (x, y up, z front) -> Blender axes (x, y back, z up); the glTF exporter maps them back."""
-    return (p[0], -p[2], p[1])
+    return alb, rough, metal, nrm, mask
 
 
 def box_polys(p, rects, lod):
@@ -481,27 +517,6 @@ def box_polys(p, rects, lod):
     return out
 
 
-def make_mesh(name, polys, mat=None):
-    verts, faces, uvs = [], [], []
-    for q, uv in polys:
-        i0 = len(verts)
-        verts.extend(g2b(v) for v in q)
-        faces.append(tuple(range(i0, i0 + len(q))))
-        uvs.extend(uv)
-    me = bpy.data.meshes.new(name)
-    me.from_pydata([tuple(map(float, v)) for v in verts], [], faces)
-    me.validate(clean_customdata=False)
-    if uvs:
-        layer = me.uv_layers.new(name='UVMap')
-        layer.data.foreach_set('uv', [float(c) for u in uvs for c in u])
-    for poly in me.polygons:
-        poly.use_smooth = False
-    if mat:
-        me.materials.append(mat)
-    me.update()
-    return me
-
-
 # ------------------------------------------------------------------------------------------------ build
 def main():
     os.makedirs(args.out, exist_ok=True)
@@ -520,7 +535,7 @@ def main():
             if kind is None:
                 continue
             s0, s1, t0, t1 = p['rect'][k]
-            faces.append(dict(id=f"{p['id']}{k}", kind=kind, s0=s0, s1=s1, t0=t0, t1=t1, seed=(len(faces) * 7.31) % 97))
+            faces.append(dict(id=f"{p['id']}{k}", kind=kind, key=k, s0=s0, s1=s1, t0=t0, t1=t1, seed=(len(faces) * 7.31) % 97))
     lo, hi = 1.0, 200.0
     for _ in range(40):                         # the largest px/m that packs
         mid = (lo + hi) / 2
@@ -532,154 +547,27 @@ def main():
     rects = pack(faces, scale)
     print(f'atlas: {len(faces)} faces, {scale:.2f} px/m (x density weight)')
 
-    alb, rough, metal, nrm = paint_atlas(faces, rects)
+    alb, rough, metal, nrm, mask = paint_atlas(faces, rects)
+    print(f'paint mask: mean {mask.mean():.3f} (1 = tinted paint)')
 
-    def new_image(name, rgb, alpha=None, non_color=False):
-        img = bpy.data.images.new(name, ATLAS, ATLAS, alpha=False, float_buffer=False)
-        if non_color:
-            img.colorspace_settings.name = 'Non-Color'
-        px = np.ones((ATLAS, ATLAS, 4), np.float32)
-        px[..., :3] = rgb
-        # quantize once so the saved PNG equals the painted values (deterministic)
-        px = np.round(px * 255) / 255
-        img.pixels.foreach_set(px.ravel())
-        return img
+    def lods(mat):
+        out = []
+        for lod in (0, 1, 2):
+            polys = []
+            for p in P:
+                if lod in p['lods']:
+                    polys += box_polys(p, rects, lod)
+            out.append(make_mesh(f'{NAME}_LOD{lod}', polys, mat))
+        return out
 
-    # ---- materials: one PBR material for every LOD (Principled + ORM + normal, glTF occlusion group)
-    mat = bpy.data.materials.new(f'M_{NAME}')
-    mat.use_nodes = True
-    nt = mat.node_tree
-    for n in list(nt.nodes):
-        nt.nodes.remove(n)
-    out = nt.nodes.new('ShaderNodeOutputMaterial')
-    bsdf = nt.nodes.new('ShaderNodeBsdfPrincipled')
-    nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
-    tex_bc = nt.nodes.new('ShaderNodeTexImage'); tex_bc.name = 'baseColor'
-    tex_orm = nt.nodes.new('ShaderNodeTexImage'); tex_orm.name = 'orm'
-    tex_n = nt.nodes.new('ShaderNodeTexImage'); tex_n.name = 'normal'
-    tex_ao = nt.nodes.new('ShaderNodeTexImage'); tex_ao.name = 'ao_bake'
+    def ao_fix(ao):
+        e = slice(ATLAS - EDGE_PX, ATLAS)
+        ao[e, e] = 1.0
+        return ao
 
-    # ---- LOD meshes
-    root = bpy.data.objects.new(NAME, None)
-    sc.collection.objects.link(root)
-    lod_objs = []
-    for lod in (0, 1, 2):
-        polys = []
-        for p in P:
-            if lod in p['lods']:
-                polys += box_polys(p, rects, lod)
-        me = make_mesh(f'{NAME}_LOD{lod}', polys, mat)
-        ob = bpy.data.objects.new(f'{NAME}_LOD{lod}', me)
-        sc.collection.objects.link(ob)
-        ob.parent = root
-        lod_objs.append(ob)
-        print(f'LOD{lod}: {sum(len(q) - 2 for q, _ in polys)} triangles')
-
-    # ---- AO bake (Cycles, LOD0 on a ground plane), into the atlas
-    sc.render.engine = 'CYCLES'
-    sc.cycles.device = 'CPU'
-    sc.cycles.samples = args.samples
-    sc.cycles.seed = 7
-    sc.cycles.use_denoising = False
-    sc.render.threads_mode = 'FIXED'
-    sc.render.threads = 4
-    world = bpy.data.worlds.new('bake')
-    sc.world = world
-    world.light_settings.distance = 4.0
-    gme = bpy.data.meshes.new('ground')
-    gme.from_pydata([(-60, -60, 0), (60, -60, 0), (60, 60, 0), (-60, 60, 0)], [], [(0, 1, 2, 3)])
-    ground = bpy.data.objects.new('ground', gme)
-    sc.collection.objects.link(ground)
-    ao_img = bpy.data.images.new('ao_bake', ATLAS, ATLAS, alpha=False, float_buffer=True)
-    ao_img.colorspace_settings.name = 'Non-Color'
-    tex_ao.image = ao_img
-    for n in nt.nodes:
-        n.select = False
-    tex_ao.select = True
-    nt.nodes.active = tex_ao
-    bpy.ops.object.select_all(action='DESELECT')
-    lod_objs[0].select_set(True)
-    bpy.context.view_layer.objects.active = lod_objs[0]
-    for ob in lod_objs[1:]:
-        ob.hide_render = True                 # LOD1/2 sit on LOD0's faces: they would occlude every ray
-    bpy.ops.object.bake(type='AO', margin=PAD, margin_type='EXTEND', use_clear=True)
-    for ob in lod_objs[1:]:
-        ob.hide_render = False
-    ao = np.array(ao_img.pixels[:], np.float32).reshape(ATLAS, ATLAS, 4)[..., 0].astype(float)
-    e = slice(ATLAS - EDGE_PX, ATLAS)
-    ao[e, e] = 1.0
-    ao = np.clip(0.18 + 0.82 * ao, 0, 1)
-    bpy.data.objects.remove(ground)
-    nt.nodes.remove(tex_ao)
-    bpy.data.images.remove(ao_img)
-    print(f'AO bake: mean {ao.mean():.3f}, min {ao.min():.3f}')
-
-    # cavity: a light AO multiply into the base colour too (the toon path ignores aoMap)
-    alb_ao = alb * (0.72 + 0.28 * ao)[..., None]
-    img_bc = new_image(f'{NAME}_baseColor', alb_ao)
-    img_orm = new_image(f'{NAME}_orm', np.stack([ao, rough, metal], -1), non_color=True)
-    img_n = new_image(f'{NAME}_normal', nrm * 0.5 + 0.5, non_color=True)
-    for img in (img_bc, img_orm, img_n):
-        img.filepath_raw = os.path.join(args.out, img.name + '.png')
-        img.file_format = 'PNG'
-        img.save()
-    tex_bc.image, tex_orm.image, tex_n.image = img_bc, img_orm, img_n
-    sep = nt.nodes.new('ShaderNodeSeparateColor')
-    nmap = nt.nodes.new('ShaderNodeNormalMap')
-    nt.links.new(tex_bc.outputs['Color'], bsdf.inputs['Base Color'])
-    nt.links.new(tex_orm.outputs['Color'], sep.inputs['Color'])
-    nt.links.new(sep.outputs['Green'], bsdf.inputs['Roughness'])
-    nt.links.new(sep.outputs['Blue'], bsdf.inputs['Metallic'])
-    nt.links.new(tex_n.outputs['Color'], nmap.inputs['Color'])
-    nt.links.new(nmap.outputs['Normal'], bsdf.inputs['Normal'])
-    grp = bpy.data.node_groups.new('glTF Material Output', 'ShaderNodeTree')
-    grp.interface.new_socket(name='Occlusion', in_out='INPUT', socket_type='NodeSocketFloat')
-    gnode = nt.nodes.new('ShaderNodeGroup')
-    gnode.node_tree = grp
-    nt.links.new(sep.outputs['Red'], gnode.inputs['Occlusion'])
-
-    # ---- COL_ proxies (made after the AO bake: they would occlude it): the sim's boxes (node at the centre, mesh = +-half extents, no material, extras.collider)
-    for i, (typ, cc, size) in enumerate(colliders()):
-        hx, hy, hz = (v / 2 for v in size)
-        vs = [(sx * hx, sy * hy, sz * hz) for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
-        idx = lambda sx, sy, sz: ((sx > 0) * 4 + (sy > 0) * 2 + (sz > 0))
-        quads = []
-        for a in range(3):
-            for sg in (-1, 1):
-                cs = []
-                for d0, d1 in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
-                    k = [0, 0, 0]; k[a] = sg
-                    o = [j for j in range(3) if j != a]
-                    k[o[0]] = d0; k[o[1]] = d1
-                    cs.append(idx(*k))
-                n = np.zeros(3); n[a] = sg
-                v0, v1, v2 = (np.array(vs[j]) for j in cs[:3])
-                if np.dot(np.cross(v1 - v0, v2 - v0), n) < 0:
-                    cs = cs[::-1]
-                quads.append(cs)
-        me = bpy.data.meshes.new(f'COL_{NAME}_{i}')
-        me.from_pydata([g2b(v) for v in vs], [], quads)
-        me.update()
-        ob = bpy.data.objects.new(f'COL_{NAME}_{i}', me)
-        ob.location = g2b(cc)
-        ob['collider'] = 'box'
-        ob['sim_type'] = typ
-        sc.collection.objects.link(ob)
-        ob.parent = root
-
-    # ---- export
-    bpy.ops.object.select_all(action='DESELECT')
-    for ob in [root] + list(root.children):
-        ob.select_set(True)
-    glb = os.path.join(args.out, f'{NAME}.glb')
-    bpy.ops.export_scene.gltf(
-        filepath=glb, export_format='GLB', use_selection=True, export_yup=True, export_apply=False,
-        export_texcoords=True, export_normals=True, export_tangents=True, export_materials='EXPORT',
-        export_image_format='AUTO', export_extras=True, export_cameras=False, export_lights=False,
-        export_animations=False, export_skins=False, export_morph=False)
-    info = dict(glb=os.path.relpath(glb, ROOT), bytes=os.path.getsize(glb), atlas_px_per_m=scale,
-                faces=len(faces), colliders=len(colliders()), blender=bpy.app.version_string)
-    print('BUILD', json.dumps(info))
-
+    info = build_kit(NAME, lods, colliders(), alb, rough, metal, nrm, args.out, ATLAS, samples=args.samples,
+                     paint_mask=mask, ao_fix=ao_fix, pad=PAD)
+    info.update(atlas_px_per_m=scale, faces=len(faces), colliders=len(colliders()))
+    report(info, ROOT)
 
 main()

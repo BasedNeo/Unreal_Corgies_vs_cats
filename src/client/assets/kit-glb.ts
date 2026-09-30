@@ -10,17 +10,24 @@
 //
 // LOD per instance: every LOD mesh holds all placements in the same order; each frame an instance keeps its matrix in
 // the LOD its camera distance picks and a zero-scale matrix in the others; a LOD mesh with no instance is hidden (no
-// draw). Tint per instance (instanceColor): the kit is painted a neutral light grey (KIT_PAINT_SRGB, the bake's PAINT)
-// and each container takes its world palette colour (CONTAINERS[].col) as a linear-space ratio.
+// draw). Tint per instance: the kit is painted a neutral light grey (KIT_PAINT_SRGB, the bake's PAINT) and each
+// container takes its world palette colour (CONTAINERS[].col) as a linear-space ratio. W11 P-GLB1b: under pbr() the
+// tint is a per-instance `paintTint` attribute that pbr({ paintTint: true }) applies only through the paint mask (the
+// baseColor alpha), so rust, grime and the frame keep their colour; the toon side keeps instanceColor (whole albedo).
+//
+// W11 P-GLB1b: a second piece, Kit_Lot_BagWall_01 (one 4.8 m module of props.ts bagWall()), goes through the same
+// view: KitPiece describes a piece (url, LOD distances, look options), createKitView draws any piece at its placements,
+// and createLotKitView bundles The Lot's two (containers + bag walls) for world-view's ?kit=glb branch. A bag wall of
+// length len is m = round(len / 4.8) modules, each stretched along its z by len / (m x 4.8).
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { pbr, stylize, toon } from '../style/style-webgpu.js';
+import { PBR_PAINT_TINT, pbr, stylize, toon } from '../style/style-webgpu.js';
 import { worldColor } from '../world/world-palette';
 import { buildPrimMeshes, disposePrimMeshes } from '../world/prim-mesh';
 import type { VisualPrim, WorldData } from '../../shared/world/world-types';
 import { Kit } from '../../shared/world/kit';
-import { container } from '../../shared/world/lot/props';
+import { bagWall, container } from '../../shared/world/lot/props';
 import { CONTAINER, CONTAINERS } from '../../shared/world/lot/layout';
 
 export type KitLook = 'pbr' | 'stylize';
@@ -40,7 +47,25 @@ export function kitFlag(search: string = typeof location !== 'undefined' ? locat
   return q.get('kitlook') === 'stylize' ? 'stylize' : 'pbr';
 }
 
-export interface KitPlacement { id: string; x: number; y: number; z: number; yaw: number; col: string }
+/** Where one instance of a kit piece stands: base centre (x, y, z), turn about +Y, palette colour, stretch along z. */
+export interface KitPlacement { id: string; x: number; y: number; z: number; yaw: number; col: string; sz?: number }
+
+/** One shared-GLB kit piece as the client draws it. */
+export interface KitPiece {
+  /** The GLB's root name (Kit_<Set>_<Thing>_<NN>); its LOD nodes are <name>_LOD0|1|2. */
+  name: string;
+  url: string;
+  /** LOD switch distances (m, camera to the instance's centre). */
+  lodDist: readonly [number, number];
+  /** Height (m) of the point the LOD distance is measured to, above the base. */
+  centreY: number;
+  /** pbr() tints the paint mask per instance (the placement's `col`); false = the GLB's own colours. */
+  paintTint: boolean;
+  /** pbr() overrides (STYLE.pbr keys) for this piece's material. */
+  pbrOpts?: Record<string, unknown>;
+  /** The toon side's SURFACES preset (stylize remap). */
+  toonSurface: string;
+}
 
 /**
  * The Lot's containers as kit placements, from the world data's own colliders: the floor slab gives the base centre
@@ -62,23 +87,15 @@ const primKey = (q: VisualPrim) => `${q.s}|` + [q.x, q.y, q.z, q.a, q.b, q.c, q.
  * Splits data.prims into the procedural containers' prims (props.ts container(), rebuilt at the same placements and
  * matched exactly) and the rest. `missing` counts rebuilt prims that were not found (0 when the data is consistent).
  */
-export function splitContainerPrims(data: WorldData): { rest: VisualPrim[]; containers: VisualPrim[]; placements: KitPlacement[]; missing: number } {
+export function splitContainerPrims(data: WorldData, prims: readonly VisualPrim[] = data.prims ?? []): { rest: VisualPrim[]; containers: VisualPrim[]; placements: KitPlacement[]; missing: number } {
   const placements = lotContainerPlacements(data);
   const kit = new Kit();
   for (const p of placements) {
     const c = CONTAINERS.find((k) => k.id === p.id);
     if (c) container(kit, c.x, p.y, c.z, c.col, c.stripe, c.door, []);
   }
-  const want = new Map<string, number>();
-  for (const q of kit.prims) want.set(primKey(q), (want.get(primKey(q)) ?? 0) + 1);
-  const rest: VisualPrim[] = [], containers: VisualPrim[] = [];
-  for (const q of data.prims ?? []) {
-    const k = primKey(q), n = want.get(k) ?? 0;
-    if (n > 0) { want.set(k, n - 1); containers.push(q); } else rest.push(q);
-  }
-  let missing = 0;
-  for (const n of want.values()) missing += n;
-  return { rest, containers, placements, missing };
+  const r = matchPrims(prims, kit.prims);
+  return { rest: r.rest, containers: r.matched, placements, missing: r.missing };
 }
 
 /** Linear-space instance tint that turns the kit's neutral paint into the palette colour `col`. */
@@ -88,8 +105,80 @@ export function kitTint(col: string, out = new THREE.Color()): THREE.Color {
   return out.setRGB(c.r / paint.r, c.g / paint.g, c.b / paint.b);
 }
 
-/** LOD index for a camera distance (m). */
-export const kitLodFor = (d: number): number => (d < KIT_LOD_DIST[0] ? 0 : d < KIT_LOD_DIST[1] ? 1 : 2);
+/** LOD index for a camera distance (m) with switch distances `dist`. */
+export const kitLodAt = (d: number, dist: readonly [number, number]): number => (d < dist[0] ? 0 : d < dist[1] ? 1 : 2);
+/** LOD index for a camera distance (m) to a container. */
+export const kitLodFor = (d: number): number => kitLodAt(d, KIT_LOD_DIST);
+
+export const KIT_CONTAINER_PIECE: KitPiece = {
+  name: KIT_CONTAINER, url: KIT_CONTAINER_URL, lodDist: KIT_LOD_DIST, centreY: CONTAINER.H / 2, paintTint: true,
+  pbrOpts: { paintTint: true }, toonSurface: 'metal',
+};
+
+// ------------------------------------------------------------------------------------------------ bag walls (P-GLB1b)
+export const KIT_BAGWALL = 'Kit_Lot_BagWall_01';
+export const KIT_BAGWALL_URL = `${import.meta.env?.BASE_URL ?? '/'}assets/kits/${KIT_BAGWALL}.glb`;
+/** The module's length (m): two nominal 2.4 m sacks (props.ts bagWall(): n = round(len / 2.4)). */
+export const KIT_BAGWALL_LEN = 4.8;
+/** Bag walls are small: LOD0 within 30 m, LOD1 within 80 m. */
+export const KIT_BAGWALL_LOD_DIST = [30, 80] as const;
+export const KIT_BAGWALL_PIECE: KitPiece = {
+  name: KIT_BAGWALL, url: KIT_BAGWALL_URL, lodDist: KIT_BAGWALL_LOD_DIST, centreY: 0.55, paintTint: false,
+  // cloth: no metal scratches, no rivulets, no puddles; a deeper weave bump
+  pbrOpts: { scratch: 0, rivulets: 0, puddle: 0, detailBump: [0.006, 0.001], detailRough: 0.05 }, toonSurface: 'cloth',
+};
+
+/** A bag wall from its world-data collider ('bags'): base centre, turn, length. */
+export interface BagWall { x: number; y: number; z: number; yaw: number; len: number }
+
+export function lotBagWalls(data: WorldData): BagWall[] {
+  return data.props.filter((p) => p.type === 'bags').map((b) => ({ x: b.x, y: b.y - b.hy, z: b.z, yaw: b.rotY ?? 0, len: 2 * b.hz }));
+}
+
+/** Module placements of one wall: m = max(1, round(len / 4.8)) modules along its local z, each stretched by len / (m x 4.8). */
+export function bagWallModules(w: BagWall, id = 'bags'): KitPlacement[] {
+  const m = Math.max(1, Math.round(w.len / KIT_BAGWALL_LEN));
+  const step = w.len / m, s = Math.sin(w.yaw), c = Math.cos(w.yaw);
+  return Array.from({ length: m }, (_, k) => {
+    const lz = -w.len / 2 + (k + 0.5) * step;
+    return { id: `${id}_${k}`, x: w.x + lz * s, y: w.y, z: w.z + lz * c, yaw: w.yaw, col: 'canvas', sz: step / KIT_BAGWALL_LEN };
+  });
+}
+
+const primKeyCount = (prims: readonly VisualPrim[]) => {
+  const want = new Map<string, number>();
+  for (const q of prims) want.set(primKey(q), (want.get(primKey(q)) ?? 0) + 1);
+  return want;
+};
+
+/** Splits `prims` into those equal to `rebuilt` (one for one) and the rest; `missing` = rebuilt prims not found. */
+export function matchPrims(prims: readonly VisualPrim[], rebuilt: readonly VisualPrim[]): { rest: VisualPrim[]; matched: VisualPrim[]; missing: number } {
+  const want = primKeyCount(rebuilt);
+  const rest: VisualPrim[] = [], matched: VisualPrim[] = [];
+  for (const q of prims) {
+    const k = primKey(q), n = want.get(k) ?? 0;
+    if (n > 0) { want.set(k, n - 1); matched.push(q); } else rest.push(q);
+  }
+  let missing = 0;
+  for (const n of want.values()) missing += n;
+  return { rest, matched, missing };
+}
+
+/**
+ * Splits `prims` (default data.prims) into the procedural bag walls' prims (props.ts bagWall() rebuilt from each 'bags'
+ * collider: its ends from the centre, length and turn, the ground from its base) and the rest, plus the module placements.
+ */
+export function splitBagWallPrims(data: WorldData, prims: readonly VisualPrim[] = data.prims ?? []): { rest: VisualPrim[]; walls: VisualPrim[]; placements: KitPlacement[]; missing: number } {
+  const kit = new Kit();
+  const placements: KitPlacement[] = [];
+  lotBagWalls(data).forEach((w, i) => {
+    const hx = (w.len / 2) * Math.sin(w.yaw), hz = (w.len / 2) * Math.cos(w.yaw);
+    bagWall(kit, () => w.y + 0.04, w.x - hx, w.z - hz, w.x + hx, w.z + hz);
+    placements.push(...bagWallModules(w, `bags${i}`));
+  });
+  const r = matchPrims(prims, kit.prims);
+  return { rest: r.rest, walls: r.matched, placements, missing: r.missing };
+}
 
 let loader: GLTFLoader | null = null;
 function gltfLoader(): GLTFLoader {
@@ -107,41 +196,48 @@ export interface KitView {
 }
 
 /**
- * The Lot's containers from the shared GLB (instanced), in `look`. `fallback` prims (the procedural containers) are
- * drawn until the GLB is ready. `far`: buildPrimMeshes' far-scenery distance for the fallback.
+ * One kit piece from its shared GLB (instanced), in `look`, at `split.placements`. `split.prims` (the procedural stand-in)
+ * are drawn until the GLB is ready. `far`: buildPrimMeshes' far-scenery distance for that stand-in.
  */
-export function createContainerKitView(split: { containers: VisualPrim[]; placements: KitPlacement[] }, look: KitLook, opts: { url?: string; far?: number } = {}): KitView {
+export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; placements: KitPlacement[] }, look: KitLook, opts: { url?: string; far?: number } = {}): KitView {
   const group = new THREE.Group();
-  group.name = 'kit_glb';
+  group.name = `kit_glb_${piece.name}`;
   const placements = split.placements;
-  const fallback = split.containers.length ? buildPrimMeshes(split.containers, { far: opts.far }) : null;
+  const fallback = split.prims.length ? buildPrimMeshes(split.prims, { far: opts.far }) : null;
   if (fallback) group.add(fallback.group);
   const meshes: THREE.InstancedMesh[] = [];
   const tris: number[] = [];
   const cur = placements.map(() => -1);
   const zero = new THREE.Matrix4().makeScale(0, 0, 0);
   const up = new THREE.Vector3(0, 1, 0);
-  const mats = placements.map((p) => new THREE.Matrix4().compose(new THREE.Vector3(p.x, p.y, p.z), new THREE.Quaternion().setFromAxisAngle(up, p.yaw), new THREE.Vector3(1, 1, 1)));
-  const centres = placements.map((p) => new THREE.Vector3(p.x, p.y + CONTAINER.H / 2, p.z));
+  const mats = placements.map((p) => new THREE.Matrix4().compose(new THREE.Vector3(p.x, p.y, p.z), new THREE.Quaternion().setFromAxisAngle(up, p.yaw), new THREE.Vector3(1, 1, p.sz ?? 1)));
+  const centres = placements.map((p) => new THREE.Vector3(p.x, p.y + piece.centreY, p.z));
   const cam = new THREE.Vector3();
   let disposed = false;
 
   // per LOD, per placement: placement x the LOD node's own matrix (the web variant's KHR_mesh_quantization puts the
   // dequantization scale/offset on the node)
   const lodMats: THREE.Matrix4[][] = [];
-  const ready = gltfLoader().loadAsync(opts.url ?? KIT_CONTAINER_URL).then((gltf) => {
+  const ready = gltfLoader().loadAsync(opts.url ?? piece.url).then((gltf) => {
     if (disposed) return;
     const tint = new THREE.Color();
+    // pbr paint tint: one per-instance attribute shared by the LOD geometries (same placements, same order)
+    const paint = look === 'pbr' && piece.paintTint ? new THREE.InstancedBufferAttribute(new Float32Array(placements.length * 3), 3) : null;
+    if (paint) placements.forEach((p, k) => { kitTint(p.col, tint); paint.setXYZ(k, tint.r, tint.g, tint.b); });
     gltf.scene.updateMatrixWorld(true);
     for (let i = 0; i < 3; i++) {
-      const src = gltf.scene.getObjectByName(`${KIT_CONTAINER}_LOD${i}`) as THREE.Mesh | undefined;
-      if (!src?.isMesh) throw new Error(`${KIT_CONTAINER}: LOD${i} missing`);
+      const src = gltf.scene.getObjectByName(`${piece.name}_LOD${i}`) as THREE.Mesh | undefined;
+      if (!src?.isMesh) throw new Error(`${piece.name}: LOD${i} missing`);
+      if (paint) src.geometry.setAttribute(PBR_PAINT_TINT, paint);
       const im = new THREE.InstancedMesh(src.geometry, src.material, placements.length);
-      im.name = `${KIT_CONTAINER}_LOD${i}`;
+      im.name = `${piece.name}_LOD${i}`;
       im.castShadow = true;
       im.receiveShadow = true;
       lodMats.push(mats.map((m) => m.clone().multiply(src.matrixWorld)));
-      placements.forEach((p, k) => { im.setMatrixAt(k, lodMats[i][k]); im.setColorAt(k, kitTint(p.col, tint)); });
+      placements.forEach((p, k) => {
+        im.setMatrixAt(k, lodMats[i][k]);
+        if (look === 'stylize' && piece.paintTint) im.setColorAt(k, kitTint(p.col, tint));
+      });
       im.computeBoundingSphere();                     // over every placement, kept when instances switch LOD
       im.computeBoundingBox();
       meshes.push(im);
@@ -149,16 +245,16 @@ export function createContainerKitView(split: { containers: VisualPrim[]; placem
       tris.push((idx ? idx.count : src.geometry.getAttribute('position').count) / 3);
     }
     const lodGroup = new THREE.Group();
-    lodGroup.name = `${KIT_CONTAINER}_instances`;
+    lodGroup.name = `${piece.name}_instances`;
     lodGroup.add(...meshes);
-    if (look === 'pbr') for (const m of meshes) m.material = pbr(m.material as THREE.Material);
+    if (look === 'pbr') for (const m of meshes) m.material = pbr(m.material as THREE.Material, piece.pbrOpts ?? {});
     // the toon side: toon() keeps the colour map; the ORM/normal maps have no place in the toon model (surface preset)
-    else stylize(lodGroup, { creases: false, remap: (m: THREE.MeshStandardMaterial) => toon({ color: m.color?.getHex() ?? 0xffffff, map: m.map ?? null, surface: 'metal', rough: 0.55, metal: 0.2 }) });
+    else stylize(lodGroup, { creases: false, remap: (m: THREE.MeshStandardMaterial) => toon({ color: m.color?.getHex() ?? 0xffffff, map: m.map ?? null, surface: piece.toonSurface, ...(piece.toonSurface === 'metal' ? { rough: 0.55, metal: 0.2 } : {}) }) });
     group.add(lodGroup);
     for (let k = 0; k < placements.length; k++) cur[k] = -1;
     if (fallback) { group.remove(fallback.group); disposePrimMeshes(fallback); }
   });
-  ready.catch((e: unknown) => console.warn(`[kit-glb] ${KIT_CONTAINER} not loaded, procedural containers kept: ${String((e as Error)?.message ?? e)}`));
+  ready.catch((e: unknown) => console.warn(`[kit-glb] ${piece.name} not loaded, procedural stand-in kept: ${String((e as Error)?.message ?? e)}`));
 
   return {
     group,
@@ -168,7 +264,7 @@ export function createContainerKitView(split: { containers: VisualPrim[]; placem
       camera.getWorldPosition(cam);
       let changed = false;
       for (let k = 0; k < placements.length; k++) {
-        const lod = kitLodFor(cam.distanceTo(centres[k]));
+        const lod = kitLodAt(cam.distanceTo(centres[k]), piece.lodDist);
         if (lod === cur[k]) continue;
         cur[k] = lod;
         changed = true;
@@ -196,5 +292,45 @@ export function createContainerKitView(split: { containers: VisualPrim[]; placem
       for (const m of meshes) { m.geometry.dispose(); m.dispose(); }
       meshes.length = 0;
     },
+  };
+}
+
+/** The Lot's containers from the shared GLB (P-GLB1's entry point, kept): createKitView with KIT_CONTAINER_PIECE. */
+export function createContainerKitView(split: { containers: VisualPrim[]; placements: KitPlacement[] }, look: KitLook, opts: { url?: string; far?: number } = {}): KitView {
+  return createKitView(KIT_CONTAINER_PIECE, { prims: split.containers, placements: split.placements }, look, opts);
+}
+
+/** The Lot's kit split: containers first, then the bag walls from what is left; `rest` is everything else. */
+export function splitLotKitPrims(data: WorldData) {
+  const containers = splitContainerPrims(data);
+  const bags = splitBagWallPrims(data, containers.rest);
+  return { rest: bags.rest, containers, bags };
+}
+
+/**
+ * Every Lot kit piece in one view (world-view's ?kit=glb branch): containers + bag walls. stats() sums the pieces
+ * (kitLoaded = pieces drawn from their GLB) and adds per-piece kitTriangles_<name>.
+ */
+export function createLotKitView(split: ReturnType<typeof splitLotKitPrims>, look: KitLook, opts: { far?: number } = {}): KitView {
+  const views: [KitPiece, KitView][] = [];
+  if (split.containers.placements.length) views.push([KIT_CONTAINER_PIECE, createKitView(KIT_CONTAINER_PIECE, { prims: split.containers.containers, placements: split.containers.placements }, look, opts)]);
+  if (split.bags.placements.length) views.push([KIT_BAGWALL_PIECE, createKitView(KIT_BAGWALL_PIECE, { prims: split.bags.walls, placements: split.bags.placements }, look, opts)]);
+  const group = new THREE.Group();
+  group.name = 'kit_glb';
+  for (const [, v] of views) group.add(v.group);
+  return {
+    group,
+    ready: Promise.all(views.map(([, v]) => v.ready)).then(() => undefined),
+    update(camera) { for (const [, v] of views) v.update(camera); },
+    stats() {
+      const out: Record<string, number> = {};
+      for (const [piece, v] of views) {
+        const st = v.stats();
+        for (const [k, n] of Object.entries(st)) out[k] = (out[k] ?? 0) + n;
+        out[`kitTriangles_${piece.name}`] = st.kitTriangles;
+      }
+      return out;
+    },
+    dispose() { for (const [, v] of views) v.dispose(); },
   };
 }

@@ -27,6 +27,11 @@
 // W11 P-GLB1: pbr(gltfMaterial) is the one sanctioned entry point for authored PBR assets (shared GLBs): the asset keeps its
 // own baseColor / ORM / normal maps and three's GGX lighting, inside the style rig (the same lights, sky reflection,
 // weather wetness, interiors, exposure and grade); no ink hull (it is not a toon material). toon/glow/stylize unchanged.
+// W11 P-GLB1b (the non-destructive Stage 6 layer, STYLE.pbr): a per-instance paint tint through the baseColor alpha
+// (the paint mask), a world-space detail layer at two scales (dents + grain as a bump, mottling, roughness breakup,
+// micro-scratches) that fades out with distance, the wet response (porous parts darken most, the roughness falls, rain
+// rivulets run down walls, puddles pool on flat tops, sheltered interiors stay dry), and a wrapped diffuse for the
+// shade side (the toon ramp's half-lambert read, so a PBR wall in shade is not black next to a toon one).
 //
 // Differences from WebGL that matter:
 // - Ink hull comes from TSL toonOutlinePass: it outlines ONLY toon materials (isMeshToonMaterial /
@@ -41,6 +46,7 @@ import {
   positionViewDirection, cameraPosition, reflect, fwidth, length, clamp, abs, floor, sqrt,
   mx_noise_float, materialReference, attribute, diffuseColor, roughness, metalness, specularColor,
   BRDF_Lambert, F_Schlick, uniformArray, Loop, materialColor, materialRoughness, cameraWorldMatrix,
+  texture, faceDirection, materialNormal, materialMetalness, positionView,
 } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
@@ -129,9 +135,9 @@ export function interiorOpenAt(p, n, boxes = interiorsSet ?? []) {
  * the air it faces) is tested against every box, feathered over `feather` m inside the box faces. An inner pipe or
  * container wall faces the inside (0); its outer shell and roof face out (1); light spills `feather` m into a mouth.
  */
-const interiorOpen = Fn(() => {
+const interiorOpenFor = (N) => Fn(() => {
   const I = STYLE.interior;
-  const p = positionWorld.add(normalWorld.mul(I.probe));
+  const p = positionWorld.add(N.mul(I.probe));
   const shut = float(0).toVar('interiorShut');
   Loop(STYLE_INTERIORS.count, ({ i }) => {
     const lo = STYLE_INTERIORS.boxes.element(i.mul(2)).xyz;
@@ -141,6 +147,10 @@ const interiorOpen = Fn(() => {
   });
   return float(1).sub(shut);
 });
+const interiorOpen = interiorOpenFor(normalWorld);
+/** P-GLB1b: the same test on the geometry normal, for pbr(): its normal node reads the wetness, so the shading normal
+ *  cannot feed the interior test that gates the wetness (a node cycle). */
+const interiorOpenGeometry = interiorOpenFor(normalWorldGeometry);
 
 let detail = 2;
 /** Tier → material detail (see the header). */
@@ -517,23 +527,46 @@ export function stylize(root, { creases = true, creaseDeg, remap, surface } = {}
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// W11 P-GLB1: authored PBR assets (shared GLBs, docs/design/ASSET_PIPELINE.md stage 5)
+// W11 P-GLB1: authored PBR assets (shared GLBs, docs/design/ASSET_PIPELINE.md stage 5; P-GLB1b: the stage 6 layer)
 
 /** Rain exposure of a surface by its world normal's y: up-facing soaks fully, walls partly, undersides barely. */
 const soakExposure = (ny) => mix(mix(float(STYLE.wet.underSoak), float(STYLE.wet.sideSoak), smoothstep(-0.7, 0.0, ny)), float(1), smoothstep(0.2, 0.75, ny));
 
 /**
+ * Bump from a procedural height `h` (metres) on the view-space normal `N`: Mikkelsen's surface-gradient method with
+ * unnormalized screen derivatives, so a 2 mm dent reads as 2 mm at every distance (three's bumpMap() normalizes them
+ * for texture heights, which makes a fixed height stronger with distance).
+ */
+const bumpHeight = Fn(([N, h]) => {
+  const sx = positionView.dFdx(), sy = positionView.dFdy();
+  const R1 = sy.cross(N), R2 = N.cross(sx);
+  const det = sx.dot(R1).mul(faceDirection);
+  const grad = det.sign().mul(h.dFdx().mul(R1).add(h.dFdy().mul(R2)));
+  return abs(det).mul(N).sub(grad).normalize();
+});
+
+/**
  * pbr()'s lighting: three's physically based model (GGX, the asset's own roughness / metalness / occlusion / normal
- * maps) plus the rig's fake sky reflection (STYLE_ENV: the style has no env map, so without it metal reads black), and
- * the W10 P5 interiors (the sky fill does not reach inside WorldData.interiors).
+ * maps) plus the rig's fake sky reflection (STYLE_ENV: the style has no env map, so without it metal reads black), the
+ * W10 P5 interiors (the sky fill does not reach inside WorldData.interiors) and (P-GLB1b) the toon ramp's shade read:
+ * max(saturate((N.L + w) / (1 + w)), floor) instead of saturate(N.L). The wrap lifts grazing and side-lit faces the way
+ * the ramp's half-lambert does (w = 0.5 tracks STYLE.toonSteps' ramp from N.L = 0 up) and leaves faces lit head-on
+ * unchanged; the floor is the ramp's bandFloor on faces turned away from an unshadowed light (the sky fill). Shadowed
+ * light stays shadowed (lightColor carries the shadow), as in the toon model.
  */
 class StylePbrLightingModel extends THREE.PhysicalLightingModel {
-  /** @param {any} open 1 where the sky reaches, 0 inside an interior (null = everywhere open) @param {number} env gain */
-  constructor(open, env) { super(); this.open = open; this.env = env; }
+  /** @param {any} open 1 where the sky reaches, 0 inside an interior (null = everywhere open) @param {number} env gain @param {number} wrap @param {number} floor */
+  constructor(open, env, wrap = 0, floor = 0) { super(); this.open = open; this.env = env; this.wrap = wrap; this.floor = floor; }
 
   direct(params, builder) {
     if (this.open && params.lightNode?.light?.userData?.skyFill) params = { ...params, lightColor: params.lightColor.mul(this.open) };
     super.direct(params, builder);
+    if (this.wrap > 0 || this.floor > 0) {
+      const { lightDirection, lightColor, reflectedLight } = params;
+      const nl = normalView.dot(lightDirection);
+      const extra = max(nl.add(this.wrap).div(1 + this.wrap).clamp(), float(this.floor)).sub(nl.clamp());
+      reflectedLight.directDiffuse.addAssign(extra.mul(lightColor).mul(BRDF_Lambert({ diffuseColor: diffuseColor.rgb })));
+    }
   }
 
   indirect(builder) {
@@ -563,21 +596,35 @@ export class StylePbrMaterial extends THREE.MeshStandardNodeMaterial {
     this.openNode = null;
     /** Sky-reflection gain (× STYLE_ENV.intensity). */
     this.envGain = 1;
+    /** Diffuse wrap w and shade floor (0, 0 = plain N.L). */
+    this.wrap = 0;
+    this.shadeFloor = 0;
   }
-  customProgramCacheKey() { return `${super.customProgramCacheKey()}|spbr${this.openNode ? 'i' : ''}${this.envGain}`; }
-  setupLightingModel() { return new StylePbrLightingModel(this.openNode, this.envGain); }
+  customProgramCacheKey() { return `${super.customProgramCacheKey()}|spbr${this.openNode ? 'i' : ''}${this.envGain}w${this.wrap}f${this.shadeFloor}`; }
+  setupLightingModel() { return new StylePbrLightingModel(this.openNode, this.envGain, this.wrap, this.shadeFloor); }
 }
+
+/** The per-instance paint tint attribute pbr({ paintTint: true }) reads (vec3, linear; an InstancedBufferAttribute). */
+export const PBR_PAINT_TINT = 'paintTint';
 
 /**
  * W11 P-GLB1: the sanctioned entry point for authored PBR assets (a shared GLB's materials, docs/design/ASSET_PIPELINE.md).
  * Keeps the source material's maps (baseColor, the ORM pair: occlusion R / roughness G / metalness B, normal, emissive)
- * and factors, and puts it inside the style rig: the same lights, the fake sky reflection (STYLE_ENV), weather wetness
- * (STYLE_WEATHER.wet darkens the albedo and drops the roughness toward a sheen, up-facing parts soak most), the W10 P5
- * interiors, and the post chain (exposure, bloom, grade). Not a toon material: no ink hull, no toon ramp (the
+ * and factors, and puts it inside the style rig: the same lights, the fake sky reflection (STYLE_ENV), weather wetness,
+ * the W10 P5 interiors, and the post chain (exposure, bloom, grade). Not a toon material: no ink hull, no toon ramp (the
  * "stylised-real" side of the W11 A/B; stylize() is the toon side). Cached: the same source + opts give one instance.
+ * W11 P-GLB1b (stage 6, never edits the GLB): see the file header; every knob is in STYLE.pbr.
+ *   paintTint   the geometry's per-instance `paintTint` (PBR_PAINT_TINT) multiplies the albedo only where the baseColor
+ *               alpha (the kit's paint mask) is 1: rust, grime and frame keep their own colour
+ *   detail*     two world-space noise scales (m^-1): a bump (m), albedo mottling and roughness breakup, faded out once a
+ *               pixel covers a good part of a wavelength (no far shimmer)
+ *   scratch     micro-scratches on the paint (contour lines of a stretched noise, in patches): lighter, smoother metal
+ *   rivulets    rain running down walls while it rains (STYLE_WEATHER.rain): darker, near-mirror lines
+ *   puddle      flat up-facing low spots pool water when wet (like toon({ puddle })): dark, mirror-smooth, flat normal
+ *   wrap, shadeFloor  the shade-side diffuse read (StylePbrLightingModel)
+ * Wetness never reaches inside WorldData.interiors (a container's floor and inner walls stay dry).
  * @param {any} src a GLTFLoader material (MeshStandardMaterial / MeshPhysicalMaterial)
- * @param {{ env?: number, wetK?: number, normalScale?: number, aoIntensity?: number, interiors?: boolean }} [opts]
- *   overrides of STYLE.pbr
+ * @param {Partial<typeof STYLE.pbr>} [opts] overrides of STYLE.pbr
  */
 export function pbr(src, opts = {}) {
   const P = { ...STYLE.pbr, ...opts };
@@ -596,12 +643,67 @@ export function pbr(src, opts = {}) {
   m.emissiveIntensity = src.emissiveIntensity ?? 1;
   m.side = src.side ?? THREE.FrontSide;
   m.vertexColors = !!src.vertexColors;
-  // weather: the albedo darkens (porous paint, rust) and the roughness falls toward a wet sheen
-  const wet = STYLE_WEATHER.wet.mul(P.wetK).mul(soakExposure(normalWorld.y)).clamp(0, 1);
-  m.colorNode = materialColor.mul(mix(float(1), float(STYLE.wet.darken), wet.mul(0.8)));
-  m.roughnessNode = mix(materialRoughness, materialRoughness.mul(STYLE.wet.roughKeep).add(STYLE.wet.rough), wet);
-  m.openNode = P.interiors ? interiorOpen() : null;
+
+  // world metres: the web variant's KHR_mesh_quantization leaves the geometry in quantized units (the dequantization
+  // lives on the node / the instance matrix), so positionGeometry is not metres there; kit pieces never move
+  const G = positionWorld;
+  const foot = length(fwidth(G));
+  const lod = (freq) => fall(0.4 / freq, 0.12 / freq, foot);
+  const [f1, f2] = P.detailFreq, [b1, b2] = P.detailBump;
+  const d1 = mx_noise_float(G.mul(f1)).mul(lod(f1)).toVar('pbrD1');                     // dents, mottling (~30 cm)
+  const d2 = mx_noise_float(G.mul(f2).add(vec3(3.1, 7.7, 1.3))).mul(lod(f2)).toVar('pbrD2');   // grain (~4 cm)
+  const mask = m.map && P.paintTint ? texture(m.map).a : float(0);
+  let scratch = float(0);
+  if (P.scratch > 0) {
+    // contour lines of a noise stretched along y (mostly level marks on walls), in patches, thin at every distance
+    const [sa, sb] = P.scratchFreq;
+    const sn = mx_noise_float(G.mul(vec3(sa, sb, sa)).add(vec3(-5.3, 0.7, 2.9)));
+    const line = fall(fwidth(sn).mul(1.2).add(0.02), float(0), abs(sn));
+    const patch = smoothstep(0.1, 0.5, mx_noise_float(G.mul(0.7).add(vec3(9.1, -3.3, 4.7))));
+    scratch = line.mul(patch).mul(lod(sb)).mul(P.scratch).mul(P.paintTint ? mask : float(1)).toVar('pbrScratch');
+  }
+  // weather: wetness (sheltered interiors stay dry), rivulets on walls while it rains, puddles on flat tops
+  const open = P.interiors ? interiorOpenGeometry().toVar('pbrOpen') : float(1);
+  const ny = normalWorldGeometry.y;                               // the surface's own facing (not the bumps)
+  const wet = STYLE_WEATHER.wet.mul(P.wetK).mul(soakExposure(ny)).mul(open).clamp(0, 1).toVar('pbrWet');
+  let riv = float(0), puddle = float(0);
+  if (P.rivulets > 0) {
+    const q = vec3(G.x.mul(6.5), G.y.mul(0.8).add(time.mul(0.9)), G.z.mul(6.5));
+    const rn = mx_noise_float(q);
+    const wall = float(1).sub(abs(ny)).pow(2);
+    riv = fall(fwidth(rn).add(0.05), float(0), abs(rn)).mul(wall).mul(STYLE_WEATHER.rain).mul(wet.min(1).mul(1.5).min(1)).mul(lod(6.5)).mul(P.rivulets).toVar('pbrRiv');
+  }
+  if (P.puddle > 0) {
+    const pn = mx_noise_float(vec3(G.x.mul(0.35), 0.37, G.z.mul(0.35))).add(d1.mul(0.08));
+    const pthr = mix(float(0.62), float(0.02), P.puddle);
+    puddle = smoothstep(pthr, pthr.add(0.1), pn).mul(smoothstep(0.965, 0.995, ny)).mul(smoothstep(0.3, 0.9, STYLE_WEATHER.wet.mul(P.wetK))).mul(open).toVar('pbrPuddle');
+  }
+
+  let c = materialColor.rgb;
+  if (P.paintTint) c = c.mul(mix(vec3(1), attribute(PBR_PAINT_TINT, 'vec3'), mask));
+  c = c.mul(d1.mul(P.detailAlbedo).add(1));
+  c = mix(c, c.mul(1.15).add(0.02), scratch);
+  // wet: porous (rough) parts darken most, painted steel mostly gains gloss
+  const porous = mix(float(0.35), float(1), materialRoughness.clamp(0, 1));
+  c = c.mul(mix(float(1), float(STYLE.wet.darken), wet.mul(porous).mul(0.85)));
+  c = c.mul(float(1).sub(riv.mul(0.2)));
+  c = mix(c, c.mul(STYLE.wet.puddleAlbedo), puddle);
+  m.colorNode = c;
+
+  let r = materialRoughness.add(d2.mul(P.detailRough)).sub(scratch.mul(0.15));
+  r = mix(r, r.mul(STYLE.wet.roughKeep).add(STYLE.wet.rough), wet);
+  r = mix(r, float(0.06), riv);
+  r = mix(r, float(0.035), puddle);
+  m.roughnessNode = r.clamp(0.04, 1);
+  m.metalnessNode = materialMetalness.add(scratch.mul(0.2)).clamp(0, 1);
+
+  // detail bump on the normal-mapped normal; puddles are flat water
+  const h = d1.mul(b1).add(d2.mul(b2)).sub(scratch.mul(0.0004));
+  m.normalNode = mix(bumpHeight(materialNormal, h), normalView, puddle).normalize();
+  m.openNode = P.interiors ? open : null;
   m.envGain = P.env;
+  m.wrap = P.wrap;
+  m.shadeFloor = P.shadeFloor;
   m.userData.style = 'pbr';
   materialCache.set(key, m);
   return m;

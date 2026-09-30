@@ -34,6 +34,9 @@ Godot is the asset-compatibility gate, and the door to a native client later; it
   - LOD nodes are `<name>_LOD0|1|2`.
   - Collision nodes are `COL_<name>_<n>` boxes; they are never rendered.
 - **PBR:** baseColor, ORM and normal at 1024² for kit pieces (2048² for heroes only).
+  - **Paint mask (P-GLB1b):** the baseColor **alpha** channel. 1 = paint that the game tints per instance, 0 = everything
+    that keeps its own colour (rust, grime, frame, glass). It is stored as `1 + 254 × mask` (never 0: lossy WebP may
+    rewrite colour under alpha 0), and the material stays `OPAQUE`. A piece that is never tinted has no alpha.
 - **Files:**
   - the master GLB (PNG textures) is the source of truth, the one Godot imports;
   - the web variant (meshopt, WebP) is made from it and is what Three.js loads;
