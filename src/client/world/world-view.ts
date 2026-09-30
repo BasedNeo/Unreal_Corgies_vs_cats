@@ -29,7 +29,7 @@ import { QUALITY, toQualityTier, type QualityTier } from '../engine/quality';
 import { createLampsView } from './lamps-view';
 import { createDestructView, type DestructView } from './destruct-view';
 import { surfaceAt } from '../../shared/world/queries';
-import { createLotKitView, kitFlag, splitLotKitPrims, type KitView } from '../assets/kit-glb';
+import { createLotKitView, kitFlag, splitLotKitPrims, type LotKitView } from '../assets/kit-glb';
 
 /** Post grade uniforms (createComicPipeline(...).grade.uniforms) the weather may desaturate. */
 export interface GradeUniforms { saturation: { value: number } }
@@ -99,12 +99,13 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
   const fence = data.fences?.length ? createFenceView(data.fences, data.height) : null;
   if (fence) root.add(fence.boards);
   // W11 P-GLB1: ?kit=glb draws The Lot's containers (P-GLB1b: and bag walls; P-GLB3: the LOT_KIT table, + pipes,
-  // footings, floodlight masts and lamps) from the shared GLBs (instanced; ?kitlook=stylize = the toon A/B side)
+  // footings, floodlight masts and lamps) from the shared GLBs (?kitlook=stylize = the toon A/B side). P-GLB4: one
+  // batched mesh per piece with per-instance distance LODs, and one shared shadow draw (kit.shadowFrom, below)
   const kitLook = kitFlag();
   const kitSplit = kitLook ? splitLotKitPrims(data) : null;
   const props = buildPrimMeshes([...(kitSplit ? kitSplit.rest : data.prims ?? []), ...(fence?.prims ?? [])], { far: edge + 8 });
   root.add(props.group);
-  const kit: KitView | null = kitLook && kitSplit && kitSplit.pieces.some((p) => p.placements.length) ? createLotKitView(kitSplit, kitLook, { far: edge + 8 }) : null;
+  const kit: LotKitView | null = kitLook && kitSplit && kitSplit.pieces.some((p) => p.placements.length) ? createLotKitView(kitSplit, kitLook, { far: edge + 8 }) : null;
   if (kit) root.add(kit.group);
   // crease ink is built in every tier and only hidden on low, so the tier can switch live
   const setPropCreases = (on: boolean) => { for (const m of props.meshes) for (const c of m.children) if (c.userData.styleInk) c.visible = on; };
@@ -139,6 +140,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
     fogScale: 118 / (edge + 1), // W9 L3: the fog's distances scale with the map (West Yard: 118 / 118 = 1)
     interiors: data.interiors, // W10 P5: the sky fill stays out of these boxes (tunnels, containers)
   });
+  kit?.shadowFrom(sky.sun); // W11 P-GLB4 (?kit=glb only): the kit's pieces cast into the sun's map with one draw
   scene.add(root);
 
   let daySpeed = opts.daySpeed ?? 0;

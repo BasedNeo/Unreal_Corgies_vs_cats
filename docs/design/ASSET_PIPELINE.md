@@ -58,9 +58,11 @@ assets can move the game a long way towards them: baked wear, wet response and a
 current HARDENED toon vs `pbr()`) is the owner's decision point: keep the ink, or go stylised-real.
 
 ## Open pipeline items (after batch 1)
-- **Draw headroom:** batch 1 draws LOD0 only on the web. Per-instance LODs cost +12.6 % draws (over budget). Proper
-  distance LODs for many kinds need one batched path (for example `BatchedMesh`), not one `InstancedMesh` per kind
-  per LOD.
+- ~~**Draw headroom**~~ closed by P-GLB4. Each kit piece is one static batch that holds every LOD of every
+  placement; an instance switches LOD by rewriting its index range, with hysteresis. All pieces cast through one
+  shadow-only mesh (layer 30), so the kit costs one draw per piece plus one shadow draw. Lot 4v4 high: +0.3 % draws
+  against flag-off; triangles below batch 1's LOD0-only figure. `BatchedMesh` was rejected: in three 0.186 on WebGPU
+  it issues one draw per instance.
 - **Inside interiors, `pbr()` has no toon ramp floor.** The GLB tunnel is 11 % darker than the procedural one; a style
   call.
 - **The palette under the cool sky fill:** blue-tinted concrete and steel at play distance. This sits with the owner's

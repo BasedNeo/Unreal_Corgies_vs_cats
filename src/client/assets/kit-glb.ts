@@ -1,19 +1,24 @@
 // OWNER: P-GLB1 (W11). Shared-GLB kit pieces in the browser client (docs/design/ASSET_PIPELINE.md, stage 5): the web
 // variant of a master GLB is loaded with GLTFLoader (+ the meshopt decoder), its <name>_LOD0|1|2 meshes become one
-// InstancedMesh each, and its materials go through the style factory: pbr() (default) or stylize() (?kitlook=stylize,
-// the toon side of the A/B). The COL_ boxes are never rendered; gameplay collision stays in the world data (the
-// authority never reads a GLB; tests/unit/glb-container-colliders.test.ts proves the two agree).
+// batched mesh (P-GLB4; P-GLB1: one InstancedMesh each), and its materials go through the style factory: pbr()
+// (default) or stylize() (?kitlook=stylize, the toon side of the A/B). The COL_ boxes are never rendered; gameplay
+// collision stays in the world data (the authority never reads a GLB; tests/unit/glb-container-colliders.test.ts
+// proves the two agree).
 //
 // The flag: ?kit=glb draws The Lot's site-office containers from Kit_Lot_Container20_01 where the procedural ones
 // stand (default off: without it nothing here runs). Until the GLB is ready (or if it fails to load) the procedural
 // container prims are drawn instead, so there is never a hole in the world.
 //
-// LOD per instance: every LOD mesh holds all placements in the same order; each frame an instance keeps its matrix in
-// the LOD its camera distance picks and a zero-scale matrix in the others; a LOD mesh with no instance is hidden (no
-// draw). Tint per instance: the kit is painted a neutral light grey (KIT_PAINT_SRGB, the bake's PAINT) and each
-// container takes its world palette colour (CONTAINERS[].col) as a linear-space ratio. W11 P-GLB1b: under pbr() the
-// tint is a per-instance `paintTint` attribute that pbr({ paintTint: true }) applies only through the paint mask (the
-// baseColor alpha), so rust, grime and the frame keep their colour; the toon side keeps instanceColor (whole albedo).
+// LOD per instance (W11 P-GLB4): a piece is ONE mesh (buildKitBatch) that holds every LOD of every placement baked in
+// world space; its index is rewritten, when an instance crosses a switch distance (kitLodSelect, with hysteresis), to
+// hold each instance's chosen LOD, so a piece costs one draw per pass whatever LODs are in use (P-GLB1's one
+// InstancedMesh per LOD cost a draw, plus a shadow draw, per LOD in use). Tint per instance: the kit is painted a
+// neutral light grey (KIT_PAINT_SRGB, the bake's PAINT) and each container takes its world palette colour
+// (CONTAINERS[].col) as a linear-space ratio. W11 P-GLB1b: under pbr() the tint is a `paintTint` attribute that
+// pbr({ paintTint: true }) applies only through the paint mask (the baseColor alpha), so rust, grime and the frame keep
+// their colour; the toon side tints the whole albedo (P-GLB4: both are per-vertex attributes, constant over each
+// instance, since the batch has no instances). P-GLB4 shadows: after world-view's shadowFrom(sun), the loaded pieces
+// stop casting one by one and cast through one shared mesh on KIT_SHADOW_LAYER (createKitShadowCaster).
 //
 // W11 P-GLB1b: a second piece, Kit_Lot_BagWall_01 (one 4.8 m module of props.ts bagWall()), goes through the same
 // view: KitPiece describes a piece (url, LOD distances, look options), createKitView draws any piece at its placements,
@@ -30,6 +35,7 @@ import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { PBR_PAINT_TINT, pbr, stylize, toon } from '../style/style-webgpu.js';
+import { smoothNormalsByPosition } from '../style/style-utils.js';
 import { worldColor } from '../world/world-palette';
 import { buildPrimMeshes, disposePrimMeshes } from '../world/prim-mesh';
 import type { VisualPrim, WorldData } from '../../shared/world/world-types';
@@ -206,104 +212,318 @@ export interface KitView {
   dispose(): void;
 }
 
+// ------------------------------------------------------------------------------------------------ LOD batches (P-GLB4)
 /**
- * One kit piece from its shared GLB (instanced), in `look`, at `split.placements`. `split.prims` (the procedural stand-in)
- * are drawn until the GLB is ready. `far`: buildPrimMeshes' far-scenery distance for that stand-in.
+ * Distance-LOD hysteresis, as a fraction of each switch distance: an instance goes coarser only beyond dist x (1 + h)
+ * and finer only inside dist x (1 - h), so a camera that hovers on a switch distance does not make a piece pop back and
+ * forth (a switch also rewrites the piece's index, kitLodSelect / KitBatch.select).
  */
-export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; placements: KitPlacement[] }, look: KitLook, opts: { url?: string; far?: number } = {}): KitView {
+export const KIT_LOD_HYST = 0.05;
+
+/**
+ * The LOD an instance draws at camera distance `d` (m), with switch distances `dist`, given the LOD it drew last
+ * (`prev`, -1 = none yet: then plain kitLodAt). See KIT_LOD_HYST.
+ */
+export function kitLodSelect(d: number, dist: readonly [number, number], prev = -1, h = KIT_LOD_HYST): number {
+  if (!(prev >= 0 && prev <= 2)) return kitLodAt(d, dist);
+  const coarsest = d < dist[0] * (1 + h) ? 0 : d < dist[1] * (1 + h) ? 1 : 2;   // beyond the outer edge: must go coarser
+  const finest = d < dist[0] * (1 - h) ? 0 : d < dist[1] * (1 - h) ? 1 : 2;     // inside the inner edge: must go finer
+  return Math.min(Math.max(prev, coarsest), finest);
+}
+
+/** ?kitlod=0|1|2 pins every kit instance to one LOD (a debug view for A/B shots); null = by distance (the default). */
+export function kitForcedLod(search: string = typeof location !== 'undefined' ? location.search : ''): number | null {
+  const v = new URLSearchParams(search).get('kitlod');
+  return v === '0' || v === '1' || v === '2' ? Number(v) : null;
+}
+
+/** A per-vertex attribute that is constant over each placement (a tint): values[k x itemSize + c] for placement k. */
+export interface KitBatchExtra { name: string; itemSize: number; values: Float32Array }
+
+export interface KitBatch {
+  /** Every LOD of every placement, baked in world space; the index holds the selected LOD of each placement. */
+  geometry: THREE.BufferGeometry;
+  /** Triangles of one instance at LOD 0, 1, 2. */
+  tris: readonly number[];
+  /** Points the index at LOD lods[k] (0-2) of every placement k, in placement order; returns the triangles drawn. */
+  select(lods: ArrayLike<number>): number;
+}
+
+/**
+ * One kit piece at all its placements as ONE indexed mesh: one draw per pass (colour, shadow, ink hull) whatever mix of
+ * LODs is in use. The vertices of LOD i at placement k are that LOD's source geometry baked by mats[i][k] (the placement
+ * x the LOD node's own matrix, which carries the web variant's dequantization): positions by the matrix, normals by its
+ * normal matrix, tangents by its linear part (w kept), and every other attribute (the uv) copied as floats. `extras` add
+ * per-placement constants. Kit pieces never move, so nothing is left for a per-instance transform. select() rewrites the
+ * index (Uint32: 4-byte aligned partial uploads on WebGPU) with each placement's chosen LOD, packed from the start, and
+ * the draw range covers exactly those, so an unused LOD costs no triangles and no draw. The bounds cover every LOD.
+ */
+export function buildKitBatch(lods: readonly THREE.BufferGeometry[], mats: readonly (readonly THREE.Matrix4[])[], extras: readonly KitBatchExtra[] = []): KitBatch {
+  const L = lods.length, n = mats[0]?.length ?? 0;
+  if (!L || !n || mats.length !== L) throw new Error('buildKitBatch: one matrix list per LOD, one matrix per placement');
+  const names = Object.keys(lods[0].attributes).filter((a) => lods.every((g) => g.getAttribute(a)));
+  const vcount = lods.map((g) => g.getAttribute('position').count);
+  const icount = lods.map((g) => (g.index ? g.index.count : g.getAttribute('position').count));
+  const perV = vcount.reduce((s, c) => s + c, 0), perI = icount.reduce((s, c) => s + c, 0);
+  const V = n * perV;
+  const src = new Uint32Array(n * perI);                 // every LOD of every placement, rebased to the merged vertices
+  const live = new Uint32Array(n * Math.max(...icount)); // the selection
+  const ranges = new Uint32Array(n * L * 2);             // (start, count) in src of LOD i at placement k
+  const out = new Map(names.map((a) => [a, new Float32Array(V * lods[0].getAttribute(a).itemSize)]));
+  const v = new THREE.Vector3(), nm = new THREE.Matrix3(), lm = new THREE.Matrix3();
+  let vo = 0, io = 0;
+  for (let k = 0; k < n; k++) {
+    for (let i = 0; i < L; i++) {
+      const g = lods[i], M = mats[i][k];
+      nm.getNormalMatrix(M);
+      lm.setFromMatrix4(M);
+      const flip = lm.determinant() < 0 ? -1 : 1;
+      for (const a of names) {
+        const s = g.getAttribute(a) as THREE.BufferAttribute, sz = s.itemSize, o = out.get(a)!;
+        for (let j = 0; j < s.count; j++) {
+          const w = (vo + j) * sz;
+          if (a === 'position') v.fromBufferAttribute(s, j).applyMatrix4(M);
+          else if (a === 'normal') v.fromBufferAttribute(s, j).applyMatrix3(nm).normalize();
+          else if (a === 'tangent') { v.set(s.getX(j), s.getY(j), s.getZ(j)).applyMatrix3(lm).normalize(); o[w + 3] = s.getW(j) * flip; }
+          else { for (let c = 0; c < sz; c++) o[w + c] = s.getComponent(j, c); continue; }
+          o[w] = v.x; o[w + 1] = v.y; o[w + 2] = v.z;
+        }
+      }
+      const idx = g.index;
+      ranges[(k * L + i) * 2] = io;
+      ranges[(k * L + i) * 2 + 1] = icount[i];
+      for (let j = 0; j < icount[i]; j++) src[io + j] = vo + (idx ? idx.getX(j) : j);
+      io += icount[i];
+      vo += vcount[i];
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  for (const a of names) geometry.setAttribute(a, new THREE.BufferAttribute(out.get(a)!, lods[0].getAttribute(a).itemSize));
+  for (const e of extras) {
+    const o = new Float32Array(V * e.itemSize);
+    for (let k = 0; k < n; k++) {
+      const val = e.values.subarray(k * e.itemSize, (k + 1) * e.itemSize);
+      for (let j = k * perV; j < (k + 1) * perV; j++) o.set(val, j * e.itemSize);
+    }
+    geometry.setAttribute(e.name, new THREE.BufferAttribute(o, e.itemSize));
+  }
+  const index = new THREE.BufferAttribute(live, 1);
+  index.setUsage(THREE.DynamicDrawUsage);
+  geometry.setIndex(index);
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return {
+    geometry,
+    tris: icount.map((c) => c / 3),
+    select(sel) {
+      let o = 0;
+      for (let k = 0; k < n; k++) {
+        const r = (k * L + Math.max(0, Math.min(L - 1, sel[k] | 0))) * 2;
+        live.set(src.subarray(ranges[r], ranges[r] + ranges[r + 1]), o);
+        o += ranges[r + 1];
+      }
+      geometry.setDrawRange(0, o);
+      index.clearUpdateRanges();
+      index.addUpdateRange(0, o);
+      index.needsUpdate = true;
+      return o / 3;
+    },
+  };
+}
+
+/**
+ * A piece view plus what the Lot view's shared shadow caster reads: the batched mesh (null while the stand-in shows)
+ * and a version that bumps whenever its index changes.
+ */
+export interface KitPieceView extends KitView { mesh(): THREE.Mesh | null; version(): number }
+
+/**
+ * The layer of the kit's shared shadow caster (P-GLB4): no camera draws it but the sun's shadow camera, which
+ * createLotKitView's shadowFrom() gives this layer (three's shadow pass then uses that camera's own mask, layers 0 + 30,
+ * instead of the view camera's: the same set for every other object; layer 31 is destruct-view's hidden proxies).
+ */
+export const KIT_SHADOW_LAYER = 30;
+
+/** One piece's part in the shared shadow caster: its batched mesh and its index version. */
+export interface KitShadowPart { mesh: THREE.Mesh; version(): number }
+
+/**
+ * P-GLB4: ONE shadow draw for every loaded kit piece. The pieces' own meshes stop casting (castShadow = false: one
+ * draw per piece in the colour pass only), and this mesh, on KIT_SHADOW_LAYER, holds their baked positions end to end
+ * with an index that repeats each piece's current selection (rebased), so the sun's shadow map sees exactly the
+ * triangles the view draws, LOD for LOD. The shadow pass renders every caster with its own depth material and only takes
+ * the side (shadowSide, else the flipped side) from the object's material, so one caster serves every piece whose
+ * material has the same side and shadowSide (all six under pbr(): the GLBs are double-sided; all six under toon():
+ * front). Pieces with another side get their own caster. refresh() re-copies the indices when a piece's version moves.
+ */
+export function createKitShadowCaster(parts: readonly KitShadowPart[]): { group: THREE.Group; refresh(): boolean; casters: number; dispose(): void } {
+  const group = new THREE.Group();
+  group.name = 'kit_glb_shadow';
+  const bySide = new Map<string, KitShadowPart[]>();
+  for (const p of parts) {
+    const m = p.mesh.material as THREE.Material, key = `${m.side}|${m.shadowSide}`;
+    bySide.set(key, [...(bySide.get(key) ?? []), p]);
+  }
+  const casters = [...bySide.values()].map((list) => {
+    const geos = list.map((p) => p.mesh.geometry);
+    const bases: number[] = [];
+    let V = 0, I = 0;
+    for (const g of geos) { bases.push(V); V += g.getAttribute('position').count; I += g.index!.count; }
+    const pos = new Float32Array(V * 3);
+    geos.forEach((g, i) => pos.set(g.getAttribute('position').array as Float32Array, bases[i] * 3));
+    const idx = new Uint32Array(I);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const index = new THREE.BufferAttribute(idx, 1);
+    index.setUsage(THREE.DynamicDrawUsage);
+    geometry.setIndex(index);
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+    const src = list[0].mesh.material as THREE.Material;
+    const material = new THREE.MeshBasicNodeMaterial({ side: src.side });
+    material.shadowSide = src.shadowSide;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = 'kit_glb_shadow';
+    mesh.castShadow = true;
+    mesh.receiveShadow = false;
+    mesh.layers.set(KIT_SHADOW_LAYER);
+    group.add(mesh);
+    const seen = list.map(() => -1);
+    const refresh = () => {
+      if (list.every((p, i) => p.version() === seen[i])) return false;
+      let o = 0;
+      list.forEach((p, i) => {
+        seen[i] = p.version();
+        const g = geos[i], n = g.drawRange.count, a = g.index!.array;
+        for (let j = 0; j < n; j++) idx[o + j] = a[j] + bases[i];
+        o += n;
+      });
+      geometry.setDrawRange(0, o);
+      index.clearUpdateRanges();
+      index.addUpdateRange(0, o);
+      index.needsUpdate = true;
+      return true;
+    };
+    refresh();
+    return { mesh, refresh };
+  });
+  return {
+    group,
+    casters: casters.length,
+    refresh() { let any = false; for (const c of casters) any = c.refresh() || any; return any; },
+    dispose() { for (const c of casters) { c.mesh.geometry.dispose(); (c.mesh.material as THREE.Material).dispose(); } group.clear(); },
+  };
+}
+
+const UP = new THREE.Vector3(0, 1, 0);
+/** A placement's turn: Ry(yaw) Rx(pitch) (Euler 'YXZ'), about its base centre. */
+export const kitPlacementTurn = (p: KitPlacement): THREE.Quaternion => (p.pitch ? new THREE.Quaternion().setFromEuler(new THREE.Euler(p.pitch, p.yaw, 0, 'YXZ')) : new THREE.Quaternion().setFromAxisAngle(UP, p.yaw));
+/** A placement's matrix: T(x, y, z) Ry(yaw) Rx(pitch) S(1, 1, sz). */
+export const kitPlacementMatrix = (p: KitPlacement): THREE.Matrix4 => new THREE.Matrix4().compose(new THREE.Vector3(p.x, p.y, p.z), kitPlacementTurn(p), new THREE.Vector3(1, 1, p.sz ?? 1));
+
+/**
+ * One kit piece from its shared GLB, in `look`, at `split.placements`, as one batched mesh (buildKitBatch): each
+ * placement draws the LOD its camera distance picks (kitLodSelect; `opts.forceLod` pins one), and the whole piece is one
+ * draw per pass. `split.prims` (the procedural stand-in) are drawn until the GLB is ready, and for good if it fails.
+ * `far`: buildPrimMeshes' far-scenery distance for that stand-in.
+ */
+export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; placements: KitPlacement[] }, look: KitLook, opts: { url?: string; far?: number; forceLod?: number | null } = {}): KitPieceView {
   const group = new THREE.Group();
   group.name = `kit_glb_${piece.name}`;
   const placements = split.placements;
   const fallback = split.prims.length ? buildPrimMeshes(split.prims, { far: opts.far }) : null;
   if (fallback) group.add(fallback.group);
-  const meshes: THREE.InstancedMesh[] = [];
-  const tris: number[] = [];
-  const cur = placements.map(() => -1);
-  const zero = new THREE.Matrix4().makeScale(0, 0, 0);
-  const up = new THREE.Vector3(0, 1, 0);
-  const turn = (p: KitPlacement) => (p.pitch ? new THREE.Quaternion().setFromEuler(new THREE.Euler(p.pitch, p.yaw, 0, 'YXZ')) : new THREE.Quaternion().setFromAxisAngle(up, p.yaw));
-  const mats = placements.map((p) => new THREE.Matrix4().compose(new THREE.Vector3(p.x, p.y, p.z), turn(p), new THREE.Vector3(1, 1, p.sz ?? 1)));
-  const centres = placements.map((p) => new THREE.Vector3(0, piece.centreY, 0).applyQuaternion(turn(p)).add(new THREE.Vector3(p.x, p.y, p.z)));
+  const mats = placements.map((p) => kitPlacementMatrix(p));
+  const centres = placements.map((p) => new THREE.Vector3(0, piece.centreY, 0).applyQuaternion(kitPlacementTurn(p)).add(new THREE.Vector3(p.x, p.y, p.z)));
+  const force = opts.forceLod ?? null;
+  const cur = new Int8Array(placements.length).fill(-1);
   const cam = new THREE.Vector3();
+  let batch: KitBatch | null = null;
+  let mesh: THREE.Mesh | null = null;
+  let drawn = 0;
+  let version = 0;                                                 // bumps when the index changes (the shadow caster follows)
   let disposed = false;
 
-  // per LOD, per placement: placement x the LOD node's own matrix (the web variant's KHR_mesh_quantization puts the
-  // dequantization scale/offset on the node)
-  const lodMats: THREE.Matrix4[][] = [];
   const ready = gltfLoader().loadAsync(opts.url ?? piece.url).then((gltf) => {
     if (disposed) return;
-    const tint = new THREE.Color();
-    // pbr paint tint: one per-instance attribute shared by the LOD geometries (same placements, same order)
-    const paint = look === 'pbr' && piece.paintTint ? new THREE.InstancedBufferAttribute(new Float32Array(placements.length * 3), 3) : null;
-    if (paint) placements.forEach((p, k) => { kitTint(p.col, tint); paint.setXYZ(k, tint.r, tint.g, tint.b); });
     gltf.scene.updateMatrixWorld(true);
-    for (let i = 0; i < 3; i++) {
-      const src = gltf.scene.getObjectByName(`${piece.name}_LOD${i}`) as THREE.Mesh | undefined;
-      if (!src?.isMesh) throw new Error(`${piece.name}: LOD${i} missing`);
-      if (paint) src.geometry.setAttribute(PBR_PAINT_TINT, paint);
-      const im = new THREE.InstancedMesh(src.geometry, src.material, placements.length);
-      im.name = `${piece.name}_LOD${i}`;
-      im.castShadow = true;
-      im.receiveShadow = true;
-      lodMats.push(mats.map((m) => m.clone().multiply(src.matrixWorld)));
-      placements.forEach((p, k) => {
-        im.setMatrixAt(k, lodMats[i][k]);
-        if (look === 'stylize' && piece.paintTint) im.setColorAt(k, kitTint(p.col, tint));
-      });
-      im.computeBoundingSphere();                     // over every placement, kept when instances switch LOD
-      im.computeBoundingBox();
-      meshes.push(im);
-      const idx = src.geometry.getIndex();
-      tris.push((idx ? idx.count : src.geometry.getAttribute('position').count) / 3);
+    const src = [0, 1, 2].map((i) => {
+      const m = gltf.scene.getObjectByName(`${piece.name}_LOD${i}`) as THREE.Mesh | undefined;
+      if (!m?.isMesh) throw new Error(`${piece.name}: LOD${i} missing`);
+      return m;
+    });
+    const material = src[0].material as THREE.Material;
+    if (src.some((m) => m.material !== material)) throw new Error(`${piece.name}: the LODs do not share one material`);
+    const extras: KitBatchExtra[] = [];
+    if (piece.paintTint) {
+      const tint = new THREE.Color(), values = new Float32Array(placements.length * 3);
+      placements.forEach((p, k) => { kitTint(p.col, tint); values.set([tint.r, tint.g, tint.b], k * 3); });
+      // pbr(): the paint-mask tint (PBR_PAINT_TINT); the toon side: the whole albedo, as a vertex colour (was instanceColor)
+      extras.push({ name: look === 'pbr' ? PBR_PAINT_TINT : 'color', itemSize: 3, values });
     }
-    const lodGroup = new THREE.Group();
-    lodGroup.name = `${piece.name}_instances`;
-    lodGroup.add(...meshes);
-    if (look === 'pbr') for (const m of meshes) m.material = pbr(m.material as THREE.Material, piece.pbrOpts ?? {});
+    // the toon side's outline normals: stylize() smooths a geometry's normals by position once; do it on each source LOD
+    // (as it did on the instanced LOD meshes), then bake
+    if (look === 'stylize') for (const m of src) smoothNormalsByPosition(THREE, m.geometry);
+    const b = buildKitBatch(src.map((m) => m.geometry), src.map((m) => mats.map((pm) => pm.clone().multiply(m.matrixWorld))), extras);
+    if (look === 'stylize') b.geometry.userData.outlineReady = true;
+    for (const m of src) m.geometry.dispose();                     // never uploaded; the batch holds its own copy
+    const bm = new THREE.Mesh(b.geometry, material);
+    bm.name = `${piece.name}_batch`;
+    bm.castShadow = true;
+    bm.receiveShadow = true;
+    const batchGroup = new THREE.Group();
+    batchGroup.name = `${piece.name}_instances`;
+    batchGroup.add(bm);
+    if (look === 'pbr') bm.material = pbr(material, piece.pbrOpts ?? {});
     // the toon side: toon() keeps the colour map; the ORM/normal maps have no place in the toon model (surface preset)
-    else stylize(lodGroup, { creases: false, remap: (m: THREE.MeshStandardMaterial) => toon({ color: m.color?.getHex() ?? 0xffffff, map: m.map ?? null, surface: piece.toonSurface, ...(piece.toonSurface === 'metal' ? { rough: 0.55, metal: 0.2 } : {}) }) });
-    group.add(lodGroup);
-    for (let k = 0; k < placements.length; k++) cur[k] = -1;
+    else stylize(batchGroup, { creases: false, remap: (m: THREE.MeshStandardMaterial) => toon({ color: m.color?.getHex() ?? 0xffffff, map: m.map ?? null, surface: piece.toonSurface, vertexColors: piece.paintTint, ...(piece.toonSurface === 'metal' ? { rough: 0.55, metal: 0.2 } : {}) }) });
+    drawn = b.select(placements.map(() => force ?? 0));          // drawn before the first update() picks by distance
+    version++;
+    batch = b;
+    mesh = bm;
+    cur.fill(-1);
+    group.add(batchGroup);
     if (fallback) { group.remove(fallback.group); disposePrimMeshes(fallback); }
   });
   ready.catch((e: unknown) => console.warn(`[kit-glb] ${piece.name} not loaded, procedural stand-in kept: ${String((e as Error)?.message ?? e)}`));
+  // still rejects for a caller that awaits it; handled here so an unawaited failure is only the warning above (P-GLB4:
+  // it was also an unhandled rejection, a page error)
+  const done = ready.then(() => undefined);
+  done.catch(() => {});
 
   return {
     group,
-    ready: ready.then(() => undefined),
+    ready: done,
     update(camera) {
-      if (!meshes.length) return;
+      if (!batch) return;
       camera.getWorldPosition(cam);
       let changed = false;
       for (let k = 0; k < placements.length; k++) {
-        const lod = kitLodAt(cam.distanceTo(centres[k]), piece.lodDist);
-        if (lod === cur[k]) continue;
-        cur[k] = lod;
-        changed = true;
-        for (let i = 0; i < 3; i++) meshes[i].setMatrixAt(k, i === lod ? lodMats[i][k] : zero);
+        const lod = force ?? kitLodSelect(cam.distanceTo(centres[k]), piece.lodDist, cur[k]);
+        if (lod !== cur[k]) { cur[k] = lod; changed = true; }
       }
-      if (!changed) return;
-      for (let i = 0; i < 3; i++) {
-        meshes[i].instanceMatrix.needsUpdate = true;
-        meshes[i].visible = cur.includes(i);
-      }
+      if (changed) { drawn = batch.select(cur); version++; }
     },
     stats() {
-      const vis = [0, 1, 2].map((i) => cur.filter((c) => c === i).length);
+      const vis = [0, 0, 0];
+      for (const c of cur) if (c >= 0) vis[c]++;
       return {
-        kitLoaded: meshes.length ? 1 : 0,
+        kitLoaded: batch ? 1 : 0,
         kitInstances: placements.length,
         kitLod0: vis[0], kitLod1: vis[1], kitLod2: vis[2],
-        kitTriangles: meshes.length ? vis.reduce((s, n, i) => s + n * tris[i], 0) : 0,
-        kitMeshes: meshes.filter((m) => m.visible).length,
+        kitTriangles: batch ? drawn : 0,
+        kitMeshes: batch ? 1 : 0,
       };
     },
     dispose() {
       disposed = true;
       if (fallback) disposePrimMeshes(fallback);
-      for (const m of meshes) { m.geometry.dispose(); m.dispose(); }
-      meshes.length = 0;
+      if (mesh) { mesh.geometry.dispose(); mesh.removeFromParent(); }
+      batch = null;
+      mesh = null;
     },
+    mesh: () => mesh,
+    version: () => version,
   };
 }
 
@@ -319,17 +539,21 @@ const kitUrl = (name: string) => `${import.meta.env?.BASE_URL ?? '/'}assets/kits
 export interface KitSplit { rest: VisualPrim[]; matched: VisualPrim[]; placements: KitPlacement[]; missing: number }
 
 /**
- * Batch 1's LOD distances: LOD0 at every distance. The four pieces are cheap (144-484 triangles; all 34 instances of LOD0
- * cost about 6.5 k triangles) and a LOD mesh is one instanced draw plus its shadow draw, so switching LODs would add up to
- * four draws per piece to save a few thousand triangles (measured, Lot 4v4 high: 222 draws with the flag off, 248-250
- * with per-instance LODs on these four, 232-234 with LOD0 only). The GLBs keep LOD1 / LOD2 (the standard; Godot and a later far tier use them).
+ * Batch 1's LOD distances (P-GLB4; P-GLB3 drew LOD0 everywhere, because one InstancedMesh per LOD cost a draw per LOD
+ * in use). A piece switches where the detail the next LOD drops falls to about 1-2 px at 1280 x 720 and a 60 degree FOV
+ * (about 620 / d px per metre at d m): the pipe's 12 cm rim chamfers (LOD1) at 70 m, like the container; the footing's
+ * 6 cm arrises and form panels, the lamp housing's fins and visor, like the bag wall at 30-35 m; the mast's step bolts
+ * and gussets at 50 m. LOD2 is a silhouette (the pipe's mouths capped dark, the footing a box, the mast a prism).
  */
-export const KIT_LOD0_ONLY = [Infinity, Infinity] as const;
+export const KIT_PIPE_LOD_DIST = [70, 160] as const;
+export const KIT_FOOTING_LOD_DIST = [30, 80] as const;
+export const KIT_FLOODMAST_LOD_DIST = [50, 120] as const;
+export const KIT_FLOODLAMP_LOD_DIST = [35, 90] as const;
 
 export const KIT_PIPE = 'Kit_Lot_Pipe_01';
 const PIPE_COS = Math.cos(Math.PI / PIPE.seg);
 export const KIT_PIPE_PIECE: KitPiece = {
-  name: KIT_PIPE, url: kitUrl(KIT_PIPE), lodDist: KIT_LOD0_ONLY, centreY: PIPE.ro * PIPE_COS, paintTint: false,
+  name: KIT_PIPE, url: kitUrl(KIT_PIPE), lodDist: KIT_PIPE_LOD_DIST, centreY: PIPE.ro * PIPE_COS, paintTint: false,
   // concrete: no metal scratches; a finer, shallower bump
   pbrOpts: { scratch: 0, detailBump: [0.003, 0.0006] }, toonSurface: 'world',
 };
@@ -352,7 +576,7 @@ export function splitPipePrims(data: WorldData, prims: readonly VisualPrim[] = d
 
 export const KIT_FOOTING = 'Kit_Lot_Footing_01';
 export const KIT_FOOTING_PIECE: KitPiece = {
-  name: KIT_FOOTING, url: kitUrl(KIT_FOOTING), lodDist: KIT_LOD0_ONLY, centreY: 0.7, paintTint: false,
+  name: KIT_FOOTING, url: kitUrl(KIT_FOOTING), lodDist: KIT_FOOTING_LOD_DIST, centreY: 0.7, paintTint: false,
   pbrOpts: { scratch: 0, detailBump: [0.003, 0.0006] }, toonSurface: 'world',
 };
 
@@ -371,11 +595,11 @@ export function splitFootingPrims(data: WorldData, prims: readonly VisualPrim[] 
 export const KIT_FLOODMAST = 'Kit_Lot_FloodMast_01';
 export const KIT_FLOODLAMP = 'Kit_Lot_FloodLamp_01';
 export const KIT_FLOODMAST_PIECE: KitPiece = {
-  name: KIT_FLOODMAST, url: kitUrl(KIT_FLOODMAST), lodDist: KIT_LOD0_ONLY, centreY: 11, paintTint: false,
+  name: KIT_FLOODMAST, url: kitUrl(KIT_FLOODMAST), lodDist: KIT_FLOODMAST_LOD_DIST, centreY: 11, paintTint: false,
   pbrOpts: {}, toonSurface: 'metal',
 };
 export const KIT_FLOODLAMP_PIECE: KitPiece = {
-  name: KIT_FLOODLAMP, url: kitUrl(KIT_FLOODLAMP), lodDist: KIT_LOD0_ONLY, centreY: 0.475, paintTint: false,
+  name: KIT_FLOODLAMP, url: kitUrl(KIT_FLOODLAMP), lodDist: KIT_FLOODLAMP_LOD_DIST, centreY: 0.475, paintTint: false,
   pbrOpts: {}, toonSurface: 'metal',
 };
 
@@ -458,28 +682,72 @@ export function splitLotKitPrims(data: WorldData, table: readonly KitEntry[] = L
   };
 }
 
+/** The Lot's kit view: + shadowFrom(), which moves every loaded piece's shadow into one shared caster. */
+export interface LotKitView extends KitView {
+  /**
+   * The light whose shadow map the kit casts into (world-view: the sky's sun). Its shadow camera gets KIT_SHADOW_LAYER
+   * and, once every piece has loaded or failed, the loaded ones cast through one createKitShadowCaster() draw instead
+   * of one draw each. Without it each piece casts its own shadow.
+   */
+  shadowFrom(light: THREE.DirectionalLight): void;
+}
+
 /**
- * Every Lot kit piece that has placements, in one view (world-view's ?kit=glb branch). stats() sums the pieces
- * (kitLoaded = pieces drawn from their GLB) and adds per-piece kitTriangles_<name>.
+ * Every Lot kit piece that has placements, in one view (world-view's ?kit=glb branch): one batched mesh per piece in
+ * the colour pass and (after shadowFrom) one shared shadow draw. stats() sums the pieces (kitLoaded = pieces drawn
+ * from their GLB), adds per-piece kitTriangles_<name> and kitLod0|1|2_<name> (instances at each LOD), and
+ * kitShadowCasters. `forceLod` (default ?kitlod=) pins every instance to one LOD.
  */
-export function createLotKitView(split: ReturnType<typeof splitLotKitPrims>, look: KitLook, opts: { far?: number } = {}): KitView {
-  const views: [KitPiece, KitView][] = split.pieces.filter((p) => p.placements.length).map((p) => [p.piece, createKitView(p.piece, { prims: p.matched, placements: p.placements }, look, opts)]);
+export function createLotKitView(split: ReturnType<typeof splitLotKitPrims>, look: KitLook, opts: { far?: number; forceLod?: number | null } = {}): LotKitView {
+  const o = { far: opts.far, forceLod: opts.forceLod === undefined ? kitForcedLod() : opts.forceLod };
+  const views: [KitPiece, KitPieceView][] = split.pieces.filter((p) => p.placements.length).map((p) => [p.piece, createKitView(p.piece, { prims: p.matched, placements: p.placements }, look, o)]);
   const group = new THREE.Group();
   group.name = 'kit_glb';
   for (const [, v] of views) group.add(v.group);
+  const ready = Promise.all(views.map(([, v]) => v.ready)).then(() => undefined);
+  ready.catch(() => {});                                            // each piece warns for itself
+  let light: THREE.DirectionalLight | null = null;
+  let settled = false, disposed = false;
+  let caster: ReturnType<typeof createKitShadowCaster> | null = null;
+  let casting: THREE.Mesh[] = [];
+  const build = () => {
+    if (!light || !settled || caster || disposed) return;
+    casting = views.map(([, v]) => v.mesh()).filter((m): m is THREE.Mesh => !!m);
+    if (!casting.length) return;
+    caster = createKitShadowCaster(views.filter(([, v]) => v.mesh()).map(([, v]) => ({ mesh: v.mesh()!, version: v.version })));
+    for (const m of casting) m.castShadow = false;
+    group.add(caster.group);
+  };
+  void Promise.allSettled(views.map(([, v]) => v.ready)).then(() => { settled = true; build(); });
   return {
     group,
-    ready: Promise.all(views.map(([, v]) => v.ready)).then(() => undefined),
-    update(camera) { for (const [, v] of views) v.update(camera); },
+    ready,
+    shadowFrom(l) {
+      light = l;
+      l.shadow.camera.layers.enable(KIT_SHADOW_LAYER);
+      build();
+    },
+    update(camera) {
+      for (const [, v] of views) v.update(camera);
+      caster?.refresh();
+    },
     stats() {
       const out: Record<string, number> = {};
       for (const [piece, v] of views) {
         const st = v.stats();
         for (const [k, n] of Object.entries(st)) out[k] = (out[k] ?? 0) + n;
         out[`kitTriangles_${piece.name}`] = st.kitTriangles;
+        for (let i = 0; i < 3; i++) out[`kitLod${i}_${piece.name}`] = st[`kitLod${i}`];
       }
+      out.kitShadowCasters = caster?.casters ?? 0;
       return out;
     },
-    dispose() { for (const [, v] of views) v.dispose(); },
+    dispose() {
+      disposed = true;
+      light?.shadow.camera.layers.disable(KIT_SHADOW_LAYER);
+      caster?.dispose();
+      caster = null;
+      for (const [, v] of views) v.dispose();
+    },
   };
 }
