@@ -1,5 +1,5 @@
 // OWNER: world lane (L2 + G1). Builds the visible West Yard from WorldData:
-//   terrain (grid-exact toon ground) · props (merged VisualPrims, ink + creases) · board fences ·
+//   terrain (grid-exact toon ground) · props (merged VisualPrims) · board fences ·
 //   water · near-field foliage with wind · stylized sky + time of day + fog + camera-following sun shadow
 //   · G1: The Garden's tall grass + sprinkler jets · weather (sky/fog/light ramps, rain streaks, wet
 //   ground + puddles, lightning, wind) driven by the server tick · D3: glowing lamps (garage tubes).
@@ -109,8 +109,6 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
   const kit: LotKitView | null = kitLook && kitSplit && kitSplit.pieces.some((p) => p.placements.length) ? createLotKitView(kitSplit, kitLook, { far: edge + 8 }) : null;
   if (kit) root.add(kit.group);
   // crease ink is built in every tier and only hidden on low, so the tier can switch live
-  const setPropCreases = (on: boolean) => { for (const m of props.meshes) for (const c of m.children) if (c.userData.styleInk) c.visible = on; };
-  setPropCreases(P.propCreases);
 
   const water = createWaterView(data);
   root.add(water.group);
@@ -126,7 +124,6 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
   root.add(lamps.group);
   // X1: destructibles (their looks are not in data.prims; debris lands on whatever surface is below it)
   const destruct = createDestructView(data, { surfaceAt: (x, z, below) => surfaceAt(data, x, z, below).y });
-  destruct.setCreases(P.propCreases);
   root.add(destruct.group, destruct.cameraGroup);
   const rain = createRain({ capacity: opts.rainDrops ?? P.rainDrops });
   root.add(rain.mesh);
@@ -195,7 +192,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
     get tick() { return clock; },
     setTimeOfDay(t: number) { pinned = true; sky.setTimeOfDay(t); },
     pinTimeOfDay(p: boolean) { pinned = p; },
-    setQuality(tier: QualityTier) { garden.setDensity(QUALITY[tier].gardenDensity); setPropCreases(QUALITY[tier].propCreases); destruct.setCreases(QUALITY[tier].propCreases); },
+    setQuality(tier: QualityTier) { garden.setDensity(QUALITY[tier].gardenDensity); },
     setWeather(w) { override = w; },
     update(dt, camera, tick) {
       if (tick !== undefined && Number.isFinite(tick)) clock = tick;

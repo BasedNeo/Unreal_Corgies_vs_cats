@@ -144,7 +144,6 @@ describe('Madame Pointillé avatar (E1)', () => {
     expect(a.stats.drawCalls).toBe(ms.length);
     for (const m of ms) {
       const mat = m.material as THREE.Material;
-      if (m.name === 'mesh_crease') continue; // the style system's own crease-ink lines on the rifle
       expect(['toon', 'glow']).toContain(mat.userData.style);
       if (mat.userData.style === 'toon') expect(m.geometry.userData.outlineReady).toBe(true);
     }

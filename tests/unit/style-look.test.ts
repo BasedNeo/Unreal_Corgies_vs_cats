@@ -1,7 +1,7 @@
 // W13 LOOK (docs/design/LOOK.md): the web look is the Godot build's stylised-realistic night; the HARDENED comic look
 // (ink hull, crease lines, stepped toon bands) is retired. The style factory contract, without a GPU:
-//   - no ink anywhere: the post chain is one plain scene pass + bloom + grade, addCreaseInk adds nothing, stylize adds no
-//     ink and leaves normals alone, the crease line width is 0;
+//   - no ink anywhere: the post chain is one plain scene pass + bloom + grade, stylize adds no ink and leaves normals
+//     alone, the tokens keep only the crease angle (for normals);
 //   - toon() keeps its API and returns a PBR StyleMaterial (MeshStandardNodeMaterial), not a toon material: surfaces
 //     separate coat / armour plate / rifle metal, weathering values share one program, detail is a build knob;
 //   - the tokens are the Godot night (AgX, exposure, bloom threshold, grade, sodium), the grade's curve, the wetness
@@ -10,7 +10,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three/webgpu';
 import {
-  toon, toonMaterial, glow, stylize, pbr, addCreaseInk, setStyleDetail, styleDetail, surfaceOf, createGrade, gradeCurveAt,
+  toon, toonMaterial, glow, stylize, pbr, setStyleDetail, styleDetail, surfaceOf, createGrade, gradeCurveAt,
   StyleMaterial, StyleLightingModel, StyleScenePass, STYLE_WEATHER, STYLE_ENV, DETAIL_BY_TIER, LOOK,
   buildComicOutput, buildStyleOutput, createComicPipeline, createStylePipeline, toneMappingOf, createStyleLights,
 } from '../../src/client/style/style-webgpu.js';
@@ -43,10 +43,8 @@ describe('no ink', () => {
     }
   });
 
-  it('addCreaseInk adds nothing; stylize adds no ink and leaves the geometry\'s normals alone', () => {
+  it('stylize adds no ink and leaves the geometry\'s normals alone', () => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x884422, roughness: 0.3, metalness: 0.8 }));
-    expect(addCreaseInk(mesh)).toBeNull();
-    expect(mesh.children.length).toBe(0);
     const before = (mesh.geometry.getAttribute('normal').array as Float32Array).slice();
     const root = new THREE.Group();
     root.add(mesh);

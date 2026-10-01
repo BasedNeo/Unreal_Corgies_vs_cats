@@ -2,7 +2,7 @@
 // LOOK (docs/design/LOOK.md): stylised-realistic, locked Wave 12 by the Godot build (engines/godot/look/), on the web
 // since Wave 13: a muted, moonlit overcast night after rain. The HARDENED comic look (ink hull, crease lines, stepped
 // toon bands, the dusk grade) is retired (docs/design/HARDENED.md).
-// Public API (unchanged names, new look): toon(), toonMaterial(), glow(), stylize(), pbr(), addCreaseInk() (a no-op),
+// Public API (unchanged names, new look): toon(), toonMaterial(), glow(), stylize(), pbr(),
 // createStyleLights(), createGrade(), buildComicOutput() / createComicPipeline() (aliases of buildStyleOutput() /
 // createStylePipeline()). Never import 'three' next to 'three/webgpu' in one app.
 //
@@ -485,14 +485,6 @@ export function glow(color = PALETTE.glowCyan, intensity = 3) {
   materialCache.set(key, m);
   return m;
 }
-
-/**
- * Retired (W13, docs/design/LOOK.md): the look draws no crease ink. Kept so callers still work: adds nothing to `mesh`
- * and returns null (callers already treat null as "no ink": skinned meshes and geometry-less objects returned it).
- * @param {THREE.Object3D} _mesh @param {object} [_opts]
- * @returns {null}
- */
-export function addCreaseInk(_mesh, _opts) { return null; }
 
 /**
  * Converts foreign materials (generators, GLBs) to the style: glow for pure emissives, glass stays, the rest become

@@ -12,7 +12,7 @@ import {
 } from '../../src/client/modes/slab-view';
 import {
   SLAB_CLICK_TO_PLAY, SLAB_CLOCK_COLOR, SLAB_HINT, SLAB_REMATCH, SLAB_TEAM_NAMES, slabAmmoText, slabClock, slabClockText, slabDownText, slabFeedText, slabFrac,
-  slabHpColor, slabHudColor, slabOvertime, slabStateText, slabWinner,
+  slabHpColor, slabHudColor, slabLineFor, slabOvertime, slabShowDebug, slabStateText, slabWinner,
 } from '../../src/client/ui/slab-hud';
 
 function st(p: Partial<EntityState>): EntityState {
@@ -149,6 +149,20 @@ describe('slab HUD model', () => {
     expect(slabFeedText('Rex', 'Cat 2')).toBe('Rex  >  Cat 2'); // match.gd _on_died
     expect(slabFeedText(null, 'Rex')).toBe('The Lot  >  Rex');
     expect(SLAB_CLICK_TO_PLAY).toBe('Click to play');
+  });
+
+  it('once the match is over the slab line goes: no frozen HOLDING +1/s claim behind the winner screen', () => {
+    const held = { holder: 1 as const, contested: false };
+    expect(slabLineFor({ phase: 'live' }, held)).toBe('SLAB  CAT CADRE HOLDING  +1/s');
+    expect(slabLineFor({ phase: 'ended' }, held)).toBeNull();
+    expect(slabLineFor({ phase: 'ended' }, { holder: -1, contested: true })).toBeNull();
+    expect(slabLineFor({ phase: 'live' }, null)).toBe('SLAB  NEUTRAL');
+  });
+
+  it('the fps / rtt debug line: hidden in a slab match (Godot has none) unless ?debug; other modes keep it', () => {
+    expect(slabShowDebug(true, '?mode=slab&autoplay')).toBe(false);
+    expect(slabShowDebug(true, '?mode=slab&debug')).toBe(true);
+    expect(slabShowDebug(false, '?mode=core-rush')).toBe(true);
   });
 
   it('the winner screen: <TEAM> WINS or DRAW, the score, your takedowns and knockouts, the rematch prompt', () => {

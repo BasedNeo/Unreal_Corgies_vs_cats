@@ -97,6 +97,7 @@ test('MATCH: SLAB from the menu starts the slab match on The Lot with its HUD an
   await expect(slab.locator('[data-slab-hp]')).toHaveText(/^\d+$/);
   await expect(slab.locator('[data-slab-ammo]')).toHaveText(/^(\d+ \/ 30|RELOADING)$/);
   for (const sel of ['.mb', '.hp', '.am']) await expect(page.locator(`#cvc-hud ${sel}`)).toBeHidden(); // no comic panels, no Q ring
+  await expect(page.locator('#cvc-hud .dbg')).toHaveText(''); // no fps / rtt line (Godot has none) without ?debug
   await expect(slab.locator('[data-slab-win]')).toBeHidden();
   // you plus one Cat bot, and the six Lot kit pieces drawn from their shared GLBs
   expect(await page.evaluate(() => ((globalThis as any).__cvc.net.entities as number[][]).filter((e) => e[1] <= 1).length)).toBe(2);
@@ -122,6 +123,7 @@ test('SLAB: the match ends on the winner screen; R, then Enter, rematch to 0-0',
     await expect(win).toContainText(/CORGI COMPANY WINS|CAT CADRE WINS|DRAW/);
     await expect(win).toContainText('R / Enter: rematch');
     await expect(page.locator('#cvc-hud .bn')).toBeHidden(); // no comic "WIN!" burst over it
+    await expect(page.locator('#cvc-slab [data-slab-state]')).toBeHidden(); // over: the slab claims no holder
     const before = (await twin()).restarts;
     await page.waitForTimeout(1500); // SLAB.rematchDelay (1 s) after the end
     await page.keyboard.press(key);

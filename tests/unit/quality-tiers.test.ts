@@ -18,10 +18,8 @@ describe('quality profiles', () => {
       expect(a.rainDrops).toBeLessThanOrEqual(b.rainDrops);
       expect(Number(a.shadows)).toBeLessThanOrEqual(Number(b.shadows));
       expect(Number(a.bloom)).toBeLessThanOrEqual(Number(b.bloom));
-      expect(Number(a.propCreases)).toBeLessThanOrEqual(Number(b.propCreases));
     }
     for (const t of TIERS) {
-      expect(QUALITY[t].outlines).toBe(true);                      // the ink hull is the look in every tier
       expect(QUALITY[t].minPixelRatio).toBeLessThanOrEqual(QUALITY[t].maxPixelRatio);
     }
   });
@@ -30,7 +28,6 @@ describe('quality profiles', () => {
     const low = QUALITY.low;
     expect(low.shadows).toBe(false);
     expect(low.bloom).toBe(false);
-    expect(low.propCreases).toBe(false);
     expect(low.foliageDensity).toBe(0);
     expect(low.gardenDensity).toBeLessThan(0.5);
     expect(low.maxPixelRatio).toBeLessThan(1);

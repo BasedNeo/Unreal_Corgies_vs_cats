@@ -6,9 +6,12 @@ extends RefCounted
 ##   head); a fox face (pointed white muzzle); a stub tail; warm ochre/tan coat with a white bib, muzzle and socks.
 ## - Cat: slim body (about 1:1) on long legs; small pointed ears; a long tail held up in an S, the tallest part of the
 ##   silhouette; cool grey tabby coat with a pale muzzle and chest.
-## - Team band (the side): self-lit harness straps around the torso and a collar, in the team colour, below the glow
-##   threshold. Corgi Company: one wide solid strap, a lighter blue. Cat Cadre: a split strap (two narrow ones), a
-##   deeper crimson. So the side reads by hue, by luminance, and close up by pattern.
+## - Team (the side), self-lit in the team band colour, below the glow threshold: a chest panel (a shield-shaped
+##   bandana, >= 0.3 m across, seen head-on), harness straps around the torso (seen side on) and a collar.
+##   W13 R-PETS2 (Q-READ: team did not read on its own at 30 m, nor without hue): the side reads by LIGHTNESS against the
+##   pet's own coat as well as by hue: Corgi Company a near-white blue on the tan corgi, Cat Cadre a dark crimson on the
+##   light grey cat. Pattern features are 0.15 m or more (STRAP): Corgi Company one solid 0.30 m strap, Cat Cadre two
+##   0.15 m straps with a 0.15 m gap.
 ## Closed mouth (no mouth or tongue geometry), no ink outline. Render only: the pet's collision is its capsule (pet.gd).
 ## Origin at the feet, facing -Z. Every part of a pet is merged into ONE mesh with one surface per material (coat,
 ## accent, dark, plate, band), built once per (species, team) and shared, so a pet costs 5 draws per pass (+2 rifle)
@@ -23,6 +26,8 @@ const RIFLE_SURFACES := ["metal", "band"]
 const COAT := [Color("e38a3a"), Color("7d8591")]  # fallback: corgiOrange / catGrey (style-tokens.js)
 const ACCENT := [Color("f6e7cf"), Color("d9dde3")]  # fallback: corgiCream / light grey muzzle and chest
 const DARK := Color("1d1714")
+## The smallest team pattern feature (strap width, gap): at 30 m and ~15 px/m it is 2-3 px, enough to resolve side on.
+const STRAP := 0.15
 
 static var _layouts := {}  # "species_team" -> layout (see layout())
 static var _rifle_mesh: ArrayMesh
@@ -67,7 +72,8 @@ static func rifle(species: int, team: int, look: Node) -> Node3D:
 
 
 ## The shared geometry of one (species, team): {mesh: ArrayMesh (SURFACES order), parts: {name: AABB in model space},
-## tail: PackedVector3Array (the tail's centre line), bands: int (torso straps: 1 solid or 2 split)}. Cached.
+## tail: PackedVector3Array (the tail's centre line), bands: int (torso straps: 1 solid or 2 split), band_feature: float
+## (the smallest strap or gap, metres)}. Cached.
 static func layout(species: int, team: int) -> Dictionary:
 	species = clampi(species, 0, 1)
 	team = clampi(team, 0, 1)
@@ -78,7 +84,8 @@ static func layout(species: int, team: int) -> Dictionary:
 			_corgi(k, team)
 		else:
 			_cat(k, team)
-		_layouts[key] = {"mesh": k.mesh(SURFACES), "parts": k.parts, "tail": k.tail, "bands": k.bands}
+		_layouts[key] = {"mesh": k.mesh(SURFACES), "parts": k.parts, "tail": k.tail, "bands": k.bands,
+			"band_feature": k.band_feature}
 	return _layouts[key]
 
 
@@ -104,9 +111,11 @@ static func _corgi(k: Kit, team: int) -> void:
 		k.prism("accent", Vector3(0.15, 0.3, 0.02), ear * Kit.at(Vector3(0, 0.2, -0.04)))
 	k.ellipsoid("coat", Vector3(0.08, 0.07, 0.08), Vector3(0, 0.56, 0.7), "tail")  # stub tail
 	# scuffed ochre armour saddle on the back, behind the team straps
-	k.box("plate", Vector3(0.44, 0.1, 0.4), Vector3(0, 0.66, 0.22), "plate")
-	_bands(k, team, Vector3(0, 0.42, -0.2), 0.255, 0.2)
+	k.box("plate", Vector3(0.44, 0.1, 0.38), Vector3(0, 0.66, 0.3), "plate")
+	_bands(k, team, Vector3(0, 0.42, -0.2), 0.255)
 	_collar(k, Vector3(0, 0.5, -0.45), Vector3(0, 0.72, -0.6), 0.35, 0.165)
+	# the team chest panel over the white bib, under the muzzle: 0.40 m across, 0.36 m tall, seen head-on
+	_panel(k, Vector3(0, 0.4, -0.7), 0.4, 0.2, 0.16)
 
 
 static func _cat(k: Kit, team: int) -> void:
@@ -135,22 +144,32 @@ static func _cat(k: Kit, team: int) -> void:
 	for i in pts.size() - 1:
 		k.segment("coat", pts[i], pts[i + 1], lerpf(0.065, 0.045, i / 5.0), "tail")
 	k.tail = pts
-	k.box("plate", Vector3(0.3, 0.07, 0.3), Vector3(0, 0.78, 0.06), "plate")
-	_bands(k, team, Vector3(0, 0.62, -0.11), 0.162, 0.2)
+	k.box("plate", Vector3(0.26, 0.07, 0.18), Vector3(0, 0.78, 0.32), "plate")  # on the haunches, behind the straps
+	_bands(k, team, Vector3(0, 0.62, 0.0), 0.162)
 	_collar(k, Vector3(0, 0.7, -0.32), Vector3(0, 0.88, -0.42), 0.3, 0.1)
+	# the team chest panel under the chin: 0.32 m across (wider than the cat's chest), 0.32 m tall, seen head-on
+	_panel(k, Vector3(0, 0.61, -0.48), 0.32, 0.18, 0.14)
 
 
-## The team straps around the torso (axis Z), centred at `c`, over `width` metres of body: Corgi Company one solid
-## strap, Cat Cadre two narrow straps with a gap (the same overall extent): a pattern cue besides hue and luminance.
-static func _bands(k: Kit, team: int, c: Vector3, radius: float, width: float) -> void:
+## The team straps around the torso (axis Z), centred at `c`: Corgi Company one solid strap 2 x STRAP wide, Cat Cadre
+## two STRAP-wide straps with a STRAP gap. A pattern cue besides hue and lightness, with features that resolve at range.
+static func _bands(k: Kit, team: int, c: Vector3, radius: float) -> void:
 	if team == 0:
-		k.cyl("band", radius, radius, width, c, Vector3(90, 0, 0), "band")
+		k.cyl("band", radius, radius, 2.0 * STRAP, c, Vector3(90, 0, 0), "band")
 		k.bands = 1
 	else:
-		var w := width * 0.4
-		for dz in [-(width - w) * 0.5, (width - w) * 0.5]:
-			k.cyl("band", radius, radius, w, c + Vector3(0, 0, dz), Vector3(90, 0, 0), "band")
+		for dz in [-STRAP, STRAP]:
+			k.cyl("band", radius, radius, STRAP, c + Vector3(0, 0, dz), Vector3(90, 0, 0), "band")
 		k.bands = 2
+	k.band_feature = STRAP
+
+
+## The team chest panel: a shield-shaped bandana, a band `top` m tall above `seam` and a point `point` m below it,
+## `width` across, its point tucked back 8 degrees to follow the chest. It faces -Z: a pet coming at you shows it.
+static func _panel(k: Kit, seam: Vector3, width: float, top: float, point: float) -> void:
+	var f := Kit.at(seam, Vector3(-8, 0, 0))
+	k.box_at("band", Vector3(width, top, 0.04), f * Kit.at(Vector3(0, top * 0.5, 0)), "panel")
+	k.prism("band", Vector3(width, point, 0.04), f * Kit.at(Vector3(0, -point * 0.5, 0), Vector3(0, 0, 180)), "panel")
 
 
 ## A collar ring around the neck from a to b, `along` of the way up.
@@ -183,9 +202,11 @@ static func _fallback_mat(kind: String, species: int, team: int) -> StandardMate
 		"dark":
 			return _plain(DARK, 0.35, 0.0)
 		"band":
-			var b := _plain(T.TEAM_COLORS[team], 0.4, 0.0)
-			b.emission_enabled = true  # team colour still reads on a dark night, below the glow threshold
-			b.emission = T.TEAM_COLORS[team]
+			# the team colour, light for Corgi Company and dark for Cat Cadre; self-lit, below the glow threshold
+			var c: Color = T.TEAM_COLORS[team].lightened(0.6) if team == 0 else T.TEAM_COLORS[team].darkened(0.45)
+			var b := _plain(c, 0.4, 0.0)
+			b.emission_enabled = true
+			b.emission = c
 			b.emission_energy_multiplier = 0.6
 			return b
 		"plate":
@@ -210,6 +231,7 @@ class Kit:
 	var parts := {}  # part name -> AABB
 	var tail := PackedVector3Array()
 	var bands := 0
+	var band_feature := 0.0
 
 	static func at(pos: Vector3, rot_deg := Vector3.ZERO, scale := Vector3.ONE) -> Transform3D:
 		var r := Basis.from_euler(Vector3(deg_to_rad(rot_deg.x), deg_to_rad(rot_deg.y), deg_to_rad(rot_deg.z)))
@@ -262,9 +284,12 @@ class Kit:
 		put(kind, c, xf, part)
 
 	func box(kind: String, size: Vector3, pos: Vector3, part := "") -> void:
+		box_at(kind, size, at(pos), part)
+
+	func box_at(kind: String, size: Vector3, xf: Transform3D, part := "") -> void:
 		var b := BoxMesh.new()
 		b.size = size
-		put(kind, b, at(pos), part)
+		put(kind, b, xf, part)
 
 	func prism(kind: String, size: Vector3, xf: Transform3D, part := "") -> void:
 		var p := PrismMesh.new()

@@ -43,7 +43,7 @@ import { createCoreRushView } from './modes/core-rush-view';
 import { createBaseAssaultView } from './modes/base-assault-view'; // W9 G4a: balls, stands, capture rings
 import { createBaseAssaultHud } from './ui/base-assault-hud'; // W9 G4a: ball strip, banners, markers, carrier cue
 import { createSlabView, type SlabReading } from './modes/slab-view'; // W13 TW-VIEW: the slab read-out (frame + fill)
-import { createSlabHud } from './ui/slab-hud'; // W13 TW-VIEW: scores to 60, clock / OVERTIME, slab line, winner screen
+import { createSlabHud, slabShowDebug } from './ui/slab-hud'; // W13 TW-VIEW: scores to 60, clock / OVERTIME, slab line, winner screen
 import { SLAB } from '../shared/content/modes';
 import { createOrdnanceView, type OrdnanceAim } from './fx/ordnance-view'; // W9 X4: throwables, arc preview, telegraph
 import { createOrdnanceAudio } from './audio/presets-ordnance'; // W9 X4
@@ -494,7 +494,8 @@ async function main(): Promise<void> {
     debug.local = local ? { x: local.x, y: local.y, z: local.z, hp: local.hp, flags: local.flags } : null;
     debug.ready = !!local && debug.frames > 5;
     if ((local || !net) && debug.frames > 2) hideLoading();
-    hud.update({ cueUp, local, match: net?.match ?? null, roster: net?.roster ?? [], fps: debug.fps, rttMs: net?.stats.rttMs ?? 0, locked: input.locked || params.has('autoplay') || !net, backend: ctx.backend, transport: transport?.kind ?? 'none', states, holdScoreboard: awardsCard.up || slabHud.winnerUp }); // W10 U3: awards, then the scoreboard (W13: not over the slab's winner screen; Tab still opens it)
+    hud.update({ cueUp, local, match: net?.match ?? null, roster: net?.roster ?? [], fps: debug.fps, rttMs: net?.stats.rttMs ?? 0, locked: input.locked || params.has('autoplay') || !net, backend: ctx.backend, transport: transport?.kind ?? 'none', states, holdScoreboard: awardsCard.up || slabHud.winnerUp, // W10 U3: awards, then the scoreboard (W13: not over the slab's winner screen; Tab still opens it)
+      showDebug: slabShowDebug(slabHud.active, location.search) }); // W13: no fps / rtt line in a slab match unless ?debug
     slabHud.update({ match: net?.match ?? null, slab: slabView.reading, localId, local, roster: net?.roster ?? [], camera: ctx.camera }, dt);
     input.enterReloads = slabHud.winnerUp && !hud.menuOpen && !hud.chatOpen; // W13: R or Enter rematches (as in Godot)
     if (slabHud.active) twinDebug(slabView.reading);

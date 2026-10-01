@@ -13,10 +13,10 @@
 //   speed/vy/grounded/anim → locomotion and air poses; dead → the death flop (the sim tumbles her off).
 // The laser beam, dot, glint and leap marker are drawn by the telegraph FX from the snapshot (truthful).
 //
-// Draw calls: body (1 skinned toon) + rifle (1) + rifle crease ink (1) + rifle emitter glow (1) + beret (1) = 5.
+// Draw calls: body (1 skinned) + rifle (1) + rifle emitter glow (1) + beret (1) = 4 (W13: no crease ink).
 import * as THREE from 'three/webgpu';
 import type { Avatar, AvatarFrame } from '../../views/avatar';
-import { toon, glow, addCreaseInk } from '../../style/style-webgpu.js';
+import { toon, glow } from '../../style/style-webgpu.js';
 import { PALETTE } from '../../style/style-tokens.js';
 import { RigInstance, type RigTemplate } from '../../anim/rig';
 import { CharacterAnimator } from '../../anim/character-animator';
@@ -65,7 +65,6 @@ interface SniperAsset {
   /** Beret pivot (head-bone local) — it spins off around this point. */
   beretPivot: V3;
   weapon: WeaponGeo;
-  weaponInk: THREE.Object3D | null;
   plan: BodyPlan;
   headTop: number;
   triangles: number;
@@ -139,16 +138,10 @@ function buildSniperAsset(key: string): SniperAsset {
   const beretPivot: V3 = [c[0] - j.head[0], c[1] - j.head[1], c[2] - j.head[2]];
 
   const weapon = buildWeapon('overwatch', Team.Cats, SNIPER_DETAIL);
-  let weaponInk: THREE.Object3D | null = null;
-  {
-    const tmp = new THREE.Mesh(weapon.geometry, toon({ color: 0xffffff, vertexColors: true }));
-    weaponInk = addCreaseInk(tmp, { thresholdDeg: 40 }) as THREE.Object3D | null;
-    if (weaponInk) tmp.remove(weaponInk);
-  }
   const boneInverses = RigInstance.bindMatrices(template).map((m) => m.invert());
   const triangles = mb.triangles + bm.triangles + weapon.triangles;
   return {
-    key, template, boneInverses, body, beret, beretPivot, weapon, weaponInk, plan,
+    key, template, boneInverses, body, beret, beretPivot, weapon, plan,
     headTop: Math.max(face.headTop, c[1] + 0.09), triangles, refs: 0,
   };
 }
@@ -165,11 +158,6 @@ function release(a: SniperAsset): void {
   if (--a.refs > 0) return;
   assets.delete(a.key);
   a.body.dispose(); a.beret.dispose(); a.weapon.geometry.dispose(); a.weapon.glow?.dispose();
-  if (a.weaponInk) {
-    const ink = a.weaponInk as THREE.Mesh;
-    ink.geometry?.dispose();
-    (ink.material as THREE.Material | undefined)?.dispose();
-  }
 }
 
 export interface SniperAvatarStats { triangles: number; drawCalls: number; bones: number }
@@ -201,13 +189,12 @@ export function createSniperAvatar(def: SniperDef, seed: number): SniperAvatar {
   skinned.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.6, 0), 1.7);
   skinned.boundingBox = new THREE.Box3(new THREE.Vector3(-1.2, -0.2, -1.2), new THREE.Vector3(1.2, 1.9, 1.2));
   skinned.castShadow = true;
-  // rifle (rigid, crease-inked) + emitter glow, like the character lane's weapons
+  // rifle (rigid) + emitter glow, like the character lane's weapons
   const weapon = new THREE.Mesh(asset.weapon.geometry, toon({ color: 0xffffff, vertexColors: true, surface: 'weapon', ...asset.weapon.finish } as Parameters<typeof toon>[0])); // X3: the Longshot's paint finish
   weapon.name = 'boss_sniper_rifle';
   weapon.castShadow = true;
   rig.bones[bi.weapon].add(weapon);
   let drawCalls = 2;
-  if (asset.weaponInk) { weapon.add(asset.weaponInk.clone()); drawCalls++; }
   if (asset.weapon.glow) {
     const g = new THREE.Mesh(asset.weapon.glow, glow(asset.weapon.glowColor, 2.6));
     g.name = 'boss_sniper_emitter';

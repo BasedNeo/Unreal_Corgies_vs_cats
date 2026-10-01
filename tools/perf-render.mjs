@@ -4,13 +4,12 @@
 // Headless Chromium renders with SwiftShader (WebGL2 backend, ~1 fps): judge cost by draws/triangles, not fps.
 // Counting wraps the WebGL2 draw calls (harness-only, like tools/qa-play.mjs perf). A draw is attributed to
 //   shadow      the viewport is square and not the canvas (the sun's shadow map: 1024/1536/2048)
-//   fullscreen  a draw of <= 2 triangles (post passes: bloom mips, outline/grade/output quads)
-//   scene       everything else (the main colour pass incl. the toon outline hulls)
+//   fullscreen  a draw of <= 2 triangles (post passes: bloom mips, grade/output quads)
+//   scene       everything else (the main colour pass)
 // The default query is free mode without bots (spawn, camera and time of day are deterministic): the same view for
 // every tier. Use --query '&mode=team-deathmatch' for a firefight (bots move, so frames differ a little).
 // --objects (W7 P3): also attribute one frame's draws to the objects that issued them (a hook on the page's own
-// WebGPURenderer.renderObject; each GL draw counts for the innermost object being rendered) and split the scene pass
-// into the ink hulls (toon outline pass) and the rest: <out>/objects-<tier>.txt, and `hull` in the printed row.
+// WebGPURenderer.renderObject; each GL draw counts for the innermost object being rendered): <out>/objects-<tier>.txt.
 import { chromium } from '@playwright/test';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 
@@ -39,7 +38,7 @@ const GLCOUNT = () => {
     cur[pass][0]++; cur[pass][1] += tris;
     const o = window.__perfObj;                              // --objects: attribute to the innermost rendered object
     if (o?.on && o.cur) {
-      const key = `${pass === 'scene' && o.cur.hull ? 'hull' : pass}|${o.cur.key}`;
+      const key = `${pass}|${o.cur.key}`;
       const e = o.rec.get(key) ?? { calls: 0, tris: 0, ids: new Set() };
       e.calls++; e.tris += tris; e.ids.add(o.cur.id); o.rec.set(key, e);
     }
@@ -78,7 +77,6 @@ for (const tier of tiers) {
   await page.waitForFunction((n) => globalThis.__cvc.frames >= n, f0 + frames + 2, { timeout: 600000, polling: 500 });
   const fr = await page.evaluate((n) => window.__perf.frames.slice(-n), frames);
   const info = await page.evaluate(() => ({ ratio: globalThis.__cvc.pixelRatio ?? null, quality: globalThis.__cvc.quality ?? null, errors: globalThis.__cvc.errors }));
-  let hull = null;
   if (objects) {
     const rows = await page.evaluate(async () => {
       // the page's own three module (Vite's pre-bundled dep), so the hook sees the renderer the game uses
@@ -94,7 +92,7 @@ for (const tier of tiers) {
       };
       R.renderObject = function (obj, scene, camera, geometry, material, ...rest) {
         const prev = o.cur;
-        o.cur = { key: `${label(obj)}|${material.type}`, hull: !!material.isMeshToonOutlineMaterial, id: obj.id };
+        o.cur = { key: `${label(obj)}|${material.type}`, id: obj.id };
         try { return orig.call(this, obj, scene, camera, geometry, material, ...rest); } finally { o.cur = prev; }
       };
       await new Promise((res) => requestAnimationFrame(() => { o.on = true; requestAnimationFrame(() => { o.on = false; res(); }); }));
@@ -108,7 +106,6 @@ for (const tier of tiers) {
       (tot[pass] ??= [0, 0]); tot[pass][0] += r.calls; tot[pass][1] += r.tris;
       (grp[g] ??= [0, 0]); grp[g][0] += r.calls; grp[g][1] += r.tris;
     }
-    hull = tot.hull ? `${tot.hull[0]} / ${tot.hull[1]}` : '0 / 0';
     const lines = [`${query} · ${tier} · one frame`, `passes: ${JSON.stringify(tot)}`, '', 'by pass and group (draws, triangles):',
       ...Object.entries(grp).sort((a, b) => b[1][1] - a[1][1]).map(([g, v]) => `${String(v[0]).padStart(5)} ${String(v[1]).padStart(9)}  ${g}`),
       '', 'by object (draws, triangles, objects):',
@@ -124,7 +121,6 @@ for (const tier of tiers) {
     shadow: `${med((f) => f.shadow.calls)} / ${med((f) => f.shadow.tris)}`,
     scene: `${med((f) => f.scene.calls)} / ${med((f) => f.scene.tris)}`,
     fullscreen: `${med((f) => f.fullscreen.calls)} / ${med((f) => f.fullscreen.tris)}`,
-    ...(hull ? { hull: `${hull} (one frame, inside scene)` } : {}),
     engine: info, errors: [...errors, ...info.errors].length, shot,
   };
   rows.push(row);

@@ -112,8 +112,8 @@ describe('characters: budgets, rig, grounding, orientation', () => {
       const g = av.skinned.geometry;
       expect(g.userData.outlineReady).toBe(true);
       av.root.traverse((o) => {
-        const m = o as THREE.Mesh & { isLineSegments2?: boolean };
-        if (!m.isMesh || m.isLineSegments2 || o.userData.styleInk) return; // crease ink comes from addCreaseInk()
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
         const mats = Array.isArray(m.material) ? m.material : [m.material];
         for (const mat of mats) expect(['toon', 'glow']).toContain(mat.userData.style);
       });

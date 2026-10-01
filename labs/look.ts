@@ -4,7 +4,6 @@
 //   &quality=low|medium|high   engine + world + material detail of that tier (default high)
 //   &wx=clear|overcast|rain|storm|clearing   weather override (default: clock tick 0 = clear)
 //   &chars=0   no character lineup · &flood=0   no demo floodlights · &harden=0   world keeps its own materials
-//   &inkmin=0   P3 A/B: every ink hull drawn (default: the renderer's ink LOD skips hulls under 0.3 px)
 //   &harden=1 (default): world materials are rebuilt with toonMaterial() + a surface preset IN THIS LAB ONLY — the
 //   preview of the materials.ts snippet in docs/handoff/S4.md (toonFrom -> toonMaterial).
 //   W9 P4 readability bench: &lineup=35 puts all 12 class × species kits (NPC tier; corgis team Corgis, cats team Cats)
@@ -23,7 +22,7 @@ import { createWorldData } from '../src/shared/world/world-data';
 import { createWorldView } from '../src/client/world/world-view';
 import { WEATHER_KINDS, type WeatherKind } from '../src/shared/world/weather';
 import { surfaceAt } from '../src/shared/world/queries';
-import { toonMaterial, glow, type HardenedToonMaterial } from '../src/client/style/style-webgpu.js';
+import { toonMaterial, glow, type StyleMaterial } from '../src/client/style/style-webgpu.js';
 import { createFloodlights } from '../src/client/style/floodlights.js';
 import { createCharacter } from '../src/client/procgen/characters';
 import { CLASS_IDS, Species, Team } from '../src/shared/types';
@@ -43,7 +42,7 @@ function hardenWorld(root: THREE.Object3D): number {
     if (!mesh.isMesh || o.userData.styleInk) return;
     const swap = (m: THREE.Material): THREE.Material => {
       const style = m.userData?.style;
-      if ((style !== 'toon' && style !== 'toon-noink') || (m as unknown as { isHardenedToonMaterial?: boolean }).isHardenedToonMaterial) return m;
+      if ((style !== 'toon' && style !== 'toon-noink') || (m as unknown as { isStyleMaterial?: boolean }).isStyleMaterial) return m;
       let r = done.get(m);
       if (r) return r;
       const src = m as THREE.MeshToonNodeMaterial;
@@ -51,7 +50,7 @@ function hardenWorld(root: THREE.Object3D): number {
       const h = toonMaterial({
         color: src.color.getHex(), vertexColors: src.vertexColors, side: src.side, transparent: src.transparent,
         opacity: src.opacity, ink: style === 'toon', surface,
-      }) as HardenedToonMaterial;
+      }) as StyleMaterial;
       h.colorNode = src.colorNode; h.normalNode = src.normalNode; h.positionNode = src.positionNode; h.opacityNode = src.opacityNode;
       h.depthWrite = src.depthWrite;
       done.set(m, h);
@@ -65,7 +64,7 @@ function hardenWorld(root: THREE.Object3D): number {
 
 async function main() {
   const tier = toQualityTier(params.get('quality'));
-  const ctx = await createRenderContext(document.getElementById('app')!, { forceWebGL: params.has('webgl'), quality: tier, inkMinPx: params.has('inkmin') ? Number(params.get('inkmin')) : undefined });
+  const ctx = await createRenderContext(document.getElementById('app')!, { forceWebGL: params.has('webgl'), quality: tier });
   debug.backend = ctx.backend;
   const seed = Number(params.get('seed') ?? 1);
   const data = createWorldData(seed);

@@ -150,14 +150,23 @@ dirt). The one line outside the owned list is in `world-view.ts`, which passes
 - Live, `labs/lot.html?bm=lot_corgi_base&wx=rain`: 155 draws and 272,941 triangles at HEAD; 146 draws and 245,357
   triangles now.
 
+## INK-DEAD (lead, W13): the dead ink code removed
+
+These are now gone:
+- `tools/perf-render.mjs` hull counting;
+- `QualityProfile.propCreases` and `.outlines`, world-view's `setPropCreases` / `destruct.setCreases`, and
+  `DestructView.setCreases`;
+- the `weaponInk` / `keepInk` paths in `procgen/characters/index.ts` and `boss/sniper.ts`, and `addCreaseInk` itself;
+- the labs' `inkMinPx` / `inkmin`, `HardenedToonMaterial` (now `StyleMaterial`), and the `addCreaseInk` calls in
+  `labs/weapons.ts`;
+- the test assertions that only existed for them (quality-tiers, render-budget, boss-avatar, characters, vehicle-views,
+  style-look).
+
+The look and the draws are unchanged.
+
 ## NEED (outside this lane)
-1. `tools/perf-render.mjs` still counts hulls (harmless). `quality.ts` `propCreases` and world-view's
-   `setPropCreases` are now no-ops and can go.
-2. The `weaponInk` paths in `procgen/characters/index.ts` and `boss/sniper.ts`, and the `keepInk` flags, are dead code.
-3. Labs: `labs/look.ts` (`type HardenedToonMaterial`), `labs/weapons.ts` (`addCreaseInk` returns `null`) and the
-   labs' `inkMinPx` option.
-4. Particle SDF rims (`fx/particle-mesh.ts`, `decal-mesh.ts`) are the FX lane's call.
-5. The card's URL `?map=the-lot` falls back to the West Yard. The map id is `the_lot`.
+1. The particle SDF rims (`fx/particle-mesh.ts`, `decal-mesh.ts`) are the FX lane's call.
+2. The card's URL `?map=the-lot` falls back to the West Yard. The map id is `the_lot`.
 
 ## Proof (private copy = HEAD + these files)
 

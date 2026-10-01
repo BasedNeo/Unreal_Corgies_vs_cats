@@ -12,7 +12,7 @@
 // capture script arms __wlab.pauseAt, then releases it).
 import * as THREE from 'three/webgpu';
 import { createRenderContext } from '../src/client/engine/renderer';
-import { toon, glow, addCreaseInk } from '../src/client/style/style-webgpu.js';
+import { toon, glow } from '../src/client/style/style-webgpu.js';
 import { PALETTE } from '../src/client/style/style-tokens.js';
 import { buildWeapon } from '../src/client/procgen/characters/weapons';
 import { createCharacter, type CharacterAvatar } from '../src/client/procgen/characters';
@@ -104,8 +104,6 @@ function buildModels(scene: THREE.Scene, camera: THREE.PerspectiveCamera, label:
     ([Team.Corgis, Team.Cats] as TeamId[]).forEach((team, row) => {
       const w = buildWeapon(clsOf(one), team, 0.86);
       const m = new THREE.Mesh(w.geometry, matFor(w.finish));
-      const ink = addCreaseInk(new THREE.Mesh(w.geometry, matFor(w.finish)), { thresholdDeg: 40 });
-      if (ink) m.add(ink);
       if (w.glow) m.add(new THREE.Mesh(w.glow, glow(w.glowColor, 2.6)));
       m.scale.setScalar(4.2);
       m.rotation.y = yaw;
@@ -123,8 +121,6 @@ function buildModels(scene: THREE.Scene, camera: THREE.PerspectiveCamera, label:
       const w = buildWeapon(cls, team, P.has('npc') ? 0.66 : 0.86);
       const mat = matFor(w.finish);
       const m = new THREE.Mesh(w.geometry, mat);
-      const ink = addCreaseInk(new THREE.Mesh(w.geometry, mat), { thresholdDeg: 40 });
-      if (ink) m.add(ink);
       if (w.glow) m.add(new THREE.Mesh(w.glow, glow(w.glowColor, 2.6)));
       const g = new THREE.Group();
       g.add(m);

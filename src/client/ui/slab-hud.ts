@@ -62,6 +62,19 @@ export function slabStateText(r: Pick<SlabReading, 'holder' | 'contested'> | nul
   return 'SLAB  NEUTRAL';
 }
 
+/**
+ * The slab line for this frame, or null to hide it. Once the match is over the slab scores nobody: Godot stops
+ * scoring at match_over and its winner veil covers the line; here the line goes (no frozen "HOLDING +1/s" claim).
+ */
+export function slabLineFor(ms: Pick<MatchState, 'phase'>, r: Pick<SlabReading, 'holder' | 'contested'> | null): string | null {
+  return ms.phase === 'ended' ? null : slabStateText(r);
+}
+
+/** The "fps · backend · transport · rtt" debug line: Godot shows none, so a slab match hides it unless ?debug is set. */
+export function slabShowDebug(slabActive: boolean, search: string): boolean {
+  return !slabActive || new URLSearchParams(search).has('debug');
+}
+
 /** hud.gd slab_color(): the slab line's and the marker's colour. */
 export function slabHudColor(r: Pick<SlabReading, 'holder' | 'contested'> | null): number {
   if (r?.contested) return 0xffa633; // Color(1.0, 0.65, 0.2)
@@ -265,8 +278,9 @@ export function createSlabHud(ui: HTMLElement, opts: SlabHudOptions): SlabHud {
       clock.className = c.tone === 'ot' ? 'clk ot' : 'clk';
       style(clock, 'color', hex(SLAB_CLOCK_COLOR[c.tone]));
       const col = hex(slabHudColor(f.slab));
-      text(state, slabStateText(f.slab));
-      style(state, 'color', col);
+      const line = slabLineFor(M, f.slab);
+      disp(state, line !== null);
+      if (line !== null) { text(state, line); style(state, 'color', col); }
       // the slab marker (hud.gd): over the slab centre, clamped to the screen; behind the camera it flips to the bottom
       const W = innerWidth, H = innerHeight;
       if (f.slab && !winnerUp) {

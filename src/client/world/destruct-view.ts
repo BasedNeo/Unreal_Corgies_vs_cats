@@ -61,8 +61,6 @@ export interface DestructView {
   /** Lab/tests: force a state by WorldData index (with or without the debris burst). */
   setBroken(index: number, broken: boolean, fx?: boolean): void;
   isBroken(index: number): boolean;
-  /** Retired (W13: no crease lines); a no-op kept for the world view's quality switch. */
-  setCreases(on: boolean): void;
   stats(): Record<string, number>;
   dispose(): void;
 }
@@ -239,7 +237,6 @@ export function createDestructView(data: WorldData, opts: { surfaceAt?: (x: numb
       lastBreakMs = performance.now() - t0;
     },
     isBroken(index) { return slots[index]?.broken ?? false; },
-    setCreases() { /* W13: no crease lines */ },
     stats() {
       let tris = 0;
       for (const gm of meshes) if (gm) tris += gm.orig.length / 3;

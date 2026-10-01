@@ -18,20 +18,19 @@ import { CLASS_IDS, Species, Team, type ClassId, type SpeciesId } from '../../sr
 // ---------------------------------------------------------------------------------------------------------------
 // Characters: a per-pass cost model of one avatar (what the renderer draws for it), per LOD.
 
-interface Cost { scene: number; hull: number; shadow: number; tris: number }
+interface Cost { scene: number; shadow: number; tris: number }
 const isLines = (o: THREE.Object3D) => !!(o as unknown as { isLineSegments2?: boolean }).isLineSegments2;
 const trisOf = (o: THREE.Object3D): number => {
   const g = (o as THREE.Mesh).geometry;
   return (g.index ? g.index.count : g.getAttribute('position').count) / 3;
 };
-/** Draws and triangles of an avatar as it stands (its own LOD): scene pass + shadow pass; `hull` counts ink (none). */
+/** Draws and triangles of an avatar as it stands (its own LOD): scene pass + shadow pass. */
 function costAt(av: CharacterAvatar): Cost {
-  const c: Cost = { scene: 0, hull: 0, shadow: 0, tris: 0 };
+  const c: Cost = { scene: 0, shadow: 0, tris: 0 };
   const walk = (o: THREE.Object3D) => {
     if (!o.visible) return;
     const m = o as THREE.Mesh;
-    if (isLines(o)) c.hull++;
-    else if (m.isMesh) {
+    if (m.isMesh) {
       const t = trisOf(o);
       c.scene++; c.tris += t;
       if (m.castShadow) { c.shadow++; c.tris += t; }
@@ -102,16 +101,16 @@ describe('P3 characters: distance LOD', () => {
         const back = costAt(av);
         if (JSON.stringify(back) !== JSON.stringify(near)) errors.push(`${name} ${cls}: near → far → near changed the cost`);
         if (av.stats.drawCalls !== drawn0) errors.push(`${name} ${cls}: stats.drawCalls moved`);
-        // near: body, weapon, weapon glow, team lamps, neckwear (W13: no weapon crease ink, no ink hulls)
-        if (near.scene !== drawn0 || near.hull !== 0 || near.shadow !== 3) errors.push(`${name} ${cls}: near ${JSON.stringify(near)}`);
+        // near: body, weapon, weapon glow, team lamps, neckwear
+        if (near.scene !== drawn0 || near.shadow !== 3) errors.push(`${name} ${cls}: near ${JSON.stringify(near)}`);
         // far: body, weapon, team lamps, neckwear; only the body's shadow
-        if (far.scene !== 4 || far.hull !== 0 || far.shadow !== 1) errors.push(`${name} ${cls}: far ${JSON.stringify(far)}`);
-        nearMax = Math.max(nearMax, near.scene + near.hull + near.shadow);
-        farMax = Math.max(farMax, far.scene + far.hull + far.shadow);
-        rows.push(`${name.padEnd(5)} ${cls.padEnd(11)} near ${near.scene}+${near.hull}+${near.shadow} draws ${near.tris} tris · far ${far.scene}+${far.hull}+${far.shadow} draws ${far.tris} tris (${(100 * (1 - far.tris / near.tris)).toFixed(0)} % fewer)`);
+        if (far.scene !== 4 || far.shadow !== 1) errors.push(`${name} ${cls}: far ${JSON.stringify(far)}`);
+        nearMax = Math.max(nearMax, near.scene + near.shadow);
+        farMax = Math.max(farMax, far.scene + far.shadow);
+        rows.push(`${name.padEnd(5)} ${cls.padEnd(11)} near ${near.scene}+${near.shadow} draws ${near.tris} tris · far ${far.scene}+${far.shadow} draws ${far.tris} tris (${(100 * (1 - far.tris / near.tris)).toFixed(0)} % fewer)`);
       } finally { av.dispose(); }
     }
-    console.log(`[p3] per character (scene + hull + shadow), NPC tier with a neckwear:\n${rows.join('\n')}`);
+    console.log(`[p3] per character (scene + shadow), NPC tier with a neckwear:\n${rows.join('\n')}`);
     expect(errors).toEqual([]);
     expect(nearMax).toBeLessThanOrEqual(12);
     expect(farMax).toBeLessThanOrEqual(7);
@@ -129,10 +128,10 @@ describe('P3 characters: distance LOD', () => {
       try {
         // full detail at every distance (pre-P3 this also drew every hull)
         const full = costAt(av);
-        before += full.scene + full.hull + full.shadow; trisBefore += full.tris;
+        before += full.scene + full.shadow; trisBefore += full.tris;
         viewFrom(av, d);
         const c = costAt(av);
-        after += c.scene + c.hull + c.shadow; trisAfter += c.tris;
+        after += c.scene + c.shadow; trisAfter += c.tris;
       } finally { av.dispose(); }
     });
     console.log(`[p3] 24-character crowd: ${before} → ${after} draws, ${trisBefore} → ${trisAfter} triangles`);

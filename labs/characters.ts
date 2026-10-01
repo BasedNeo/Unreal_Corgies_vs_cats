@@ -16,7 +16,6 @@
 //   species=corgi|cat  cls=assault  coat=red|tabby|…  team=0|1  expr=smug|…  npc (NPC tier)
 //   t=1.5   pre-simulate 1.5 s at 60 Hz, then freeze (deterministic screenshots); live=1 keeps running
 //   webgl   force the WebGL2 backend (headless probe)        labels=0   hide name tags     bare=1   hide the weapons
-//   inkmin=0   P3 A/B: draw every ink hull (default: the renderer's ink LOD skips hulls under 0.3 px, engine/renderer.ts)
 //   W9 K3: view=squads = the alley-cat raider and the tabby heavy (team Cats) from the front and from behind, with a
 //     grunt (assault) and a kitten (infiltrator) for scale; view=pve = the whole PvE cat family in a row (grunt, kitten,
 //     sniper, brute, raider, heavy); squad=alley|heavy puts every character of any view in that squad kit.
@@ -245,7 +244,7 @@ function capInkDistance(d: number): void {
 async function main(): Promise<void> {
   if (P.has('inkfar')) capInkDistance(Number(P.get('inkfar')));
   const app = document.getElementById('app')!;
-  const ctx = await createRenderContext(app, { forceWebGL: P.has('webgl'), inkMinPx: P.has('inkmin') ? Number(P.get('inkmin')) : undefined });
+  const ctx = await createRenderContext(app, { forceWebGL: P.has('webgl') });
   const { scene, camera, renderer } = ctx;
   scene.background = new THREE.Color(PALETTE.void);
 

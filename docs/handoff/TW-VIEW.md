@@ -26,6 +26,11 @@ read-out, HUD text and colours copy `engines/godot/game/slab.gd`, `hud.gd` and `
   - Slab marker: a diamond and the word SLAB, clamped to the screen edges.
   - You: hit points (number and bar, red at 40 or less) bottom left; `30 / 30` or `RELOADING` bottom right;
     `TAKEN DOWN  ·  back in 2.4` while down; hud.gd's controls hint for the first 14 s.
+  - Verifier fixes (post a64ce51):
+    - Once the match is over the slab line is hidden (`slabLineFor`). It no longer shows a frozen
+      `HOLDING +1/s`; hud.gd stops scoring at match_over and covers the line with its winner veil.
+    - The general HUD's `fps · backend · transport · rtt` line (hud.ts `.dbg`, driven by `HudModel.showDebug` from
+      main.ts) is off in a slab match unless `?debug` is set (`slabShowDebug`).
   - Winner screen: `<TEAM> WINS` or `DRAW`, `12  –  7`, `You: n takedowns · n knockouts`, and `R / Enter: rematch`.
   - While a slab match runs, a class on the HUD parent hides the general HUD's comic match bar, its health panel
     (with the Q ability ring), its ammo panel and its knocked-out screen. It also hides the Q line of the pause

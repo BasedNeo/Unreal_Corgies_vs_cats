@@ -6,22 +6,26 @@ extends RefCounted
 ## One cached material per (kind, species, team), so every pet of a side shares it. Object-space triplanar mapping:
 ## any placeholder or final mesh works without UVs. species: 0 corgi, 1 cat. team: 0 Corgi Company, 1 Cat Cadre (the
 ## locked team signal colours of the web game's PALETTE.teamCorgis / teamCats).
-## Readability at 30 m at night (W13 R-PETS): coat colour separates species (warm ochre vs cool grey); the team band
-## separates sides by hue AND by luminance (the two locked hues are within 1.1:1 of each other in luminance, so hue
-## alone is not enough): the Corgi Company band is a lighter blue, the Cat Cadre band a deeper crimson, both the
-## locked hue. Every emissive here stays below the look's glow threshold (glow_hdr_threshold 1.3 at exposure 1.25):
-## the bands are self-lit so they survive the dark and the fog, but they do not bloom.
+## Readability at 30 m at night (W13 R-PETS): coat colour separates species (warm ochre vs neutral grey); the team band
+## separates sides by hue AND by lightness (the two locked hues are within 1.1:1 of each other in luminance, so hue
+## alone is not enough). W13 R-PETS2 (Q-READ: in greyscale and red-green colour-blind views the red strap vanished into
+## the grey coat): each band now contrasts with its own coat in lightness, in opposite directions. Corgi Company is a
+## near-white blue on the mid-tone tan corgi; Cat Cadre is a dark crimson on the light grey cat. Both keep the locked
+## hue. Every emissive here stays below the look's glow threshold (glow_hdr_threshold 1.3 at exposure 1.25): the
+## bands are self-lit so they survive the dark and the fog, but they do not bloom.
 const KINDS := ["coat", "accent", "dark", "band", "plate", "metal"]
 const TEAM := [Color("2f6fd6"), Color("c9344a")]
-## The team band colours: the locked hues, the Corgi one lighter and the Cat one deeper (about 3:1 in luminance).
-const BAND := [Color(0.429, 0.6047, 0.8875), Color(0.67, 0.1733, 0.2467)]  # 2f6fd6 lightened 0.3, c9344a darkened 0.15
-const BAND_ENERGY := [1.0, 1.2]
+## The team band colours, in the locked hues: Corgi Company near-white blue (L* 79), Cat Cadre dark crimson (L* 25).
+const BAND := [Color(0.6737, 0.7741, 0.9357), Color(0.4335, 0.1122, 0.1596)]  # 2f6fd6 lightened 0.6, c9344a darkened 0.45
+## Self-lit: the Corgi band at 0.85 stays under the glow threshold; the dark Cat band at 1.4 stays dark but still red.
+const BAND_ENERGY := [0.85, 1.4]
 const OCHRE := Color(0.74, 0.53, 0.16)
 const CORGI_COAT := Color(0.72, 0.46, 0.26)
-## W13: a cool silver-blue tabby (was 0.56, 0.54, 0.52, a neutral that the sodium light turned warm like the corgi),
-## light enough that the cat is not the harder pet to see at night
-const CAT_COAT := Color(0.64, 0.66, 0.71)
-const ACCENT := [Color(0.95, 0.91, 0.84), Color(0.8, 0.82, 0.85)]  # corgi white bib / cat pale muzzle
+## W13 R-PETS2: a light neutral grey tabby, a hair warm (was 0.64, 0.66, 0.71: under the blue night ambient its shaded
+## side read blue, Corgi Company's hue). Light enough that the cat is not the harder pet to see, and that the dark Cat
+## Cadre band stands out on it.
+const CAT_COAT := Color(0.67, 0.66, 0.64)
+const ACCENT := [Color(0.95, 0.91, 0.84), Color(0.85, 0.84, 0.82)]  # corgi white bib / cat pale muzzle
 const DARK := Color(0.05, 0.045, 0.045)
 ## The self-lit fill on fur (W12 Q6 P1): away from the floods a pet was a black silhouette. W13: the fill is now the
 ## coat's own colour times the fur texture (EMISSION_OP_MULTIPLY). At W12 it was 0.28 x (colour + fur texture), the

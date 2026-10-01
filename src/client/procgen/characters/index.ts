@@ -3,11 +3,10 @@
 // expressions, faction armour + team signal + class kit, and code-authored animation (src/client/anim).
 //
 // Draw calls per character: 1 skinned body (fur + face + suit + armour, vertex colors) + 1 rigid weapon
-// (+ its crease ink) + 1 weapon glow + 1 skinned team-lamp glow (helmet / visor / goggle lamps, the Overwatch
-// monocle + mast beacon) (+ 1 skinned neckwear with a C3 look) ≤ 6. W7 P3 distance LOD: past
-// CHARACTER_DETAIL_DISTANCE the weapon ink and glow hide and only the body casts a shadow (4 draws + 1 shadow). The
-// body and weapon keep their ink hulls at every distance (`keepInk`: a whip mast or a barrel at 35 m is mostly its
-// hull); the neckwear's goes by the renderer's sub-pixel rule. The tree (and stats.drawCalls) never changes.
+// + 1 weapon glow + 1 skinned team-lamp glow (helmet / visor / goggle lamps, the Overwatch monocle + mast beacon)
+// (+ 1 skinned neckwear with a C3 look) ≤ 5. W7 P3 distance LOD: past CHARACTER_DETAIL_DISTANCE the weapon glow hides
+// and only the body casts a shadow (4 draws + 1 shadow). The tree (and stats.drawCalls) never changes. W13
+// (docs/design/LOOK.md): no ink hull and no crease ink.
 // Geometry is cached and shared: a kit (rig template, weapon, glow parts) per (species, breed, class, team, tier), and
 // under it a body (fur + gear) per (coat paint, team collar or not). Every avatar gets its own skeleton and animator.
 // Seeds drive the breed (body shape), per-instance proportions (bone scales), blink timing, idle moods and ear
@@ -19,7 +18,7 @@
 // same rig and draw structure; the weapon stays the class's (it is what the bot fires).
 import * as THREE from 'three/webgpu';
 import type { Avatar, AvatarFrame, AvatarOptions } from '../../views/avatar';
-import { toon, glow, addCreaseInk } from '../../style/style-webgpu.js';
+import { toon, glow } from '../../style/style-webgpu.js';
 import { releaseObject3D } from '../../engine/release';
 import { Species, type ClassId, type SpeciesId, type TeamId } from '../../../shared/types';
 import { mulberry32 } from '../../../shared/rng';
@@ -54,11 +53,9 @@ export const FACE_DETAIL = { hero: 1.12, npc: 0.66 } as const;
 export const CHARACTER_VERSION = 3;
 
 /**
- * W7 P3 distance LOD. Beyond this camera distance (m) a character drops its small detail: the weapon's crease ink
- * (≈ 1.2 k triangles of 1.1 px lines on a gun ~25 px long), the weapon glow (sight / emitter, a pixel or two) and the
- * weapon's and neckwear's shadows. The body, the weapon, the neckwear, the team lamps, the body's shadow and the body
- * and weapon ink hulls stay, so team, class and look read the same. The neckwear's hull goes by the renderer's
- * sub-pixel rule (engine/renderer.ts ink LOD, ~19 m at a 720 px buffer). Nothing changes within 18.5 m.
+ * W7 P3 distance LOD. Beyond this camera distance (m) a character drops its small detail: the weapon glow (sight /
+ * emitter, a pixel or two) and the weapon's and neckwear's shadows. The body, the weapon, the neckwear, the team lamps
+ * and the body's shadow stay, so team, class and look read the same. Nothing changes within 18.5 m.
  */
 export const CHARACTER_DETAIL_DISTANCE = 20;
 /** Half-width (m) of the band where the detail level holds, so a character at the threshold never flickers. */
@@ -78,7 +75,6 @@ interface KitAsset {
   template: RigTemplate;
   boneInverses: THREE.Matrix4[];
   weapon: WeaponGeo;
-  weaponInk: THREE.Object3D | null;
   /** Skinned team-lamp glow parts on the shared skeleton (helmet / visor / goggle lamps, Overwatch monocle + beacon). */
   kitGlow: THREE.BufferGeometry | null;
   kitTriangles: number;
@@ -183,13 +179,6 @@ function getKit(species: SpeciesId, breed: Breed, cls: ClassId, team: TeamId, he
   const plan = planForBreed(species, breed, gearCls, true);
   const template = buildRigTemplate(plan);
   const weapon = buildWeapon(cls, team, q);
-  // Crease ink for the rigid weapon, made once by the style system and cloned per instance.
-  let weaponInk: THREE.Object3D | null = null;
-  {
-    const tmp = new THREE.Mesh(weapon.geometry, toon({ color: 0xffffff, vertexColors: true }));
-    weaponInk = addCreaseInk(tmp, { thresholdDeg: 40 }) as THREE.Object3D | null;
-    if (weaponInk) tmp.remove(weaponInk);
-  }
   let kitGlow: THREE.BufferGeometry | null = null;
   {
     const g = new MeshBuilder(template);
@@ -201,7 +190,7 @@ function getKit(species: SpeciesId, breed: Breed, cls: ClassId, team: TeamId, he
   const boneInverses = RigInstance.bindMatrices(template).map((m) => m.invert());
   const face = faceInfo(plan);
   const kitTriangles = weapon.triangles + (kitGlow ? (kitGlow.index!.count / 3) : 0);
-  a = { key, planKey: `${species}:${breed}:${gearCls}`, template, boneInverses, weapon, weaponInk, kitGlow, kitTriangles, plan, cls, gearCls, team, hero, veteran, squad, headTop: face.headTop, snoutTip: face.snoutTip, bodies: new Map(), refs: 1 };
+  a = { key, planKey: `${species}:${breed}:${gearCls}`, template, boneInverses, weapon, kitGlow, kitTriangles, plan, cls, gearCls, team, hero, veteran, squad, headTop: face.headTop, snoutTip: face.snoutTip, bodies: new Map(), refs: 1 };
   kits.set(key, a);
   return a;
 }
@@ -214,11 +203,6 @@ function releaseKit(a: KitAsset): void {
   a.weapon.geometry.dispose();
   a.weapon.glow?.dispose();
   a.kitGlow?.dispose();
-  if (a.weaponInk) {
-    const ink = a.weaponInk as THREE.Mesh;
-    ink.geometry?.dispose();
-    (ink.material as THREE.Material | undefined)?.dispose();
-  }
 }
 
 function getBody(kit: KitAsset, coat: Coat, collar: boolean): BodyAsset {
@@ -327,7 +311,6 @@ export function createCharacter(o: CharacterOptions): CharacterAvatar {
     m.boundingSphere = sphere;
     m.boundingBox = box;
     m.castShadow = true;
-    m.userData.keepInk = true;         // P3: the renderer's ink LOD keeps this hull at range (masts, ears, tails)
     m.onBeforeRender = lodHook as unknown as THREE.Object3D['onBeforeRender'];
     return m;
   };
@@ -350,16 +333,14 @@ export function createCharacter(o: CharacterOptions): CharacterAvatar {
   setScale('tail1', jit(0.1));
   setScale('butt', jit(0.08));
 
-  // Weapon (rigid, crease-inked) + glow parts.
+  // Weapon (rigid) + glow parts.
   let fixedDraws = 1; // weapon
   const weaponBone = rig.bones[bi.weapon];
   const weapon = new THREE.Mesh(kit.weapon.geometry, weaponMat);
   weapon.name = `weapon_${kit.weapon.id}`;
   weapon.castShadow = true;
-  weapon.userData.keepInk = true;      // P3: a barrel at range is mostly its hull (the class read, like the body)
   weaponBone.add(weapon);
-  let weaponInk: THREE.Object3D | null = null, weaponGlow: THREE.Mesh | null = null;
-  if (kit.weaponInk) { weaponInk = kit.weaponInk.clone(); weapon.add(weaponInk); fixedDraws++; }
+  let weaponGlow: THREE.Mesh | null = null;
   if (kit.weapon.glow) {
     const g = new THREE.Mesh(kit.weapon.glow, glow(kit.weapon.glowColor, 2.6));
     g.name = 'weapon_glow';
@@ -406,7 +387,6 @@ export function createCharacter(o: CharacterOptions): CharacterAvatar {
   // P3 distance LOD (CHARACTER_DETAIL_DISTANCE): the small detail a far character drops.
   let far = false;
   const applyDetail = () => {
-    if (weaponInk) weaponInk.visible = !far;
     if (weaponGlow) weaponGlow.visible = !far;
     weapon.castShadow = !far;
     if (neck) neck.mesh.castShadow = !far;

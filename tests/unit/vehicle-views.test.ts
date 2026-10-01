@@ -88,7 +88,6 @@ describe('plane views (R1)', () => {
       expect(a.triangles).toBeLessThanOrEqual(3600);
       expect(a.body.getAttribute('color')).toBeDefined();
       expect(a.body.userData.outlineReady).toBe(true);
-      expect('lines' in a).toBe(false);                   // W13: no crease-ink lines
     }
     expect(hangarAssets().triangles).toBeLessThanOrEqual(3500);
   });

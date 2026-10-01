@@ -27,7 +27,6 @@ and Godot disagree, Godot wins. The web has used the same look since Wave 13. It
   - `pbr()` keeps an authored GLB's own maps and gets the same wetness (the Godot `kit_wet` rules).
   - `glow()` stays unlit for emissives.
   - `stylize()` converts imported materials to `StyleMaterial` and adds nothing else.
-  - `addCreaseInk()` is a no-op that returns `null`.
 - **Pet materials** (Godot `pet_materials.gd`). On a pet's side, once wet:
   - coat: about 0.48 roughness, a broad sheen;
   - plate: about 0.29, the tight gloss of Godot's clearcoat;

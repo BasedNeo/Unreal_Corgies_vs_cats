@@ -1,9 +1,12 @@
 extends RefCounted
 ## R-PETS (W13): the PLACEHOLDER pets read apart at range. A corgi and a cat differ in silhouette (body length to
-## height, leg length, ear size, tail length and pose) and in coat (warm ochre vs cool grey, a white bib on the corgi);
-## the two sides differ in the team band by hue, by luminance (the locked hues alone are ~1.07:1) and by pattern
+## height, leg length, ear size, tail length and pose) and in coat (warm ochre vs neutral grey, a white bib on the
+## corgi); the two sides differ in the team band by hue, by luminance (the locked hues alone are ~1.07:1) and by pattern
 ## (one solid strap vs a split strap). Every pet emissive stays below the look's glow threshold. A pet is a handful of
 ## draws (one merged mesh, one surface per material), with no mouth or tongue and no ink outline.
+## R-PETS2 (Q-READ): team must read at 30 m on its own and without hue: a team chest panel >= 0.3 m across seen
+## head-on; pattern features >= 0.15 m; each team's band contrasts in lightness with its own coat (Corgi Company lighter
+## than the tan corgi, Cat Cadre darker than the grey cat), so the two sides differ in greyscale too.
 const Model := preload("res://game/pet_model.gd")
 const PetMaterials := preload("res://look/pet_materials.gd")
 const T := preload("res://game/tuning.gd")
@@ -21,6 +24,7 @@ func run(tree: SceneTree) -> Array:
 	errs.append_array(_silhouettes(corgi, cat))
 	errs.append_array(_coats(look))
 	errs.append_array(_bands(look))
+	errs.append_array(_team(look))
 	errs.append_array(_glow(look))
 	# draws, no mouth or tongue, no outline, placeholder tag
 	for species in 2:
@@ -54,7 +58,7 @@ func _silhouettes(corgi: Dictionary, cat: Dictionary) -> Array:
 	var e: Array = []
 	var cp: Dictionary = corgi.parts
 	var kp: Dictionary = cat.parts
-	for need in ["body", "legs", "head", "ear_l", "ear_r", "tail", "band", "collar", "plate"]:
+	for need in ["body", "legs", "head", "ear_l", "ear_r", "tail", "band", "collar", "plate", "panel", "bib"]:
 		if not cp.has(need) or not kp.has(need):
 			return ["a pet layout lacks the part '%s'" % need]
 	# body length to the height of the back: the corgi long and low, the cat about square
@@ -114,8 +118,8 @@ func _coats(look: Node) -> Array:
 	var k: Color = look.pet_material("coat", T.CAT, 1).albedo_color
 	if c.r - c.b < 0.3 or c.s < 0.45 or c.h > 0.14:
 		e.append("corgi coat %s is not a warm ochre/tan" % c.to_html(false))
-	if k.s > 0.15 or k.b < k.r:
-		e.append("cat coat %s is not a cool grey" % k.to_html(false))
+	if k.s > 0.06 or k.b > k.r + 0.005:
+		e.append("cat coat %s is not a neutral grey (no blue cast: Corgi Company's hue)" % k.to_html(false))
 	if c.v < 0.5 or k.v < 0.5:
 		e.append("a coat is too dark to read at night (corgi v %.2f, cat v %.2f)" % [c.v, k.v])
 	var bib: Color = look.pet_material("accent", T.CORGI, 0).albedo_color
@@ -140,8 +144,8 @@ func _bands(look: Node) -> Array:
 		lum.append((0.2126 * lin.r + 0.7152 * lin.g + 0.0722 * lin.b) * m.emission_energy_multiplier)
 		if look.pet_material("band", 0, team) != look.pet_material("band", 1, team):
 			e.append("team %d: the two species do not share one band material" % team)
-	if maxf(lum[0], lum[1]) < 2.0 * minf(lum[0], lum[1]):
-		e.append("team bands differ only by hue: luminance %.3f vs %.3f (want >= 2:1)" % [lum[0], lum[1]])
+	if maxf(lum[0], lum[1]) < 3.0 * minf(lum[0], lum[1]):
+		e.append("team bands differ only by hue: luminance %.3f vs %.3f (want >= 3:1)" % [lum[0], lum[1]])
 	var solid: int = Model.layout(T.CORGI, 0).bands
 	var split: int = Model.layout(T.CAT, 1).bands
 	if solid == split or Model.layout(T.CAT, 0).bands != solid or Model.layout(T.CORGI, 1).bands != split:
@@ -172,3 +176,64 @@ func _glow(look: Node) -> Array:
 				if peak >= GLOW_THRESHOLD * 0.85:
 					e.append("%s %d/%d emits %.2f: at or near the glow threshold %.2f" % [kind, sp, team, peak, GLOW_THRESHOLD])
 	return e
+
+
+## Team at 30 m without hue (R-PETS2). Each pet in its game pairing (species = team, match.gd).
+func _team(look: Node) -> Array:
+	var e: Array = []
+	var band_l := []
+	for sp in 2:
+		var lay: Dictionary = Model.layout(sp, sp)
+		var p: Dictionary = lay.parts
+		var who: String = ["Corgi Company", "Cat Cadre"][sp]
+		# a team part seen head-on, at least 0.3 m across, in front of the chest and below the head
+		var pan: AABB = p.panel
+		if pan.size.x < 0.3 or pan.size.y < 0.25:
+			e.append("%s: chest panel %.2f x %.2f m (want >= 0.30 across, >= 0.25 tall)" % [who, pan.size.x, pan.size.y])
+		if pan.position.z > p.bib.position.z or pan.position.z > p.body.position.z:
+			e.append("%s: the chest panel is not in front of the chest (z %.2f)" % [who, pan.position.z])
+		if pan.end.y > p.head.position.y + 0.03 or absf(pan.get_center().x) > 0.01:
+			e.append("%s: the chest panel is not centred under the head" % who)
+		if float(lay.band_feature) < 0.15:
+			e.append("%s: team strap pattern feature %.2f m (want >= 0.15)" % [who, lay.band_feature])
+		# lightness against its own coat: the Corgi Company band lighter than the corgi, Cat Cadre darker than the cat
+		var coat: BaseMaterial3D = look.pet_material("coat", sp, sp)
+		var band: BaseMaterial3D = look.pet_material("band", sp, sp)
+		var fur := _mean(coat.albedo_texture)
+		var coat_l := _lstar(_y(coat.albedo_color) * fur)
+		var bl := _lstar(_y(band.albedo_color))
+		band_l.append(bl)
+		var coat_glow := _y(coat.emission) * fur * coat.emission_energy_multiplier
+		var band_glow := _y(band.emission) * band.emission_energy_multiplier
+		var lighter := sp == 0
+		if (bl - coat_l if lighter else coat_l - bl) < 20.0:
+			e.append("%s band L* %.0f vs its coat L* %.0f (want %s by >= 20)" % [who, bl, coat_l, "lighter" if lighter else "darker"])
+		if (band_glow / coat_glow if lighter else coat_glow / band_glow) < 2.0:
+			e.append("%s band glows %.3f vs its coat %.3f (want the %s by >= 2:1)" % [who, band_glow, coat_glow,
+				"band brighter" if lighter else "coat brighter"])
+	if band_l[0] - band_l[1] < 40.0:
+		e.append("team bands in greyscale: L* %.0f vs %.0f (want >= 40 apart)" % [band_l[0], band_l[1]])
+	return e
+
+
+static func _y(c: Color) -> float:
+	var l := c.srgb_to_linear()
+	return 0.2126 * l.r + 0.7152 * l.g + 0.0722 * l.b
+
+
+static func _lstar(y: float) -> float:
+	return 116.0 * pow(y, 1.0 / 3.0) - 16.0 if y > 0.008856 else 903.3 * y
+
+
+## Mean value (0..1) of a texture's image; 1.0 when there is none.
+static func _mean(t: Texture2D) -> float:
+	if t == null or t.get_image() == null:
+		return 1.0
+	var img := t.get_image()
+	var sum := 0.0
+	var n := 0
+	for y in range(0, img.get_height(), 4):
+		for x in range(0, img.get_width(), 4):
+			sum += img.get_pixel(x, y).v
+			n += 1
+	return sum / maxf(1.0, n)
