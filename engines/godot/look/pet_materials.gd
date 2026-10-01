@@ -1,5 +1,5 @@
 extends RefCounted
-## Pet materials for G-GAME (through Look.pet_material): `coat` (wet fur sheen; corgi ochre/tan, cat dark tabby),
+## Pet materials for G-GAME (through Look.pet_material): `coat` (wet fur sheen; corgi ochre/tan, cat grey tabby),
 ## `plate` (scuffed ochre armour with a team band that stays readable at 30 m at night), `metal` (rifle metal).
 ## One cached material per (kind, species, team), so every pet of a side shares it and batches. Object-space
 ## triplanar mapping: any placeholder or final mesh works without UVs. species: 0 corgi, 1 cat. team: 0 Corgi Company,
@@ -8,7 +8,7 @@ const KINDS := ["coat", "plate", "metal"]
 const TEAM := [Color("2f6fd6"), Color("c9344a")]
 const OCHRE := Color(0.74, 0.53, 0.16)
 const CORGI_COAT := Color(0.72, 0.46, 0.26)
-const CAT_COAT := Color(0.34, 0.31, 0.28)
+const CAT_COAT := Color(0.56, 0.54, 0.52)  # W12 Q6 P1: a grey tabby (cool) against the corgi ochre (warm); the dark tabby went black at night
 
 var _cache := {}
 var _tex := {}
@@ -35,6 +35,13 @@ func get_material(kind: String, species: int, team: int) -> Material:
 			m.rim_enabled = true      # the sheen along the silhouette that sells a wet coat
 			m.rim = 0.55
 			m.rim_tint = 0.35
+			# W12 Q6 P1: a character-only readability fill (the web's P4 lesson: readability at range is lighting). Away
+			# from the floods a pet was a black silhouette; a faint self-lit coat keeps species colour and shape readable
+			# at 30 m, well below the glow threshold.
+			m.emission_enabled = true
+			m.emission = CORGI_COAT if species == 0 else CAT_COAT
+			m.emission_texture = _fur(species)
+			m.emission_energy_multiplier = 0.28
 		"plate":
 			m.albedo_texture = _plate(team)
 			m.uv1_scale = Vector3(1.4, 1.4, 1.4)
@@ -43,7 +50,7 @@ func get_material(kind: String, species: int, team: int) -> Material:
 			# the team band glows faintly (below the glow threshold): the side reads at 30 m in the dark and fog
 			m.emission_enabled = true
 			m.emission = TEAM[team]
-			m.emission_energy_multiplier = 0.55
+			m.emission_energy_multiplier = 1.0  # W12 Q6 P1: was 0.55; still below the glow threshold
 			m.emission_texture = _band_mask()
 			if forward_plus:
 				m.clearcoat_enabled = true

@@ -12,8 +12,16 @@ assets. Original IP.
 ```bash
 # Install Godot 4.7+ from https://godotengine.org/download (macOS: drag Godot.app to /Applications)
 npm run godot               # opens the match (or: godot --path engines/godot)
+GODOT=/path/to/Godot npm run godot   # when Godot is somewhere else (the script also finds godot4 / godot on PATH)
 ```
 The Godot project lives in `engines/godot/` (see its README). Look: stylised-realistic, a wet night on The Lot.
+
+You are Corgi Company against a Cat Cadre bot. Stand on the slab in the middle of The Lot to score; the first side
+to 60 wins, then rematch.
+- **Keyboard + mouse:** WASD move · mouse look (click to capture the mouse, Esc frees it) · Space jump · Shift
+  sprint · left click fire · right click aim · R reload · R or Enter rematch · F2 switch 1v1 / 2v2
+- **Gamepad:** left stick move · right stick look · A jump · RT fire · LT aim · L3 sprint · X reload · Start rematch
+  · Back switch 1v1 / 2v2
 
 ## Play the web twin (Three.js)
 ```bash

@@ -301,10 +301,16 @@ func _build_kit() -> void:
 	add_child(root)
 	var sv := PackedVector3Array()
 	var sn := PackedVector3Array()
-	# the six GLB reads (mostly PNG decoding) run in parallel; everything after them stays on this thread, in order
+	# the six GLB reads (mostly PNG decoding) run in parallel; everything after them stays on this thread, in order.
+	# Headless (the tests, CI) reads them in turn: each read makes ImageTextures, and the dummy renderer's texture table
+	# is not thread-safe, so parallel reads there now and then fail with "texture_2d_initialize: Parameter t is null".
 	_gltf.resize(data.kit.size())
-	var task := WorkerThreadPool.add_group_task(_read_gltf, data.kit.size(), -1, true, "world kit")
-	WorkerThreadPool.wait_for_group_task_completion(task)
+	if DisplayServer.get_name() == "headless":
+		for i in data.kit.size():
+			_read_gltf(i)
+	else:
+		var task := WorkerThreadPool.add_group_task(_read_gltf, data.kit.size(), -1, true, "world kit")
+		WorkerThreadPool.wait_for_group_task_completion(task)
 	for pi in data.kit.size():
 		var p: Dictionary = data.kit[pi]
 		var piece := _load_piece(p, _gltf[pi])
