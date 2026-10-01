@@ -73,6 +73,9 @@ describe('The Lot: 14v14 TDM with bots', () => {
     expect(deaths).toBeGreaterThan(5);
     expect(stuckMax).toBeLessThanOrEqual(5);
     for (const lane of ['Container Canyon', 'The Mud', 'The Pipeworks']) expect(lanes.get(lane) ?? 0, lane).toBeGreaterThan(0);
-    expect(p95).toBeLessThan(3 * Math.max(1, load / Math.max(1, os.cpus().length)));
+    // W13: PERF_HOST_FACTOR scales the budget for a host measured slower than the reference box (A/B the previous
+    // commit on that host first: W13's container ran the W12 code at p95 3.72-4.05 ms here, so its verify used 2)
+    const host = Number(process.env.PERF_HOST_FACTOR) || 1;
+    expect(p95).toBeLessThan(3 * host * Math.max(1, load / Math.max(1, os.cpus().length)));
   }, 600_000);
 });
