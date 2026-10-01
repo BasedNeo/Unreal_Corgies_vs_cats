@@ -77,9 +77,9 @@ describe('slab cues: which cue for which event', () => {
 
 // ---------------------------------------------------------------- through createAudio (strict fake AudioContext)
 
-const g = globalThis as unknown as { AudioContext?: unknown; window?: unknown; fetch?: unknown };
-const saved = { AudioContext: g.AudioContext, window: g.window, fetch: g.fetch };
-afterEach(() => { g.AudioContext = saved.AudioContext; g.window = saved.window; g.fetch = saved.fetch; vi.restoreAllMocks(); });
+const g = globalThis as unknown as { AudioContext?: unknown; window?: unknown; fetch?: unknown; location?: unknown };
+const saved = { AudioContext: g.AudioContext, window: g.window, fetch: g.fetch, location: g.location };
+afterEach(() => { g.AudioContext = saved.AudioContext; g.window = saved.window; g.fetch = saved.fetch; g.location = saved.location; vi.restoreAllMocks(); });
 
 const pet = (id: number, team: 0 | 1, x = 0, z = 0): EntityState => ({ id, kind: EntityKind.Player, team, species: team, cls: 0, seed: id, x, y: 0, z, yaw: 0, pitch: 0, vx: 0, vy: 0, vz: 0, hp: 120, maxHp: 120, anim: 0, flags: 1, weapon: 0, ammo: 30 });
 
@@ -202,5 +202,27 @@ describe('slab cues through createAudio', () => {
     expect(start).toHaveBeenCalledTimes(1); // not restarted per snapshot
     expect(stop).toHaveBeenCalledTimes(1);
     b.audio.dispose();
+  });
+
+  it('?sfxlog: one `SFX <cue>` console line per play, all six cues (W14 LISTEN evidence)', async () => {
+    g.location = { search: '?mode=slab&sfxlog' };
+    const lines: string[] = [];
+    const real = console.log.bind(console);
+    vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { if (String(a[0]).startsWith('SFX ')) lines.push(String(a[0])); else real(...a); });
+    const { audio } = await rig();
+    bus.emit('match', ms({ score: [0, 0] }));
+    await settle(); await settle();
+    audio.onGameEvent(fire(1)); // your shot
+    audio.onGameEvent(fire(2)); // the Cat's shot, 5 m off
+    audio.onGameEvent(hit(1, 2)); // yours lands
+    bus.emit('match', ms({ score: [1, 0] })); // your point
+    bus.emit('match', ms({ score: [1, 1] })); // theirs
+    bus.emit('match', ms({ score: [2, 1], phase: 'ended', winner: 0 })); // your last point and the win
+    bus.emit('match', ms({ score: [0, 0] })); // rematch
+    bus.emit('match', ms({ score: [0, 1], phase: 'ended', winner: 1 })); // their last point and your loss
+    real(lines.join('\n'));
+    expect(lines).toEqual(['SFX rifle_shot', 'SFX rifle_shot', 'SFX hit_confirm', 'SFX slab_tick', 'SFX slab_tick_enemy', 'SFX slab_tick',
+      'SFX match_end_win', 'SFX slab_tick_enemy', 'SFX match_end_lose']);
+    audio.dispose();
   });
 });

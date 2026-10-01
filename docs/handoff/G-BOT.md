@@ -10,9 +10,9 @@ and the Corgi's faster sprint (9.6 vs 8.8 m/s) evens the trip. Separately, the b
 ## 1. Files
 | Path | What |
 |---|---|
-| `engines/godot/game/bot.gd` | `_gait()`: sprint while off the slab, nobody seen or heard, goal more than `SPRINT_MIN` 12 m away (the web bot's 12 m, `src/sim/ai/brain.ts`); run otherwise. `LEDGE_JUMP` 0.45 (was 0.3 inline). `ledge_jump` and `jumps` vars for the harness. |
+| `engines/godot/game/bot.gd` | W14: `_hold_inside()`, `SLAB_MARGIN`, `EDGE_LOOK`, `CONTEST_ZONE` (§11). W13: `_gait()`: sprint while off the slab, nobody seen or heard, goal more than `SPRINT_MIN` 12 m away (the web bot's 12 m, `src/sim/ai/brain.ts`); run otherwise. `LEDGE_JUMP` 0.45 (was 0.3 inline). `ledge_jump` and `jumps` vars for the harness. |
 | `engines/godot/tests/balance.gd` | The harness (`--script`, not in `tests/run.gd`). |
-| `engines/godot/tests/test_game_balance.gd` | Smoke check, about 10 s: ledge jump not below the step-up; both bots leave their spawn at their sprint speed; a bot with an enemy in sight runs. |
+| `engines/godot/tests/test_game_balance.gd` | Smoke check, about 10 s: ledge jump not below the step-up; both bots leave their spawn at their sprint speed; a bot with an enemy in sight runs; a bot on the slab is held 1 m inside its edges (W14). |
 
 | `engines/godot/game/match.gd` | Follow-up, at the lead's request: `start_slots(team)` and `_sprint_time()`. The match-start slots are matched on straight-line sprint time to the slab (§10). Nothing else; A-HOOK's `slab_point` is kept. |
 
@@ -219,7 +219,78 @@ jump 0.45 m), with the working tree as of the follow-up. That tree adds A-HOOK's
   shorter, so they also won the reinforcement race at every wave (§4).
 - **Full suite** on this tree: 15/15 pass in 1 min 17 s; the soak read 19-20.
 
-## 11. Commands
+## 11. Wave 14 CONTEST: holding and contesting inside the score volume (bot.gd)
+**The problem (W13 READ check):** the Cat bot fought from the slab's corners and lip. Only the middle held.
+- As a holder, a bot strafed (and backed off to the rifle's 7 m minimum range) across the edge, in and out of the
+  volume.
+- As an attacker, it stopped at 7 m from a holder in the middle and circled. 7 m is outside the 8 x 8 m square
+  (whose corners are 5.7 m from the centre), so it only clipped the corners: CONTESTED flickered, and each flicker
+  reset the holder's count.
+
+**The one change (bot.gd):**
+- **On the slab** (slab.gd `contains()`), a bot's wish goes through `_hold_inside()`. Per axis, the part that would
+  carry it within `SLAB_MARGIN` 1.0 m of an edge in the next `EDGE_LOOK` 0.8 m is cut back. From inside that margin
+  it points back in. A strafe the edge stops turns round. The goal pull, the strafe and the shooting are as before;
+  a bot on the slab no longer backs off to its minimum range.
+- **Within `CONTEST_ZONE` 6 m of the square**, a bot with an enemy in sight steps in: it follows its path with less
+  strafe (0.4 instead of 0.8) and never backs off.
+- Standing still on the slab no longer counts as stuck, so a bot does not jump there.
+
+**Measured** on a private copy of HEAD 3b9b956 plus my bot.gd only (HEAD's match.gd: sprint, equal-time slots). The
+same seeds as before: 1v1 n 40, seeds 1-40; 2v2 n 60, seeds 1-60. Slab metrics are new in `balance.gd`:
+- **inside**: share of the pets' slab time spent at least 1 m from every edge;
+- **lip fights**: seconds a pet spent outside the volume, within 3 m of the square, fighting an enemy on the slab;
+- **steps off**: times a living pet left the volume.
+
+| Format | Build | n | Corgi wins | Cat wins | Draws | Cat share (95 % CI) | Mean margin | Inside (Corgi / Cat) | Lip fights per match | Steps off per match |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1v1 | HEAD | 40 | 16 | 24 | 0 | 60 % (45-74 %) | -1.1 | 97 / 96 % | 0.9 s | 8.0 |
+| 1v1 | hold inside | 40 | 22 | 18 | 0 | 45 % (31-60 %) | +2.7 | 99 / 99 % | 0.9 s | 0.0 |
+| 2v2 | HEAD | 60 | 28 | 32 | 0 | 53 % (41-65 %) | -0.6 | 94 / 92 % | 2.4 s | 20.7 |
+| 2v2 | hold inside | 60 | 24 | 36 | 0 | 60 % (47-71 %) | -0.9 | 98 / 97 % | 2.5 s | 0.0 |
+
+- **Wins: neither side is over 60 %, but 2v2 is at the line.** The Cats win 36 of 60. The interval includes 50 %,
+  the held time is 50.4 % Cat (3348 against 3404 s) and the mean margin is -0.9 points. The second seed set the lead
+  plans will settle it.
+
+- The lip time did not change (0.9 and 2.5 s per match). It is the step across the 3 m ring into the volume: about
+  0.5 s at run speed, once or twice a match in 1v1. Steps off the slab went to zero, and the share inside the margin
+  rose.
+- HEAD's 2v2 row is 28-32 here against 27-33 in §3's equal-time row. That tree had other lanes' uncommitted edits.
+
+**The verifier's case: `--holder 40 --n 10`.** You stand in the middle of the slab, a Corgi with no input, kept
+unhurt so the fight lasts. The Cat bot comes from its start slot and fights you for 40 s per trial. Its position is
+counted from its first sight of you (at 13.4 s):
+
+| Build | Bot inside the 1 m margin | Edge band (last 1 m) | On the lip (3 m out) | Farther (on its way in) | CONTESTED flips per trial | Your points after its first sight |
+|---|---|---|---|---|---|---|
+| HEAD | 69 % | 17 % | 5 % | 9 % | 3.2 | 3.1 |
+| hold inside | 88 % | 1 % | 3 % | 8 % | 1.0 | 3.0 |
+
+After the change the bot walks in and contests from inside, once and for good (one flip per trial). Before, it
+crossed the edge band 2-6 times per trial.
+
+**Suite:** HEAD plus my three files, full `tests/run.gd` 15/15 PASS in 1 min 15 s (soak 18-21).
+`test_game_balance.gd` adds a check: a bot 0.5 m from the edge heading out is turned in, and one in the middle is
+left alone.
+
+**Harness, ready for the second seed set:** `--format 1v1|2v2 --n N --seed S` (for example `--seed 101`) prints the
+slab-position line per match and in the summary; `--holder S` is the scenario above.
+
+## 11b. Wave 14 SAMPLE (integrated build)
+The table and the analysis are in `docs/qa/w14/bot-sample.md`. The build was HEAD plus G-MOVE's match.gd plus this
+bot.gd, with seeds 1-40/1-60 and 101-140/101-160:
+- **1v1:** n 80, 41-39 (Cat 49 %).
+- **2v2:** n 120, 47-73 (Cat 61 %, 52-69 %).
+- **The one allowed start-offset change, slots by nav-path sprint time:** 2v2 went to 73 % Cat, so it is reverted.
+  match.gd is G-MOVE's version again. The nav path does not see the Corgi bots' extra 0.4 s per trip.
+- **Jump fix, tried and reverted.** A ledge jump only against a wall the movement cannot take cut Corgi jumps per trip
+  from 7.2 to 0.6, with no trip-time gain (+0.09 s). 2v2 went to 30-90 (Cat 75 %), so bot.gd is back to the CONTEST
+  version. NEXT, in bot-sample.md:
+  1. slots from measured bot trip times (test_game_respawn.gd changes with it);
+  2. the ramp hops (cosmetic).
+
+## 12. Commands
 ```
 G=<Godot 4.7.2>
 $G --headless --path engines/godot --import
@@ -228,6 +299,7 @@ $G --headless --path engines/godot --script res://tests/balance.gd -- --format 2
 $G --headless --path engines/godot --script res://tests/balance.gd -- --format 1v1 --n 3 --seed 1 --speed 1 --events   # x1 check
 $G --headless --path engines/godot --script res://tests/balance.gd -- --routes --speed 30 [--jump-up 0.3]
 $G --headless --path engines/godot --script res://tests/balance.gd -- --ttk 15 --n 10 --speed 30
+$G --headless --path engines/godot --script res://tests/balance.gd -- --holder 40 --n 10 --seed 1 --speed 30
 $G --headless --path engines/godot --script res://tests/run.gd -- --only balance
 ```
 "After" rows: add `--jump-up 0.3` to hold the ledge jump at the baseline value. Seeds 21-40: `--seed 21`.

@@ -13,7 +13,7 @@ import type { GameEvent, MatchState, ServerMsg } from '../../src/shared/protocol
 import { PROTOCOL_VERSION } from '../../src/shared/constants';
 import { SLAB, SLAB_TEXT, SLAB_ZONE_SEED, onSlab, type SlabConfig } from '../../src/shared/content/modes';
 import { weaponIndex } from '../../src/shared/content/weapons';
-import { MODES, slabZone } from '../../src/sim/match';
+import { MODES, slabRespawnPoints, slabSlotOf, slabSlots, slabSprintTime, slabZone } from '../../src/sim/match';
 import { applyDamage, isInvulnerable, kill, respawnNow } from '../../src/sim/combat';
 import { WebSocket as WsClient } from 'ws';
 import { startGameServer } from '../../server/app';
@@ -24,10 +24,14 @@ import { mapForMode, mapForRoom, mapsForMode } from '../../src/shared/world/maps
 
 const SEED = 1;
 
+/** A slab sim whose match has started (its first tick ran: pets present then would have been moved to their start
+ *  slots; the test pets come after it, where the tests put them, and take a slot at their first respawn). */
 async function slabSim(over: Partial<SlabConfig> = {}): Promise<Sim> {
   const sim = await Sim.create({ seed: SEED, map: 'the_lot' });
   sim.state.room = { mode: 'slab' };
   sim.state.matchConfig = { slab: over };
+  sim.step();
+  sim.drainEvents();
   return sim;
 }
 
@@ -100,7 +104,7 @@ describe('slab mode: scoring', () => {
     run(sim, 1);
     const ms = match(sim);
     expect(ms).toMatchObject({ mode: 'slab', phase: 'live', score: [0, 0], objective: SLAB_TEXT.hold, winner: -1 });
-    expect(ms.timeLeft).toBeCloseTo(SLAB.timeLimit - 1 / 60, 6);
+    expect(ms.timeLeft).toBeCloseTo(SLAB.timeLimit - 2 / 60, 6); // (slabSim ran the first tick)
     const z = slabZone(sim)!;
     const s = sim.toState(sim.entities.get(z.id)!);
     expect(s).toMatchObject({ kind: EntityKind.Zone, seed: SLAB_ZONE_SEED, team: Team.Corgis, x: SLAB.center.x, y: SLAB.center.y, z: SLAB.center.z });
@@ -160,8 +164,11 @@ describe('slab mode: scoring', () => {
     // killed between ticks: the respawn runs in the 181st tick (a kill inside a tick respawns 180 ticks later)
     expect(steps).toBe(181);
     expect(match(sim).score).toEqual([3, 0]); // the corpse on the slab never contested it
-    const spawns = sim.worldData.spawns.filter((s) => s.team === Team.Cats);
-    expect(Math.min(...spawns.map((s) => Math.hypot(s.x - k.pos.x, s.z - k.pos.z)))).toBeLessThan(1);
+    // W14 (Godot best_spawn): on the Cats' respawn point farthest from the corgi (both are cat spawns in the band), facing the slab
+    const pts = slabRespawnPoints(sim, Team.Cats);
+    const far = [...pts].sort((a, b) => Math.hypot(b.x - c.pos.x, b.z - c.pos.z) - Math.hypot(a.x - c.pos.x, a.z - c.pos.z))[0];
+    expect([k.pos.x, k.pos.z, k.yaw]).toEqual([far.x, far.z, far.yaw]);
+    expect(sim.worldData.spawns.some((s) => s.team === Team.Cats && s.x === k.pos.x && s.z === k.pos.z)).toBe(true);
     expect(k.health!.hp).toBe(120);
     // the shield: 1 s (60 ticks after the respawn tick), not the default 1.5 s
     expect(isInvulnerable(sim, k)).toBe(true);
@@ -183,7 +190,7 @@ describe('slab mode: the end', () => {
     const evs = run(sim, 60 * 70, () => (ticks++, match(sim).phase === 'ended'));
     expect(ticks).toBe(3600);
     expect(match(sim)).toMatchObject({ phase: 'ended', score: [0, 60], winner: Team.Cats, objective: SLAB_TEXT.win[Team.Cats] });
-    expect(match(sim).timeLeft).toBeCloseTo(SLAB.timeLimit - 60, 3);
+    expect(match(sim).timeLeft).toBeCloseTo(SLAB.timeLimit - 60 - 1 / 60, 3); // (+ slabSim's first tick)
     expect(evs.some((e) => e.e === 'score' && e.reason === 'win' && e.team === Team.Cats)).toBe(true);
     const frozen = match(sim).timeLeft;
     run(sim, 120);
@@ -195,7 +202,7 @@ describe('slab mode: the end', () => {
     const c = pet(sim, Team.Corgis);
     run(sim, 120);
     offSlab(sim, c);
-    let ticks = 120;
+    let ticks = 121; // (+ slabSim's first tick)
     run(sim, 600, () => (ticks++, match(sim).phase === 'ended'));
     expect(ticks).toBe(300);
     expect(match(sim)).toMatchObject({ phase: 'ended', score: [2, 0], winner: Team.Corgis, objective: SLAB_TEXT.win[Team.Corgis], timeLeft: 0 });
@@ -203,7 +210,7 @@ describe('slab mode: the end', () => {
 
   it('tied at the horn: overtime until someone leads', async () => {
     const sim = await slabSim({ timeLimit: 2 });
-    run(sim, 120);
+    run(sim, 119); // the 120th tick of the match
     expect(match(sim)).toMatchObject({ phase: 'live', score: [0, 0], objective: SLAB_TEXT.overtime });
     expect(match(sim).timeLeft).toBeCloseTo(SLAB.overtimeMax, 6);
     run(sim, 600);
@@ -222,7 +229,7 @@ describe('slab mode: the end', () => {
     pet(sim, Team.Cats, 1);
     let ticks = 0;
     run(sim, 600, () => (ticks++, match(sim).phase === 'ended'));
-    expect(ticks).toBe(60 + 120); // the horn's tick starts the overtime; then 120 ticks (2 s) of it
+    expect(ticks).toBe(60 + 120 - 1); // the horn's tick starts the overtime; then 120 ticks (2 s) of it (slabSim ran tick 1)
     expect(match(sim)).toMatchObject({ phase: 'ended', winner: -1, objective: SLAB_TEXT.draw, score: [0, 0], timeLeft: 0 });
   });
 });
@@ -283,13 +290,14 @@ describe('slab mode: kit, rematch, bots', () => {
     expect(match(sim).timeLeft).toBeCloseTo(SLAB.timeLimit, 6);
     expect(evs.filter((e) => e.e === 'score' && e.reason === 'reset').length).toBe(2);
     expect(slabZone(sim)).toMatchObject({ holder: -1, contested: false });
-    // everybody back at a team spawn, shielded for 1 s
+    // everybody back at its start slot (W14: slot 0 of each team, equal sprint time to the slab), shielded for 1 s
     for (const e of [c, k]) {
       expect(e.dead).toBe(false);
-      const d = Math.min(...sim.worldData.spawns.filter((s) => s.team === e.team).map((s) => Math.hypot(s.x - e.pos.x, s.z - e.pos.z)));
-      expect(d).toBeLessThan(1);
+      const slot = slabSlots(sim, e.team)[0];
+      expect([e.pos.x, e.pos.z]).toEqual([slot.x, slot.z]);
       expect(isInvulnerable(sim, e)).toBe(true);
     }
+    expect(Math.abs(slabSprintTime(c.pos.x, c.pos.z, c.team) - slabSprintTime(k.pos.x, k.pos.z, k.team))).toBeLessThan(0.3);
     run(sim, 60);
     expect(isInvulnerable(sim, c)).toBe(false);
   });
@@ -324,6 +332,85 @@ describe('slab mode: kit, rematch, bots', () => {
     expect(contested).toBeGreaterThan(3 * 60);
     expect(b.dead).toBe(false);
   });
+
+  it('W14 (Godot start_slots, _pick_respawn_slots): both teams start and respawn at equal straight-line sprint time to the slab', async () => {
+    const sim0 = await Sim.create({ seed: SEED, map: 'the_lot' });
+    sim0.state.room = { mode: 'slab' };
+    const slots = [slabSlots(sim0, Team.Corgis), slabSlots(sim0, Team.Cats)];
+    expect(slots[0].length).toBe(16);
+    expect(slots[1].length).toBe(16);
+    for (let k = 0; k < 6; k++) expect(Math.abs(slots[0][k].time - slots[1][k].time)).toBeLessThan(0.3);
+    // slot 0: the Corgis' farthest spawn (143.5 m at 9.6 m/s), the Cat spawn 132.4 m out (at 8.8 m/s)
+    expect(Math.hypot(slots[0][0].x, slots[0][0].z)).toBeCloseTo(143.5, 1);
+    expect(slots[0][0].time).toBeCloseTo(14.95, 2);
+    expect(Math.hypot(slots[1][0].x, slots[1][0].z)).toBeCloseTo(132.4, 1);
+    expect(slots[1][0].time).toBeCloseTo(15.05, 2);
+    for (let i = 1; i < 16; i++) expect(slots[0][i].time).toBeLessThanOrEqual(slots[0][i - 1].time); // farthest first
+    // respawn points: the Corgis' slot 0 and two points 1.3 m on toward the slab; the two Cat spawns in the band
+    const resp = [slabRespawnPoints(sim0, Team.Corgis), slabRespawnPoints(sim0, Team.Cats)];
+    expect(resp[0].map((p) => +p.time.toFixed(2))).toEqual([14.95, 14.82, 14.68]); // (143.5 m, then 1.3 m and 2.6 m nearer, at 9.6 m/s)
+    expect(resp[1].map((p) => [p.x, p.z, +p.time.toFixed(2)])).toEqual([[56, 117, 14.74], [68, 111, 14.79]]);
+    for (const a of resp[0]) for (const b of resp[1]) expect(Math.abs(a.time - b.time)).toBeLessThan(0.3);
+    // a 2v2 room: everyone starts on its slot; then everyone is downed and comes back to the same slot
+    const sim = await Sim.create({ seed: SEED, map: 'the_lot' });
+    const room = new Room(sim, { mode: 'slab', botsPerTeam: [2, 2] });
+    room.tick();
+    const pets = () => [Team.Corgis, Team.Cats].map((t) => [...sim.entities.values()].filter((e) => e.char && e.team === t).sort((a, b) => (a.data.slabSlot as number) - (b.data.slabSlot as number)));
+    const check = () => {
+      const [cs, ks] = pets();
+      expect(cs.map((e) => e.data.slabSlot)).toEqual([0, 1]);
+      expect(ks.map((e) => e.data.slabSlot)).toEqual([0, 1]);
+      for (let i = 0; i < 2; i++) {
+        for (const e of [cs[i], ks[i]]) {
+          const s = slabSlotOf(sim, e)!;
+          expect([e.pos.x, e.pos.z, e.yaw]).toEqual([s.x, s.z, s.yaw]);
+        }
+        expect(Math.abs(slabSprintTime(cs[i].pos.x, cs[i].pos.z, Team.Corgis) - slabSprintTime(ks[i].pos.x, ks[i].pos.z, Team.Cats))).toBeLessThan(0.3);
+      }
+    };
+    check();
+    for (let i = 0; i < 60; i++) room.tick(); // they walk off
+    const [cs, ks] = pets();
+    for (const e of [...cs, ...ks]) kill(sim, e, src(e.team === Team.Corgis ? ks[0] : cs[0]));
+    for (let i = 0; i < 181; i++) room.tick();
+    for (const e of [...cs, ...ks]) expect(e.dead).toBe(false);
+    // everyone back on a respawn point of its team (teammates on different ones), facing the slab, all within 0.3 s
+    for (const team of [cs, ks]) {
+      const pts = slabRespawnPoints(sim, team[0].team);
+      const at = team.map((e) => pts.findIndex((p) => p.x === e.pos.x && p.z === e.pos.z && p.yaw === e.yaw));
+      expect(at.every((i) => i >= 0)).toBe(true);
+      expect(new Set(at).size).toBe(team.length);
+    }
+    for (const a of cs) for (const b of ks) expect(Math.abs(slabSprintTime(a.pos.x, a.pos.z, Team.Corgis) - slabSprintTime(b.pos.x, b.pos.z, Team.Cats))).toBeLessThan(0.3);
+    room.dispose();
+  });
+
+  it('a respawned bot of each team reaches the slab from its respawn point (bots only, deterministic)', async () => {
+    const reach = async (team: TeamId) => {
+      const sim = await Sim.create({ seed: SEED, map: 'the_lot' });
+      const room = new Room(sim, { mode: 'slab', botsPerTeam: team === Team.Corgis ? [1, 0] : [0, 1] });
+      room.tick();
+      const b = [...sim.entities.values()].find((e) => e.char)!;
+      for (let i = 0; i < 120; i++) room.tick();
+      kill(sim, b, src(b));
+      let t = 0;
+      while (b.dead && t < 400) { room.tick(); t++; }
+      expect(b.dead).toBe(false);
+      const slot = slabRespawnPoints(sim, team).find((p) => p.x === b.pos.x && p.z === b.pos.z)!;
+      expect(slot).toBeDefined();
+      for (t = 0; t < 40 * 60; t++) {
+        room.tick();
+        if (onSlab(b.pos.x, b.pos.y, b.pos.z)) break;
+      }
+      room.dispose();
+      return { s: t / 60, time: slot.time };
+    };
+    const c = await reach(Team.Corgis), k = await reach(Team.Cats);
+    expect(c.s).toBeLessThan(30);
+    expect(k.s).toBeLessThan(30);
+    expect(await reach(Team.Cats)).toEqual(k); // deterministic
+    console.log(`[slab W14] respawn to slab: corgi ${c.s.toFixed(2)} s (straight sprint ${c.time.toFixed(2)} s) · cat ${k.s.toFixed(2)} s (${k.time.toFixed(2)} s)`);
+  }, 120_000);
 
   it('1v1 bots only: both walk to the slab, someone scores; the run is deterministic', async () => {
     const play = async () => {

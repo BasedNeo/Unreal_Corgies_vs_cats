@@ -32,7 +32,7 @@ import { objectiveState, takeObjectiveScore, foldObjectiveText } from '../intera
 import { coreRushConfig, setupCorePads, stepCorePads } from './core-rush';
 import { BA_REASON, CORE_PAD_LABELS, SLAB_TEXT } from '../../shared/content/modes';
 import { baseAssaultConfig, resetBaseAssault, setupBaseAssault, stepBaseAssault } from './base-assault';
-import { evaluateSlab, resetSlab, setupSlab, slabConfig, slabKitSystem, slabRespawnDelay, slabSpawnShields } from './slab';
+import { assignSlabSlots, evaluateSlab, resetSlab, setupSlab, slabConfig, slabKitSystem, slabRespawnDelay, slabRespawns } from './slab';
 import { clearVehicles } from '../vehicles';
 
 export { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type WaveDef, type MatchConfigOverrides } from './config';
@@ -40,7 +40,7 @@ export { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type WaveDef, type 
 export const MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault', 'slab'] as const;
 export { coreRushPads, corePadSpots, type CorePadInfo } from './core-rush';
 export { baseAssaultBalls, baseAssaultSpots, baseAssaultState, checkBallInvariants, type BallInfo, type BaseSpot } from './base-assault';
-export { applySlabKit, hasSlabKit, slabConfig, slabZone, type SlabInfo } from './slab';
+export { applySlabKit, hasSlabKit, slabConfig, slabRespawnPoint, slabRespawnPoints, slabSlotOf, slabSlots, slabSprintTime, slabZone, type SlabInfo, type SlabSlot } from './slab';
 
 /** Match runtime bookkeeping (plain data in sim.state.matchRt). */
 interface MatchRuntime {
@@ -288,18 +288,28 @@ function rematchAsked(sim: Sim): boolean {
 function updateSlab(sim: Sim, rt: MatchRuntime, dt: number, kills: KillRecord[]): void {
   const cfg = slabConfig(sim);
   const ms = stateOf(sim);
-  if (!rt.slabReady) { setupSlab(sim, cfg); rt.slabReady = true; } // a restart re-inits rt: the slab goes back to neutral
   slabRespawnDelay(sim, kills, cfg);
+  let start = false;
+  if (!rt.slabReady) {
+    // the first match (Godot start_match): every pet to its start slot (slabRespawns places them), shielded
+    setupSlab(sim, cfg);
+    assignSlabSlots(sim);
+    for (const e of characters(sim)) respawnNow(sim, e, undefined, true);
+    rt.slabReady = true;
+    start = true;
+  }
   if (ms.phase === 'ended') {
     rt.clock -= dt; // only a bots-only room counts this down; ms.timeLeft stays at the final clock
     const humans = humanPresent(sim);
     const rematch = humans ? sim.tick - rt.endedTick >= ticksOf(cfg.rematchDelay) && rematchAsked(sim) : rt.clock <= 1e-6;
     if (rematch) {
-      restart(sim, rt); // 0-0, every pet back at a team spawn, live at the full clock
+      restart(sim, rt); // 0-0, every pet respawned (slabRespawns: at its start slot), live at the full clock
       resetSlab(sim);
+      assignSlabSlots(sim);
       rt.slabReady = true;
+      start = true;
     }
-    slabSpawnShields(sim, cfg);
+    slabRespawns(sim, cfg, start);
     return;
   }
   rulesOf(sim).combatLive = true;
@@ -329,7 +339,7 @@ function updateSlab(sim: Sim, rt: MatchRuntime, dt: number, kills: KillRecord[])
     ms.timeLeft = timeLeft; // frozen at the final clock (the result holds for a human's rematch, not a countdown)
     rt.endedTick = sim.tick;
   }
-  slabSpawnShields(sim, cfg);
+  slabRespawns(sim, cfg, start);
 }
 
 // ------------------------------------------------------------------ yard skirmish

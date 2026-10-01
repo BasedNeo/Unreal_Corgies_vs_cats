@@ -7,6 +7,10 @@ extends RefCounted
 ## R-PETS2 (Q-READ): team must read at 30 m on its own and without hue: a team chest panel >= 0.3 m across seen
 ## head-on; pattern features >= 0.15 m; each team's band contrasts in lightness with its own coat (Corgi Company lighter
 ## than the tan corgi, Cat Cadre darker than the grey cat), so the two sides differ in greyscale too.
+## W14 TEAM (Q-READ2: the near-white blue rendered white; a 5x4 px chest patch cannot carry the side at 30 m): the team
+## paint covers most of the armour and a large share of each pet's visible area head-on and side on (measured here by
+## rasterising the merged mesh orthographically); the Corgi blue is saturated and short of the tonemap shoulder; the
+## chest shield is solid for Corgi Company and split for Cat Cadre.
 const Model := preload("res://game/pet_model.gd")
 const PetMaterials := preload("res://look/pet_materials.gd")
 const T := preload("res://game/tuning.gd")
@@ -14,6 +18,9 @@ const T := preload("res://game/tuning.gd")
 const GLOW_THRESHOLD := 1.3
 const EXPOSURE := 1.25
 const MAX_DRAWS_PER_PET := 8  # model + rifle, one pass (W12 the whole play view was 257 draws)
+## The least share of a pet's visible area in team paint, [side on, head-on], per species (corgi, cat). The cat's long
+## legs, head and tail (its species cues, in coat) take more of its outline.
+const MIN_TEAM_SHARE := [[0.4, 0.32], [0.3, 0.26]]
 
 
 func run(tree: SceneTree) -> Array:
@@ -58,7 +65,7 @@ func _silhouettes(corgi: Dictionary, cat: Dictionary) -> Array:
 	var e: Array = []
 	var cp: Dictionary = corgi.parts
 	var kp: Dictionary = cat.parts
-	for need in ["body", "legs", "head", "ear_l", "ear_r", "tail", "band", "collar", "plate", "panel", "bib"]:
+	for need in ["body", "legs", "head", "ear_l", "ear_r", "tail", "band", "collar", "trim", "panel", "bib"]:
 		if not cp.has(need) or not kp.has(need):
 			return ["a pet layout lacks the part '%s'" % need]
 	# body length to the height of the back: the corgi long and low, the cat about square
@@ -195,25 +202,121 @@ func _team(look: Node) -> Array:
 		if pan.end.y > p.head.position.y + 0.03 or absf(pan.get_center().x) > 0.01:
 			e.append("%s: the chest panel is not centred under the head" % who)
 		if float(lay.band_feature) < 0.15:
-			e.append("%s: team strap pattern feature %.2f m (want >= 0.15)" % [who, lay.band_feature])
-		# lightness against its own coat: the Corgi Company band lighter than the corgi, Cat Cadre darker than the cat
+			e.append("%s: team vest pattern feature %.2f m (want >= 0.15)" % [who, lay.band_feature])
+		# the pattern follows the team on the chest too: Corgi Company one solid shield, Cat Cadre split in two
+		if int(lay.chest) != sp + 1 or int(Model.layout(1 - sp, sp).chest) != sp + 1:
+			e.append("%s: chest shield in %d pieces (want %d)" % [who, lay.chest, sp + 1])
+		# the team paint covers most of the armour and a large share of the pet head-on and side on
+		for view in [0, 2]:
+			var cov := _coverage(lay.mesh, view)
+			var vname: String = "side on" if view == 0 else "head-on"
+			var share: float = cov.band / maxf(1.0, cov.total)
+			var armour: float = cov.band / maxf(1.0, cov.band + cov.plate)
+			if share < MIN_TEAM_SHARE[sp][view / 2]:
+				e.append("%s %s: team paint is %.0f%% of the pet (want >= %.0f%%)" % [who, vname, share * 100.0,
+					MIN_TEAM_SHARE[sp][view / 2] * 100.0])
+			if armour < 0.6 or cov.plate == 0:
+				e.append("%s %s: team paint is %.0f%% of the armour (want >= 60%%, with ochre trim)" % [who, vname, armour * 100.0])
+		# lightness against its own coat, self-lit (what reads at night): the Corgi Company paint brighter than the corgi,
+		# the Cat Cadre paint darker than the cat. (Measured through the look at 30 m: blue L* ~64 on a coat at L* 38;
+		# crimson L* ~25 on a coat at L* 44-50.)
 		var coat: BaseMaterial3D = look.pet_material("coat", sp, sp)
 		var band: BaseMaterial3D = look.pet_material("band", sp, sp)
 		var fur := _mean(coat.albedo_texture)
-		var coat_l := _lstar(_y(coat.albedo_color) * fur)
-		var bl := _lstar(_y(band.albedo_color))
-		band_l.append(bl)
 		var coat_glow := _y(coat.emission) * fur * coat.emission_energy_multiplier
 		var band_glow := _y(band.emission) * band.emission_energy_multiplier
-		var lighter := sp == 0
-		if (bl - coat_l if lighter else coat_l - bl) < 20.0:
-			e.append("%s band L* %.0f vs its coat L* %.0f (want %s by >= 20)" % [who, bl, coat_l, "lighter" if lighter else "darker"])
-		if (band_glow / coat_glow if lighter else coat_glow / band_glow) < 2.0:
-			e.append("%s band glows %.3f vs its coat %.3f (want the %s by >= 2:1)" % [who, band_glow, coat_glow,
-				"band brighter" if lighter else "coat brighter"])
-	if band_l[0] - band_l[1] < 40.0:
-		e.append("team bands in greyscale: L* %.0f vs %.0f (want >= 40 apart)" % [band_l[0], band_l[1]])
+		band_l.append(band_glow)
+		if sp == 0 and band_glow < 1.25 * coat_glow:
+			e.append("%s paint glows %.3f vs its coat %.3f (want the paint >= 1.25x brighter)" % [who, band_glow, coat_glow])
+		if sp == 1 and coat_glow < 3.0 * band_glow:
+			e.append("%s paint glows %.3f vs its coat %.3f (want the coat >= 3x brighter)" % [who, band_glow, coat_glow])
+	if band_l[0] < 3.0 * band_l[1]:
+		e.append("team paint in greyscale: %.3f vs %.3f self-lit (want Corgi Company >= 3x Cat Cadre)" % [band_l[0], band_l[1]])
+	# the Corgi blue stays a nameable blue on screen: saturated, and its self-lit peak short of the tonemap shoulder
+	var blue: BaseMaterial3D = look.pet_material("band", 0, 0)
+	var lab := _lab(blue.albedo_color)
+	var c_star := Vector2(lab.y, lab.z).length()
+	var hue := fposmod(rad_to_deg(atan2(lab.z, lab.y)), 360.0)
+	if c_star < 45.0 or hue < 250.0 or hue > 310.0:
+		e.append("Corgi Company paint is not a saturated blue: C* %.0f, hue %.0f (want C* >= 45, hue 250-310)" % [c_star, hue])
+	var hdr := blue.emission.srgb_to_linear() * blue.emission_energy_multiplier * EXPOSURE
+	var hi := maxf(hdr.r, maxf(hdr.g, hdr.b))
+	var lo := minf(hdr.r, minf(hdr.g, hdr.b))
+	if hi > 1.1 or 1.0 - lo / maxf(hi, 1e-6) < 0.7:
+		e.append("Corgi Company paint emits %s after exposure: past the tonemap shoulder or too pale, it renders white" % str(hdr))
 	return e
+
+
+## Rasterises a merged pet mesh orthographically on a 2 cm grid with a depth test: view 0 side on (from +X), view 2
+## head-on (from -Z, the way the pet faces). Returns the frontmost cells per surface: band (team paint), plate (ochre
+## trim) and total.
+static func _coverage(mesh: Mesh, view: int) -> Dictionary:
+	const CELL := 0.02
+	var u0 := -1.2
+	var v0 := -0.1
+	var w := 120
+	var h := 90
+	var depth := PackedFloat32Array()
+	depth.resize(w * h)
+	depth.fill(-INF)
+	var owner := PackedInt32Array()
+	owner.resize(w * h)
+	owner.fill(-1)
+	for s in mesh.get_surface_count():
+		var a := mesh.surface_get_arrays(s)
+		var vs: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+		var idx: PackedInt32Array = a[Mesh.ARRAY_INDEX]
+		var q := PackedVector3Array()
+		q.resize(vs.size())
+		for i in vs.size():  # (screen u, screen v, nearness)
+			q[i] = Vector3(vs[i].z, vs[i].y, vs[i].x) if view == 0 else Vector3(vs[i].x, vs[i].y, -vs[i].z)
+		for t in range(0, idx.size(), 3):
+			var p0 := q[idx[t]]
+			var p1 := q[idx[t + 1]]
+			var p2 := q[idx[t + 2]]
+			var area := (p1.x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (p1.y - p0.y)
+			if absf(area) < 1e-9:
+				continue
+			var i0 := maxi(0, int(floor((minf(p0.x, minf(p1.x, p2.x)) - u0) / CELL)))
+			var i1 := mini(w - 1, int(floor((maxf(p0.x, maxf(p1.x, p2.x)) - u0) / CELL)))
+			var j0 := maxi(0, int(floor((minf(p0.y, minf(p1.y, p2.y)) - v0) / CELL)))
+			var j1 := mini(h - 1, int(floor((maxf(p0.y, maxf(p1.y, p2.y)) - v0) / CELL)))
+			for j in range(j0, j1 + 1):
+				var y := v0 + (j + 0.5) * CELL
+				for i in range(i0, i1 + 1):
+					var x := u0 + (i + 0.5) * CELL
+					var b1 := ((x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (y - p0.y)) / area
+					var b2 := ((p1.x - p0.x) * (y - p0.y) - (x - p0.x) * (p1.y - p0.y)) / area
+					if b1 < 0.0 or b2 < 0.0 or b1 + b2 > 1.0:
+						continue
+					var d := p0.z + b1 * (p1.z - p0.z) + b2 * (p2.z - p0.z)
+					var k := j * w + i
+					if d > depth[k]:
+						depth[k] = d
+						owner[k] = s
+	var out := {"band": 0, "plate": 0, "total": 0}
+	var band_s := Model.SURFACES.find("band")
+	var plate_s := Model.SURFACES.find("plate")
+	for k in owner.size():
+		if owner[k] < 0:
+			continue
+		out.total += 1
+		if owner[k] == band_s:
+			out.band += 1
+		elif owner[k] == plate_s:
+			out.plate += 1
+	return out
+
+
+static func _lab(c: Color) -> Vector3:
+	var l := c.srgb_to_linear()
+	var x := (0.4124 * l.r + 0.3576 * l.g + 0.1805 * l.b) / 0.95047
+	var y := 0.2126 * l.r + 0.7152 * l.g + 0.0722 * l.b
+	var z := (0.0193 * l.r + 0.1192 * l.g + 0.9505 * l.b) / 1.08883
+	var fx := pow(x, 1.0 / 3.0) if x > 0.008856 else 7.787 * x + 16.0 / 116.0
+	var fy := pow(y, 1.0 / 3.0) if y > 0.008856 else 7.787 * y + 16.0 / 116.0
+	var fz := pow(z, 1.0 / 3.0) if z > 0.008856 else 7.787 * z + 16.0 / 116.0
+	return Vector3(116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz))
 
 
 static func _y(c: Color) -> float:

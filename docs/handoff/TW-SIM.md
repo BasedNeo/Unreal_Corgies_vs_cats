@@ -89,3 +89,37 @@ combat 18, net-room-setup 9, profile-content 11, ui-locker 9, lot-world 16, cont
 3. The roster shows a human's chosen class (`room.ts sendRoster` uses `p.cls`). The entity is always Assault.
 4. ARCHITECTURE.md line:
    `match/slab.ts  W13 slab: the Godot mode (hold the slab alone 1/s, first to 60 / 3:00 / overtime), Zone, kit`.
+
+## Wave 14: respawn parity (start slots and respawn points)
+`src/sim/match/slab.ts` copies Godot. Sprint speeds come from `classes.ts`: Corgi 9.6 m/s, Cat 8.8 m/s.
+
+**Starts** follow `match.gd start_slots()` and `_sprint_time()`: equal straight-line sprint time to the slab, not
+equal distance.
+- Corgi slots run from the farthest spawn to the nearest.
+- Cat slot k is the unused cat spawn whose sprint time is closest to the Corgis' slot k.
+- Pets take slots at the match start and on a restart: humans first, then by id.
+
+**Respawns** follow lane G-MOVE's `_pick_respawn_slots()` and `best_spawn()` (still uncommitted in the working tree).
+- Every respawn point lies within 0.3 s below the Corgis' slot-0 time t0.
+- Corgi points: slot 0 plus points 1.3 m apart on its straight line to the slab, while they stay in the band.
+- Cat points: the cat spawns inside the band (else the one nearest its middle).
+- A pet takes a point no living teammate stands on (within 1.2 m), the one farthest from the nearest living enemy.
+- `slabRespawns` (order 800) places pets on their slot or point, facing the slab, with the 1 s shield.
+
+| | Corgi | Cat | gap |
+|---|---|---|---|
+| Before, start and respawn (`pickSpawn`: farthest from enemies) | 143.5 m / 14.95 s | 143.5 m / 16.31 s | 1.36 s |
+| After, start slot 0 | 143.5 m / 14.95 s | 132.4 m / 15.05 s | 0.09 s |
+| After, start slot 1 (2v2) | 140.5 m / 14.64 s | 128.5 m / 14.60 s | 0.04 s |
+| After, respawn points | 14.95 / 14.82 / 14.68 s | 14.74 / 14.79 s | ≤ 0.21 s, any pair |
+| After, a lone bot respawned to the slab, measured | 15.75 s | 15.68 s | 0.07 s |
+
+Before, in a 2v2 both pets of a team started on the same spawn. Start slots 0-5 match within 0.22 s; from slot 6 on,
+the leftover spawns drift apart (0.37 s, then 1-4 s), which is more slots than this mode's teams use.
+
+Tests: `tests/unit/slab-mode.test.ts` is now 19/19.
+- `slabSim()` runs the match's first tick, so the test pets are placed after the start move.
+- New: slot and respawn-point times; a 2v2 on its start slots, then all downed and back on distinct respawn points,
+  every cross-team pair within 0.3 s; a respawned bot of each team reaches the slab (deterministic).
+- The downed test checks Godot's farthest-from-enemy point. The rematch test checks the start slot.
+- Mutation-checked: start slots off, or respawn points off, each fails tests.

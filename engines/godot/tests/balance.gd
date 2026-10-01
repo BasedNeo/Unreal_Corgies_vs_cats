@@ -19,6 +19,10 @@ extends SceneTree
 ##                    open ground (match.gd --lineup M); n kills with you still, n with you strafing (A/D, switching
 ##                    every 0.5-1.0 s); prints the time to kill from exposure (includes the bot's reaction) and from its
 ##                    first shot
+## --holder S         the verifier's case (W14): you (a Corgi, no input, kept unhurt) stand in the middle of the slab and
+##                    the Cat bot comes from its start slot and fights you for S s per trial (n trials). Prints where the
+##                    bot is from its first sight of you on (inside the margin, in the volume's edge band, on the lip,
+##                    farther out), how often the slab flips to contested, and your points after it arrived
 ## --routes           pathing only, no fight: one bot of each side in turn walks from each of its team's 16 spawns to
 ##                    the slab alone; prints time to the slab, jumps, step-ups and the longest stall per spawn
 ## Per match: format, seed, winner, score, takedowns per side, seconds with a pet of each side on the slab, seconds
@@ -26,6 +30,10 @@ extends SceneTree
 ## mean spawn-to-slab time per life.
 const T := preload("res://game/tuning.gd")
 const SIDE := ["Corgi", "Cat"]
+## Slab position metrics (W14 CONTEST): "inside" = in slab.gd contains() at least MARGIN m from every edge (bot.gd
+## SLAB_MARGIN); "the lip" = outside the volume but within LIP m of its square.
+const MARGIN := 1.0
+const LIP := 3.0
 
 var fmt := "1v1"
 var n := 10
@@ -36,6 +44,7 @@ var events := false
 var jump_up := -1.0
 var routes := false
 var ttk := 0.0
+var holder := 0.0
 
 func _init() -> void:
 	_run.call_deferred()
@@ -54,6 +63,7 @@ func _args() -> void:
 			"--jump-up": jump_up = float(v)
 			"--routes": routes = true
 			"--ttk": ttk = float(v)
+			"--holder": holder = float(v)
 
 func _run() -> void:
 	_args()
@@ -65,6 +75,8 @@ func _run() -> void:
 		o.enemies = 1
 	if ttk > 0.0:
 		o = {"lineup": ttk}
+	if holder > 0.0:
+		o = {"human": true, "allies": 0, "enemies": 1, "think": true}
 	for k in o:
 		game.opts[k] = o[k]
 	root.add_child(main)
@@ -92,6 +104,13 @@ func _run() -> void:
 		await _ttk(game)
 		quit(0)
 		return
+	if holder > 0.0:
+		await _holder(game)
+		quit(0)
+		return
+	for i in 2:  # match.gd picks its slots by nav path on the first tick the map serves paths
+		await physics_frame
+	_print_slots(game)
 	var rows: Array = []
 	var t_real := Time.get_ticks_msec()
 	for i in n:
@@ -135,8 +154,12 @@ func _routes(game: Node) -> void:
 				worst = maxf(worst, stall)
 			var d := Vector2(sp.x - game.slab.center.x, sp.z - game.slab.center.z).length()
 			all[team].append({"t": reached, "j": b.jumps - j0, "s": b.steps - s0, "stall": worst, "d": d})
-			print("ROUTE %s spawn %2d (%.1f m): %s · jumps %d · step-ups %d · longest stall %.2f s" % [SIDE[team], i, d,
-				"slab in %.2f s" % reached if reached >= 0.0 else "NOT REACHED in 60 s", b.jumps - j0, b.steps - s0, worst])
+			var st := ""
+			if game.has_method("_sprint_time") and game.has_method("_line_len"):
+				st = " · sprint time by line %.2f s, by nav path %.2f s" % [game._line_len(sp) / float(T.MOVE[team].sprint),
+					game._sprint_time(sp, team)]
+			print("ROUTE %s spawn %2d (%.1f m): %s · jumps %d · step-ups %d · longest stall %.2f s%s" % [SIDE[team], i, d,
+				"slab in %.2f s" % reached if reached >= 0.0 else "NOT REACHED in 60 s", b.jumps - j0, b.steps - s0, worst, st])
 	for team in 2:
 		var ok: Array = all[team].filter(func(r): return r.t >= 0.0)
 		var ts: Array = ok.map(func(r): return r.t)
@@ -227,6 +250,77 @@ func _ttk(game: Node) -> void:
 			ttk, mode, t_kill.size(), n, _mean_s(t_kill), _mean_s(t_fire), _pct(hits, shots), hits, shots, cuts,
 			moved / maxf(game_t, 0.001)])
 
+func _holder(game: Node) -> void:
+	var you: Node = game.player
+	var cat: Node = game.pets.filter(func(p): return p != you)[0]
+	var c: Vector3 = game.slab.center
+	var where := {"inner": 0.0, "band": 0.0, "lip": 0.0, "far": 0.0}
+	var flips := 0
+	var pts_after := 0
+	var watched := 0.0
+	var arrived := 0
+	for i in n:
+		_reseed(game, seed0 + i)
+		game.start_match()
+		you.respawn(c + Vector3(0, 0.1, 0), game._yaw_to(c, cat.global_position))
+		var t0: float = game.elapsed
+		var t_seen := -1.0
+		var pts0 := 0
+		var was_contested := false
+		var w := {"inner": 0.0, "band": 0.0, "lip": 0.0, "far": 0.0}
+		var f := 0
+		while game.playing() and game.elapsed - t0 < holder:
+			you.shield = 10.0
+			await physics_frame
+			if t_seen < 0.0 and cat.target == you and cat.target_visible:
+				t_seen = game.elapsed
+				pts0 = game.score[0]
+			if t_seen < 0.0:
+				continue
+			var p: Vector3 = cat.global_position
+			var k := "far"
+			if _inside(game.slab, p, MARGIN):
+				k = "inner"
+			elif game.slab.contains(p):
+				k = "band"
+			elif _lip(game.slab, p):
+				k = "lip"
+			w[k] += 1.0 / 60.0
+			var con: bool = game.slab_state.contested
+			if con and not was_contested:
+				f += 1
+			was_contested = con
+		var tot := 0.0
+		for k in w:
+			where[k] += w[k]
+			tot += w[k]
+		watched += tot
+		flips += f
+		if t_seen >= 0.0:
+			arrived += 1
+			pts_after += game.score[0] - pts0
+		print("HOLDER trial %d: first sight at %.1f s · bot inside the margin %s · edge band %s · lip %s · farther %s · contested %d times · your points after its first sight %d" % [
+			i + 1, t_seen - t0 if t_seen >= 0.0 else -1.0, _pct_f(w.inner, tot), _pct_f(w.band, tot), _pct_f(w.lip, tot),
+			_pct_f(w.far, tot), f, game.score[0] - pts0 if t_seen >= 0.0 else 0])
+	print("HOLDER %d trials of %.0f s, %.0f s watched: Cat bot inside the margin %s · edge band (within %.0f m of the edge) %s · on the lip %s · farther %s · contested %.1f times per trial · your points after its first sight %.1f per trial" % [
+		n, holder, watched, _pct_f(where.inner, watched), MARGIN, _pct_f(where.band, watched), _pct_f(where.lip, watched),
+		_pct_f(where.far, watched), float(flips) / maxf(1.0, n), float(pts_after) / maxf(1.0, arrived)])
+
+## Start slots 0-1 and the respawn points per team, with their sprint times (match.gd _sprint_time), when match.gd has them.
+func _print_slots(game: Node) -> void:
+	if not game.has_method("start_slots") or not game.has_method("_sprint_time"):
+		return
+	for t in 2:
+		var out: Array = []
+		var sl: Array = game.start_slots(t)
+		for k in mini(2, sl.size()):
+			out.append("slot %d (%.0f, %.0f) %.2f s" % [k, sl[k].x, sl[k].z, game._sprint_time(sl[k], t)])
+		var rs = game.get("respawn_slots")
+		if rs is Array and not rs[t].is_empty():
+			var ts: Array = rs[t].map(func(p): return "%.2f" % game._sprint_time(p, t))
+			out.append("respawns %s s" % ", ".join(ts))
+		print("SLOTS %s · %s" % [SIDE[t], " · ".join(out)])
+
 func _reseed(game: Node, s: int) -> void:
 	seed(s)
 	for p in game.pets:
@@ -252,10 +346,11 @@ func _match(game: Node, s: int) -> Dictionary:
 	game.start_match()
 	var r := {"seed": s, "downs": [0, 0], "falls": [0, 0], "on": [0.0, 0.0], "hold": [0.0, 0.0], "contested": 0.0,
 		"shots": [0, 0], "hits": [0, 0], "dmg": [0.0, 0.0], "first": [-1.0, -1.0], "route": [[], []],
-		"died_en_route": [0, 0], "def_kills": [0, 0], "kill_d": [[], []], "log": []}
+		"died_en_route": [0, 0], "def_kills": [0, 0], "kill_d": [[], []], "log": [], "pet_on": [0.0, 0.0],
+		"inner": [0.0, 0.0], "lip_fight": [0.0, 0.0], "exits": [0, 0]}
 	var life := {}
 	for p in game.pets:
-		life[p] = {"t0": 0.0, "reached": false, "alive": true}
+		life[p] = {"t0": 0.0, "reached": false, "alive": true, "on": false}
 	var cons: Array = []
 	var on_down := func(pet: Node, killer: Node) -> void:
 		var t: float = game.elapsed
@@ -305,6 +400,19 @@ func _match(game: Node, s: int) -> Dictionary:
 			if p.alive and not l.reached and game.slab.contains(p.global_position):
 				l.reached = true
 				r.route[p.team].append(game.elapsed - l.t0)
+			var on: bool = p.alive and game.slab.contains(p.global_position)
+			if on:
+				r.pet_on[p.team] += dt
+				if _inside(game.slab, p.global_position, MARGIN):
+					r.inner[p.team] += dt
+			elif p.alive:
+				if l.on:
+					r.exits[p.team] += 1
+				var tg = p.get("target")
+				if tg != null and tg.alive and p.get("target_visible") and game.slab.contains(tg.global_position) \
+						and _lip(game.slab, p.global_position):
+					r.lip_fight[p.team] += dt
+			l.on = on
 		if max_game > 0.0 and game.elapsed >= max_game:
 			break
 	for k in cons:
@@ -317,6 +425,9 @@ func _match(game: Node, s: int) -> Dictionary:
 		r.on[0], r.on[1], r.hold[0], r.hold[1], r.contested, _pct(r.hits[0], r.shots[0]), _pct(r.hits[1], r.shots[1]),
 		r.hits[0], r.shots[0], r.hits[1], r.shots[1], r.first[0], r.first[1], _mean_s(r.route[0]), _mean_s(r.route[1]),
 		r.died_en_route[0], r.died_en_route[1], r.def_kills[0], r.def_kills[1]])
+	print("  slab position (Corgi-Cat) · %.0f m from the edge %s-%s of slab time · fighting a holder from the lip %.1f-%.1f s · steps off the slab alive %d-%d" % [
+		MARGIN, _pct_f(r.inner[0], r.pet_on[0]), _pct_f(r.inner[1], r.pet_on[1]), r.lip_fight[0], r.lip_fight[1],
+		r.exits[0], r.exits[1]])
 	if events:
 		for e in r.log:
 			print("  ", e)
@@ -327,7 +438,8 @@ func _summary(rows: Array, real_s: float) -> void:
 	var draws := 0
 	var margin := 0.0
 	var tot := {"downs": [0, 0], "shots": [0, 0], "hits": [0, 0], "on": [0.0, 0.0], "hold": [0.0, 0.0], "route": [[], []],
-		"first": [[], []], "kill_d": [[], []], "def_kills": [0, 0], "died_en_route": [0, 0]}
+		"first": [[], []], "kill_d": [[], []], "def_kills": [0, 0], "died_en_route": [0, 0], "pet_on": [0.0, 0.0],
+		"inner": [0.0, 0.0], "lip_fight": [0.0, 0.0], "exits": [0, 0]}
 	var game_s := 0.0
 	for r in rows:
 		if r.winner == 0 or r.winner == 1:
@@ -337,7 +449,7 @@ func _summary(rows: Array, real_s: float) -> void:
 		margin += float(r.score[0] - r.score[1])
 		game_s += r.time
 		for t in 2:
-			for k in ["downs", "shots", "hits", "def_kills", "died_en_route"]:
+			for k in ["downs", "shots", "hits", "def_kills", "died_en_route", "pet_on", "inner", "lip_fight", "exits"]:
 				tot[k][t] += r[k][t]
 			tot.on[t] += r.on[t]
 			tot.hold[t] += r.hold[t]
@@ -354,7 +466,24 @@ func _summary(rows: Array, real_s: float) -> void:
 		tot.on[0], tot.on[1], tot.hold[0], tot.hold[1], _mean_s(tot.first[0]), _mean_s(tot.first[1]),
 		_mean_s(tot.route[0]), _mean_s(tot.route[1]), tot.route[0].size(), tot.route[1].size(),
 		tot.died_en_route[0], tot.died_en_route[1], tot.def_kills[0], tot.def_kills[1], _mean_s(tot.kill_d[0]), _mean_s(tot.kill_d[1])])
+	print("SUMMARY %s slab position (Corgi-Cat) · %.0f m from the edge %s-%s of %.0f-%.0f pet-s on the slab · fighting a holder from the lip %.0f-%.0f s (%.1f s per match) · steps off the slab alive %d-%d (%.1f per match)" % [
+		fmt, MARGIN, _pct_f(tot.inner[0], tot.pet_on[0]), _pct_f(tot.inner[1], tot.pet_on[1]), tot.pet_on[0], tot.pet_on[1],
+		tot.lip_fight[0], tot.lip_fight[1], (tot.lip_fight[0] + tot.lip_fight[1]) / maxf(1.0, m), tot.exits[0], tot.exits[1],
+		(tot.exits[0] + tot.exits[1]) / maxf(1.0, m)])
 	print("SUMMARY %s %.0f s of game time in %.0f s real (x%.1f)" % [fmt, game_s, real_s, game_s / maxf(0.001, real_s)])
+
+## In the slab's score volume (slab.gd contains()) and at least `margin` m inside every edge of its square.
+static func _inside(slab: Node, p: Vector3, margin: float) -> bool:
+	return slab.contains(p) and absf(p.x - slab.center.x) <= slab.size.x * 0.5 - margin \
+		and absf(p.z - slab.center.z) <= slab.size.y * 0.5 - margin
+
+## Outside the volume, within LIP m of its square (the y window of contains()).
+static func _lip(slab: Node, p: Vector3) -> bool:
+	var out := maxf(absf(p.x - slab.center.x) - slab.size.x * 0.5, absf(p.z - slab.center.z) - slab.size.y * 0.5)
+	return out > 0.0 and out <= LIP and p.y > slab.center.y - 1.0 and p.y < slab.center.y + 3.0
+
+static func _pct_f(a: float, b: float) -> String:
+	return "%.0f%%" % (100.0 * a / b) if b > 0.0 else "-"
 
 static func _wname(w: int) -> String:
 	return {0: "CORGI", 1: "CAT", -1: "DRAW", -2: "CUT"}[w]

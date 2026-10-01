@@ -1,11 +1,11 @@
 // slab (Wave 13 TW-SIM): the Godot game's mode on The Lot. Rules and the snapshot contract: SLAB in
 // src/shared/content/modes.ts (the Godot sources engines/godot/game/match.gd, slab.gd, tuning.gd are the reference).
 // This module owns the slab's Zone entity (who is on it: holder, contested), the one kit everybody carries (Assault,
-// Squeaker Rifle, no class ability) and the spawn shield; the match flow (scoring, clock, overtime, end, rematch) is
-// updateSlab in ./index.ts.
+// Squeaker Rifle, no class ability), the start and respawn slots (W14: equal sprint time to the slab for both teams) and
+// the spawn shield; the match flow (scoring, clock, overtime, end, rematch) is updateSlab in ./index.ts.
 import type { Sim, SimSystem } from '../sim';
 import type { SimEntity } from '../entity';
-import { Anim, EFlag, EntityKind, Team, type EntityId, type TeamId } from '../../shared/types';
+import { Anim, EFlag, EntityKind, Species, Team, type EntityId, type TeamId } from '../../shared/types';
 import { emptyInput } from '../../shared/input';
 import { SLAB, SLAB_ZONE_SEED, onSlab, type SlabConfig } from '../../shared/content/modes';
 import { CLASSES, moveStatsFor } from '../../shared/content/classes';
@@ -161,17 +161,159 @@ export function slabRespawnDelay(sim: Sim, kills: ReadonlyArray<{ victim: Entity
   }
 }
 
+// ------------------------------------------------------------------ start slots and respawn points (W14)
+// Godot match.gd start_slots() / _sprint_time(): both teams start at equal straight-line SPRINT TIME to the slab, not at
+// equal distance (the Corgis sprint 9.6 m/s, the Cats 8.8: classes.ts, copied by tuning.gd). The Corgis' slots run from
+// their farthest spawn (slot 0) to the nearest; the Cats' slot k is the unused cat spawn whose sprint time is closest to
+// the Corgis' slot k. On The Lot slots 0-5 match within 0.22 s (slot 0: 143.5 m / 14.95 s vs 132.4 m / 15.05 s); from
+// slot 6 on the leftovers drift apart (0.37 s, then 1-4 s), past any team size this mode uses. A pet takes its slot at
+// the match start (and a restart), facing the slab.
+// Respawns (Godot match.gd _pick_respawn_slots() / best_spawn(), lane G-MOVE): every respawn point of every team lies
+// within RESPAWN_BAND (0.3 s) of sprint time below the Corgis' slot 0 (t0). The Corgis' points are slot 0 and points
+// RESPAWN_STEP (1.3 m) apart from it on its straight line to the slab while they stay in the band (14.95, 14.81,
+// 14.68 s); the Cats' are their spawns inside the band (14.74 s and 14.79 s), else the one nearest its middle. A respawn
+// takes the team's point no living teammate stands on (within 1.2 m) that is farthest from the nearest living enemy.
+
+/** A start / respawn slot: the spawn point, the facing toward the slab centre, and its straight-line sprint time (s). */
+export interface SlabSlot { x: number; y: number; z: number; yaw: number; time: number }
+
+/** Straight-line sprint time (s) from (x, z) to the slab centre for a pet of `team` (team = species in this mode). */
+export function slabSprintTime(x: number, z: number, team: TeamId, cfg: SlabConfig = SLAB): number {
+  const sprint = moveStatsFor(team === Team.Cats ? Species.Cat : Species.Corgi, cfg.cls).sprintSpeed;
+  return Math.hypot(x - cfg.center.x, z - cfg.center.z) / sprint;
+}
+
+function slotAt(x: number, y: number, z: number, team: TeamId, cfg: SlabConfig): SlabSlot {
+  return { x, y, z, yaw: Math.atan2(-(cfg.center.x - x), -(cfg.center.z - z)), time: slabSprintTime(x, z, team, cfg) };
+}
+
+/** A team's slots in order (Godot start_slots): the Corgis' farthest first; each Cat slot matched to the Corgi slot's time. */
+export function slabSlots(sim: Sim, team: TeamId, cfg: SlabConfig = slabConfig(sim)): SlabSlot[] {
+  const own = (t: TeamId) => sim.worldData.spawns.filter((s) => s.team === t);
+  const time = (s: { x: number; z: number }, t: TeamId) => slabSprintTime(s.x, s.z, t, cfg);
+  const ref = own(Team.Corgis).sort((a, b) => time(b, Team.Corgis) - time(a, Team.Corgis));
+  if (team === Team.Corgis) return ref.map((s) => slotAt(s.x, s.y, s.z, team, cfg));
+  const left = own(team);
+  const out: typeof left = [];
+  for (const r of ref) {
+    if (!left.length) break;
+    const want = time(r, Team.Corgis);
+    let best = 0;
+    for (let i = 1; i < left.length; i++) if (Math.abs(time(left[i], team) - want) < Math.abs(time(left[best], team) - want)) best = i;
+    out.push(left[best]);
+    left.splice(best, 1);
+  }
+  out.push(...left);
+  return out.map((s) => slotAt(s.x, s.y, s.z, team, cfg));
+}
+
+/** Godot RESPAWN_BAND (s) and RESPAWN_STEP (m). */
+export const SLAB_RESPAWN_BAND = 0.3;
+const RESPAWN_STEP = 1.3;
+
+/** A team's respawn points (Godot _pick_respawn_slots), in Godot's order. */
+export function slabRespawnPoints(sim: Sim, team: TeamId, cfg: SlabConfig = slabConfig(sim)): SlabSlot[] {
+  const s0 = slabSlots(sim, Team.Corgis, cfg)[0];
+  if (!s0) return [];
+  const t0 = s0.time;
+  if (team === Team.Corgis) {
+    const len = Math.hypot(cfg.center.x - s0.x, cfg.center.z - s0.z) || 1;
+    const dx = (cfg.center.x - s0.x) / len, dz = (cfg.center.z - s0.z) / len;
+    const lift = s0.y - sim.worldData.height(s0.x, s0.z); // the data's spawns stand a little over the ground
+    const out = [s0];
+    for (let k = 1; k < 8; k++) {
+      const x = s0.x + dx * RESPAWN_STEP * k, z = s0.z + dz * RESPAWN_STEP * k;
+      if (slabSprintTime(x, z, team, cfg) < t0 - SLAB_RESPAWN_BAND) break;
+      out.push(slotAt(x, sim.worldData.height(x, z) + lift, z, team, cfg));
+    }
+    return out;
+  }
+  const own = sim.worldData.spawns.filter((s) => s.team === team);
+  if (!own.length) return [];
+  const mid = t0 - SLAB_RESPAWN_BAND * 0.5;
+  const inside: SlabSlot[] = [];
+  let nearest = own[0];
+  for (const s of own) {
+    const st = slabSprintTime(s.x, s.z, team, cfg);
+    if (st <= t0 + 1e-4 && st >= t0 - SLAB_RESPAWN_BAND - 1e-4) inside.push(slotAt(s.x, s.y, s.z, team, cfg));
+    if (Math.abs(st - mid) < Math.abs(slabSprintTime(nearest.x, nearest.z, team, cfg) - mid)) nearest = s;
+  }
+  return inside.length ? inside : [slotAt(nearest.x, nearest.y, nearest.z, team, cfg)];
+}
+
 /**
- * The spawn shield: a character (re)spawned with protection this tick (respawnNow grants COMBAT_RULES.spawnInvulnerable)
- * is shielded for the `cfg.spawnShield` s after its spawn tick instead. Runs after every respawn of the tick (order 800).
- * As in Godot, firing does not end it in this mode (weapon-system.ts fireEndsShield).
+ * Where `e` respawns (Godot best_spawn): of its team's respawn points, one no living teammate stands on (within 1.2 m),
+ * and of those the one farthest from the nearest living enemy; first in order on a tie. `skip`: characters that count as
+ * still down (respawned this tick but not placed yet).
  */
-export function slabSpawnShields(sim: Sim, cfg: SlabConfig): void {
+export function slabRespawnPoint(sim: Sim, e: SimEntity, cfg: SlabConfig = slabConfig(sim), skip?: ReadonlySet<SimEntity>): SlabSlot | null {
+  if (e.team !== Team.Corgis && e.team !== Team.Cats) return null;
+  const pts = slabRespawnPoints(sim, e.team, cfg);
+  let best: SlabSlot | null = null, bestScore = -Infinity;
+  for (const p of pts) {
+    let d = 1e6, taken = false;
+    for (const o of sim.entities.values()) {
+      if (o === e || !o.char || o.dead || skip?.has(o) || (o.team !== Team.Corgis && o.team !== Team.Cats)) continue;
+      const dist = Math.hypot(p.x - o.pos.x, p.y - o.pos.y, p.z - o.pos.z);
+      if (o.team === e.team) taken ||= dist < 1.2;
+      else d = Math.min(d, dist);
+    }
+    const score = d - (taken ? 1e7 : 0);
+    if (score > bestScore) { bestScore = score; best = p; }
+  }
+  return best;
+}
+
+/** Match start: each team's pets take slots 0, 1, … in Godot's pet order (humans first: slot 0 is the player's; then by id). */
+export function assignSlabSlots(sim: Sim): void {
+  for (const team of [Team.Corgis, Team.Cats] as const) {
+    const pets: SimEntity[] = [];
+    for (const e of sim.entities.values()) if (e.char && e.team === team) pets.push(e);
+    pets.sort((a, b) => Number(b.kind === EntityKind.Player) - Number(a.kind === EntityKind.Player) || a.id - b.id);
+    pets.forEach((e, k) => { e.data.slabSlot = k; });
+  }
+}
+
+/** A pet's start slot (one without takes the lowest slot no teammate holds); null without team spawns. */
+export function slabSlotOf(sim: Sim, e: SimEntity, cfg: SlabConfig = slabConfig(sim)): SlabSlot | null {
+  if (e.team !== Team.Corgis && e.team !== Team.Cats) return null;
+  const list = slabSlots(sim, e.team, cfg);
+  if (!list.length) return null;
+  let k = typeof e.data.slabSlot === 'number' ? e.data.slabSlot : -1;
+  if (k < 0) {
+    const used = new Set<unknown>();
+    for (const o of sim.entities.values()) if (o !== e && o.char && o.team === e.team) used.add(o.data.slabSlot);
+    k = 0;
+    while (used.has(k)) k++;
+    e.data.slabSlot = k;
+  }
+  const s = list[k % list.length];
+  return slotAt(s.x + 1.2 * Math.floor(k / list.length), s.y, s.z, e.team, cfg);
+}
+
+/**
+ * Every (re)spawn of the tick, after them all (order 800): a character spawned with protection this tick (respawnNow
+ * grants COMBAT_RULES.spawnInvulnerable) stands facing the slab on its start slot (`start`: the match start or a
+ * restart) or on its respawn point (the respawn system), shielded for the `cfg.spawnShield` s after its spawn tick. As
+ * in Godot, firing does not end that shield in this mode (weapon-system.ts fireEndsShield).
+ */
+export function slabRespawns(sim: Sim, cfg: SlabConfig, start = false): void {
   const fresh = sim.tick + ticksOf(COMBAT_RULES.spawnInvulnerable);
   const want = sim.tick + 1 + ticksOf(cfg.spawnShield);
+  const todo = new Set<SimEntity>();
   for (const e of sim.entities.values()) {
     const m = e.combat;
-    if (!e.char || e.dead || !m || m.invulnUntil !== fresh || e.data.slabShield === m.invulnUntil) continue;
+    if (e.char && !e.dead && m && m.invulnUntil === fresh && e.data.slabShield !== m.invulnUntil) todo.add(e);
+  }
+  for (const e of [...todo]) {
+    todo.delete(e); // placed in turn: the ones still waiting count as down (Godot respawns them one by one)
+    const m = e.combat!;
+    const s = start ? slabSlotOf(sim, e, cfg) : slabRespawnPoint(sim, e, cfg, todo);
+    if (s) {
+      sim.placeCharacter(e, s.x, s.y, s.z);
+      e.yaw = s.yaw; e.pitch = 0;
+      e.input = { ...e.input, yaw: s.yaw, pitch: 0 };
+    }
     m.invulnUntil = want;
     e.data.slabShield = want; // (a later tick whose `fresh` happens to equal `want` must not extend it again)
     if (want > sim.tick) e.flags |= EFlag.Invulnerable; else e.flags &= ~EFlag.Invulnerable;

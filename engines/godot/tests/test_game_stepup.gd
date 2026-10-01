@@ -62,13 +62,15 @@ func run(tree: SceneTree) -> Array:
 	await Kit.dispose(tree, main)
 	return errs
 
-func _routes(tree: SceneTree, game: Node, runners: Array, gait: String) -> Array:
+## Runs `runners` (Player pets) at the slab pressing only move_forward (+ sprint for gait "sprint"), each from
+## starts[runner] (default: its team's match-start spawn); returns failure strings. Also used by test_game_respawn.gd.
+func _routes(tree: SceneTree, game: Node, runners: Array, gait: String, starts: Dictionary = {}) -> Array:
 	var errs: Array = []
 	var c: Vector3 = game.slab.center
 	var st := {}
 	var limit := 0.0
 	for r in runners:
-		var from: Vector3 = game.spawns[r.team][0]
+		var from: Vector3 = starts.get(r, game.spawns[r.team][0])
 		r.respawn(from, atan2(-(c.x - from.x), -(c.z - from.z)))
 		var dist := Vector2(c.x - from.x, c.z - from.z).length()
 		var budget: float = dist / float(r.m[gait]) * SLACK

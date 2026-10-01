@@ -21,6 +21,14 @@ const SPRINT_MIN := 12.0
 ## Jump when the next path corner is more than this above the feet (and within 2.5 m). Equal to pet.gd STEP_HEIGHT:
 ## anything lower is taken in stride by the step-up.
 const LEDGE_JUMP := 0.45
+## Holding and contesting (W14 G-BOT CONTEST): only a pet inside the score volume (slab.gd contains(): the 8 x 8 m
+## square and its y window) holds or contests. On the slab a bot stands and strafes at least SLAB_MARGIN m inside every
+## edge: its wish may not carry it past that inner square (it looks EDGE_LOOK m ahead), and from outside it the wish
+## turns back in. Within CONTEST_ZONE m of the square a bot with an enemy in sight keeps stepping in instead of backing
+## off to the rifle's minimum range, which left it circling a holder at 7 m and clipping the corners (W13 READ check).
+const SLAB_MARGIN := 1.0
+const EDGE_LOOK := 0.8
+const CONTEST_ZONE := 6.0
 
 var think := true  # false = a frozen dummy (tests)
 var ledge_jump := LEDGE_JUMP  # tests/balance.gd --jump-up overrides it for an A/B
@@ -103,6 +111,7 @@ func _physics_process(delta: float) -> void:
 	_want_jump = false
 	var hs := Vector2(velocity.x, velocity.z).length()
 	var far := Vector2(goal.x - global_position.x, goal.z - global_position.z).length() > 1.5
+	far = far and not game.slab.contains(global_position)  # standing still on the slab is holding, not stuck
 	_stuck_t = _stuck_t + delta if far and hs < 0.6 else 0.0
 	if _stuck_t > 0.6:
 		_stuck_t = 0.0
@@ -207,16 +216,51 @@ func _steer(_delta: float) -> Vector3:
 			_want_jump = true
 	dir.y = 0.0
 	dir = dir.normalized() if dir.length() > 0.3 else Vector3.ZERO
+	var contest := on_slab or _off_square(pos) <= CONTEST_ZONE
 	if target != null and target_visible and target.alive:
 		var to: Vector3 = target.global_position - pos
 		to.y = 0.0
 		var d := to.length()
 		var side := Vector3(-to.z, 0.0, to.x).normalized() * _strafe
 		var a_min: float = T.RIFLE.ai_range[0]
-		dir = (dir * (0.7 if on_slab else 1.0) + side * 0.8).normalized()
-		if d < a_min:
-			dir = (dir - to.normalized() * 0.6).normalized()
+		if on_slab:
+			dir = (dir * 0.7 + side * 0.8).normalized()
+		elif contest:  # step in while fighting: strafe less, never back off
+			dir = (dir + side * 0.4).normalized()
+		else:
+			dir = (dir + side * 0.8).normalized()
+			if d < a_min:
+				dir = (dir - to.normalized() * 0.6).normalized()
+	if on_slab:
+		dir = _hold_inside(dir, pos)
 	return dir
+
+## Horizontal distance from `p` to the slab's square (0 inside it).
+func _off_square(p: Vector3) -> float:
+	var c: Vector3 = game.slab.center
+	var h: Vector2 = game.slab.size * 0.5
+	var dx := maxf(0.0, absf(p.x - c.x) - h.x)
+	var dz := maxf(0.0, absf(p.z - c.z) - h.y)
+	return Vector2(dx, dz).length()
+
+## A wish that keeps the bot SLAB_MARGIN m inside every edge of the slab: per axis, the part that would carry it past
+## the inner square within EDGE_LOOK m is cut back to reach it (pointing in when the bot is already past it). A strafe
+## the edge stops turns round.
+func _hold_inside(dir: Vector3, pos: Vector3) -> Vector3:
+	var c: Vector3 = game.slab.center
+	var h: Vector2 = game.slab.size * 0.5 - Vector2(SLAB_MARGIN, SLAB_MARGIN)
+	var rel := Vector2(pos.x - c.x, pos.z - c.z)
+	var out := Vector2(dir.x, dir.z)
+	var cut := false
+	for i in 2:
+		var ahead: float = rel[i] + out[i] * EDGE_LOOK
+		if absf(ahead) > h[i]:
+			out[i] = clampf((signf(ahead) * h[i] - rel[i]) / EDGE_LOOK, -1.0, 1.0)
+			cut = true
+	if cut and out.length() < 0.5 * Vector2(dir.x, dir.z).length():
+		_strafe = -_strafe
+		_strafe_t = rng.randf_range(0.5, 1.3)
+	return Vector3(out.x, 0.0, out.y)
 
 func _pick_goal() -> void:
 	if game == null or game.slab == null:

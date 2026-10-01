@@ -6,6 +6,8 @@ extends RefCounted
 ##    the slab far away): the Corgi 9.6 m/s, the Cat 8.8 m/s, the Corgi's counterweight to the Cat's faster run
 ##    (6.6 vs 6.4 m/s). A bot that only ran gave the Cat the faster trip from every respawn (the 2v2 lean).
 ## 3. A bot with an enemy in sight runs (its spread grows with speed up to the run speed; it does not sprint at a fight).
+## 4. On the slab a bot's wish keeps it bot.gd SLAB_MARGIN m inside the edges (W14): heading out from the edge band it
+##    turns back in; in the middle it is left alone.
 const Kit := preload("res://game/testkit.gd")
 const Bot := preload("res://game/bot.gd")
 const Pet := preload("res://game/pet.gd")
@@ -57,6 +59,17 @@ func run(tree: SceneTree) -> Array:
 		errs.append("bot.gd has no _gait(): bots have a single gait")
 	elif not is_equal_approx(a._gait(), float(a.m.run)):
 		errs.append("%s with an enemy in sight moves at %.1f m/s, not its run %.1f" % [a.display_name, a._gait(), a.m.run])
+	if not a.has_method("_hold_inside"):
+		errs.append("bot.gd has no _hold_inside(): nothing keeps a holding bot off the slab's edge")
+	else:
+		var c: Vector3 = game.slab.center
+		var edge: float = game.slab.size.x * 0.5
+		var band: Vector3 = a._hold_inside(Vector3(1, 0, 0), c + Vector3(edge - 0.5, 0, 0))
+		var mid: Vector3 = a._hold_inside(Vector3(1, 0, 0), c)
+		if band.x >= 0.0:
+			errs.append("a bot 0.5 m from the slab's edge, heading out, keeps going out (wish x %.2f)" % band.x)
+		if not mid.is_equal_approx(Vector3(1, 0, 0)):
+			errs.append("a bot in the middle of the slab had its wish changed to %s" % str(mid))
 	errs.append_array(Kit.unwatch(log))
 	await Kit.dispose(tree, main)
 	return errs

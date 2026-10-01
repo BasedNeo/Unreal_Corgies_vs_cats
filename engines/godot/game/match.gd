@@ -75,6 +75,12 @@ var _demo_done := false
 var _demo_live := false
 ## --lineup: where the human stands (set by _place_lineup).
 var lineup_spot := Vector3.ZERO
+## Respawn points per team (W14, _pick_respawn_slots): every one within RESPAWN_BAND s of straight-line sprint time to
+## the slab of every other team's.
+var respawn_slots := [[], []]
+const RESPAWN_BAND := 0.3
+## Spacing of the Corgis' respawn points along their slot-0 line (more than a capsule's width).
+const RESPAWN_STEP := 1.3
 
 func _enter_tree() -> void:
 	# Connect before World._ready runs (enter_tree reaches every node before any _ready), so a world that emits
@@ -144,6 +150,7 @@ func _begin() -> void:
 	add_child(slab)
 	slab.setup(c, sd.size)
 	_pick_spawns(c)
+	_pick_respawn_slots()
 	hud = Hud.new()
 	hud.game = self
 	add_child(hud)
@@ -417,19 +424,66 @@ func respawn_left(pet: Node) -> float:
 			return r[1]
 	return 0.0
 
-## The team spawn farthest from the nearest living enemy (no spawn camping), with a small lateral jitter.
+## Respawn points (W14 G-MOVE): equal time, like the start (start_slots), for every respawn. The window is the
+## RESPAWN_BAND s of sprint time that ends at the Corgis' slot 0 (14.95 s on The Lot: spawn 0, the slab path's
+## line). Corgi points: slot 0 and points RESPAWN_STEP m apart on from it, on its straight line to the slab, while
+## they stay in the window (14.95, 14.81, 14.68 s: the Corgis' only straight walk out of the pit is that line; from 7
+## of their 16 spawns a straight walk stalls at the pit wall or in trench T1, W14 probe). Other teams: their spawns
+## inside the window (the Cats: 14.74 s and 14.79 s; from every Cat spawn the straight walk reaches the slab), else the
+## one nearest it. So any two respawns of different teams are at most RESPAWN_BAND s apart. At W13 a respawn took the
+## team spawn farthest from the nearest enemy: about 143.5 m for both teams, 14.95 s for a Corgi but 16.31 s for a Cat
+## (docs/qa/w14/respawn.md).
+func _pick_respawn_slots() -> void:
+	var c: Vector3 = slab.center
+	var s0: Vector3 = start_slots(0)[0]
+	var t0 := _sprint_time(s0, 0)
+	var dir := Vector3(c.x - s0.x, 0.0, c.z - s0.z).normalized()
+	var pts: Array = [s0]
+	for k in range(1, 8):
+		var p: Vector3 = s0 + dir * (RESPAWN_STEP * k)
+		if _sprint_time(p, 0) < t0 - RESPAWN_BAND:
+			break
+		var hit := _ground_hit(p)
+		pts.append(hit.position + Vector3(0, s0.y - _ground_y_at(s0), 0) if not hit.is_empty() else p)
+	respawn_slots[0] = pts
+	for t in range(1, 2):
+		var inside: Array = []
+		var nearest: Vector3 = spawns[t][0]
+		for sp in spawns[t]:
+			var st := _sprint_time(sp, t)
+			if st <= t0 + 1e-4 and st >= t0 - RESPAWN_BAND - 1e-4:
+				inside.append(sp)
+			if absf(st - (t0 - RESPAWN_BAND * 0.5)) < absf(_sprint_time(nearest, t) - (t0 - RESPAWN_BAND * 0.5)):
+				nearest = sp
+		respawn_slots[t] = inside if not inside.is_empty() else [nearest]
+
+## Height of a spawn point over the ground under it (the data's spawns stand 5 cm up).
+func _ground_y_at(p: Vector3) -> float:
+	var hit := _ground_hit(p)
+	return hit.position.y if not hit.is_empty() else p.y
+
+## A respawn point: one of the team's respawn_slots, not one a living teammate stands on, and of those the one
+## farthest from the nearest living enemy (no spawn camping).
 func best_spawn(team: int) -> Vector3:
-	var best: Vector3 = spawns[team][0]
-	var best_d := -1.0
-	for sp in spawns[team]:
-		var d := INF
+	var slots: Array = respawn_slots[team] if not respawn_slots[team].is_empty() else spawns[team]
+	var best: Vector3 = slots[0]
+	var best_score := -INF
+	for sp in slots:
+		var d := 1e6
+		var taken := false
 		for p in pets:
-			if p.team != team and p.alive:
-				d = minf(d, (sp as Vector3).distance_to(p.global_position))
-		if d > best_d:
-			best_d = d
+			if not p.alive:
+				continue
+			var dist := (sp as Vector3).distance_to(p.global_position)
+			if p.team == team:
+				taken = taken or dist < 1.2
+			else:
+				d = minf(d, dist)
+		var score := d - (1e7 if taken else 0.0)
+		if score > best_score:
+			best_score = score
 			best = sp
-	return best + Vector3(randf_range(-0.8, 0.8), 0.0, randf_range(-0.8, 0.8))
+	return best
 
 ## --demo: a spot on the pet's own side of the slab, on the ground found by a ray: the human 2 m off the slab's edge
 ## (facing across it), bots 11-15 m from its centre and spread sideways.
