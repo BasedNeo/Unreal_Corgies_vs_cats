@@ -843,6 +843,20 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
         steerTo(sim, e, ai, ctx, ai.tac.gx, ai.tac.gz, true);
         mv.sprint = false;
       }
+      // W13 slab (Godot bot.gd _steer): off the slab, keep heading for it while trading shots, strafing as it goes (on it,
+      // holdZone keeps the fight inside); the band's back-off still applies inside the rifle's minimum range
+      if (ai.tac.advance && ai.tac.goal === 'step' && !perched && Math.hypot(ai.tac.cx - e.pos.x, ai.tac.cz - e.pos.z) > ai.tac.gr * 0.75) {
+        steerTo(sim, e, ai, ctx, ai.tac.gx, ai.tac.gz, true);
+        if (ai.visible) {
+          let sx = -uz * ai.strafeDir * 0.8, sz = ux * ai.strafeDir * 0.8;
+          if (!openAhead(hg, e, sx, sz)) { sx = 0; sz = 0; }
+          if (dist < minR) { sx -= ux * 0.6; sz -= uz * 0.6; }
+          mv.x += sx; mv.z += sz;
+          const l = Math.hypot(mv.x, mv.z);
+          if (l > 1e-3) { mv.x /= l; mv.z /= l; }
+        }
+        mv.sprint = false;
+      }
       break;
     }
     case 'cover': {

@@ -62,3 +62,72 @@ test('MATCH: ADVENTURE → The Tall Grass from the menu starts chapter 2', async
   expect(await page.evaluate(() => /TALL GRASS/i.test(document.body.innerText))).toBe(true);
   expect(errors).toEqual([]);
 });
+
+// W13 TW-VIEW: SLAB from the menu reloads into the Godot game's match on The Lot (?mode=slab): the page builds The Lot
+// with its six shared kit GLBs, the slab is the one EntityKind.Zone (8) in the snapshot, and the slab HUD shows both
+// scores racing to 60, the clock, the slab line, hit points and ammo, in hud.gd's plain style, in place of the general
+// HUD's comic match bar and health / ability / ammo panels.
+test('MATCH: SLAB from the menu starts the slab match on The Lot with its HUD and kit', async ({ page }) => {
+  test.setTimeout(300_000);
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  // the reload into the match carries no ?quality=: the saved setting keeps SwiftShader on the low tier
+  await page.addInitScript(() => { if (!localStorage.getItem('cvc.settings')) localStorage.setItem('cvc.settings', JSON.stringify({ v: 1, quality: 'low' })); });
+  await page.goto('/?webgl&quality=low');
+  const pick = page.locator('[data-match="slab"]');
+  await pick.waitFor({ timeout: 90_000 });
+  await pick.click();
+  await expect(pick).toHaveAttribute('aria-checked', 'true');
+  await page.locator('[data-play]').click(); // another map: the page reloads straight into the match
+  await page.waitForURL(/[?&]mode=slab/, { timeout: 60_000 });
+  // (interval polling: a SwiftShader frame of The Lot can take seconds, rAF polling would wait on each one)
+  await page.waitForFunction(() => (globalThis as any).__cvc?.ready === true, null, { timeout: 200_000, polling: 1000 });
+  await page.waitForFunction(
+    () => (((globalThis as any).__cvc.net?.entities ?? []) as number[][]).filter((e) => e[1] === 8).length === 1,
+    null, { timeout: 60_000, polling: 1000 },
+  );
+  const slab = page.locator('#cvc-slab');
+  await expect(slab).toBeVisible({ timeout: 30_000 });
+  await expect(slab.locator('[data-slab-s0]')).toHaveText(/^\d+$/);
+  await expect(slab.locator('[data-slab-s1]')).toHaveText(/^\d+$/);
+  await expect(slab.locator('[data-slab-clock]')).toHaveText(/^[0-3]:[0-5]\d$/);
+  await expect(slab).toContainText('CORGI COMPANY');
+  await expect(slab).toContainText('CAT CADRE');
+  await expect(slab.locator('[data-slab-state]')).toHaveText(/^SLAB\s+(NEUTRAL|CONTESTED|(CORGI COMPANY|CAT CADRE) HOLDING\s+\+1\/s)$/);
+  await expect(slab.locator('[data-slab-hp]')).toHaveText(/^\d+$/);
+  await expect(slab.locator('[data-slab-ammo]')).toHaveText(/^(\d+ \/ 30|RELOADING)$/);
+  for (const sel of ['.mb', '.hp', '.am']) await expect(page.locator(`#cvc-hud ${sel}`)).toBeHidden(); // no comic panels, no Q ring
+  await expect(slab.locator('[data-slab-win]')).toBeHidden();
+  // you plus one Cat bot, and the six Lot kit pieces drawn from their shared GLBs
+  expect(await page.evaluate(() => ((globalThis as any).__cvc.net.entities as number[][]).filter((e) => e[1] <= 1).length)).toBe(2);
+  await page.waitForFunction(() => (globalThis as any).__cvc.twin?.kits === 6, null, { timeout: 90_000, polling: 1000 });
+  expect(await page.evaluate(() => (globalThis as any).__cvc.twin.map)).toBe('the_lot');
+  expect(errors).toEqual([]);
+});
+
+// W13 TW-VIEW: the end of a slab match and the rematch. &slabTime / &slabOvertime shorten the offline match (they reach
+// the worker's sim.state.matchConfig.slab through WorkerBootConfig; online rooms never see them): 8 s of regulation and
+// 4 s of overtime end it (a draw, unless the Cat bot already holds the slab) and the result holds. R rematches to 0-0,
+// and at the next end Enter does too (the authority takes a Reload edge 1 s or more after the end).
+test('SLAB: the match ends on the winner screen; R, then Enter, rematch to 0-0', async ({ page }) => {
+  test.setTimeout(300_000);
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto('/?mode=slab&webgl&quality=low&autoplay&slabTime=8&slabOvertime=4');
+  await page.waitForFunction(() => (globalThis as any).__cvc?.ready === true, null, { timeout: 200_000, polling: 1000 });
+  const win = page.locator('#cvc-slab [data-slab-win]');
+  const twin = () => page.evaluate(() => (globalThis as any).__cvc.twin as { match: { phase: string; score: number[] } | null; restarts: number; restartScore: number[] | null });
+  for (const key of ['KeyR', 'Enter']) {
+    await expect(win).toBeVisible({ timeout: 90_000 });
+    await expect(win).toContainText(/CORGI COMPANY WINS|CAT CADRE WINS|DRAW/);
+    await expect(win).toContainText('R / Enter: rematch');
+    await expect(page.locator('#cvc-hud .bn')).toBeHidden(); // no comic "WIN!" burst over it
+    const before = (await twin()).restarts;
+    await page.waitForTimeout(1500); // SLAB.rematchDelay (1 s) after the end
+    await page.keyboard.press(key);
+    await page.waitForFunction((n) => (globalThis as any).__cvc.twin.restarts > n, before, { timeout: 60_000, polling: 100 });
+    expect((await twin()).restartScore).toEqual([0, 0]);
+    await expect(win).toBeHidden({ timeout: 30_000 });
+  }
+  expect(errors).toEqual([]);
+});

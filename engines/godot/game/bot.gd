@@ -1,8 +1,8 @@
 extends "res://game/pet.gd"
-## A bot (lane G-GAME): walks a NavigationAgent3D path to the slab and holds it. It sees enemies in a 150 degree cone
-## (or hears them fire within the rifle's noise range), needs line of sight, waits a reaction delay, turns its aim at a
-## limited rate and fires bursts of the same rifle with extra spread. Fair by design: no wallhacks, no instant snap,
-## no perfect aim. Thinks at 10 Hz (staggered) so the tick stays cheap.
+## A bot (lane G-GAME): sprints along a NavigationAgent3D path to the slab and holds it. It sees enemies in a 150
+## degree cone (or hears them fire within the rifle's noise range), needs line of sight, waits a reaction delay, turns
+## its aim at a limited rate and fires bursts of the same rifle with extra spread. Fair by design: no wallhacks, no
+## instant snap, no perfect aim. Thinks at 10 Hz (staggered) so the tick stays cheap.
 
 const THINK_DT := 0.1
 const VIEW_DIST := 60.0
@@ -11,8 +11,20 @@ const TURN_RATE := 5.0  # rad/s aim tracking
 const AIM_ERROR := 0.035  # rad (~2 deg) on top of the rifle's own spread
 const REACT := Vector2(0.4, 0.7)  # seconds before the first shot at a newly seen target
 const FIRE_CONE := 0.12  # rad: fire only when the aim is this close to the target
+## Travel gait (W13 G-BOT): a bot sprints, as a player does with Shift and as the web bot does (src/sim/ai/brain.ts:
+## sprint while more than 12 m of path is left), when it is off the slab, nobody is in sight or heard, and its goal is
+## more than SPRINT_MIN m away; otherwise it runs. The species trade speed (tuning.gd MOVE, classes.ts BASE_MOVE): the
+## Cat runs faster (6.6 vs 6.4 m/s), the Corgi sprints faster (9.6 vs 8.8). A bot that only ran gave every Cat the
+## faster trip from each respawn (1.5-1.8 s over about 140 m), and in 2v2 the faster side's respawns rejoin a fight at
+## the slab first: the Cat Cadre won 38 of 60 2v2 bots-only matches (docs/handoff/G-BOT.md).
+const SPRINT_MIN := 12.0
+## Jump when the next path corner is more than this above the feet (and within 2.5 m). Equal to pet.gd STEP_HEIGHT:
+## anything lower is taken in stride by the step-up.
+const LEDGE_JUMP := 0.45
 
 var think := true  # false = a frozen dummy (tests)
+var ledge_jump := LEDGE_JUMP  # tests/balance.gd --jump-up overrides it for an A/B
+var jumps := 0  # jumps asked for (ledge or unstick), for tests/balance.gd
 var agent: NavigationAgent3D
 var target: Node = null
 var target_visible := false
@@ -85,7 +97,9 @@ func _physics_process(delta: float) -> void:
 	set_facing(atan2(-aim_dir.x, -aim_dir.z), asin(clampf(aim_dir.y, -1.0, 1.0)))
 	_shoot(delta)
 	var wish := _steer(delta)
-	move_pet(wish, m.run, _want_jump, _want_jump, delta)
+	if _want_jump:
+		jumps += 1
+	move_pet(wish, _gait(), _want_jump, _want_jump, delta)
 	_want_jump = false
 	var hs := Vector2(velocity.x, velocity.z).length()
 	var far := Vector2(goal.x - global_position.x, goal.z - global_position.z).length() > 1.5
@@ -94,6 +108,12 @@ func _physics_process(delta: float) -> void:
 		_stuck_t = 0.0
 		_want_jump = true
 		_pick_goal()
+
+## Run speed at a fight, on the slab or near the goal; the species' sprint on the way there.
+func _gait() -> float:
+	if (target != null and target_visible and target.alive) or _heard_t > 0.0 or game.slab.contains(global_position):
+		return m.run
+	return m.sprint if Vector2(goal.x - global_position.x, goal.z - global_position.z).length() > SPRINT_MIN else m.run
 
 func _think(dt: float) -> void:
 	if not _nav_ok and game.nav_ready():
@@ -183,7 +203,7 @@ func _steer(_delta: float) -> Vector3:
 				nxt = path[i]
 				break
 		dir = nxt - pos
-		if nxt.y - pos.y > 0.3 and Vector2(dir.x, dir.z).length() < 2.5 and is_on_floor():
+		if nxt.y - pos.y > ledge_jump and Vector2(dir.x, dir.z).length() < 2.5 and is_on_floor():
 			_want_jump = true
 	dir.y = 0.0
 	dir = dir.normalized() if dir.length() > 0.3 else Vector3.ZERO

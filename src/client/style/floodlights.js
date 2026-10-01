@@ -1,5 +1,6 @@
-// floodlights.js — sodium floodlights for the HARDENED battle mood (W7 S4). OWNER: style lane; placement: the
-// environment lane (bases, watchtowers, terminals). Cheap by construction:
+// floodlights.js — sodium floodlights of the night look (docs/design/LOOK.md; W7 S4, retuned W13 to the Godot build's
+// floods [engines/godot/look/look.gd: sodium ~2000 K, energy 22, spot angle 38°, distance attenuation 0.9]). OWNER: style
+// lane; placement: the environment lane (bases, watchtowers, terminals). Cheap by construction:
 //   - every floodlight gets a glowing lamp head, a soft halo (bigger in rain) and a fake warm light pool on the ground:
 //     three instanced draws for ALL floodlights together (heads, halos, pools);
 //   - only the `budget` nearest to the camera get a REAL SpotLight (lit characters, specular on wet ground). The light
@@ -7,7 +8,10 @@
 //     every lit material in three.js), so add them all while the world builds, before the first frame; update()
 //     only moves the real lights between floodlights. Budget per tier: STYLE.floodlight.budget (high 4, medium 2,
 //     low 0: low draws the fake pools only and costs 3 draws, no light).
-//   - pools of floodlights that own a real light dim to `poolWithLight` so the two never double up.
+//   - pools of floodlights that own a real light dim to `poolWithLight` (0: the real light alone paints its pool, as in
+//     Godot) so the two never double up; the fake pools of the others add STYLE.floodlight.poolGain of the lamp colour.
+//   - the real lights fall off as Godot's do (STYLE.floodlight.decay 0.9, not inverse-square): wide sodium pools, and
+//     the wet ground's puddles catch their glints.
 // Usage (world build):
 //   const floods = createFloodlights({ tier });                 // tier from engine/quality.ts
 //   floods.add({ pos: [x, 9, z], target: [x + 2, groundY, z + 3] });
@@ -31,7 +35,7 @@ export function floodlightBudget(tier = 'high') {
  * @property {[number, number, number]} pos lamp head position (m)
  * @property {[number, number, number]} target the ground point it aims at (the pool's centre)
  * @property {number} [color] default PALETTE.sodium
- * @property {number} [intensity] candela (decay 2), default STYLE.floodlight.intensity
+ * @property {number} [intensity] three intensity at STYLE.floodlight.decay, default STYLE.floodlight.intensity
  * @property {number} [range] m, default STYLE.floodlight.range
  * @property {number} [angle] cone half-angle (rad)
  * @property {number} [penumbra]
@@ -51,7 +55,7 @@ export function createFloodlights(opts = {}) {
   /** @type {{ pos: THREE.Vector3, target: THREE.Vector3, color: THREE.Color, intensity: number, range: number, angle: number, penumbra: number, radius: number }[]} */
   const list = [];
 
-  // --- lamp heads: one instanced glow draw (bloom catches them; never inked) ---
+  // --- lamp heads: one instanced glow draw (above the bloom threshold) ---
   const headGeo = new THREE.CylinderGeometry(0.42, 0.5, 0.16, 14);
   headGeo.rotateX(Math.PI / 2);                     // lens faces +Z, turned toward the target per instance
   const heads = new THREE.InstancedMesh(headGeo, glow(PALETTE.sodium, 5), capacity);
@@ -118,8 +122,8 @@ export function createFloodlights(opts = {}) {
   const world = fp.xyz.add(vec3(positionGeometry.x, positionGeometry.y.add(0.06), positionGeometry.z).mul(vec3(fp.w, 1, fp.w)));
   poolMat.vertexNode = cameraProjectionMatrix.mul(cameraViewMatrix.mul(vec4(world, 1)));
   const pd = length(uv().sub(0.5)).mul(2);
-  // soft pool: warm core, long falloff; a wet ground reads brighter (it would mirror the lamp)
-  poolMat.colorNode = fk.xyz.mul(pow(max(float(1).sub(pd), 0), 1.7)).mul(fk.w).mul(float(0.3).add(STYLE_WEATHER.wet.mul(0.12)));
+  // soft pool: warm core, long falloff; a wetter ground reads brighter (it would mirror the lamp)
+  poolMat.colorNode = fk.xyz.mul(pow(max(float(1).sub(pd), 0), 1.7)).mul(fk.w).mul(float(T.poolGain).mul(float(1).add(STYLE_WEATHER.wet.mul(0.4))));
   const pools = new THREE.Mesh(poolGeo, poolMat);
   pools.name = 'fx_flood_pools';
   pools.frustumCulled = false;
@@ -171,7 +175,7 @@ export function createFloodlights(opts = {}) {
       haloGeo.instanceCount = list.length;
       poolGeo.instanceCount = list.length;
       if (lights.length < budget) {
-        const L = new THREE.SpotLight(f.color, 0, f.range, f.angle, f.penumbra, 2);
+        const L = new THREE.SpotLight(f.color, 0, f.range, f.angle, f.penumbra, T.decay);
         L.name = `flood_light_${lights.length}`;
         L.castShadow = false;
         group.add(L, L.target);

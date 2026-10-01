@@ -1,47 +1,26 @@
 // VisualPrims (pure data from src/shared/world) -> a few merged, styled meshes.
 // All prims of one render group inside one spatial cell share ONE geometry with vertex colors and
-// ONE toon material, so ~1200 prims cost a handful of draw calls:
-//   solid: ink hull + crease ink (LineSegments2 via addCreaseInk)   soft: ink hull only
-//   noink: toon-lit, no ink (glass, decals, tiny details)
+// ONE style material, so ~1200 prims cost a handful of draw calls (groups solid / soft / noink: the style factory's
+// family tags; W13, docs/design/LOOK.md: nothing is inked, no hull, no crease lines).
 // E4: every vertex also carries its prim's weathering (rough, metal, grime, wear) from the palette key
 // (world-palette worldSurface) as a `surface` attribute, read by the hardened style material (surfaceAttr), so
 // one merged mesh holds sacks (cloth), crates (wood), poles (metal) and paint with their own wear.
-// W7 P3: a cell's crease ink is split into tiles (a third of the cell) that carry `userData.drawDistance`
-// (CREASE_DRAW_DISTANCE): the scene pass (engine/renderer.ts ink LOD) draws only the tiles near the camera. Crease lines
-// are 1.1 px at every distance (6 triangles per segment), so a whole yard of them was ~160 k triangles a frame; far
-// props keep their fills and hulls, like the far scenery that never had creases.
+// W13: normals. Hard-edged prims (boxes, cylinders, cones) keep their faces' normals at edges sharper than the style's
+// crease angle (welded seams only); bevelled boxes carry their own rounded normals; smooth shapes (spheres, rings) are
+// fully welded.
 import * as THREE from 'three/webgpu';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { PrimGroup, VisualPrim } from '../../shared/world/world-data';
 import { hash2 } from '../../shared/world/noise';
-import { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
-import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
-import { PALETTE, STYLE } from '../style/style-tokens.js';
+import { STYLE } from '../style/style-tokens.js';
 import { smoothNormalsByPosition } from '../style/style-utils.js';
 import { toonFrom, toonNoInk } from './materials';
 import { worldColor, worldSurface } from './world-palette';
 
-const edgeCache = new WeakMap<THREE.BufferGeometry, Float32Array>();
-/** Crease edges (style crease angle) of one source geometry, computed once per unique geometry. */
-export function creaseEdges(g: THREE.BufferGeometry): Float32Array {
-  let e = edgeCache.get(g);
-  if (!e) {
-    const eg = new THREE.EdgesGeometry(g, STYLE.crease.angleDeg);
-    e = eg.getAttribute('position').array as Float32Array;
-    eg.dispose();
-    edgeCache.set(g, e);
-  }
-  return e;
-}
-
 export class Builder {
-  pos: number[] = []; nor: number[] = []; col: number[] = []; idx: number[] = []; lines: number[] = [];
+  pos: number[] = []; nor: number[] = []; col: number[] = []; idx: number[] = [];
   /** E4: per-vertex weathering (rough, metal, grime, wear), only when add() is given one. */
   sur: number[] = [];
-  addLines(e: Float32Array, m: THREE.Matrix4): void {
-    const v = new THREE.Vector3();
-    for (let i = 0; i < e.length; i += 3) { v.set(e[i], e[i + 1], e[i + 2]).applyMatrix4(m); this.lines.push(v.x, v.y, v.z); }
-  }
   add(g: THREE.BufferGeometry, m: THREE.Matrix4, color: THREE.Color, surf?: readonly number[]): void {
     const p = g.getAttribute('position'), n = g.getAttribute('normal');
     const nm = new THREE.Matrix3().getNormalMatrix(m);
@@ -79,10 +58,13 @@ function strip(g: THREE.BufferGeometry): THREE.BufferGeometry {
   return g;
 }
 
-/** Unit-ish source geometry for a prim (cached by shape+dims). Ink groups get outline-safe normals. */
-export function primGeometry(p: VisualPrim, inked: boolean): THREE.BufferGeometry {
+/** Weld seams; edges sharper than the style's crease angle stay hard (PBR shading reads them). */
+const hardEdges = (g: THREE.BufferGeometry) => smoothNormalsByPosition(THREE, g, 1e-4, STYLE.crease.angleDeg);
+
+/** Unit-ish source geometry for a prim (cached by shape+dims). */
+export function primGeometry(p: VisualPrim): THREE.BufferGeometry {
   const r3 = (v: number) => Math.round(v * 1000) / 1000;
-  const key = `${p.s}|${r3(p.a)}|${r3(p.b)}|${r3(p.c)}|${r3(p.bev ?? 0)}|${p.seg ?? ''}|${inked}|${p.g === 'soft' && p.s === 'sphere' ? 'blob' : ''}`;
+  const key = `${p.s}|${r3(p.a)}|${r3(p.b)}|${r3(p.c)}|${r3(p.bev ?? 0)}|${p.seg ?? ''}|${p.g === 'soft' && p.s === 'sphere' ? 'blob' : ''}`;
   let g = geoCache.get(key);
   if (g) return g;
   switch (p.s) {
@@ -95,17 +77,17 @@ export function primGeometry(p: VisualPrim, inked: boolean): THREE.BufferGeometr
         g = bevelBoxGeometry(p.a, p.b, p.c, Math.min(bev, p.a / 2 - 0.001, p.b / 2 - 0.001, p.c / 2 - 0.001));
       } else {
         g = strip(new THREE.BoxGeometry(p.a, p.b, p.c));
-        if (inked) smoothNormalsByPosition(THREE, g);
+        hardEdges(g);
       }
       break;
     }
     case 'cyl':
       g = strip(new THREE.CylinderGeometry(p.a, p.c, p.b, p.seg ?? 14, 1));
-      if (inked) smoothNormalsByPosition(THREE, g);
+      hardEdges(g);
       break;
     case 'cone':
       g = strip(new THREE.ConeGeometry(p.a, p.b, p.seg ?? 12, 1));
-      if (inked) smoothNormalsByPosition(THREE, g);
+      hardEdges(g);
       break;
     case 'sphere': {
       const seg = p.seg ?? 12;
@@ -259,40 +241,14 @@ function blobify(g: THREE.BufferGeometry, p: VisualPrim): void {
   }
 }
 
-let inkMat: THREE.Line2NodeMaterial | null = null;
-export function inkMaterial(): THREE.Line2NodeMaterial {
-  inkMat ??= new THREE.Line2NodeMaterial({ color: PALETTE.ink, linewidth: STYLE.crease.widthPx, worldUnits: false });
-  return inkMat;
-}
-
-/** Crease-ink tiles are drawn only within this distance (m, camera to the tile's bounds). */
-export const CREASE_DRAW_DISTANCE = 40;
-
-/**
- * Splits crease segments (flat xyz pairs, as Builder.lines) into square tiles of `tile` m by segment midpoint (XZ).
- * Returns the tiles' segment arrays keyed "ix,iz" (tile indices), in first-seen order.
- */
-export function creaseTiles(lines: readonly number[], tile: number): Map<string, Float32Array> {
-  const lists = new Map<string, number[]>();
-  for (let i = 0; i + 5 < lines.length; i += 6) {
-    const k = `${Math.floor((lines[i] + lines[i + 3]) / 2 / tile)},${Math.floor((lines[i + 2] + lines[i + 5]) / 2 / tile)}`;
-    let l = lists.get(k);
-    if (!l) { l = []; lists.set(k, l); }
-    for (let j = 0; j < 6; j++) l.push(lines[i + j]);
-  }
-  const out = new Map<string, Float32Array>();
-  for (const [k, l] of lists) out.set(k, new Float32Array(l));
-  return out;
-}
-
 export interface PrimMeshes {
   group: THREE.Group;
-  /** Solid meshes (for shadows/debug); crease lines are children flagged styleInk. */
+  /** The merged meshes (for shadows/debug). */
   meshes: THREE.Mesh[];
   stats: { prims: number; triangles: number; meshes: number };
 }
 
-export function buildPrimMeshes(prims: readonly VisualPrim[], opts: { cell?: number; creases?: boolean; /** W8: beyond this |x| or |z| a prim is far scenery (no shadow, no crease ink); default 125 = the West Yard. */ far?: number } = {}): PrimMeshes {
+export function buildPrimMeshes(prims: readonly VisualPrim[], opts: { cell?: number; /** W8: beyond this |x| or |z| a prim is far scenery (no shadow); default 125 = the West Yard. */ far?: number } = {}): PrimMeshes {
   const cell = opts.cell ?? 100;
   const buckets = new Map<string, Builder>();
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -300,8 +256,7 @@ export function buildPrimMeshes(prims: readonly VisualPrim[], opts: { cell?: num
   const color = new THREE.Color();
   prims.forEach((p, i) => {
     const group: PrimGroup = p.g ?? 'solid';
-    const inked = group !== 'noink';
-    const g = primGeometry(p, inked);
+    const g = primGeometry(p);
     e.set(p.pitch ?? 0, p.yaw ?? 0, p.roll ?? 0, 'YXZ');
     q.setFromEuler(e);
     m.compose(pos.set(p.x, p.y, p.z), q, one);
@@ -315,7 +270,6 @@ export function buildPrimMeshes(prims: readonly VisualPrim[], opts: { cell?: num
     const jit = 1 + (hash2(i, 17, 99) - 0.5) * 0.08;
     color.copy(worldColor(p.col)).multiplyScalar(jit);
     b.add(g, m, color, worldSurface(p.col));
-    if (group === 'solid' && !far && opts.creases !== false) b.addLines(creaseEdges(g), m);
   });
   const group = new THREE.Group();
   group.name = 'world_props';
@@ -336,17 +290,6 @@ export function buildPrimMeshes(prims: readonly VisualPrim[], opts: { cell?: num
     mesh.castShadow = !far;
     mesh.receiveShadow = true;
     mesh.userData.noCameraCollide = true;          // camera uses collider proxies instead (cheap raycasts)
-    // crease ink (same look as style addCreaseInk) in distance-culled tiles, a third of a cell each, so tiles never
-    // straddle cells
-    for (const [tk, seg] of creaseTiles(b.lines, cell / 3)) {
-      const lg = new LineSegmentsGeometry();
-      lg.setPositions(seg);
-      const lines = new LineSegments2(lg, inkMaterial());
-      lines.name = `${mesh.name}_crease_${tk}`;
-      lines.userData.styleInk = true;
-      lines.userData.drawDistance = CREASE_DRAW_DISTANCE;
-      mesh.add(lines);
-    }
     group.add(mesh);
     meshes.push(mesh);
     triangles += (g.getIndex()?.count ?? 0) / 3;

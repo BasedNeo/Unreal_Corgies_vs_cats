@@ -1,9 +1,9 @@
 // Merged-part geometry builder for vehicle props: many small primitives -> ONE indexed geometry with
-// vertex colors (one toon material, one draw call) plus ONE crease-line geometry for the parts that have
-// hard edges. Mirrors the world lane's prim merger (src/client/world/prim-mesh.ts) at prop scale.
+// vertex colors (one style material, one draw call). Mirrors the world lane's prim merger
+// (src/client/world/prim-mesh.ts) at prop scale. W13 (docs/design/LOOK.md): no crease lines; hard edges keep their
+// faces' normals (the style's crease angle), smooth parts are welded.
 import * as THREE from 'three/webgpu';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { STYLE } from '../style/style-tokens.js';
 import { smoothNormalsByPosition } from '../style/style-utils.js';
 
@@ -14,20 +14,14 @@ export class PartBuilder {
   private nor: number[] = [];
   private col: number[] = [];
   private idx: number[] = [];
-  private lines: number[] = [];
 
   /**
-   * Add a part. `crease` adds its hard edges (style crease angle) to the ink lines. The geometry is
-   * consumed. color < 0 keeps the geometry's own vertex colors (a pre-merged sub-assembly).
+   * Add a part. The geometry is consumed. color < 0 keeps the geometry's own vertex colors (a pre-merged
+   * sub-assembly). `_crease` is ignored (W13: no crease lines; kept so the model builders' calls stay as they are).
    */
-  add(g: THREE.BufferGeometry, m: THREE.Matrix4, color: number, crease = false): this {
-    if (crease) {
-      const eg = new THREE.EdgesGeometry(g, STYLE.crease.angleDeg);
-      const e = eg.getAttribute('position');
-      for (let i = 0; i < e.count; i++) { tmpV.fromBufferAttribute(e, i).applyMatrix4(m); this.lines.push(tmpV.x, tmpV.y, tmpV.z); }
-      eg.dispose();
-    }
-    if (!g.userData.outlineReady) smoothNormalsByPosition(THREE, g); // outline-safe normals within the part
+  add(g: THREE.BufferGeometry, m: THREE.Matrix4, color: number, _crease = false): this {
+    // weld seams, keep edges sharper than the crease angle hard (PBR shading reads the edges)
+    if (!g.userData.outlineReady) smoothNormalsByPosition(THREE, g, 1e-4, STYLE.crease.angleDeg);
     const p = g.getAttribute('position'), n = g.getAttribute('normal');
     nm.getNormalMatrix(m);
     const c = new THREE.Color(Math.max(0, color));
@@ -50,7 +44,7 @@ export class PartBuilder {
 
   get triangles(): number { return this.idx.length / 3; }
 
-  build(): { geometry: THREE.BufferGeometry; lines: LineSegmentsGeometry | null } {
+  build(): { geometry: THREE.BufferGeometry } {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
@@ -59,12 +53,7 @@ export class PartBuilder {
     g.computeBoundingBox();
     g.computeBoundingSphere();
     g.userData.outlineReady = true;
-    let lines: LineSegmentsGeometry | null = null;
-    if (this.lines.length) {
-      lines = new LineSegmentsGeometry();
-      lines.setPositions(this.lines);
-    }
-    return { geometry: g, lines };
+    return { geometry: g };
   }
 }
 

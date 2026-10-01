@@ -8,12 +8,13 @@
 //   3. pads: blend to a flat height (container block, pipe block)
 //   4. the spoil heap: blend to a flat top with per-side slope widths (lumpy slopes), plus its north ramp (max)
 //   5. carves (min): the foundation pit and its two ramps, the communication trenches, the drainage ditch.
-//      A carve is floor(x, z) + WALL_STEEP * (distance outside its footprint): steep walls, flat floors.
+//      A carve is floor(x, z) + WALL_STEEP * (distance outside its footprint): steep walls, flat floors. Inside the
+//      slab path's band (SLAB_PATH, W13) the pit's and the trenches' walls slope at SLAB_PATH.slope instead.
 import type { SurfaceSample } from '../world-types';
 import { clamp, createNoise2D, fbm2, lerp, smoothstep } from '../noise';
 import {
   DITCH, DITCH_SEGMENTS, HEAP, HEAP_RAMP, LOT_EDGE, MOUNDS, PADS, PIT, PIT_RAMP_EAST, PIT_RAMP_SOUTH, ROADS, RUT,
-  TRENCHES, WALL_STEEP,
+  SLAB_PATH, TRENCHES, WALL_STEEP,
 } from './layout';
 
 export interface LotField {
@@ -60,7 +61,7 @@ function sdRect(px: number, pz: number, cx: number, cz: number, hx: number, hz: 
 export function createLotField(seed: number): LotField {
   const nA = createNoise2D(`${seed}:lotMudA`), nB = createNoise2D(`${seed}:lotMudB`);
   const nLump = createNoise2D(`${seed}:lotSpoil`), nPatch = createNoise2D(`${seed}:lotPatch`);
-  const trenches = TRENCHES.map((t) => ({ ...t, p: poly(t.pts, t.half + 4) }));
+  const trenches = TRENCHES.map((t) => ({ ...t, p: poly(t.pts, t.half + 6) }));  // +6: the slab path's notches reach 4-5 m out
   const roads = ROADS.map((r) => poly(r.pts, RUT.offset + RUT.width + 3));
   const tmp = { d: 0, s: 0 };
   const S = WALL_STEEP;
@@ -68,6 +69,15 @@ export function createLotField(seed: number): LotField {
   const pitBox = [PIT.x - PIT.hx - 2, PIT.z - PIT.hz - 2, PIT.x + PIT.hx + 2, PIT.z + PIT.hz + 2];
   const ditchReach = DITCH.floorHz + DITCH.bank;
   const ditchSlope = -DITCH.floor / DITCH.bank;
+  const SP = SLAB_PATH;
+  const spLen = Math.hypot(SP.x1 - SP.x0, SP.z1 - SP.z0), spUx = (SP.x1 - SP.x0) / spLen, spUz = (SP.z1 - SP.z0) / spLen;
+  /** How far (m) (x, z) lies outside the slab path's band sideways (0 inside it); Infinity beyond its two ends. */
+  function pathSide(x: number, z: number): number {
+    const rx = x - SP.x0, rz = z - SP.z0, s = rx * spUx + rz * spUz;
+    if (s < SP.s0 || s > SP.s1) return Infinity;
+    const v = Math.abs(rz * spUx - rx * spUz) - SP.half;
+    return v > 0 ? v : 0;
+  }
 
   /** Heap blend weight at (x, z): 1 on the flat top, 0 at the foot; per-side slope widths, rounded corners. */
   function heapWeight(x: number, z: number): number {
@@ -124,10 +134,12 @@ export function createLotField(seed: number): LotField {
       }
     }
 
-    // 5) carves
-    if (inBox(pitBox, x, z)) {
-      const d = sdRect(x, z, PIT.x, PIT.z, PIT.hx, PIT.hz);
-      h = Math.min(h, PIT.floor + Math.max(0, d) * S);
+    // 5) carves (side < 3: near the slab path, whose band lays the pit's and the trenches' walls back)
+    const side = pathSide(x, z);
+    if (inBox(pitBox, x, z) || side < 3) {
+      const d = Math.max(0, sdRect(x, z, PIT.x, PIT.z, PIT.hx, PIT.hz));
+      h = Math.min(h, PIT.floor + d * S);
+      if (side < 3) h = Math.min(h, PIT.floor + d * SP.slope + side * S);
     }
     {
       const R = PIT_RAMP_EAST;
@@ -147,10 +159,11 @@ export function createLotField(seed: number): LotField {
       if (!inBox(t.p.box, x, z)) continue;
       polyDist(t.p, x, z, tmp);
       const out = tmp.d - t.half;
-      if (out > 3) continue;
+      if (out > (side < 3 ? 6 : 3)) continue;
       const exitStart = t.p.total - t.exit;
       const floor = t.exit > 0 && tmp.s > exitStart ? t.floor * (1 - (tmp.s - exitStart) / t.exit) : t.floor;
       h = Math.min(h, floor + Math.max(0, out) * S);
+      if (side < 3) h = Math.min(h, floor + Math.max(0, out) * SP.slope + side * S);
     }
     if (Math.abs(z - DITCH.z) < ditchReach + 0.5) {
       for (const [x0, x1] of DITCH_SEGMENTS) {

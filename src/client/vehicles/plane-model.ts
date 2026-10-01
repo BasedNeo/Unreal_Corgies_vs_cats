@@ -11,7 +11,6 @@
 // Draw calls per plane: body (vertex-colored toon) + crease ink + propeller + whirl strokes (only while the prop
 // spins fast) + booster flame (glow, only while boosting) = 3–5. Geometry is built once per team and shared.
 import * as THREE from 'three/webgpu';
-import type { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { PALETTE } from '../style/style-tokens.js';
 import { Team, type TeamId } from '../../shared/types';
 import { VEHICLES } from '../../shared/content/vehicles';
@@ -56,7 +55,6 @@ export const PLANE_WHEELS = [
 
 export interface PlaneAssets {
   body: THREE.BufferGeometry;
-  lines: LineSegmentsGeometry | null;
   prop: THREE.BufferGeometry;
   whirl: THREE.BufferGeometry;
   wheel: THREE.BufferGeometry;
@@ -169,19 +167,19 @@ export function planeAssets(team: TeamId): PlaneAssets {
   if (a) return a;
   const b = new PartBuilder();
   buildBody(key, b);
-  const { geometry, lines } = b.build();
+  const { geometry } = b.build();
   const prop = buildProp(key), whirl = buildWhirl(), wheel = buildWheel(key);
   const flame = new THREE.ConeGeometry(0.075, 0.42, 8);
   flame.rotateX(Math.PI / 2); // tip toward +Z (backward)
   flame.translate(0, 0, 0.21);
   const tris = (g: THREE.BufferGeometry) => (g.index ? g.index.count : g.getAttribute('position').count) / 3;
-  a = { body: geometry, lines, prop, whirl, wheel, flame, triangles: b.triangles + tris(prop) + tris(whirl) + tris(wheel) * PLANE_WHEELS.length + tris(flame) };
+  a = { body: geometry, prop, whirl, wheel, flame, triangles: b.triangles + tris(prop) + tris(whirl) + tris(wheel) * PLANE_WHEELS.length + tris(flame) };
   cache.set(key, a);
   return a;
 }
 
 /** Free the shared plane geometry (tests / hot reload). */
 export function releasePlaneAssets(): void {
-  for (const a of cache.values()) { a.body.dispose(); a.lines?.dispose(); a.prop.dispose(); a.whirl.dispose(); a.wheel.dispose(); a.flame.dispose(); }
+  for (const a of cache.values()) { a.body.dispose(); a.prop.dispose(); a.whirl.dispose(); a.wheel.dispose(); a.flame.dispose(); }
   cache.clear();
 }

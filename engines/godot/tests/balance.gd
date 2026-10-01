@@ -1,0 +1,382 @@
+extends SceneTree
+## Balance harness (lane G-BOT, W13): plays full bots-only matches with the real rules (match.gd: first to 60, else the
+## lead at 3:00, overtime up to 60 s) on The Lot and prints one line per match, then a summary. Not part of
+## tests/run.gd: a match is 60-240 s of game time. tests/test_game_balance.gd is the fast smoke check.
+##
+##   godot --headless --path engines/godot --script res://tests/balance.gd -- --format 2v2 --n 20 --seed 100
+##
+## --format 1v1|2v2   one Corgi bot vs one Cat bot, or two vs two (match.gd opts, as --bots-only / --bots-only --2v2)
+## --n N              matches, one after the other on the same world (match.gd start_match, the R rematch path)
+## --seed S           match i uses seed S + i for the global RNG (spawn jitter) and every bot's and rifle's RNG, and
+##                    resets the bots' think state, so a seed replays the same match in another run
+## --speed K          K x 60 physics ticks per real second with Engine.time_scale K: every tick still steps 1/60 s
+##                    (test_game_soak's method). The run goes up to K x real time, slower if the CPU cannot keep up.
+##                    --speed 1 is real time.
+## --max-game T       end a match after T s of game time (no winner): for comparing speeds per event
+## --events           print every takedown (game time, killer, victim, distance)
+## --jump-up H        bot ledge-jump height override (bot.gd LEDGE_JUMP), for the A/B in docs/handoff/G-BOT.md
+## --ttk M            lethality: the Cat bot on the slab against you (a Corgi, no input but A/D) standing M m away on
+##                    open ground (match.gd --lineup M); n kills with you still, n with you strafing (A/D, switching
+##                    every 0.5-1.0 s); prints the time to kill from exposure (includes the bot's reaction) and from its
+##                    first shot
+## --routes           pathing only, no fight: one bot of each side in turn walks from each of its team's 16 spawns to
+##                    the slab alone; prints time to the slab, jumps, step-ups and the longest stall per spawn
+## Per match: format, seed, winner, score, takedowns per side, seconds with a pet of each side on the slab, seconds
+## each side held it alone (scored), shots / hits / hit rate per side, first arrival on the slab per side, and the
+## mean spawn-to-slab time per life.
+const T := preload("res://game/tuning.gd")
+const SIDE := ["Corgi", "Cat"]
+
+var fmt := "1v1"
+var n := 10
+var seed0 := 1
+var speed := 8.0
+var max_game := 0.0
+var events := false
+var jump_up := -1.0
+var routes := false
+var ttk := 0.0
+
+func _init() -> void:
+	_run.call_deferred()
+
+func _args() -> void:
+	var a := OS.get_cmdline_user_args()
+	for i in a.size():
+		var v: String = a[i + 1] if i + 1 < a.size() else ""
+		match a[i]:
+			"--format": fmt = v
+			"--n": n = int(v)
+			"--seed": seed0 = int(v)
+			"--speed": speed = maxf(1.0, float(v))
+			"--max-game": max_game = float(v)
+			"--events": events = true
+			"--jump-up": jump_up = float(v)
+			"--routes": routes = true
+			"--ttk": ttk = float(v)
+
+func _run() -> void:
+	_args()
+	var duo := fmt == "2v2"
+	var main: Node = load("res://main.tscn").instantiate()
+	var game: Node = main.get_node("Game")
+	var o := {"human": false, "allies": 1 if duo else 0, "enemies": 2 if duo else 1, "think": true}
+	if routes:
+		o.enemies = 1
+	if ttk > 0.0:
+		o = {"lineup": ttk}
+	for k in o:
+		game.opts[k] = o[k]
+	root.add_child(main)
+	for i in 1200:
+		if game.playing() and game.nav_ready():
+			break
+		await process_frame
+	if not game.playing() or not game.nav_ready():
+		print("BALANCE FAIL: the match did not start with a ready nav map")
+		quit(1)
+		return
+	if jump_up >= 0.0:
+		for p in game.pets:
+			p.set("ledge_jump", jump_up)
+	Engine.physics_ticks_per_second = int(60.0 * speed)
+	Engine.time_scale = speed
+	Engine.max_physics_steps_per_frame = maxi(8, int(speed * 2.0))
+	print("BALANCE %s · n %d · seeds %d..%d · speed x%.0f (tick %.4f s) · ledge jump %s" % [fmt, n, seed0, seed0 + n - 1,
+		speed, speed / Engine.physics_ticks_per_second, str(game.pets[0].get("ledge_jump"))])
+	if routes:
+		await _routes(game)
+		quit(0)
+		return
+	if ttk > 0.0:
+		await _ttk(game)
+		quit(0)
+		return
+	var rows: Array = []
+	var t_real := Time.get_ticks_msec()
+	for i in n:
+		rows.append(await _match(game, seed0 + i))
+	_summary(rows, (Time.get_ticks_msec() - t_real) / 1000.0)
+	Engine.time_scale = 1.0
+	Engine.physics_ticks_per_second = 60
+	quit(0)
+
+## Each side's bot walks alone (the other is taken out of game.pets, parked and frozen) from every spawn of its team.
+func _routes(game: Node) -> void:
+	var bots: Array = game.pets.duplicate()
+	var all := [[], []]
+	var t_real := Time.get_ticks_msec()
+	for b in bots:
+		game.pets = [b]
+		for o in bots:
+			o.think = o == b
+			if o != b:  # parked at its own base, out of the way and out of game.pets (so nobody sees it)
+				var home: Vector3 = game.spawns[o.team][15]
+				o.respawn(home, 0.0)
+		var team: int = b.team
+		var spawns: Array = game.spawns[team]
+		for i in spawns.size():
+			_reseed(game, seed0 + i)
+			game.start_match()
+			var sp: Vector3 = spawns[i]
+			b.respawn(sp, game._yaw_to(sp, game.slab.center))
+			var j0: int = b.jumps
+			var s0: int = b.steps
+			var t0: float = game.elapsed
+			var stall := 0.0
+			var worst := 0.0
+			var reached := -1.0
+			while game.playing() and game.elapsed - t0 < 60.0:
+				await physics_frame
+				if game.slab.contains(b.global_position):
+					reached = game.elapsed - t0
+					break
+				stall = stall + 1.0 / 60.0 if Vector2(b.velocity.x, b.velocity.z).length() < 1.0 else 0.0
+				worst = maxf(worst, stall)
+			var d := Vector2(sp.x - game.slab.center.x, sp.z - game.slab.center.z).length()
+			all[team].append({"t": reached, "j": b.jumps - j0, "s": b.steps - s0, "stall": worst, "d": d})
+			print("ROUTE %s spawn %2d (%.1f m): %s · jumps %d · step-ups %d · longest stall %.2f s" % [SIDE[team], i, d,
+				"slab in %.2f s" % reached if reached >= 0.0 else "NOT REACHED in 60 s", b.jumps - j0, b.steps - s0, worst])
+	for team in 2:
+		var ok: Array = all[team].filter(func(r): return r.t >= 0.0)
+		var ts: Array = ok.map(func(r): return r.t)
+		var js := 0
+		var ss := 0
+		var worst := 0.0
+		var slow := 0.0
+		for r in all[team]:
+			js += r.j
+			ss += r.s
+			worst = maxf(worst, r.stall)
+		for r in ok:
+			slow = maxf(slow, r.t)
+		print("ROUTES %s · reached %d/%d · mean %s s · slowest %.2f s · jumps %d · step-ups %d · longest stall %.2f s · ledge jump %.2f m" % [
+			SIDE[team], ok.size(), all[team].size(), _mean_s(ts), slow, js, ss, worst, float(bots[0].ledge_jump)])
+	print("ROUTES in %.0f s real" % ((Time.get_ticks_msec() - t_real) / 1000.0))
+
+## The Cat bot (thinking) on its lineup spot against you at the lineup spot; the Corgi bot is taken out (parked at its
+## base, out of game.pets). Every kill puts both back on their spots; the score and the clock are held so the match runs on.
+func _ttk(game: Node) -> void:
+	var you: Node = game.player
+	var cat: Node = null
+	for p in game.pets:
+		if p.team == 1:
+			cat = p
+	var corgi_bot: Node = game.pets.filter(func(p): return p != you and p.team == 0)[0]
+	game.pets.erase(corgi_bot)
+	corgi_bot.respawn(game.spawns[0][15], 0.0)
+	var cat_spot: Vector3 = cat.global_position
+	var you_spot: Vector3 = you.global_position
+	var you_yaw: float = you.yaw
+	var rng := RandomNumberGenerator.new()
+	for mode in ["still", "strafing"]:
+		var t_kill: Array = []
+		var t_fire: Array = []
+		var hits := 0
+		var shots := 0
+		var cuts := 0
+		var moved := 0.0
+		var game_t := 0.0
+		for i in n:
+			_reseed(game, seed0 + i)
+			rng.seed = seed0 + i
+			game._respawns.clear()
+			you.respawn(you_spot, you_yaw)
+			you.cam_yaw = you_yaw
+			you.shield = 0.0
+			cat.respawn(cat_spot, game._yaw_to(cat_spot, you_spot))
+			cat.think = true
+			var t0: float = game.elapsed
+			var first := -1.0
+			var flip := 0.0
+			var left := true
+			var fired := [0, 0]
+			var on_fire := func(res: Dictionary) -> void:
+				fired[0] += 1
+				if res.get("target") == you:
+					fired[1] += 1
+			cat.rifle.fired.connect(on_fire)
+			while you.alive and game.elapsed - t0 < 20.0:
+				game.score = [0, 0]
+				game.time_left = T.MATCH_TIME
+				if mode == "strafing":
+					flip -= 1.0 / 60.0
+					if flip <= 0.0:
+						left = not left
+						flip = rng.randf_range(0.5, 1.0)
+						Input.action_release("move_right" if left else "move_left")
+						Input.action_press("move_left" if left else "move_right")
+				var was: Vector3 = you.global_position
+				await physics_frame
+				moved += Vector2(you.global_position.x - was.x, you.global_position.z - was.z).length()
+				game_t += 1.0 / 60.0
+				if first < 0.0 and fired[0] > 0:
+					first = game.elapsed - t0
+			for a in ["move_left", "move_right"]:
+				Input.action_release(a)
+			cat.rifle.fired.disconnect(on_fire)
+			cat.think = false
+			shots += fired[0]
+			hits += fired[1]
+			if you.alive:
+				cuts += 1
+			else:
+				t_kill.append(game.elapsed - t0)
+				t_fire.append(game.elapsed - t0 - first)
+		print("TTK %.0f m, you %s: %d/%d kills · time to kill %s s (from exposure, incl. reaction) · %s s from the first shot · hit rate %s (%d/%d) · not killed in 20 s: %d · your mean speed %.1f m/s" % [
+			ttk, mode, t_kill.size(), n, _mean_s(t_kill), _mean_s(t_fire), _pct(hits, shots), hits, shots, cuts,
+			moved / maxf(game_t, 0.001)])
+
+func _reseed(game: Node, s: int) -> void:
+	seed(s)
+	for p in game.pets:
+		if p.get("rng") is RandomNumberGenerator:
+			p.rng.seed = hash("%d/%s" % [s, p.name])
+			p.react = p.rng.randf_range(0.4, 0.7)
+			p._think_t = p.rng.randf() * 0.1
+			p._burst = 6
+			p._pause = 0.0
+			p._strafe = 1.0
+			p._strafe_t = 0.0
+			p._stuck_t = 0.0
+			p._heard = null
+			p._heard_t = 0.0
+			p.lost = 0.0
+		p.rifle.rng.seed = hash("rifle %d/%s" % [s, p.name])
+		p._jump_buffer = 0.0
+		p._air_time = 0.0
+		p._jump_held = false
+
+func _match(game: Node, s: int) -> Dictionary:
+	_reseed(game, s)
+	game.start_match()
+	var r := {"seed": s, "downs": [0, 0], "falls": [0, 0], "on": [0.0, 0.0], "hold": [0.0, 0.0], "contested": 0.0,
+		"shots": [0, 0], "hits": [0, 0], "dmg": [0.0, 0.0], "first": [-1.0, -1.0], "route": [[], []],
+		"died_en_route": [0, 0], "def_kills": [0, 0], "kill_d": [[], []], "log": []}
+	var life := {}
+	for p in game.pets:
+		life[p] = {"t0": 0.0, "reached": false, "alive": true}
+	var cons: Array = []
+	var on_down := func(pet: Node, killer: Node) -> void:
+		var t: float = game.elapsed
+		if killer == null or killer == pet:
+			r.falls[pet.team] += 1
+		else:
+			r.downs[killer.team] += 1
+			var d: float = killer.global_position.distance_to(pet.global_position)
+			r.kill_d[killer.team].append(d)
+			if game.slab.contains(killer.global_position) and not game.slab.contains(pet.global_position):
+				r.def_kills[killer.team] += 1
+			r.log.append("%.2f %s > %s %.1f m" % [t, killer.display_name, pet.display_name, d])
+		if not life[pet].reached:
+			r.died_en_route[pet.team] += 1
+	game.pet_down.connect(on_down)
+	cons.append([game.pet_down, on_down])
+	for p in game.pets:
+		var team: int = p.team
+		var on_fire := func(res: Dictionary) -> void:
+			r.shots[team] += 1
+			if res.get("target") != null:
+				r.hits[team] += 1
+				r.dmg[team] += float(res.get("damage", 0.0))
+		p.rifle.fired.connect(on_fire)
+		cons.append([p.rifle.fired, on_fire])
+	var dt := 1.0 / 60.0
+	while game.playing():
+		await physics_frame
+		if not game.playing():
+			break
+		var c: Array = game.slab_state.counts
+		for t in 2:
+			if c[t] > 0:
+				r.on[t] += dt
+				if r.first[t] < 0.0:
+					r.first[t] = game.elapsed
+		if game.slab_state.holder >= 0:
+			r.hold[game.slab_state.holder] += dt
+		if game.slab_state.contested:
+			r.contested += dt
+		for p in game.pets:
+			var l: Dictionary = life[p]
+			if p.alive and not l.alive:
+				l.t0 = game.elapsed
+				l.reached = false
+			l.alive = p.alive
+			if p.alive and not l.reached and game.slab.contains(p.global_position):
+				l.reached = true
+				r.route[p.team].append(game.elapsed - l.t0)
+		if max_game > 0.0 and game.elapsed >= max_game:
+			break
+	for k in cons:
+		k[0].disconnect(k[1])
+	r["winner"] = game.winner if game.over() else -2
+	r["score"] = game.score.duplicate()
+	r["time"] = game.elapsed
+	print("MATCH %s seed %d · %s · %d-%d in %.1f s · takedowns %d-%d (falls %d-%d) · on slab %.0f-%.0f s · held %.0f-%.0f s · contested %.0f s · hit rate %s-%s (%d/%d, %d/%d) · first on slab %.1f-%.1f s · spawn-to-slab %s-%s s · died en route %d-%d · kills from the slab %d-%d" % [
+		fmt, s, _wname(r.winner), r.score[0], r.score[1], r.time, r.downs[0], r.downs[1], r.falls[0], r.falls[1],
+		r.on[0], r.on[1], r.hold[0], r.hold[1], r.contested, _pct(r.hits[0], r.shots[0]), _pct(r.hits[1], r.shots[1]),
+		r.hits[0], r.shots[0], r.hits[1], r.shots[1], r.first[0], r.first[1], _mean_s(r.route[0]), _mean_s(r.route[1]),
+		r.died_en_route[0], r.died_en_route[1], r.def_kills[0], r.def_kills[1]])
+	if events:
+		for e in r.log:
+			print("  ", e)
+	return r
+
+func _summary(rows: Array, real_s: float) -> void:
+	var wins := [0, 0]
+	var draws := 0
+	var margin := 0.0
+	var tot := {"downs": [0, 0], "shots": [0, 0], "hits": [0, 0], "on": [0.0, 0.0], "hold": [0.0, 0.0], "route": [[], []],
+		"first": [[], []], "kill_d": [[], []], "def_kills": [0, 0], "died_en_route": [0, 0]}
+	var game_s := 0.0
+	for r in rows:
+		if r.winner == 0 or r.winner == 1:
+			wins[r.winner] += 1
+		else:
+			draws += 1
+		margin += float(r.score[0] - r.score[1])
+		game_s += r.time
+		for t in 2:
+			for k in ["downs", "shots", "hits", "def_kills", "died_en_route"]:
+				tot[k][t] += r[k][t]
+			tot.on[t] += r.on[t]
+			tot.hold[t] += r.hold[t]
+			tot.route[t].append_array(r.route[t])
+			tot.kill_d[t].append_array(r.kill_d[t])
+			if r.first[t] >= 0.0:
+				tot.first[t].append(r.first[t])
+	var m := rows.size()
+	var ci := _wilson(wins[1], m)
+	print("SUMMARY %s n %d · Corgi wins %d · Cat wins %d · draws %d · Cat win share %.0f%% (95%% CI %.0f-%.0f%%) · mean margin (Corgi - Cat) %+.1f" % [
+		fmt, m, wins[0], wins[1], draws, 100.0 * wins[1] / maxf(1.0, m), 100.0 * ci.x, 100.0 * ci.y, margin / maxf(1.0, m)])
+	print("SUMMARY %s per side (Corgi-Cat) · takedowns %d-%d · hit rate %s-%s · on slab %.0f-%.0f s · held %.0f-%.0f s · first on slab %s-%s s · spawn-to-slab %s-%s s (n %d-%d) · died en route %d-%d · kills from the slab %d-%d · kill distance %s-%s m" % [
+		fmt, tot.downs[0], tot.downs[1], _pct(tot.hits[0], tot.shots[0]), _pct(tot.hits[1], tot.shots[1]),
+		tot.on[0], tot.on[1], tot.hold[0], tot.hold[1], _mean_s(tot.first[0]), _mean_s(tot.first[1]),
+		_mean_s(tot.route[0]), _mean_s(tot.route[1]), tot.route[0].size(), tot.route[1].size(),
+		tot.died_en_route[0], tot.died_en_route[1], tot.def_kills[0], tot.def_kills[1], _mean_s(tot.kill_d[0]), _mean_s(tot.kill_d[1])])
+	print("SUMMARY %s %.0f s of game time in %.0f s real (x%.1f)" % [fmt, game_s, real_s, game_s / maxf(0.001, real_s)])
+
+static func _wname(w: int) -> String:
+	return {0: "CORGI", 1: "CAT", -1: "DRAW", -2: "CUT"}[w]
+
+static func _pct(a: int, b: int) -> String:
+	return "%.0f%%" % (100.0 * a / b) if b > 0 else "-"
+
+static func _mean_s(a: Array) -> String:
+	if a.is_empty():
+		return "-"
+	var s := 0.0
+	for v in a:
+		s += float(v)
+	return "%.1f" % (s / a.size())
+
+## 95 % Wilson score interval for k successes in m trials.
+static func _wilson(k: int, m: int) -> Vector2:
+	if m == 0:
+		return Vector2(0, 1)
+	var z := 1.96
+	var p := float(k) / m
+	var den := 1.0 + z * z / m
+	var c := (p + z * z / (2.0 * m)) / den
+	var h := z * sqrt(p * (1.0 - p) / m + z * z / (4.0 * m * m)) / den
+	return Vector2(maxf(0.0, c - h), minf(1.0, c + h))

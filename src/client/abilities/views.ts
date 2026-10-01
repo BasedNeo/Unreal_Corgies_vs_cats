@@ -12,14 +12,12 @@
 //                   drawn through walls (depthTest off), one InstancedMesh for all.
 // Cost: drone 4 draws, charge 3–4, barrier 2, markers 1 (all of them). Geometry is built once per team and shared.
 import * as THREE from 'three/webgpu';
-import { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
-import type { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { releaseObject3D } from '../engine/release';
 import type { EntityState, GameEvent } from '../../shared/protocol';
 import { EFlag, EntityKind, Species, Team, type TeamId } from '../../shared/types';
 import { ABILITIES, ABILITY_IDS, type AbilityKind } from '../../shared/content/abilities';
 import { toon, glow } from '../style/style-webgpu.js';
-import { PALETTE, STYLE } from '../style/style-tokens.js';
+import { PALETTE } from '../style/style-tokens.js';
 import { measureObject } from '../vehicles/parts';
 import { ABILITY_ENTITY_KIND, BARRIER } from '../../sim/combat/ability-tuning';
 import { buildBarrier, buildCharge, buildDrone, chargeLight, chargeRing, droneLens, droneRing, spottedMarker, type Built } from './models';
@@ -77,11 +75,10 @@ abstract class AbilityView {
   abstract exit(dt: number): boolean;
 }
 
-function bodyMesh(b: Built, ink: (l: LineSegmentsGeometry | null, p: THREE.Object3D) => void, name: string): THREE.Mesh {
+function bodyMesh(b: Built, name: string): THREE.Mesh {
   const m = new THREE.Mesh(b.geometry, BODY());
   m.name = name;
   m.castShadow = true; m.receiveShadow = true;
-  ink(b.lines, m);
   return m;
 }
 
@@ -212,14 +209,6 @@ export function createAbilityViews(scene: THREE.Scene, opts: AbilityViewsOptions
   const group = new THREE.Group();
   group.name = 'ability-views';
   scene.add(group);
-  const inkMat = new THREE.Line2NodeMaterial({ color: PALETTE.ink, linewidth: STYLE.crease.widthPx, worldUnits: false });
-  // (no registry of the ink lines: a list of them pinned every view ever made, ~15 drones a minute in TDM)
-  const ink = (lines: LineSegmentsGeometry | null, parent: THREE.Object3D) => {
-    if (!lines) return;
-    const l = new LineSegments2(lines, inkMat);
-    l.userData.styleInk = true;
-    parent.add(l);
-  };
   const assets = new Map<TeamId, TeamAssets>();
   const assetsFor = (team: TeamId): TeamAssets => {
     let a = assets.get(team);
@@ -254,9 +243,9 @@ export function createAbilityViews(scene: THREE.Scene, opts: AbilityViewsOptions
     const team = s.team as TeamId;
     const a = assetsFor(team);
     let v: AbilityView;
-    if (kind === 'drone') v = new DroneView(s.id, team, bodyMesh(a.drone, ink, 'drone'), lens, ring);
-    else if (kind === 'charge') v = new ChargeView(s.id, team, bodyMesh(a.charge, ink, 'charge'), light, cring);
-    else v = new BarrierView(s.id, team, bodyMesh(a.barrier, ink, 'barrier'));
+    if (kind === 'drone') v = new DroneView(s.id, team, bodyMesh(a.drone, 'drone'), lens, ring);
+    else if (kind === 'charge') v = new ChargeView(s.id, team, bodyMesh(a.charge, 'charge'), light, cring);
+    else v = new BarrierView(s.id, team, bodyMesh(a.barrier, 'barrier'));
     group.add(v.root);
     return v;
   };
@@ -312,11 +301,10 @@ export function createAbilityViews(scene: THREE.Scene, opts: AbilityViewsOptions
     },
     dispose() {
       scene.remove(group);
-      for (const a of assets.values()) for (const b of [a.drone, a.charge, a.barrier]) { b.geometry.dispose(); b.lines?.dispose(); }
+      for (const a of assets.values()) for (const b of [a.drone, a.charge, a.barrier]) b.geometry.dispose();
       for (const g of [lens, ring, light, cring, markerGeo]) g.dispose();
       markers.dispose();
       markerMat.dispose();
-      inkMat.dispose();
       views.clear();
       leaving.length = 0;
     },

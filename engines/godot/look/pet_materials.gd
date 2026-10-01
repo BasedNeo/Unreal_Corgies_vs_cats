@@ -1,14 +1,33 @@
 extends RefCounted
-## Pet materials for G-GAME (through Look.pet_material): `coat` (wet fur sheen; corgi ochre/tan, cat grey tabby),
-## `plate` (scuffed ochre armour with a team band that stays readable at 30 m at night), `metal` (rifle metal).
-## One cached material per (kind, species, team), so every pet of a side shares it and batches. Object-space
-## triplanar mapping: any placeholder or final mesh works without UVs. species: 0 corgi, 1 cat. team: 0 Corgi Company,
-## 1 Cat Cadre (the locked team signal colours of the web game's PALETTE.teamCorgis / teamCats).
-const KINDS := ["coat", "plate", "metal"]
+## Pet materials for G-GAME (through Look.pet_material): `coat` (wet fur sheen; corgi warm ochre/tan, cat cool grey
+## tabby), `accent` (corgi white chest, muzzle and socks; cat pale muzzle and chest), `dark` (eyes, nose), `band` (the
+## team band: harness straps around the torso and the collar), `plate` (scuffed ochre armour with a team band),
+## `metal` (rifle metal).
+## One cached material per (kind, species, team), so every pet of a side shares it. Object-space triplanar mapping:
+## any placeholder or final mesh works without UVs. species: 0 corgi, 1 cat. team: 0 Corgi Company, 1 Cat Cadre (the
+## locked team signal colours of the web game's PALETTE.teamCorgis / teamCats).
+## Readability at 30 m at night (W13 R-PETS): coat colour separates species (warm ochre vs cool grey); the team band
+## separates sides by hue AND by luminance (the two locked hues are within 1.1:1 of each other in luminance, so hue
+## alone is not enough): the Corgi Company band is a lighter blue, the Cat Cadre band a deeper crimson, both the
+## locked hue. Every emissive here stays below the look's glow threshold (glow_hdr_threshold 1.3 at exposure 1.25):
+## the bands are self-lit so they survive the dark and the fog, but they do not bloom.
+const KINDS := ["coat", "accent", "dark", "band", "plate", "metal"]
 const TEAM := [Color("2f6fd6"), Color("c9344a")]
+## The team band colours: the locked hues, the Corgi one lighter and the Cat one deeper (about 3:1 in luminance).
+const BAND := [Color(0.429, 0.6047, 0.8875), Color(0.67, 0.1733, 0.2467)]  # 2f6fd6 lightened 0.3, c9344a darkened 0.15
+const BAND_ENERGY := [1.0, 1.2]
 const OCHRE := Color(0.74, 0.53, 0.16)
 const CORGI_COAT := Color(0.72, 0.46, 0.26)
-const CAT_COAT := Color(0.56, 0.54, 0.52)  # W12 Q6 P1: a grey tabby (cool) against the corgi ochre (warm); the dark tabby went black at night
+## W13: a cool silver-blue tabby (was 0.56, 0.54, 0.52, a neutral that the sodium light turned warm like the corgi),
+## light enough that the cat is not the harder pet to see at night
+const CAT_COAT := Color(0.64, 0.66, 0.71)
+const ACCENT := [Color(0.95, 0.91, 0.84), Color(0.8, 0.82, 0.85)]  # corgi white bib / cat pale muzzle
+const DARK := Color(0.05, 0.045, 0.045)
+## The self-lit fill on fur (W12 Q6 P1): away from the floods a pet was a black silhouette. W13: the fill is now the
+## coat's own colour times the fur texture (EMISSION_OP_MULTIPLY). At W12 it was 0.28 x (colour + fur texture), the
+## default ADD operator, which put a grey wash over both coats (corgi and cat drifted toward the same pale grey).
+## Per species: the striped grey cat needs more fill than the saturated ochre corgi to be as easy to see.
+const FUR_FILL := [0.7, 0.9]
 
 var _cache := {}
 var _tex := {}
@@ -18,6 +37,11 @@ var forward_plus := true  # clearcoat (the wet film) only where the renderer has
 func get_material(kind: String, species: int, team: int) -> Material:
 	species = clampi(species, 0, 1)
 	team = clampi(team, 0, 1)
+	if kind in ["band", "plate"]:
+		species = 0  # the side's colours: one material per team, shared by both species
+	elif kind in ["dark", "metal"]:
+		species = 0
+		team = 0
 	var key := "%s_%d_%d" % [kind, species, team]
 	if _cache.has(key):
 		return _cache[key]
@@ -26,32 +50,52 @@ func get_material(kind: String, species: int, team: int) -> Material:
 	m.uv1_triplanar = true
 	m.uv1_world_triplanar = false
 	match kind:
-		"coat":
-			m.albedo_color = CORGI_COAT if species == 0 else CAT_COAT
+		"coat", "accent":
+			var c: Color = (CORGI_COAT if species == 0 else CAT_COAT) if kind == "coat" else ACCENT[species]
+			m.albedo_color = c
 			m.albedo_texture = _fur(species)
 			m.uv1_scale = Vector3(2.5, 2.5, 2.5)
-			m.roughness = 0.42        # wet fur: tight highlights
+			m.roughness = 0.42 if kind == "coat" else 0.5  # wet fur: tight highlights
 			m.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
 			m.rim_enabled = true      # the sheen along the silhouette that sells a wet coat
 			m.rim = 0.55
 			m.rim_tint = 0.35
-			# W12 Q6 P1: a character-only readability fill (the web's P4 lesson: readability at range is lighting). Away
-			# from the floods a pet was a black silhouette; a faint self-lit coat keeps species colour and shape readable
-			# at 30 m, well below the glow threshold.
+			# W12 Q6 P1: a character-only readability fill (the web's P4 lesson: readability at range is lighting). A
+			# faint self-lit coat keeps species colour and shape readable at 30 m, well below the glow threshold.
 			m.emission_enabled = true
-			m.emission = CORGI_COAT if species == 0 else CAT_COAT
+			m.emission = c
 			m.emission_texture = _fur(species)
-			m.emission_energy_multiplier = 0.28
+			m.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
+			m.emission_energy_multiplier = FUR_FILL[species]
+		"dark":
+			m.albedo_color = DARK
+			m.roughness = 0.25  # wet eyes and nose
+		"band":
+			# a solid self-lit strap in the team colour: the side reads at 30 m in the dark and the fog, no glow
+			m.albedo_color = BAND[team]
+			m.albedo_texture = _wear()
+			m.uv1_scale = Vector3(3, 3, 3)
+			m.roughness = 0.4
+			m.emission_enabled = true
+			m.emission = BAND[team]
+			m.emission_energy_multiplier = BAND_ENERGY[team]
+			if forward_plus:
+				m.clearcoat_enabled = true
+				m.clearcoat = 0.5
+				m.clearcoat_roughness = 0.15
 		"plate":
 			m.albedo_texture = _plate(team)
 			m.uv1_scale = Vector3(1.4, 1.4, 1.4)
 			m.roughness = 0.38
 			m.metallic = 0.1
-			# the team band glows faintly (below the glow threshold): the side reads at 30 m in the dark and fog
+			# the plate's band is self-lit (below the glow threshold), in the same team band colour. MULTIPLY: the mask
+			# masks. At W12 the default ADD made the emission band + mask, white over the band (above the glow threshold)
+			# and band-coloured over the ochre, so the plate read as a pale glowing block on both sides.
 			m.emission_enabled = true
-			m.emission = TEAM[team]
-			m.emission_energy_multiplier = 1.0  # W12 Q6 P1: was 0.55; still below the glow threshold
+			m.emission = BAND[team]
+			m.emission_energy_multiplier = BAND_ENERGY[team]
 			m.emission_texture = _band_mask()
+			m.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
 			if forward_plus:
 				m.clearcoat_enabled = true
 				m.clearcoat = 0.6
@@ -63,7 +107,7 @@ func get_material(kind: String, species: int, team: int) -> Material:
 			m.metallic = 0.9
 			m.roughness = 0.32
 		_:
-			push_warning("Look.pet_material: unknown kind '%s' (want coat, plate or metal)" % kind)
+			push_warning("Look.pet_material: unknown kind '%s' (want one of %s)" % [kind, ", ".join(KINDS)])
 			m.albedo_color = Color(0.4, 0.4, 0.4)
 	_cache[key] = m
 	return m
@@ -77,7 +121,7 @@ func _noise(freq: float, seed_: int) -> FastNoiseLite:
 	return n
 
 
-## Fur: vertical strands (corgi: tan with a lighter wash; cat: dark tabby bands with a wobble).
+## Fur: vertical strands (corgi: tan with a lighter wash; cat: tabby bands with a wobble).
 func _fur(species: int) -> Texture2D:
 	var k := "fur%d" % species
 	if _tex.has(k):
@@ -90,7 +134,7 @@ func _fur(species: int) -> Texture2D:
 			var v := strand
 			if species == 1:
 				var band := sin(y * 0.2 + n.get_noise_2d(x, y) * 4.0)
-				v *= lerpf(1.0, 0.35, smoothstep(0.2, 0.7, band))
+				v *= lerpf(1.0, 0.55, smoothstep(0.2, 0.7, band))
 			else:
 				v *= lerpf(1.0, 1.25, smoothstep(0.1, 0.6, n.get_noise_2d(x * 0.5, y * 0.5 + 40.0)))
 			img.set_pixel(x, y, Color(v, v, v).clamp())
@@ -109,7 +153,7 @@ func _plate(team: int) -> Texture2D:
 	var scuff := _noise(0.16, 9)
 	for y in 128:
 		for x in 128:
-			var c: Color = TEAM[team] if y < 44 else OCHRE
+			var c: Color = BAND[team] if y < 44 else OCHRE
 			var gv := grime.get_noise_2d(x, y)
 			c = c.lerp(Color(0.07, 0.075, 0.09), smoothstep(0.18, 0.3, gv) * 0.85)
 			if scuff.get_noise_2d(x, y) > 0.42:

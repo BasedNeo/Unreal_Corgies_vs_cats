@@ -1,3 +1,7 @@
+> **RETIRED (Wave 13).** The web look is now the locked Wave 12 **stylised-realistic** look of the Godot build. See
+> `docs/design/LOOK.md`. This file is kept as history: its ink outlines, crease lines, stepped toon bands and dusk grade
+> are gone, and its pillars (veterans, readability, one image) carry on in LOOK.md.
+
 # HARDENED — art & feel bible v2 (the Yard War)
 
 Owner direction (2026-09-26): the first pass reads too cartoony and soft. Shift hard toward **battle-hardened

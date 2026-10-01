@@ -6,7 +6,6 @@
 // Draw calls per kart: body (vertex-colored toon) + crease ink + 4 wheels (one InstancedMesh)
 // + boost flame (glow, only while boosting) = 4. Geometry is built once per team and shared.
 import * as THREE from 'three/webgpu';
-import type { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { PALETTE } from '../style/style-tokens.js';
 import { Team, type TeamId } from '../../shared/types';
 import { PartBuilder, at, rbox, box, cyl, cone, torus } from './parts';
@@ -46,7 +45,6 @@ export const KART_HOOD = new THREE.Vector3(0, 0.62, -0.62);
 
 export interface KartAssets {
   body: THREE.BufferGeometry;
-  lines: LineSegmentsGeometry | null;
   wheel: THREE.BufferGeometry;
   flame: THREE.BufferGeometry;
   triangles: number;
@@ -121,18 +119,18 @@ export function kartAssets(team: TeamId): KartAssets {
   if (a) return a;
   const b = new PartBuilder();
   buildBody(key, b);
-  const { geometry, lines } = b.build();
+  const { geometry } = b.build();
   const wheel = buildWheel(key);
   const flame = new THREE.ConeGeometry(0.1, 0.46, 7);
   flame.translate(0, 0.23, 0);
   const wheelTris = (wheel.index!.count / 3) * 4;
-  a = { body: geometry, lines, wheel, flame, triangles: b.triangles + wheelTris + flame.index!.count / 3 };
+  a = { body: geometry, wheel, flame, triangles: b.triangles + wheelTris + flame.index!.count / 3 };
   cache.set(key, a);
   return a;
 }
 
 /** Free the shared kart geometry (tests / hot reload). */
 export function releaseKartAssets(): void {
-  for (const a of cache.values()) { a.body.dispose(); a.lines?.dispose(); a.wheel.dispose(); a.flame.dispose(); }
+  for (const a of cache.values()) { a.body.dispose(); a.wheel.dispose(); a.flame.dispose(); }
   cache.clear();
 }

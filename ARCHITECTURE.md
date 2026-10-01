@@ -56,6 +56,7 @@ src/sim/                           AUTHORITATIVE simulation (worker / Node / tes
                                    return, chase), re-planned every 0.5 s with hysteresis; goal kind 'ball' in tactics.ts;
                                    the ball-run override in brain.ts sits above the HFSM modes
   match/core-rush.ts               core-rush: fair Core Pad placement, capture, hold scoring (EntityKind.Zone)
+  match/slab.ts                    W13 slab: the Godot mode (hold the slab alone 1/s, first to 60 / 3:00 / overtime), Zone, kit
   match/base-assault.ts            W9 G4a base-assault: a ball, stand and capture ring per team (props in the snapshot),
                                    steal / carry (EFlag.Carrier: 0.75× speed, no glide, no rides) / drop / return /
                                    capture, stalemate relief; bases from WorldData.bases → battleOf flags → spawns
@@ -116,7 +117,8 @@ src/client/
                                    battle-dressing.ts (W7 E4): banners + nets (cloth, TSL icons), S4 floodlights with
                                    real lights (world-view calls lamps.update), instanced battle clutter; terrain-view
                                    bakes the `battle` ground channels (scorch, mud, puddles, ruts)
-                                   W7 P3: prim-mesh crease ink in 33 m tiles, drawn within 40 m (CREASE_DRAW_DISTANCE)
+                                   W13: the ink (outlines, crease lines) and the HARDENED comic look are retired: style/ is
+                                   the stylised-realistic night copied from engines/godot/look (docs/design/LOOK.md)
                                    W10 P5: sky.ts drives STYLE_EXPOSURE from the time of day and hands
                                    WorldData.interiors (the-lot.ts lotInteriors) to the hardened material, which keeps
                                    the sky fill out of those boxes; high cameras thin the storm fog (STYLE.mood.highFog)
@@ -126,7 +128,7 @@ src/client/
                                    calls, fanfare, heartbeat), site-ambience.ts + presets-site.ts (world-data ambience)
                                    reward card (rewards.ts, never interactive) ·
                                    procedural audio + music (S2: vehicle-loops.ts engine loops from snapshot states,
-                                   presets-engines.ts; vehicle/break voices; adventure stingers) · pooled FX + words ·
+                                   presets-engines.ts; vehicle/break voices; adventure stingers) · pooled FX (W13: the comic words are retired) ·
                                    plane-hud.ts cockpit strip
   vehicles/                        kart + terminal views (Wave 2) · RC plane + Rooftop Hangar views (R1)
   interact/                        kiosk/core/kibble/beacon views · E prompt, kit picker, buff chips, mission card
@@ -134,6 +136,9 @@ src/client/
                                    ui/ordnance-hud.ts the throwable slot · audio/presets-ordnance.ts
   abilities/                       drone, charge, barrier views + spotted markers
   modes/core-rush-view.ts          Core Pads, A·B·C markers and strip
+  modes/slab-view.ts               W13 slab read-out (frame + fill, as Godot's slab.gd) · ui/slab-hud.ts the slab HUD as
+                                   hud.gd (scores to 60, clock/OVERTIME, slab line, HP/ammo, winner + R/Enter rematch) ·
+                                   audio/slab-cues.ts the slab-mode cues (same WAVs as engines/godot/game/sfx.gd)
   modes/base-assault-view.ts       W9 G4a balls, stands, rings, beacons · ui/base-assault-hud.ts ball strip, banners
   adventure/                       A1: intro/outro captions, step barks, chapter card (medals), sentry cones, catnip
                                    bags, `cvc.adventure` progress; content in shared/content/chapters.ts

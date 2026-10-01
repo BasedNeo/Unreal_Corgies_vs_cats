@@ -141,6 +141,7 @@ export const ADVENTURE_STRINGS = {
 /** Mode names for first-win lines and hints (MatchState.mode / C3 FIRST_WIN_MODES ids). */
 export const MODE_NAMES: Record<string, string> = {
   'yard-skirmish': 'Skirmish', 'team-deathmatch': 'Deathmatch', 'core-rush': 'Core Rush', 'base-assault': 'Base Assault', 'boss-rush': 'Boss Rush', adventure: 'Adventure',
+  slab: 'Slab', // W13: the Godot game's match on The Lot
 };
 
 export const LOCKER_STRINGS = {

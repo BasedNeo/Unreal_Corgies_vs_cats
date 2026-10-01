@@ -1,0 +1,60 @@
+# W13 A-HOOK: web SFX log (src/client/audio/slab-cues.ts), browser console lines with ?sfxlog
+# Private vite server (port 5391) on the private copy with A-CUES's real files; headless Chromium (SwiftShader).
+# A private variant of tools/probe.mjs clicks once at 12 s (the first gesture unlocks Web Audio), then runs to 60 s:
+#    ?mode=slab&webgl&autoplay&sfxlog&2v2&cam=slab&slabWin=10
+# &cam=slab keeps the listener near the slab, inside the 80 m shot range. The page ran at well under 1 fps on the
+# loaded machine, so the snapshots, and their cues, arrive in bursts. Format: [seconds since page open] SFX <cue>.
+[112.1s] SFX rifle_shot
+[112.5s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.6s] SFX rifle_shot
+[112.7s] SFX slab_tick_enemy
+[112.7s] SFX slab_tick_enemy
+[112.7s] SFX slab_tick_enemy
+[112.7s] SFX slab_tick_enemy
+[112.7s] SFX slab_tick_enemy
+[112.7s] SFX slab_tick_enemy
+[112.9s] SFX slab_tick_enemy
+[112.9s] SFX slab_tick_enemy
+[112.9s] SFX slab_tick_enemy
+[112.9s] SFX slab_tick_enemy
+[112.9s] SFX match_end_lose
+
+# Counts:
+      1 SFX match_end_lose
+     34 SFX rifle_shot
+     10 SFX slab_tick_enemy
+
+# Without a gesture (tools/probe.mjs '?mode=slab&webgl&autoplay&sfxlog' 20), the cue is still picked but the
+# audio is locked:
+      6 SFX slab_tick_enemy silent (audio locked)

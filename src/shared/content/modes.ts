@@ -126,3 +126,92 @@ export const BA_GOAL_SEED = 0xba60;
 export const BA_PICKUP_ITEM = 'squeaky_ball';
 /** `score` event reasons. */
 export const BA_REASON = { taken: 'ball taken', dropped: 'ball dropped', returned: 'ball returned', captured: 'captured' } as const;
+
+// ------------------------------------------------------------------------------------------------ slab (Wave 13 TW-SIM)
+// Slab — the Godot game's mode (engines/godot/game/match.gd, slab.gd, tuning.gd are the rules source), on The Lot.
+// One neutral control slab at the map's point-symmetry centre: a team scores 1 point per full second while it ALONE has
+// at least one alive (not downed) pet on the slab; contested (both teams) or empty, nobody scores, and the second being
+// counted starts over whenever the holder changes. First to `winScore`, else the most points at `timeLimit` s; tied
+// then: overtime until someone leads, at most `overtimeMax` s, then a draw. Downed pets respawn after `respawn` s at
+// their team spawn with a `spawnShield` s shield. Everybody carries the Assault kit with the Squeaker Rifle only: no
+// class ability, no ordnance, pickups, vehicles or terminals. No warm-up: the match is live from its first tick.
+// The result holds until a human presses Reload (R / pad X; an edge at least `rematchDelay` s after the end), then the
+// match restarts at 0-0 and 3:00; a room with no humans restarts by itself after `endedHold` s.
+// A pet is on the slab when its feet are inside the square (|x - cx| <= sx/2, |z - cz| <= sz/2) and cy - 1 < y < cy + 3.
+//
+// Snapshot contract (no protocol change):
+//   MatchState  mode 'slab' · phase 'live' (from the first tick; no warm-up) or 'ended' · score = [corgis, cats], whole
+//               points · timeLeft = seconds left of regulation, or of overtime while in overtime (frozen at the final
+//               value while ended) · objective = SLAB_TEXT.hold ('HOLD THE SLAB'), SLAB_TEXT.overtime ('OVERTIME') in
+//               overtime; ended: SLAB_TEXT.win[team] ('CORGI COMPANY WINS' / 'CAT CADRE WINS') or SLAB_TEXT.draw
+//               ('DRAW') · winner = team, or -1 (a draw is winner -1 with phase 'ended' and objective 'DRAW') · wave 0
+//   Zone        one EntityKind.Zone entity for the slab, seed SLAB_ZONE_SEED (0), never removed: x, y, z = SLAB.center ·
+//               team = the holder (Team.Neutral = 2 when nobody holds it) · flags & EFlag.Busy = contested ·
+//               hp, maxHp, ammo 0 · state frozen while ended, neutral again on a restart
+// Game events: `score` with reason 'reset' (both teams, pts 0) on a restart and 'win' (pts 0) for the winner; points
+// for holding are added silently (no event per point), like core-rush's held pads.
+
+export interface SlabConfig {
+  /** Slab centre on the ground (m): `slab.center` of engines/godot/data/the_lot.json (tools/godot/export-lot.mjs). */
+  center: { x: number; y: number; z: number };
+  /** Slab size along x and z (m). */
+  size: { x: number; z: number };
+  /** Feet height window around center.y (m): on the slab when center.y - below < y < center.y + above. */
+  below: number;
+  above: number;
+  /** First team to this many points wins. */
+  winScore: number;
+  /** Regulation length (s); the leader at the horn wins. */
+  timeLimit: number;
+  /** Tied at the horn: overtime until someone leads, at most this long (s), then a draw. */
+  overtimeMax: number;
+  /** Seconds a downed pet waits before it respawns at its team spawn. */
+  respawn: number;
+  /** Seconds of spawn shield after every respawn (and at a restart). */
+  spawnShield: number;
+  /** Seconds after the end before a human's Reload press counts as a rematch request. */
+  rematchDelay: number;
+  /** Bots-only room (no human present): seconds the result stays up before the match restarts by itself. */
+  endedHold: number;
+  /** Pets per team: 1v1 by default, 2v2 as the option (the Room fills empty slots with bots). */
+  teamSize: number;
+  teamSizes: readonly number[];
+  /** The one class and the one weapon of this mode. */
+  cls: 'assault';
+  weapon: 'squeaker_rifle';
+}
+
+export const SLAB: SlabConfig = {
+  center: { x: 0, y: -0.0572, z: 0 },
+  size: { x: 8, z: 8 },
+  below: 1,
+  above: 3,
+  winScore: 60,
+  timeLimit: 180,
+  overtimeMax: 60,
+  respawn: 3,
+  spawnShield: 1,
+  rematchDelay: 1,
+  endedHold: 10,
+  teamSize: 1,
+  teamSizes: [1, 2],
+  cls: 'assault',
+  weapon: 'squeaker_rifle',
+};
+
+/** EntityState.seed of the slab's Zone entity. */
+export const SLAB_ZONE_SEED = 0;
+
+/** MatchState.objective strings of the slab mode (the client compares against these). Team names as Godot's HUD. */
+export const SLAB_TEXT = {
+  hold: 'HOLD THE SLAB',
+  overtime: 'OVERTIME',
+  draw: 'DRAW',
+  win: ['CORGI COMPANY WINS', 'CAT CADRE WINS'],
+} as const;
+
+/** Is a pet whose feet are at (x, y, z) on the slab? (The authority's test; the client may use it for hints.) */
+export function onSlab(x: number, y: number, z: number, cfg: Pick<SlabConfig, 'center' | 'size' | 'below' | 'above'> = SLAB): boolean {
+  const c = cfg.center;
+  return Math.abs(x - c.x) <= cfg.size.x * 0.5 && Math.abs(z - c.z) <= cfg.size.z * 0.5 && y > c.y - cfg.below && y < c.y + cfg.above;
+}

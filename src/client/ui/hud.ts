@@ -29,6 +29,7 @@ import { TipScheduler, baseAssaultTipFacts, createTipView } from './tips';
 import { bootQuality, reloadUrl } from './quality-note';
 import type { RoomPoller } from './rooms';
 import { findInteractTarget } from '../interact/targets';
+import { SLAB_CLICK_TO_PLAY, slabFeedText } from './slab-hud'; // W13: slab mode reads like Godot's hud.gd
 import { serverUrlForPage } from '../net/server-url';
 
 export type { PlayOptions } from './menu';
@@ -203,7 +204,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
         <div class="lk-main">
           <div class="lk-title">CLICK TO PLAY</div>
           <div class="lk-sub">Your pointer locks to aim · press Esc to get it back</div>
-          <div class="keys">${CONTROLS.map(([k, v]) => `<span><kbd>${k}</kbd>${v}</span>`).join('')}</div>
+          <div class="keys">${CONTROLS.map(([k, v]) => `<span data-k="${k}"><kbd>${k}</kbd>${v}</span>`).join('')}</div>
           <div class="lk-btns"></div>
         </div>
         <div class="lk-settings hidden"></div>
@@ -230,7 +231,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
   const bn = q('.bn'), bnText = q('.bn-text');
   const sb = q('.sb'), sbCols = q('.sb-cols'), sbMeta = q('.sb-meta');
   const vig = q('.vig'), vigLow = q('.vig-low');
-  const lk = q('.lk'), lkMain = q('.lk-main'), lkSettings = q('.lk-settings'), lkBtns = q('.lk-btns');
+  const lk = q('.lk'), lkMain = q('.lk-main'), lkSettings = q('.lk-settings'), lkBtns = q('.lk-btns'), lkTitle = q('.lk-title');
 
   // ---------------------------------------------------------------- menus
   const sound = (k: UiSoundKind) => uiSound?.(k);
@@ -313,6 +314,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
   // banner
   let bannerUntil = 0;
   let lastLocked: boolean | null = null, lastDbg = '';
+  let plainFeed = false; // W13: a slab match runs (Godot's plain kill feed and "Click to play")
   const clock = opts.clock ?? (() => performance.now() / 1000);
 
   // U1: chat (right column, under the kill feed) and first-match tips (bottom centre, under the character).
@@ -368,6 +370,8 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
     const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
     // Names resolve at render time: events can arrive before the roster that names their entities.
     const nm = (p: FeedParty) => esc(rosterBy.get(p.id)?.name ?? p.name);
+    // W13 slab mode: hud.gd's plain lines, "Killer  >  Victim" (styled by slab-hud.ts while a slab match runs)
+    if (plainFeed) { kf.innerHTML = feed.entries.map((e) => `<div class="kf-e kf-plain">${esc(slabFeedText(e.killer ? rosterBy.get(e.killer.id)?.name ?? e.killer.name : null, rosterBy.get(e.victim.id)?.name ?? e.victim.name))}</div>`).join(''); return; }
     kf.innerHTML = feed.entries.map((e) => {
       const me = e.victim.local || e.killer?.local;
       const k = e.killer ? `<span class="kf-n t${e.killer.team}">${nm(e.killer)}</span>` : '';
@@ -575,6 +579,8 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
 
       // ---- kill feed
       feed.prune(now);
+      const slabMode = m.match?.mode === 'slab';
+      if (slabMode !== plainFeed) { plainFeed = slabMode; feedVersion = -1; setText(lkTitle, slabMode ? SLAB_CLICK_TO_PLAY : 'CLICK TO PLAY'); }
       if (feed.version !== feedVersion) { feedVersion = feed.version; renderFeed(); }
 
       // ---- death screen

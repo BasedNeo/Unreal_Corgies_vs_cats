@@ -26,22 +26,21 @@ const make = (species: SpeciesId, cls: ClassId, look: Look | null, o: { team?: T
 /** The first seed with this breed (chonk / sphynx cats keep their body under any look). */
 const seedOfBreed = (sp: SpeciesId, breed: string) => { for (let s = 1; s < 500; s++) if (breedFor(sp, s) === breed) return s; throw new Error(breed); };
 
-/** The char-audit rules (tools/char-audit.mjs): budget, draws, style-system materials, ink on rigid parts only. */
+/** The char-audit rules (tools/char-audit.mjs): budget, draws, style-system materials; W13 (docs/design/LOOK.md): no ink
+ *  lines at all (the stylised-realistic look retired the crease ink and the ink hull). */
 function audit(av: CharacterAvatar, budget: number): string[] {
   const errors: string[] = [];
   let tris = 0, draws = 0;
   av.root.traverse((o) => {
     const m = o as THREE.Mesh & { isLineSegments2?: boolean };
-    if (m.isLineSegments2) { draws++; if ((o.parent as THREE.SkinnedMesh | null)?.isSkinnedMesh) errors.push('crease ink on a skinned mesh'); return; }
+    if (m.isLineSegments2) { draws++; errors.push(`${o.name}: ink lines (the look has none)`); return; }
     if (!m.isMesh) return;
     draws++;
     tris += (m.geometry.index ? m.geometry.index.count : m.geometry.getAttribute('position').count) / 3;
     for (const mat of [m.material].flat()) {
       if (!['toon', 'glow'].includes(mat.userData?.style)) errors.push(`${o.name}: material not from the style system`);
-      if (mat.userData?.style === 'toon' && (o as THREE.SkinnedMesh).isSkinnedMesh && !m.geometry.userData.outlineReady) errors.push(`${o.name}: ink hull without outline-safe normals`);
+      if (mat.userData?.style === 'toon' && (o as THREE.SkinnedMesh).isSkinnedMesh && !m.geometry.userData.outlineReady) errors.push(`${o.name}: skinned style mesh without welded normals`);
     }
-    const toonRigid = !(o as THREE.SkinnedMesh).isSkinnedMesh && [m.material].flat().some((mat) => mat.userData?.style === 'toon');
-    if (toonRigid && !o.children.some((c) => c.userData.styleInk)) errors.push(`${o.name}: rigid toon mesh without crease ink`);
   });
   if (tris !== av.stats.triangles) errors.push(`stats.triangles ${av.stats.triangles} != measured ${tris}`);
   if (tris > budget) errors.push(`${tris} tris > ${budget}`);

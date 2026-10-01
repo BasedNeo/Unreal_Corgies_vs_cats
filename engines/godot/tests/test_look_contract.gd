@@ -2,6 +2,9 @@ extends RefCounted
 ## G-LOOK (Wave 12), against a stand-in world (independent of the live Lot): the look waits for World.built, makes one
 ## floodlight per World.floodlights() entry with shadows on a few, wets `kit` / `prims` materials without replacing
 ## their maps or touching the originals, and the quality knob turns the costly features off.
+## W13 (G-ATMOS): SSR and volumetric fog are requested only on Forward+ (Compatibility warns about them and ignores them);
+## the night keys stay night (a dark blue-black zenith, a cold horizon, fog the colour of the horizon); the ditch water
+## gets the look's dark water.
 const WORLD_SRC := """extends Node3D
 signal built
 var is_built := false
@@ -33,6 +36,10 @@ func run(tree: SceneTree) -> Array:
 	kit.mesh.surface_set_material(0, kit_src)
 	kit.add_to_group("kit")
 	world.add_child(kit)
+	var water := MeshInstance3D.new()
+	water.mesh = PlaneMesh.new()
+	water.add_to_group("water")
+	world.add_child(water)
 	var prim_src := StandardMaterial3D.new()
 	prim_src.albedo_color = Color(0.5, 0.5, 0.5)
 	prim_src.roughness = 0.8
@@ -72,6 +79,21 @@ func run(tree: SceneTree) -> Array:
 	if not (wet_prim is BaseMaterial3D) or wet_prim == prim_src or wet_prim.roughness >= prim_src.roughness \
 			or wet_prim.albedo_color.v >= prim_src.albedo_color.v:
 		errs.append("prims material not darkened and smoothed")
+	var wm = water.material_override
+	if not (wm is BaseMaterial3D) or wm.resource_name != "look_water" or wm.albedo_color.v > 0.1 or wm.roughness > 0.1:
+		errs.append("the ditch water did not get the look's dark still water")
+	# the night: a dark blue-black zenith, a cold (not warm, dusk) horizon, fog the horizon's colour
+	var zen: Color = look.SKY_ZENITH
+	var hor: Color = look.SKY_HORIZON
+	if zen.get_luminance() > 0.05 or zen.b <= zen.r:
+		errs.append("sky zenith %s is not a dark blue-black" % zen)
+	if hor.get_luminance() > 0.15 or hor.r > hor.b:  # W12 dusk horizon: 0.22, warm-washed
+		errs.append("sky horizon %s is bright or warm (reads dusk, not night)" % hor)
+	if look.environment.fog_light_color != hor:
+		errs.append("the fog colour is not the horizon colour")
+	# Forward+ keeps its SSR and volumetric fog (the headless server reports the project's Forward+)
+	if look.rendering_method == "forward_plus" and not (look.environment.ssr_enabled and look.environment.volumetric_fog_enabled):
+		errs.append("Forward+ %s lost SSR or volumetric fog" % ["LOW", "MEDIUM", "HIGH"][look.quality])
 	# idempotent: applying again does not re-wet or duplicate floods
 	look.apply()
 	await tree.process_frame
@@ -95,5 +117,28 @@ func run(tree: SceneTree) -> Array:
 	if load("res://tests/test_look_scene.gd").outline_scan(main).is_empty():
 		errs.append("outline_scan misses an inverted-hull material")
 	main.queue_free()
+	await tree.process_frame
+	# SSR and volumetric fog exist only on Forward+: the feature table never asks for them elsewhere, and a look built
+	# for Compatibility never turns them on at any quality (Q6: two engine warnings per launch)
+	var LookScript: GDScript = load("res://look/look.gd")
+	for method in ["gl_compatibility", "mobile"]:
+		for q in 3:
+			var f: Dictionary = LookScript.features(method, q)
+			if f.ssr or f.volumetric_fog:
+				errs.append("features(%s, %d) asks for SSR or volumetric fog" % [method, q])
+	var ff: Dictionary = LookScript.features("forward_plus", 2)
+	if not (ff.ssr and ff.volumetric_fog):
+		errs.append("features(forward_plus, HIGH) lost SSR or volumetric fog")
+	var host := Node3D.new()
+	var compat: Node = LookScript.new()
+	compat.rendering_method = "gl_compatibility"
+	host.add_child(compat)
+	tree.root.add_child(host)
+	await tree.process_frame
+	for q in [2, 1, 0, 2]:
+		compat.set_quality(q)
+		if compat.environment.ssr_enabled or compat.environment.volumetric_fog_enabled:
+			errs.append("a Compatibility look at quality %d turned on SSR or volumetric fog" % q)
+	host.queue_free()
 	await tree.process_frame
 	return errs

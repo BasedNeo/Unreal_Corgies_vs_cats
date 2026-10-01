@@ -41,6 +41,14 @@ export const PIT = { x: -40, z: -110, hx: 40, hz: 15, floor: -2.4 } as const;
 /** Pit ramps: the vehicle ramp climbs east out of the pit, the foot ramp south. */
 export const PIT_RAMP_EAST = { z: -109, half: 5, x0: 0, run: 10 } as const;
 export const PIT_RAMP_SOUTH = { x: -63, half: 3, z0: -95, run: 8 } as const;
+/** W13 G-MOVE: the slab path. A pet that only walks (no jump; the KCC climbs 52 deg, the carve walls are 65.6) gets
+ *  from the pit to the middle on the straight line from the first corgi spawn (x0, z0) to the slab (x1, z1): inside a
+ *  band `half` m either side of that line, between arc lengths s0 and s1 from the spawn, the pit's and the trenches'
+ *  walls slope at `slope` (1:2 = 26.6 deg) instead of WALL_STEEP, with steep sides like the pit's own ramps. That
+ *  makes a 7 m wide ramp out of the pit's south wall, in the bag line's gap and clear of its cover (on the 1 m grid
+ *  4 m of it is at most 28.3 deg and 5 m under 45), and notches down into and up out of trenches T1 and T3, which
+ *  stay continuous. Nothing else stands in the band. */
+export const SLAB_PATH = { x0: -74, z0: -123, x1: 0, z1: 0, half: 3.5, s0: 26, s1: 64, slope: 0.5 } as const;
 /** Cat base: the spoil heap (flat top inside the rect; slope widths per side: steep north face, gentle west side). */
 export const HEAP = { x: 40, z: 110, hx: 40, hz: 15, top: 4.6, wN: 2.6, wS: 9, wE: 11, wW: 16 } as const;
 /** The heap's north ramp (x corridor, climbing south from z1 to the top edge). */

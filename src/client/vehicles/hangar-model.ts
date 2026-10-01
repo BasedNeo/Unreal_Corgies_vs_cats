@@ -5,14 +5,12 @@
 // Kiosk space: +Y up, the screen faces -Z, ground at y = 0 (like terminal-model.ts).
 // Draw calls: body (vertex-colored toon) + crease ink + screen (glow) + sign propeller + runway decals (no ink) = 5.
 import * as THREE from 'three/webgpu';
-import type { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { PALETTE } from '../style/style-tokens.js';
 import { PartBuilder, at, rbox, box, cyl, cone, torus } from './parts';
 import { SCREEN } from './terminal-model';
 
 export interface HangarAssets {
   body: THREE.BufferGeometry;
-  lines: LineSegmentsGeometry | null;
   screen: THREE.BufferGeometry;
   /** Sign propeller (spins about its local Z), placed at HANGAR_SIGN. */
   sign: THREE.BufferGeometry;
@@ -58,7 +56,7 @@ export function hangarAssets(): HangarAssets {
     const r0 = 0.13 - i * 0.022, len = 0.2;
     b.add(cyl(r0 - 0.022, r0, len, 10), at(0.5 + 0.12 + i * len, 3.42 - i * 0.03, 0.35, 0, 0, Math.PI / 2 + 0.12), i % 2 ? H.sockB : H.sockA);
   }
-  const { geometry, lines } = b.build();
+  const { geometry } = b.build();
 
   const screen = new THREE.PlaneGeometry(SCREEN.w, SCREEN.h);
   screen.translate(0, SCREEN.h / 2, 0);
@@ -71,7 +69,7 @@ export function hangarAssets(): HangarAssets {
   }
   sb.add(cone(0.09, 0.16, 8), at(0, 0, -0.08, -Math.PI / 2), H.trim);
   const sign = sb.build().geometry;
-  cached = { body: geometry, lines, screen, sign, triangles: geometry.index!.count / 3 + 2 + sign.index!.count / 3 };
+  cached = { body: geometry, screen, sign, triangles: geometry.index!.count / 3 + 2 + sign.index!.count / 3 };
   return cached;
 }
 
@@ -95,6 +93,6 @@ export function runwayGeometry(runway: number): THREE.BufferGeometry {
 
 export function releaseHangarAssets(): void {
   if (!cached) return;
-  cached.body.dispose(); cached.lines?.dispose(); cached.screen.dispose(); cached.sign.dispose();
+  cached.body.dispose(); cached.screen.dispose(); cached.sign.dispose();
   cached = null;
 }

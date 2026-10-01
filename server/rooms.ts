@@ -11,7 +11,7 @@ import type { MatchPhase } from '../src/shared/protocol';
 import { botsForMode, type ServerConfig } from './config';
 import type { RoomMode } from '../src/host/guard';
 import { adventureState } from '../src/sim/adventure';
-import { DEFAULT_MAP } from '../src/shared/world/maps';
+import { DEFAULT_MAP, mapForMode } from '../src/shared/world/maps';
 import { BOSS_IDS } from '../src/shared/content/bosses';
 
 /** The chapter an adventure room is playing now: online rooms advance after each result, so the chapter it was created
@@ -216,7 +216,7 @@ export class RoomManager {
   }
 
   private async create(name: string, setup: RoomSetup | null): Promise<ManagedRoom> {
-    const sim = await Sim.create({ seed: this.cfg.seed, map: setup?.map });
+    const sim = await Sim.create({ seed: this.cfg.seed, map: setup?.map ?? mapForMode(undefined, this.cfg.mode) }); // W13: the server's MODE=slab → The Lot
     // the server's MODE/BOTS apply unless the creator asked for a mode (co-op adventure, core-rush, …)
     const room = setup
       ? new Room(sim, { mode: setup.mode, chapter: setup.chapter, boss: setup.boss, botsPerTeam: botsForMode(setup.mode, this.cfg.bots) })

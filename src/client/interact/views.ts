@@ -9,8 +9,6 @@
 // the beacon draws a light pillar + bobbing chevron, the Squeaker toy on its first step, and the hold ring
 // with 24 progress pips that turns red while contested.
 import * as THREE from 'three/webgpu';
-import { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
-import type { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { releaseObject3D } from '../engine/release';
 import type { EntityState, GameEvent } from '../../shared/protocol';
 import { EFlag, EntityKind, Team, type TeamId } from '../../shared/types';
@@ -20,7 +18,7 @@ import { terminalKindAt } from '../../shared/content/terminals';
 import { PICKUPS, isCore, pickupByIndex, type PickupDef } from '../../shared/content/pickups';
 import { objectiveChainByIndex } from '../../shared/content/objectives';
 import { toon, glow } from '../style/style-webgpu.js';
-import { PALETTE, STYLE } from '../style/style-tokens.js';
+import { PALETTE } from '../style/style-tokens.js';
 import { measureObject } from '../vehicles/parts';
 import {
   kioskAssets, pickupAssets, KIOSK_SCREEN, KIOSK_TILES, KIOSK_BALL, TILE_W, TILE_H, type Built,
@@ -43,20 +41,11 @@ export interface InteractViews {
   stats(): { kiosks: number; cores: number; kibble: number; beacon: boolean; triangles: number; drawCalls: number };
 }
 
-let inkMat: THREE.Line2NodeMaterial | null = null;
-function ink(lines: LineSegmentsGeometry | null, parent: THREE.Object3D): void {
-  if (!lines) return;
-  inkMat ??= new THREE.Line2NodeMaterial({ color: PALETTE.ink, linewidth: STYLE.crease.widthPx, worldUnits: false });
-  const l = new LineSegments2(lines, inkMat);
-  l.userData.styleInk = true;
-  parent.add(l);
-}
 const bodyMat = () => toon({ color: 0xffffff, vertexColors: true });
 function builtMesh(b: Built, name: string): THREE.Mesh {
   const m = new THREE.Mesh(b.geometry, bodyMat());
   m.name = name;
   m.castShadow = true; m.receiveShadow = true;
-  ink(b.lines, m);
   return m;
 }
 const colorOf = (d: PickupDef) => PALETTE[d.color] as number;

@@ -7,14 +7,13 @@
 //
 // Kart juice: wheels spin from forward speed, fronts steer from the yaw rate, a spring suspension bobs on
 // bumps and squashes on landings, the body leans into turns and squats under throttle/brake, roll
-// follows the lawn, exhaust puffs (ink-outlined toon puffs, one shared InstancedMesh), a glowing
+// follows the lawn, exhaust puffs (one shared InstancedMesh), a glowing
 // boost flame, tire smoke while drifting and dark smoke when badly damaged.
 // Plane juice (R1): banks from the snapshot's roll (eased, so 30 Hz snapshots never step), the propeller
 // spins with the throttle (comic whirl strokes when fast), balloon wheels roll on the ground, a glowing
 // tennis-ball-can booster flame + puffs, engine puffs, wing-tip contrails in hard turns, a stall wobble,
 // damage smoke; the Rooftop Hangar has a spinning propeller sign and painted runway markings.
 import * as THREE from 'three/webgpu';
-import { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
 import { releaseObject3D } from '../engine/release';
 import type { EntityState } from '../../shared/protocol';
 import { EFlag, EntityKind, type TeamId } from '../../shared/types';
@@ -25,7 +24,7 @@ import { surfaceAt } from '../../shared/world/queries';
 import { VEHICLES, TERMINALS, kartByIndex, planeByIndex, terminalByIndex, unpackPlaneAux, type PlaneDef } from '../../shared/content/vehicles';
 import { terminalKindAt } from '../../shared/content/terminals';
 import { toon, glow } from '../style/style-webgpu.js';
-import { PALETTE, STYLE } from '../style/style-tokens.js';
+import { PALETTE } from '../style/style-tokens.js';
 import { toonNoInk } from '../world/materials';
 import { kartAssets, KART_WHEELS, KART_EXHAUST, KART_HOOD, KART_CHUTE } from './kart-model';
 import { terminalAssets, SCREEN } from './terminal-model';
@@ -57,11 +56,6 @@ export interface VehicleViews {
 // ---------------------------------------------------------------------------------------------
 // Shared materials (from the style factory; never disposed by users)
 // ---------------------------------------------------------------------------------------------
-let inkMat: THREE.Line2NodeMaterial | null = null;
-function crease(): THREE.Line2NodeMaterial {
-  inkMat ??= new THREE.Line2NodeMaterial({ color: PALETTE.ink, linewidth: STYLE.crease.widthPx, worldUnits: false });
-  return inkMat;
-}
 const bodyMat = () => toon({ color: 0xffffff, vertexColors: true });
 
 const SCREEN_READY = () => glow(PALETTE.tennisBall, 2.4);
@@ -184,12 +178,6 @@ class KartView {
     const mesh = new THREE.Mesh(a.body, bodyMat());
     mesh.castShadow = true; mesh.receiveShadow = true;
     mesh.name = 'kart_body';
-    if (a.lines) {
-      const ink = new LineSegments2(a.lines, crease());
-      ink.userData.styleInk = true;
-      ink.name = 'kart_crease';
-      mesh.add(ink);
-    }
     this.body.add(mesh);
     this.flame = new THREE.Mesh(a.flame, glow(PALETTE.glowOrange, 3.2));
     this.flame.position.copy(KART_EXHAUST);
@@ -324,7 +312,7 @@ class KartView {
 // Plane view (R1)
 // ---------------------------------------------------------------------------------------------
 const PLANE_DEF = VEHICLES.rc_plane;
-const whirlMat = () => toon({ color: PALETTE.ink }); // ink strokes: the outline pass only thickens them
+const whirlMat = () => toon({ color: PALETTE.ink }); // the prop blur strokes: dark paint (W13: no outline pass)
 
 class PlaneView {
   readonly root = new THREE.Group();
@@ -357,12 +345,6 @@ class PlaneView {
     body.castShadow = true; body.receiveShadow = true;
     body.name = 'plane_body';
     body.position.y = -def.pivotY;
-    if (a.lines) {
-      const ink = new LineSegments2(a.lines, crease());
-      ink.userData.styleInk = true;
-      ink.name = 'plane_crease';
-      body.add(ink);
-    }
     this.prop = new THREE.Mesh(a.prop, bodyMat());
     this.prop.position.set(PLANE_PROP.x, PLANE_PROP.y - def.pivotY, PLANE_PROP.z);
     this.prop.castShadow = true;
@@ -495,11 +477,6 @@ class HangarView {
     this.root.name = `hangar_${s.id}`;
     const mesh = new THREE.Mesh(a.body, bodyMat());
     mesh.castShadow = true; mesh.receiveShadow = true;
-    if (a.lines) {
-      const ink = new LineSegments2(a.lines, crease());
-      ink.userData.styleInk = true;
-      mesh.add(ink);
-    }
     this.screen = new THREE.Mesh(a.screen, SCREEN_READY());
     this.screen.position.set(SCREEN.x, SCREEN.y, SCREEN.z);
     this.screen.userData.noCameraCollide = true;
@@ -553,11 +530,6 @@ class TerminalView {
     this.root.name = `terminal_${s.id}`;
     const mesh = new THREE.Mesh(a.body, bodyMat());
     mesh.castShadow = true; mesh.receiveShadow = true;
-    if (a.lines) {
-      const ink = new LineSegments2(a.lines, crease());
-      ink.userData.styleInk = true;
-      mesh.add(ink);
-    }
     this.screen = new THREE.Mesh(a.screen, SCREEN_READY());
     this.screen.position.set(SCREEN.x, SCREEN.y, SCREEN.z);
     this.screen.userData.noCameraCollide = true;

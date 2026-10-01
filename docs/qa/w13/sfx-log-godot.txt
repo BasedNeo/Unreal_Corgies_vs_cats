@@ -1,0 +1,73 @@
+# W13 A-HOOK: Godot SFX log (engines/godot/game/sfx.gd), all six cues
+# 1) Headless cue test with the log on, A-CUES's real files (public/assets/audio/synth_*.wav), Godot 4.7.2:
+#    godot --headless --path engines/godot --script res://tests/run.gd -- --only sfx --sfx-log
+#    Format: SFX <cue> <seconds since engine start>. The test boots a 1 v 1, fires at the Cat bot until a hit,
+#    lets the Cat fire once, scores a slab point for each side, holds the slab from 59-0 to the win, then loses a rematch.
+SFX rifle_shot 10.726
+SFX rifle_shot 10.728
+SFX hit_confirm 10.728
+SFX rifle_shot 10.730
+SFX slab_tick 10.730
+SFX slab_tick_enemy 10.730
+SFX slab_tick 11.696
+SFX match_end_win 11.697
+SFX match_end_lose 11.717
+  sfx counts: { "rifle_shot": 3, "hit_confirm": 1, "slab_tick": 2, "slab_tick_enemy": 1, "match_end_win": 1, "match_end_lose": 1 }
+PASS test_game_sfx.gd
+GODOT TESTS: PASS
+
+# 2) Real launch (Xvfb, gl_compatibility, Dummy audio driver), A-CUES's real files, killed by PID after 75 s:
+#    godot --path engines/godot --rendering-method gl_compatibility --rendering-driver opengl3 --audio-driver Dummy -- --sfx-log --demo
+#    (the human does not fire in --demo: shots are the Cat bot's, ticks are its slab points; the machine was loaded, so the game ran slowly)
+SFX rifle_shot 15.735
+SFX rifle_shot 15.755
+SFX rifle_shot 18.956
+SFX rifle_shot 22.344
+SFX rifle_shot 25.911
+SFX rifle_shot 25.916
+SFX rifle_shot 36.630
+SFX rifle_shot 36.631
+SFX rifle_shot 39.132
+SFX rifle_shot 41.172
+SFX rifle_shot 41.177
+SFX rifle_shot 43.440
+SFX rifle_shot 47.542
+SFX slab_tick_enemy 55.023
+SFX rifle_shot 58.700
+SFX rifle_shot 58.700
+SFX slab_tick_enemy 90.328
+SFX slab_tick_enemy 126.127
+SFX slab_tick_enemy 160.927
+SFX rifle_shot 181.578
+SFX rifle_shot 181.579
+SFX rifle_shot 186.831
+SFX rifle_shot 193.887
+SFX rifle_shot 193.893
+SFX rifle_shot 197.919
+SFX rifle_shot 204.141
+SFX rifle_shot 212.871
+SFX rifle_shot 212.872
+SFX rifle_shot 219.836
+SFX rifle_shot 224.367
+SFX rifle_shot 224.373
+SFX rifle_shot 228.344
+SFX rifle_shot 232.160
+SFX rifle_shot 235.990
+SFX slab_tick_enemy 251.606
+SFX slab_tick_enemy 283.704
+SFX slab_tick_enemy 330.464
+SFX slab_tick_enemy 358.206
+SFX rifle_shot 363.542
+SFX rifle_shot 378.350
+SFX rifle_shot 378.351
+SFX rifle_shot 383.719
+SFX rifle_shot 388.683
+SFX rifle_shot 394.543
+SFX rifle_shot 394.549
+SFX rifle_shot 415.493
+SFX rifle_shot 415.494
+SFX rifle_shot 418.843
+SFX rifle_shot 418.850
+SFX slab_tick_enemy 426.075
+SFX slab_tick_enemy 465.047
+SFX slab_tick_enemy 496.042

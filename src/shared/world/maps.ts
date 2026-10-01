@@ -25,6 +25,22 @@ export const MAPS: Record<MapId, MapDef> = {
   the_lot: { id: 'the_lot', title: 'The Lot', modes: [...PVP], build: buildTheLot },
 };
 
+/**
+ * W13: modes that belong to one map (their home): only it hosts them, and every request for them lands there.
+ * 'slab' (the Godot game's mode) is played on The Lot's control slab. Every other mode falls back to DEFAULT_MAP.
+ */
+export const MODE_HOME: Readonly<Record<string, MapId>> = { slab: 'the_lot' };
+
+/** The map a mode falls back to (the default map, unless the mode has its own home map). */
+export function homeMapFor(mode: string): MapId {
+  return Object.prototype.hasOwnProperty.call(MODE_HOME, mode) ? MODE_HOME[mode] : DEFAULT_MAP;
+}
+
+/** Can map `id` host `mode`? (Its mode list, or it is the mode's home.) */
+export function mapHosts(id: MapId, mode: string): boolean {
+  return MAPS[id].modes.includes(mode) || (Object.prototype.hasOwnProperty.call(MODE_HOME, mode) && MODE_HOME[mode] === id);
+}
+
 export const isMapId = (id: unknown): id is MapId => typeof id === 'string' && (MAP_IDS as readonly string[]).includes(id);
 
 /** Untrusted input (URL, hello, welcome) → a known map id; anything else is the default map. */
@@ -32,16 +48,18 @@ export function sanitizeMap(id: unknown): MapId {
   return isMapId(id) ? id : DEFAULT_MAP;
 }
 
-/** Maps that can host `mode`, in registry order (the menu's MAP button cycles these; the default map is always one). */
+/** Maps that can host `mode`, in registry order (the menu's MAP button cycles these; the mode's home map is always one:
+ *  the default map, or The Lot for 'slab'). */
 export function mapsForMode(mode: string): MapId[] {
-  return MAP_IDS.filter((id) => MAPS[id].modes.includes(mode));
+  return MAP_IDS.filter((id) => mapHosts(id, mode));
 }
 
 /** The map a room in `mode` will really run for a requested id: unknown ids, and maps that can't host the mode, fall
- *  back to the default map (so a listing or a welcome never names a map the sim isn't playing). */
+ *  back to the mode's home map (the default map; The Lot for 'slab'), so a listing or a welcome never names a map the
+ *  sim isn't playing. */
 export function mapForMode(id: unknown, mode: string): MapId {
-  const m = sanitizeMap(id);
-  return MAPS[m].modes.includes(mode) ? m : DEFAULT_MAP;
+  const m = isMapId(id) ? id : homeMapFor(mode);
+  return mapHosts(m, mode) ? m : homeMapFor(mode);
 }
 
 /** W10 C10: the map a room really runs. An adventure room plays its chapter's map (`ChapterDef.map`; absent or unknown →

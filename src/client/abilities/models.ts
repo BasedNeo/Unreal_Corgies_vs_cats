@@ -7,15 +7,14 @@
 //   Squeak Barrier  corgi: four inflatable squeaky-toy pillows with squeak buttons and a gold rail; cat ("Scratch
 //                   Wall"): four sisal scratching posts with crimson bands and a carpeted top plank.
 // Model space: +Y up, ground at y = 0, facing -Z (the sim's yaw 0). Merged vertex-colored parts come from the
-// vehicle lane's PartBuilder: one toon draw + one crease-ink draw per model.
+// vehicle lane's PartBuilder: one style-material draw per model (W13: no crease ink).
 import * as THREE from 'three/webgpu';
-import type { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { PALETTE } from '../style/style-tokens.js';
 import { Team, type TeamId } from '../../shared/types';
 import { PartBuilder, at, rbox, box, cyl, cone, torus, ball } from '../vehicles/parts';
 import { BARRIER, DRONE, CHARGE } from '../../sim/combat/ability-tuning';
 
-export interface Built { geometry: THREE.BufferGeometry; lines: LineSegmentsGeometry | null }
+export interface Built { geometry: THREE.BufferGeometry }
 
 interface TeamColors { main: number; trim: number; dark: number; light: number }
 export function teamColors(team: TeamId): TeamColors {

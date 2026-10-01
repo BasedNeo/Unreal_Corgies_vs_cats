@@ -98,6 +98,11 @@ const aggDmg: number[] = [];
 const aggCrit: boolean[] = [];
 const aggP: number[] = [];
 
+/** Firing ends spawn protection early, except in slab (W13, Godot pet.gd): there the 1 s shield runs its full time. */
+function fireEndsShield(sim: Sim): boolean {
+  return (sim.state.room as { mode?: string } | undefined)?.mode !== 'slab';
+}
+
 function fire(sim: Sim, e: SimEntity, w: WeaponState, def: WeaponDef, frac: number): void {
   w.ammo--;
   e.ammo = w.ammo;
@@ -107,7 +112,7 @@ function fire(sim: Sim, e: SimEntity, w: WeaponState, def: WeaponDef, frac: numb
   const spread = currentSpread(e, def, w);
   w.bloom = Math.min(def.bloomMax, w.bloom + def.bloomPerShot);
   const meta = e.combat!;
-  if (meta.invulnUntil > sim.tick) { meta.invulnUntil = 0; e.flags &= ~EFlag.Invulnerable; }
+  if (meta.invulnUntil > sim.tick && fireEndsShield(sim)) { meta.invulnUntil = 0; e.flags &= ~EFlag.Invulnerable; }
   if (isStealthed(sim, e) && abilityDef(e.abil?.id ?? '')?.breakOnFire) { meta.stealthUntil = 0; e.flags &= ~EFlag.Stealthed; }
   reportNoise(sim, e, def.noise);
 

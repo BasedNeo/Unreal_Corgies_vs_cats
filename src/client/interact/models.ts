@@ -7,15 +7,14 @@
 //   Golden Kibble    a fat three-lobed kibble nugget (gold toon, a little emissive) + 4-point sparkles.
 //   Squeaker         the objective toy: a corgi-blue rubber squeaky bone with a gold squeak nub.
 // Kiosk space: +Y up, the screen faces -Z (like the Kart-O-Matic), ground at y = 0.
-// Merged vertex-colored parts come from the vehicle lane's PartBuilder (one toon draw + one crease-ink draw).
+// Merged vertex-colored parts come from the vehicle lane's PartBuilder (one style-material draw; W13: no crease ink).
 import * as THREE from 'three/webgpu';
-import type { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { PALETTE } from '../style/style-tokens.js';
 import { Team, CLASS_IDS, type TeamId, type ClassId } from '../../shared/types';
 import { PartBuilder, at, rbox, box, cyl, cone, torus, ball } from '../vehicles/parts';
 import { KART_PALETTES } from '../vehicles/kart-model';
 
-export interface Built { geometry: THREE.BufferGeometry; lines: LineSegmentsGeometry | null }
+export interface Built { geometry: THREE.BufferGeometry }
 
 // ------------------------------------------------------------------------------------------------ kiosk
 /** Screen placement in kiosk space: center (x, y, z), size, back-tilt (rad). */
@@ -247,14 +246,13 @@ function mergeSimple(list: THREE.BufferGeometry[]): THREE.BufferGeometry {
 
 export function releaseInteractAssets(): void {
   for (const a of kioskCache.values()) {
-    a.body.geometry.dispose(); a.body.lines?.dispose(); a.icons.dispose(); a.tile.dispose(); a.screen.dispose();
-    a.ball.geometry.dispose(); a.ball.lines?.dispose(); a.pad.dispose();
+    a.body.geometry.dispose(); a.icons.dispose(); a.tile.dispose(); a.screen.dispose();
+    a.ball.geometry.dispose(); a.pad.dispose();
   }
   kioskCache.clear();
   if (pickupCache) {
     const p = pickupCache;
     for (const g of [p.crystal, p.pip, p.halo, p.kibble, p.sparkle, p.chevron, p.pillar, p.ring.geometry, p.pedestal.geometry, p.squeaker.geometry]) g.dispose();
-    for (const l of [p.ring.lines, p.pedestal.lines, p.squeaker.lines]) l?.dispose();
     pickupCache = null;
   }
 }

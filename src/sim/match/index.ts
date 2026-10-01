@@ -11,11 +11,17 @@
 //                    scoreLimit or the leader at the horn.
 //   base-assault     W9 G4a: steal the enemy's squeaky ball and run it home (base-assault.ts): first to
 //                    captureLimit captures, or the most captures at the horn (equal = draw).
+//   slab             W13: the Godot game's mode on The Lot (slab.ts; rules + snapshot contract: SLAB in
+//                    shared/content/modes.ts): hold the slab alone for 1 point per full second; first to winScore, or
+//                    the leader at timeLimit, tied: overtime (at most overtimeMax s, then a draw). Live from the first
+//                    tick; the result holds until a human presses Reload (bots-only rooms: endedHold s).
 import type { Sim, SimSystem } from '../sim';
 import type { SimEntity } from '../entity';
 import type { MatchState } from '../../shared/protocol';
 import { Team, Species, EntityKind, type TeamId, type EntityId } from '../../shared/types';
-import { combatBus, ensureCombat, type MatchRules, type KillRecord } from '../combat/state';
+import { Btn } from '../../shared/input';
+import { pressed } from '../entity';
+import { combatBus, ensureCombat, ticksOf, type MatchRules, type KillRecord } from '../combat/state';
 import { respawnNow } from '../combat/damage';
 import { applyArchetype, simNavGrid } from '../ai';
 import { ARCHETYPES, type ArchetypeId } from '../ai/archetypes';
@@ -24,15 +30,17 @@ import { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type MatchConfigOve
 import { spawnBoss, bossWaveStatus, bossRushConfig } from '../boss'; // B1 hook: boss waves (E1: which boss)
 import { objectiveState, takeObjectiveScore, foldObjectiveText } from '../interact'; // S1: mission chain
 import { coreRushConfig, setupCorePads, stepCorePads } from './core-rush';
-import { BA_REASON, CORE_PAD_LABELS } from '../../shared/content/modes';
+import { BA_REASON, CORE_PAD_LABELS, SLAB_TEXT } from '../../shared/content/modes';
 import { baseAssaultConfig, resetBaseAssault, setupBaseAssault, stepBaseAssault } from './base-assault';
+import { evaluateSlab, resetSlab, setupSlab, slabConfig, slabKitSystem, slabRespawnDelay, slabSpawnShields } from './slab';
 import { clearVehicles } from '../vehicles';
 
 export { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type WaveDef, type MatchConfigOverrides } from './config';
 
-export const MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault'] as const;
+export const MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault', 'slab'] as const;
 export { coreRushPads, corePadSpots, type CorePadInfo } from './core-rush';
 export { baseAssaultBalls, baseAssaultSpots, baseAssaultState, checkBallInvariants, type BallInfo, type BaseSpot } from './base-assault';
+export { applySlabKit, hasSlabKit, slabConfig, slabZone, type SlabInfo } from './slab';
 
 /** Match runtime bookkeeping (plain data in sim.state.matchRt). */
 interface MatchRuntime {
@@ -54,6 +62,14 @@ interface MatchRuntime {
   holdAcc: [number, number];
   /** base-assault: balls, stands and rings placed for this match. */
   ballsReady: boolean;
+  /** slab: zone placed for this match; the team counted as holding and the seconds it has held since (Godot
+   *  hold_acc: starts over whenever the holder changes); overtime and its seconds; the tick the match ended. */
+  slabReady: boolean;
+  slabHolder: TeamId | -1;
+  slabHold: number;
+  overtime: boolean;
+  overtimeT: number;
+  endedTick: number;
 }
 
 function roomMode(sim: Sim): string | undefined {
@@ -81,15 +97,19 @@ function rulesOf(sim: Sim): MatchRules {
 }
 
 function init(sim: Sim, mode: string): MatchRuntime {
-  const rt: MatchRuntime = { mode, clock: 0, intermission: false, queue: [], spawnTimer: 0, spawned: 0, wipes: 0, squadAlive: false, banner: '', bannerTime: 0, boss: 0, padsReady: false, holdAcc: [0, 0], ballsReady: false };
+  const rt: MatchRuntime = {
+    mode, clock: 0, intermission: false, queue: [], spawnTimer: 0, spawned: 0, wipes: 0, squadAlive: false, banner: '', bannerTime: 0, boss: 0,
+    padsReady: false, holdAcc: [0, 0], ballsReady: false, slabReady: false, slabHolder: -1, slabHold: 0, overtime: false, overtimeT: 0, endedTick: 0,
+  };
   sim.state.matchRt = rt;
   const ms: MatchState = { mode, phase: 'warmup', timeLeft: 0, score: [0, 0], objective: '', wave: 0, winner: -1 };
   sim.state.match = ms;
   const rules: MatchRules = { combatLive: false, respawn: [true, mode !== 'yard-skirmish', true] };
   sim.state.rules = rules;
   rt.clock = mode === 'team-deathmatch' ? tdmConfig(sim).warmup : mode === 'core-rush' ? coreRushConfig(sim).warmup
-    : mode === 'base-assault' ? baseAssaultConfig(sim).warmup : skirmishConfig(sim).warmup;
+    : mode === 'base-assault' ? baseAssaultConfig(sim).warmup : mode === 'slab' ? slabConfig(sim).timeLimit : skirmishConfig(sim).warmup;
   ms.timeLeft = rt.clock;
+  if (mode === 'slab') { ms.phase = 'live'; ms.objective = SLAB_TEXT.hold; rules.combatLive = true; } // Godot: no warm-up
   return rt;
 }
 
@@ -245,6 +265,71 @@ function updateBaseAssault(sim: Sim, rt: MatchRuntime, dt: number): void {
     return;
   } else stepBaseAssault(sim, false, cfg);
   ms.timeLeft = Math.max(0, rt.clock);
+}
+
+// ------------------------------------------------------------------ slab (W13)
+
+function humanPresent(sim: Sim): boolean {
+  for (const e of sim.entities.values()) if (e.char && e.kind === EntityKind.Player) return true;
+  return false;
+}
+
+/** A human pressed Reload this tick (R / pad X: the rematch request while the result is up). */
+function rematchAsked(sim: Sim): boolean {
+  for (const e of sim.entities.values()) if (e.char && e.kind === EntityKind.Player && pressed(e, Btn.Reload)) return true;
+  return false;
+}
+
+/**
+ * The Godot match flow (match.gd _physics_process: step_score, clock, _check_end), every tick while live: who holds the
+ * slab, a point per full second held alone, the clock, then the end checks (first to winScore; at the horn the leader;
+ * tied: overtime until someone leads, a draw after overtimeMax). Ended: the result holds until a human's rematch.
+ */
+function updateSlab(sim: Sim, rt: MatchRuntime, dt: number, kills: KillRecord[]): void {
+  const cfg = slabConfig(sim);
+  const ms = stateOf(sim);
+  if (!rt.slabReady) { setupSlab(sim, cfg); rt.slabReady = true; } // a restart re-inits rt: the slab goes back to neutral
+  slabRespawnDelay(sim, kills, cfg);
+  if (ms.phase === 'ended') {
+    rt.clock -= dt; // only a bots-only room counts this down; ms.timeLeft stays at the final clock
+    const humans = humanPresent(sim);
+    const rematch = humans ? sim.tick - rt.endedTick >= ticksOf(cfg.rematchDelay) && rematchAsked(sim) : rt.clock <= 1e-6;
+    if (rematch) {
+      restart(sim, rt); // 0-0, every pet back at a team spawn, live at the full clock
+      resetSlab(sim);
+      rt.slabReady = true;
+    }
+    slabSpawnShields(sim, cfg);
+    return;
+  }
+  rulesOf(sim).combatLive = true;
+  ms.phase = 'live';
+  const st = evaluateSlab(sim, cfg);
+  if (st.holder !== rt.slabHolder) { rt.slabHolder = st.holder; rt.slabHold = 0; }
+  if (st.holder === Team.Corgis || st.holder === Team.Cats) {
+    rt.slabHold += dt;
+    // a point per full second held alone, added silently (the HUD's score counter shows them; no toast per point)
+    while (rt.slabHold >= 1 - 1e-6) { rt.slabHold -= 1; ms.score[st.holder] += 1; }
+  }
+  if (rt.overtime) rt.overtimeT += dt;
+  else { rt.clock = Math.max(0, rt.clock - dt); if (rt.clock < 1e-6) rt.clock = 0; }
+  const [c, k] = ms.score;
+  const leader: TeamId | -1 = c > k ? Team.Corgis : k > c ? Team.Cats : -1;
+  let end: TeamId | -1 | null = null;
+  if (c >= cfg.winScore) end = Team.Corgis;
+  else if (k >= cfg.winScore) end = Team.Cats;
+  else if (!rt.overtime && rt.clock <= 0) { if (leader !== -1) end = leader; else rt.overtime = true; }
+  else if (rt.overtime) { if (leader !== -1) end = leader; else if (rt.overtimeT >= cfg.overtimeMax - 1e-6) end = -1; }
+  const otLeft = cfg.overtimeMax - rt.overtimeT;
+  ms.timeLeft = rt.overtime ? (otLeft < 1e-6 ? 0 : otLeft) : rt.clock;
+  ms.objective = rt.overtime ? SLAB_TEXT.overtime : SLAB_TEXT.hold;
+  if (end !== null) {
+    const timeLeft = ms.timeLeft;
+    endMatch(sim, rt, end, end === -1 ? SLAB_TEXT.draw : SLAB_TEXT.win[end], cfg.endedHold);
+    ms.timeLeft = timeLeft; // frozen at the final clock (the result holds for a human's rematch, not a countdown)
+    rt.endedTick = sim.tick;
+  }
+  slabSpawnShields(sim, cfg);
 }
 
 // ------------------------------------------------------------------ yard skirmish
@@ -415,13 +500,14 @@ export const matchSystem: SimSystem = {
       (sim.state.room as { mode: string }).mode = mode = 'yard-skirmish';
     }
     const kills = combatBus(sim).kills;
-    if (mode !== 'yard-skirmish' && mode !== 'team-deathmatch' && mode !== 'core-rush' && mode !== 'base-assault') return;
+    if (mode !== 'yard-skirmish' && mode !== 'team-deathmatch' && mode !== 'core-rush' && mode !== 'base-assault' && mode !== 'slab') return;
     let rt = sim.state.matchRt as MatchRuntime | undefined;
     if (!rt || rt.mode !== mode) rt = init(sim, mode);
     const batch = kills.splice(0);
     if (mode === 'team-deathmatch') updateTdm(sim, rt, dt, batch);
     else if (mode === 'core-rush') updateCoreRush(sim, rt, dt);
     else if (mode === 'base-assault') updateBaseAssault(sim, rt, dt);
+    else if (mode === 'slab') { updateSlab(sim, rt, dt, batch); return; } // no mission chain in this mode
     else updateSkirmish(sim, rt, dt, batch);
     // S1 mission chain: its points join the team score; its current step rides the objective line
     // ("Wave 2/5 — 6 cats left · ▶ Hold the trampoline 12/20s (2/3)"). The fold is idempotent.
@@ -433,5 +519,5 @@ export const matchSystem: SimSystem = {
 };
 
 export function matchSystems(): SimSystem[] {
-  return [matchSystem];
+  return [slabKitSystem, matchSystem];
 }

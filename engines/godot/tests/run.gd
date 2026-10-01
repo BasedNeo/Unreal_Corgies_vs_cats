@@ -1,6 +1,6 @@
 extends SceneTree
 ## Headless test runner (lead): godot --headless --path engines/godot --script res://tests/run.gd
-## Runs every res://tests/test_*.gd. Each test file extends RefCounted and has `func run(tree: SceneTree) -> Array`
+## Runs every res://tests/test_*.gd (or, with `-- --only <text>`, those whose name contains <text>). Each test file extends RefCounted and has `func run(tree: SceneTree) -> Array`
 ## returning failure strings (empty = pass); it may `await` frames through the tree.
 ## W12: a test that fails to parse or to instantiate, or that returns anything but an Array (a script error returns
 ## null), is a FAIL; an engine or script error logged while a test runs is a FAIL (a runtime error aborts the test's
@@ -35,8 +35,17 @@ func _run() -> void:
 	var failed := 0
 	var files := DirAccess.get_files_at("res://tests")
 	files.sort()
+	# `-- --only <text>` runs just the test files whose name contains <text> (for a lane's own loop; CI runs them all)
+	var only := ""
+	var ua := OS.get_cmdline_user_args()
+	var oi := ua.find("--only")
+	if oi >= 0 and oi + 1 < ua.size():
+		only = ua[oi + 1]
+		print("(only test files containing '%s')" % only)
 	for f in files:
 		if not (f.begins_with("test_") and f.ends_with(".gd")):
+			continue
+		if only != "" and not only in f:
 			continue
 		var script = load("res://tests/" + f)
 		if script == null or not (script is GDScript) or not script.can_instantiate():

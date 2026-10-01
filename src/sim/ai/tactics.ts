@@ -18,6 +18,9 @@
 // room bots with ≥ 50 % health walk to an Upgrade Core within 30 m that stands on walkable ground.
 // core-rush: every other bot of a team (by id) attacks the best pad it does not own (near, contested or being taken
 // by the enemy scores higher); the rest defend owned pads under attack, else sit on the nearest owned pad.
+// slab (W13, Godot bot.gd): every bot walks to the slab and holds it, fighting from it: a random spot within 35 % of the
+// slab's size of its centre, a new one each time it gets there (holders keep moving); no buddy help, cores or planes.
+// It keeps heading for the slab while trading shots (`advance`, brain.ts engage), strafing as it goes.
 // adventure (A1, src/sim/adventure): squad bots follow the chapter step — reach/hold/survive: take spots in the zone
 // (survive: around the rally point) · interact: with a human in the squad they guard the point (humans trigger it),
 // else the runner uses it (also at the Ordnance Kiosk) · collect: one item each (by rank) · defeat/destroy: walk to
@@ -64,6 +67,7 @@ import { concealLevel } from '../world/env';
 import { abilityEntities } from '../combat/ability-core';
 import { objectiveState, interactRuntime, interactConfig } from '../interact';
 import { coreRushConfig, coreRushPads, type CorePadInfo } from '../match/core-rush';
+import { slabConfig, slabZone } from '../match/slab';
 import { KIOSK_PROMPT } from '../../shared/content/chapters';
 import { WEAPONS, type WeaponId } from '../../shared/content/weapons';
 import { BREACH, DESTRUCT_KINDS, destructDistance } from '../../shared/world/destructibles';
@@ -131,6 +135,8 @@ export interface TacticsState {
   /** B2b: the goal is the Rooftop Hangar (vend the RC plane and fly it); an airborne step's launch spot (glide off). */
   plane: boolean;
   glide: boolean;
+  /** W13 slab: keep heading for the zone while trading shots (Godot bot.gd), instead of holding a range band off it. */
+  advance: boolean;
   /** B2a: boarding and driving vehicles (vehicleThink). */
   ride: RideState;
   /** G4b: the bot's base-assault role and ball run (base-assault-ai.ts); unset outside that mode. */
@@ -205,7 +211,7 @@ export function createTactics(): TacticsState {
   return {
     lock: 0, pushUntil: 0, pushRolled: -1, pushRollAt: 0, rolledFor: -1, wallFrom: -1, wallUntil: 0, holdUntil: 0, chokeAt: 0, hopAt: 0,
     goal: '', gx: 0, gz: 0, gy: 0, gr: 0, cx: 0, cz: 0, interact: false, hold: false, kiosk: false, destroy: false, goalId: -1, goalAt: 0, goalSince: 0, drone: -1, droneLined: false, skip: [],
-    prop: -1, px: 0, py: 0, pz: 0, propMin: 0, propMax: 0, propSeen: false, propLined: false, walk: false, vehicle: false, plane: false, glide: false, ride: createRide(),
+    prop: -1, px: 0, py: 0, pz: 0, propMin: 0, propMax: 0, propSeen: false, propLined: false, walk: false, vehicle: false, plane: false, glide: false, advance: false, ride: createRide(),
   };
 }
 
@@ -479,6 +485,23 @@ function pickPad(sim: Sim, e: SimEntity, chars: SimEntity[], pads: CorePadInfo[]
   return best;
 }
 
+/** slab (W13): hold the slab (see the header). The zone is fought from (brain holdZone) like a core-rush pad. */
+function slabGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, prev: string, prevId: EntityId): void {
+  const z = slabZone(sim);
+  if (!z) return;
+  const cfg = slabConfig(sim);
+  const half = Math.min(cfg.size.x, cfg.size.z) / 2;
+  t.goal = 'step'; t.interact = false; t.hold = true; t.advance = true;
+  t.gr = half; t.gy = z.y; t.cx = z.x; t.cz = z.z;
+  const kept = prev === 'step' && prevId === z.id;
+  if (!kept || Math.hypot(t.gx - e.pos.x, t.gz - e.pos.z) < 1.2) { // (the brain stops within 1.2 m of a hold spot)
+    const c = randomCell(g, sim.rng, -1, z.x, z.z, Math.min(cfg.size.x, cfg.size.z) * 0.35);
+    t.gx = c >= 0 ? cellX(g, c) : z.x; t.gz = c >= 0 ? cellZ(g, c) : z.z;
+  }
+  if (!kept) t.goalSince = sim.tick;
+  t.goalId = z.id;
+}
+
 /**
  * Pick (or keep) the objective/core goal for a patrolling bot; writes t.goal/gx/gz/... ('' = none, patrol as usual).
  * Re-evaluated every 0.5 s. W9 L3: with nothing else to do, a room bot walks its lane (lanes.ts; maps with lanes only).
@@ -493,7 +516,7 @@ function objectiveGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, char
   t.goalAt = sim.tick + 30;
   const prev = t.goal, prevId = t.goalId;
   t.goal = '';
-  t.kiosk = false; t.destroy = false; t.walk = false; t.prop = -1; t.vehicle = false; t.plane = false; t.glide = false;
+  t.kiosk = false; t.destroy = false; t.walk = false; t.prop = -1; t.vehicle = false; t.plane = false; t.glide = false; t.advance = false;
   if (isAdventureMode(sim)) { adventureGoal(sim, e, t, g, chars, prev, prevId); return; }
   if (e.combat?.pve || e.kind !== EntityKind.Bot) return;
   if (roomModeOf(sim) === 'base-assault') {
@@ -504,6 +527,7 @@ function objectiveGoal(sim: Sim, e: SimEntity, t: TacticsState, g: NavGrid, char
     if (t.ba?.role === 'attack' && baPushCount(sim)[e.team as 0 | 1] > 0 && buddyInTrouble(sim, e, chars) === null) planeGoal(sim, e, t, chars, prev, prevId);
     return;
   }
+  if (roomModeOf(sim) === 'slab') { slabGoal(sim, e, t, g, prev, prevId); return; }
   const hpFrac = e.health ? e.health.hp / e.health.max : 1;
   const buddy = buddyInTrouble(sim, e, chars) !== null;
   if (!buddy && planeGoal(sim, e, t, chars, prev, prevId)) return; // B2b: the team's pilot heads for the Rooftop Hangar

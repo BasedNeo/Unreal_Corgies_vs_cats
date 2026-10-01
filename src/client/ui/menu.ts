@@ -26,13 +26,15 @@ import { profileStore } from '../profile';
 import type { Look } from '../../shared/content/cosmetics';
 
 /** Offline match types the menu offers (the online server decides its own). */
-export type MatchMode = 'yard-skirmish' | 'team-deathmatch' | 'core-rush' | 'base-assault' | 'adventure';
+export type MatchMode = 'yard-skirmish' | 'team-deathmatch' | 'core-rush' | 'base-assault' | 'adventure' | 'slab';
 export const MATCH_MODES: ReadonlyArray<{ id: MatchMode; label: string; hint: string }> = [
   { id: 'adventure', label: ADVENTURE_STRINGS.matchLabel, hint: ADVENTURE_STRINGS.matchHint },
   { id: 'yard-skirmish', label: 'SKIRMISH', hint: 'Co-op: your squad vs five waves of cats and the Vac-Tank' },
   { id: 'team-deathmatch', label: 'DEATHMATCH', hint: '4 vs 4: first team to 30 knockouts' },
   { id: 'core-rush', label: 'CORE RUSH', hint: '4 vs 4: hold the three Core Pads, first to 250' },
   { id: 'base-assault', label: 'BASE ASSAULT', hint: '4 vs 4: steal their squeaky ball, run it home, first to 3' },
+  // W13 TW-VIEW: the Godot game's match in the browser (The Lot, one rifle, hold the slab alone, first to 60)
+  { id: 'slab', label: 'SLAB', hint: '1 vs 1 on The Lot: hold the slab alone, first to 60' },
 ];
 
 /** Chapter picker CSS (A1; scoped like the HUD's, injected once). */

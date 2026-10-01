@@ -139,7 +139,7 @@ export class AbuseMeter {
 }
 
 /** Match modes a room can be created with (the first joiner's ?mode= picks it; later joiners get the room as is). */
-export const ROOM_MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault', 'boss-rush', 'adventure'] as const;
+export const ROOM_MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault', 'boss-rush', 'adventure', 'slab'] as const; // W13: slab plays on The Lot (maps.ts MODE_HOME)
 export type RoomMode = (typeof ROOM_MODES)[number];
 
 /**

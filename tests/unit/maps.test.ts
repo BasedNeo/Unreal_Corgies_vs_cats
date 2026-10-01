@@ -1,7 +1,7 @@
 // Wave 8 M1 (docs/design/EXPANSION_VISION.md): the map registry and the map id's trip through the authority
 // (Sim, Room welcome) and the client (reload into the authority's world). The West Yard stays the default everywhere.
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MAP, MAP_IDS, MAPS, isMapId, mapForMode, mapsForMode, sanitizeMap } from '../../src/shared/world/maps';
+import { DEFAULT_MAP, MAP_IDS, MAPS, MODE_HOME, homeMapFor, isMapId, mapForMode, mapHosts, mapsForMode, sanitizeMap } from '../../src/shared/world/maps';
 import { createWorldData } from '../../src/shared/world/world-data';
 import { sanitizeRoomSetup, ROOM_MODES } from '../../src/host/guard';
 import { Sim } from '../../src/sim/sim';
@@ -19,7 +19,13 @@ describe('map registry', () => {
       expect(w.map).toBe(id);
       expect(w.name).toBe(MAPS[id].title); // content tables (pickup layouts, objective chains) key on the name
     }
-    expect(MAPS.west_yard.modes).toEqual(expect.arrayContaining([...ROOM_MODES]));
+    // every room mode without a home map of its own plays on the West Yard; W13 slab lives on The Lot only
+    expect(MAPS.west_yard.modes).toEqual(expect.arrayContaining(ROOM_MODES.filter((m) => homeMapFor(m) === DEFAULT_MAP)));
+    expect(MODE_HOME).toEqual({ slab: 'the_lot' });
+    for (const [mode, home] of Object.entries(MODE_HOME)) {
+      expect(ROOM_MODES as readonly string[]).toContain(mode);
+      expect(MAPS[home].id).toBe(home);
+    }
   });
 
   it('untrusted ids fall back to the default map; the default call is unchanged (same cached world)', () => {
@@ -32,20 +38,24 @@ describe('map registry', () => {
     expect(createWorldData(1).name).toBe('West Yard');
   });
 
-  it('a map that cannot host the mode is replaced by the default map', () => {
+  it("a map that cannot host the mode is replaced by the mode's home map (the default map; The Lot for slab)", () => {
     expect(mapForMode('west_yard', 'adventure')).toBe('west_yard');
     expect(mapForMode('nope', 'team-deathmatch')).toBe('west_yard');
+    expect(mapForMode('west_yard', 'slab')).toBe('the_lot');
+    expect(mapForMode('nope', 'slab')).toBe('the_lot');
     for (const id of MAP_IDS) for (const mode of ROOM_MODES) {
-      expect(mapForMode(id, mode)).toBe(MAPS[id].modes.includes(mode) ? id : DEFAULT_MAP);
+      expect(mapForMode(id, mode)).toBe(mapHosts(id, mode) ? id : homeMapFor(mode));
     }
   });
 
-  it('the maps a mode can be played on (the menu cycles these) always include the default map, in registry order', () => {
+  it("the maps a mode can be played on (the menu cycles these) always include the mode's home map, in registry order", () => {
     for (const mode of ROOM_MODES) {
       const maps = mapsForMode(mode);
-      expect(maps[0]).toBe(DEFAULT_MAP);
-      expect(maps).toEqual(MAP_IDS.filter((id) => MAPS[id].modes.includes(mode)));
+      expect(maps).toContain(homeMapFor(mode));
+      if (homeMapFor(mode) === DEFAULT_MAP) expect(maps[0]).toBe(DEFAULT_MAP);
+      expect(maps).toEqual(MAP_IDS.filter((id) => mapHosts(id, mode)));
     }
+    expect(mapsForMode('slab')).toEqual(['the_lot']);
     expect(mapsForMode('adventure')).toEqual(['west_yard']); // chapters are authored for the West Yard
     expect(mapsForMode('no-such-mode')).toEqual([]);
   });
@@ -55,6 +65,8 @@ describe('map registry', () => {
     expect(sanitizeRoomSetup('core-rush', null, null, 'west_yard')).toMatchObject({ map: 'west_yard' });
     expect(sanitizeRoomSetup('core-rush', null, null, '../../etc')).toMatchObject({ map: 'west_yard' });
     expect(sanitizeRoomSetup('adventure', 'yard_day', null, 'nope')).toMatchObject({ mode: 'adventure', chapter: 'yard_day', map: 'west_yard' });
+    expect(sanitizeRoomSetup('slab', null, null, 'west_yard')).toMatchObject({ mode: 'slab', map: 'the_lot' }); // W13: slab's home
+    expect(sanitizeRoomSetup('slab', null)).toEqual({ mode: 'slab', map: 'the_lot' });
     expect(sanitizeRoomSetup(null, null, null, 'west_yard')).toBeNull(); // no mode asked: the server's defaults
   });
 });

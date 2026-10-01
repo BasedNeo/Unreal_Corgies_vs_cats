@@ -19,6 +19,10 @@ export class InputState {
   sensitivity = 0.0022;
   invertY = false;
   locked = false;
+  /** W13 slab: while true, Enter latches the reload bit (R / pad X already do) and opens nothing else: the slab
+   *  authority rematches on that bit while the match is over. main.ts sets it per frame (winner screen up, no menu or
+   *  chat), so Enter keeps opening chat everywhere else. */
+  enterReloads = false;
   private lastLook = 0;
   private suspendedFlag = false;
   private keys = new Set<string>();
@@ -32,6 +36,13 @@ export class InputState {
     this.el = el;
     window.addEventListener('keydown', (e) => {
       if (this.suspendedFlag || isTyping(e.target)) return; // chat / name fields keep their keys
+      if (this.enterReloads && (e.code === 'Enter' || e.code === 'NumpadEnter')) {
+        // bound before the HUD, so this runs first: the chat's window listener never sees this Enter
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        this.latched |= Btn.Reload;
+        return;
+      }
       if (e.code === 'Tab') e.preventDefault();
       this.keys.add(e.code);
       const b = KEYMAP[e.code];

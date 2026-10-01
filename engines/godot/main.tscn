@@ -3,6 +3,7 @@
 [ext_resource type="Script" path="res://world/world.gd" id="1"]
 [ext_resource type="Script" path="res://look/look.gd" id="2"]
 [ext_resource type="Script" path="res://game/match.gd" id="3"]
+[ext_resource type="Script" path="res://game/sfx.gd" id="4"]
 
 [node name="Main" type="Node3D"]
 
@@ -14,3 +15,6 @@ script = ExtResource("2")
 
 [node name="Game" type="Node" parent="."]
 script = ExtResource("3")
+
+[node name="Sfx" type="Node" parent="."]
+script = ExtResource("4")

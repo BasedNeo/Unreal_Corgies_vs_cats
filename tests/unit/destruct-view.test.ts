@@ -1,4 +1,4 @@
-// X1 client: the destructible view headless — merged draw calls within budget, style materials + tagged ink, states
+// X1 client: the destructible view headless — merged draw calls within budget, style materials (W13: no ink), states
 // and events switch standing <-> rubble by rewriting index ranges (no rebuild), the event guard against lagging
 // interpolated states, camera proxies follow the state, debris is pooled (fixed buffers, bounded count) and settles.
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -8,7 +8,6 @@ import { Anim, EFlag, EntityKind, Team } from '../../src/shared/types';
 import { createWorldData, type WorldData } from '../../src/shared/world/world-data';
 import { createDestructView } from '../../src/client/world/destruct-view';
 import { createDebris } from '../../src/client/world/destruct-debris';
-import { OnomatopoeiaPicker, WORDS } from '../../src/client/fx/onomatopoeia';
 
 let data: WorldData;
 beforeAll(() => { data = createWorldData(1); });
@@ -32,12 +31,12 @@ function liveTris(mesh: THREE.Mesh): number {
 }
 
 describe('destructible view', () => {
-  it('merges every destructible into <= 3 meshes + 1 ink line set, style materials only, ink tagged', () => {
+  it('merges every destructible into <= 3 meshes, style materials only, no ink lines (W13)', () => {
     const v = createDestructView(data);
     const meshes: THREE.Mesh[] = [];
     v.group.traverse((o) => {
       const m = o as THREE.Mesh & { isLineSegments2?: boolean; isInstancedMesh?: boolean };
-      if (m.isLineSegments2) { expect(m.userData.styleInk).toBe(true); return; }
+      expect(m.isLineSegments2, 'ink lines').toBeFalsy();
       if (!m.isMesh) return;
       expect(['toon', 'toon-noink']).toContain((m.material as THREE.Material).userData.style);
       if (!m.isInstancedMesh) meshes.push(m);
@@ -45,7 +44,7 @@ describe('destructible view', () => {
     expect(meshes.length).toBeLessThanOrEqual(3);
     const s = v.stats();
     expect(s.destructibles).toBe(8);
-    expect(s.destructDraws).toBeLessThanOrEqual(4);                 // + 2 debris instanced meshes only while debris flies
+    expect(s.destructDraws).toBeLessThanOrEqual(3);                 // + 2 debris instanced meshes only while debris flies
     console.log(`[x1] destructible view: ${s.destructDraws} draws, ${s.destructTris} tris (standing + rubble buffers)`);
     v.dispose();
   });
@@ -111,14 +110,5 @@ describe('destructible view', () => {
     expect([chunks.instanceMatrix.array, cans.instanceMatrix.array, chunks.instanceColor!.array]).toEqual(bufs);
     expect(chunks.instanceMatrix.array).toBe(bufs[0]);
     debris.dispose();
-  });
-
-  it('breaks pop a comic word (CRASH! for the wall) from the atlas', () => {
-    expect(WORDS).toContain('CRASH!');
-    expect(WORDS.length).toBeLessThanOrEqual(32);
-    const p = new OnomatopoeiaPicker();
-    const ctx = { localId: 1, now: 0, speciesOf: () => 0, weaponOf: () => 'squeaker_rifle' as const, rand: () => 0.5 };
-    expect(p.pick({ e: 'ability', id: 7, ability: 'destruct:wall_boards', x: 0, y: 0, z: 0 }, ctx)).toMatchObject({ word: 'CRASH!' });
-    expect(p.pick({ e: 'ability', id: 8, ability: 'destruct:tuna_stack', x: 0, y: 0, z: 0 }, ctx)).toMatchObject({ word: 'CLANG!' });
   });
 });

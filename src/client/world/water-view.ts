@@ -17,7 +17,7 @@ const luma = (c: THREE.Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
  * colour's brightness relative to the default shallow water, so the shallows are exactly the tint, deeper water a
  * darker tint, ripples and the shore foam lighter ones (muddy foam, not white). One dot + one multiply per pixel.
  */
-export function tintWater(m: THREE.MeshToonNodeMaterial, key: string): void {
+export function tintWater(m: THREE.NodeMaterial, key: string): void {
   const base = m.colorNode;
   if (!base) return;
   const tint = worldColor(key), ref = luma(worldColor('water'));

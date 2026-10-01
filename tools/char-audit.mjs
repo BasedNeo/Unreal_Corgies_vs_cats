@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Character audit (L1): builds every species × class × tier × a few seeds and checks the MASTER_PLAN §6
 // contract in one table — triangles (hero ≤ 6k, NPC ≤ 3.5k), draw calls (≤ 6), bones (≤ 48),
-// style-system materials only, outline-safe normals on inked meshes (the style_audit.mjs rule),
-// crease ink on rigid parts only, grounded feet, determinism. Exit 1 on any failure.
+// style-system materials only, welded normals on the skinned body, no ink lines at all (W13 LOOK.md: the
+// stylised-realistic look retired the ink hull and the crease lines), grounded feet, determinism. Exit 1 on any failure.
 //   node tools/char-audit.mjs [--seeds 1,2,3] [--json]
 import { tsImport } from 'tsx/esm/api';
 
@@ -42,15 +42,14 @@ for (const species of [0, 1]) for (const cls of CLASS_IDS) for (const isLocal of
     variants.add(av.stats.variant);
     let tris = 0, draws = 0;
     av.root.traverse((o) => {
-      if (o.isLineSegments2) { draws++; if (o.parent?.isSkinnedMesh) errors.push('crease ink on a skinned mesh'); return; }
+      if (o.isLineSegments2) { draws++; errors.push(`${o.name}: ink lines (the look has none)`); return; }
       if (!o.isMesh) return;
       draws++;
       tris += (o.geometry.index ? o.geometry.index.count : o.geometry.getAttribute('position').count) / 3;
       for (const m of [o.material].flat()) {
         if (!m.userData?.style) errors.push(`${o.name}: material not from the style system`);
-        if (m.userData?.style === 'toon' && !o.geometry.userData.outlineReady && splitNormalRatio(o.geometry) > 0.05) errors.push(`${o.name}: split normals under ink`);
+        if (o.isSkinnedMesh && !o.geometry.userData.outlineReady && splitNormalRatio(o.geometry) > 0.05) errors.push(`${o.name}: split normals on the skinned body`);
       }
-      if (!o.isSkinnedMesh && o.material.userData?.style === 'toon' && !o.children.some((c) => c.userData.styleInk)) errors.push(`${o.name}: rigid toon mesh without crease ink`);
     });
     bones = av.skinned.skeleton.bones.length;
     for (let i = 0; i < 20; i++) av.update(frame, 1 / 60);

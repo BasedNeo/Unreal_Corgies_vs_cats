@@ -98,10 +98,10 @@ export const WORLD_EXTRA: Record<string, number> = {
   splinter: 0xf0cf94,
   scorch: 0x6a5e52,
   crateStencil: 0x5a3b1f,
-  // ---- E4: the Yard War front (fortifications.ts, battle-dressing.ts). The first block mirrors keys S4 adds to the
-  // style PALETTE (HARDENED): PALETTE wins when it has them, these keep the world building if a key is renamed.
+  // ---- E4: the Yard War front (fortifications.ts, battle-dressing.ts). The first block mirrors keys the style PALETTE
+  // also has: PALETTE wins when it has them, these keep the world building if a key is renamed.
   sandbag: 0x8b7a57, khaki: 0x8f8160, canvas: 0x9c8c66, olive: 0x535a35, oliveDark: 0x363b24,
-  gunmetal: 0x3a3e44, rust: 0x7a3e22, steel: 0x7d848b, oxidized: 0x56615c, mud: 0x3a2e23, sodium: 0xffa53f,
+  gunmetal: 0x3a3e44, rust: 0x7a3e22, steel: 0x7d848b, oxidized: 0x56615c, mud: 0x3a2e23, sodium: 0xff8c33,
   tennisFelt: 0xb8c448,       // grimy tennis-ball felt (ammo crates, spent balls)
   brassCasing: 0xb8913f,      // spent casings
   soot: 0x1d1813,             // blast scorch core
@@ -109,15 +109,16 @@ export const WORLD_EXTRA: Record<string, number> = {
   mudWet: 0x2a2119,           // churned mud, ruts
   camoA: 0x5a6439, camoB: 0x8a7e53, camoC: 0x3c4129,
   bannerRag: 0xd6cdb8,        // torn banner edge / bleached cloth, crate stencils
-  crateOlive: 0x6f7446,       // tennis-ball ammo crates (olive drab that survives the dusk grade)
+  crateOlive: 0x6f7446,       // tennis-ball ammo crates (olive drab that survives the night grade)
   cable: 0x1f2124,
 };
 
 /**
- * E4: weathering values per palette key for the hardened style factory's per-vertex `surface` attribute
- * (rough, metal, grime, wear). Keys not listed use the 'world' preset.
+ * E4: weathering values per palette key for the style factory's per-vertex `surface` attribute (rough, metal, grime,
+ * wear; dry PBR values, the night's wetness lowers the roughness). Keys not listed use the 'world' preset.
  */
-// half-metal: with metal >= 0.8 the hardened lighting takes diffuse x (1 - metal) and poles go near-black at dusk (K2)
+// half-metal: with metal >= 0.8 the PBR diffuse is x (1 - metal) and, with only the night sky to reflect, poles go
+// near-black (K2)
 const SURF_METAL: [number, number, number, number] = [0.42, 0.5, 0.35, 0.45];
 const SURF_RUST: [number, number, number, number] = [0.82, 0.25, 0.55, 0.3];
 const SURF_WOOD: [number, number, number, number] = [0.82, 0, 0.5, 0.4];

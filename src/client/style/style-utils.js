@@ -1,40 +1,7 @@
-// style-utils.js — renderer-agnostic helpers used by both style-webgl.js and style-webgpu.js.
-// Pass in the THREE namespace you use ('three' or 'three/webgpu') so classes never mix.
-
-import { STYLE } from './style-tokens.js';
-
-/**
- * Soft multi-band ramp value at half-lambert coordinate x = N.L * 0.5 + 0.5 (pure, testable).
- * `steps` bands from `floor` to 1; band edges sit from just before the terminator (x = 0.5, N.L = 0) to x ≈ 0.84, each
- * edge a smoothstep of half-width `softness`, and the lit band keeps a slight slope so big faces still read as form.
- */
-export function rampValue(x, steps = STYLE.toonSteps, floor = STYLE.bandFloor, softness = STYLE.ramp.softness, terminator = STYLE.ramp.terminator) {
-  const n = Math.max(1, steps - 1);
-  const e0 = terminator - 0.06, e1 = terminator + 0.34;
-  const ss = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
-  let v = floor;
-  for (let i = 0; i < n; i++) {
-    const e = n === 1 ? terminator : e0 + ((e1 - e0) * i) / (n - 1);
-    v += ((1 - floor) / n) * ss(e - softness, e + softness, x) * (i === n - 1 ? 0.92 : 1);
-  }
-  // top band: keep a gentle slope up to 1 (stylized-real, not a flat plateau)
-  v += (1 - floor) / n * 0.08 * ss(e1, 1, x);
-  return Math.min(1, v);
-}
-
-/** Soft-banded lighting ramp (HARDENED): linear-filtered, `texels` wide. Used as `gradientMap` by every toon material. */
-export function createRampTexture(THREE, { steps = STYLE.toonSteps, floor = STYLE.bandFloor, softness = STYLE.ramp.softness, texels = STYLE.ramp.texels } = {}) {
-  const data = new Uint8Array(texels);
-  for (let i = 0; i < texels; i++) data[i] = Math.round(255 * rampValue((i + 0.5) / texels, steps, floor, softness));
-  const tex = new THREE.DataTexture(data, texels, 1, THREE.RedFormat);
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-  tex.generateMipmaps = false;
-  tex.needsUpdate = true;
-  tex.name = `style_ramp_${steps}`;
-  return tex;
-}
+// style-utils.js — renderer-agnostic helpers of the style system (style-webgpu.js and the procedural builders).
+// Pass in the THREE namespace you use ('three/webgpu') so classes never mix.
+// W13 (docs/design/LOOK.md): the toon ramp helpers (rampValue, createRampTexture, createToonGradient) are gone with the
+// stepped bands; the look is PBR.
 
 /**
  * Per-vertex surface for merged meshes that mix materials in one draw (fur + armor plates + a steel buckle):
@@ -56,34 +23,26 @@ export function paintSurface(THREE, geometry, s, start = 0, end = geometry.getAt
   return geometry;
 }
 
-/** Stepped lighting ramp (v1, hard bands, nearest-filtered). Kept for labs that want the old flat comic read. */
-export function createToonGradient(THREE, steps = STYLE.toonSteps, floor = STYLE.bandFloor) {
-  const data = new Uint8Array(steps);
-  for (let i = 0; i < steps; i++) {
-    const t = steps === 1 ? 1 : i / (steps - 1);
-    data[i] = Math.round(255 * (floor + (1 - floor) * t));
-  }
-  const tex = new THREE.DataTexture(data, steps, 1, THREE.RedFormat);
-  tex.minFilter = THREE.NearestFilter;   // Nearest = hard bands. Linear would smear them.
-  tex.magFilter = THREE.NearestFilter;
-  tex.generateMipmaps = false;
-  tex.needsUpdate = true;
-  return tex;
-}
-
 /**
- * Average normals of all vertices that share a position (angle-weighted), in place.
- * Inverted-hull outlines push vertices along their normal; with split (faceted) normals
- * the hull tears open at every hard edge. This keeps UVs/topology intact — unlike
- * mergeVertices, which won't weld across UV seams.
- * Hard edges are then drawn by crease lines instead of by shading.
+ * Average normals of all vertices that share a position (angle-weighted), in place. Welds the shading across UV seams
+ * and duplicated poles of smooth shapes (characters, spheres, rings) without touching UVs or topology, unlike
+ * mergeVertices. History: it made the retired ink hull watertight (W13 LOOK.md: no hull any more).
+ * `angleDeg` (optional): only faces within that angle of the vertex's own faces are averaged, so hard edges (box edges,
+ * cylinder caps) keep their faces' normals under the PBR look; omitted = every face at the position (the old weld,
+ * right for organic shapes whose low-poly facets meet at wide angles).
+ * Sets geometry.userData.outlineReady (kept for the callers and audits that test it: "normals are processed").
+ * @param {any} THREE @param {any} geometry @param {number} [precision] @param {number | null} [angleDeg]
  */
-export function smoothNormalsByPosition(THREE, geometry, precision = 1e-4) {
+export function smoothNormalsByPosition(THREE, geometry, precision = 1e-4, angleDeg = null) {
   const pos = geometry.getAttribute('position');
   const idx = geometry.index;
   const triCount = (idx ? idx.count : pos.count) / 3;
   const key = (i) => `${Math.round(pos.getX(i) / precision)},${Math.round(pos.getY(i) / precision)},${Math.round(pos.getZ(i) / precision)}`;
+  const limit = angleDeg === null || angleDeg === undefined ? null : Math.cos((angleDeg * Math.PI) / 180);
+  /** position key -> [nx, ny, nz, weight] per contributing face corner (limited mode) or one running sum */
   const acc = new Map();
+  /** limited mode: each vertex's own angle-weighted face normal (its reference) */
+  const own = limit === null ? null : new Float32Array(pos.count * 3);
   const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3();
   const e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
   const vi = (k) => (idx ? idx.getX(k) : k);
@@ -99,14 +58,35 @@ export function smoothNormalsByPosition(THREE, geometry, precision = 1e-4) {
       // Angle-weighted: a cube corner gets (1,1,1)/sqrt3 no matter how faces are triangulated.
       const ang = e1.subVectors(P[j], P[i]).angleTo(e2.subVectors(P[k], P[i]));
       const key0 = key(ids[i]);
-      const v = acc.get(key0) ?? [0, 0, 0];
-      v[0] += n.x * ang; v[1] += n.y * ang; v[2] += n.z * ang;
-      acc.set(key0, v);
+      if (own) {
+        own[3 * ids[i]] += n.x * ang; own[3 * ids[i] + 1] += n.y * ang; own[3 * ids[i] + 2] += n.z * ang;
+        const list = acc.get(key0) ?? [];
+        list.push(n.x * ang, n.y * ang, n.z * ang);
+        acc.set(key0, list);
+      } else {
+        const v = acc.get(key0) ?? [0, 0, 0];
+        v[0] += n.x * ang; v[1] += n.y * ang; v[2] += n.z * ang;
+        acc.set(key0, v);
+      }
     }
   }
   const normals = new Float32Array(pos.count * 3);
   for (let i = 0; i < pos.count; i++) {
-    const v = acc.get(key(i)) ?? [0, 1, 0];
+    let v = [0, 1, 0];
+    if (own) {
+      const ox = own[3 * i], oy = own[3 * i + 1], oz = own[3 * i + 2];
+      const ol = Math.hypot(ox, oy, oz);
+      const list = acc.get(key(i));
+      if (list) {
+        // a vertex no triangle uses (a sphere's spare pole copy) has no faces of its own: it takes the full weld
+        v = [0, 0, 0];
+        for (let f = 0; f < list.length; f += 3) {
+          const fl = Math.hypot(list[f], list[f + 1], list[f + 2]) || 1;
+          if (ol === 0 || (list[f] * ox + list[f + 1] * oy + list[f + 2] * oz) / (fl * ol) >= limit) { v[0] += list[f]; v[1] += list[f + 1]; v[2] += list[f + 2]; }
+        }
+        if (Math.hypot(v[0], v[1], v[2]) === 0) v = ol > 0 ? [ox, oy, oz] : [0, 1, 0];
+      }
+    } else v = acc.get(key(i)) ?? v;
     const len = Math.hypot(v[0], v[1], v[2]) || 1;
     normals[3 * i] = v[0] / len; normals[3 * i + 1] = v[1] / len; normals[3 * i + 2] = v[2] / len;
   }

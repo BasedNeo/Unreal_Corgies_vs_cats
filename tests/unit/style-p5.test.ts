@@ -1,28 +1,23 @@
 // W10 P5 (the look calls fixed with data), without a GPU:
-// - the exposure follows the sky's time of day (STYLE_EXPOSURE): P4's dusk lift at low sun, at night and in storm,
-//   the pre-P4 exposure by day;
+// - W13: the look is the locked night (docs/design/LOOK.md): the exposure (STYLE_EXPOSURE) and the light no longer
+//   follow the time of day;
 // - WorldData.interiors keep the sky fill (and the character rim + fill) out of tunnels and containers: the style's
 //   interior boxes, the fill light's flag, the CPU twin of the shader test, and The Lot's boxes against its geometry;
 // - the storm overview: a camera far above the ground sees through more of the rain fog than one at player height.
 import { describe, it, expect, afterEach } from 'vitest';
 import * as THREE from 'three/webgpu';
 import {
-  STYLE_EXPOSURE, STYLE_INTERIORS, setStyleInteriors, styleInteriors, interiorOpenAt, createStyleLights, toonMaterial,
-  HardenedToonMaterial,
+  STYLE_EXPOSURE, STYLE_INTERIORS, STYLE_ENV, setStyleInteriors, styleInteriors, interiorOpenAt, createStyleLights, toonMaterial,
+  StyleMaterial,
 } from '../../src/client/style/style-webgpu.js';
 import { STYLE } from '../../src/client/style/style-tokens.js';
-import { YARD_RAMPS, createYardSky, sunState, CLEAR_SKY } from '../../src/client/world/sky';
+import { createYardSky, CLEAR_SKY } from '../../src/client/world/sky';
 import { createWorldData } from '../../src/shared/world/world-data';
 import { LOT_PIPES, lotInteriors } from '../../src/shared/world/the-lot';
 import { pipeFacets } from '../../src/shared/world/lot/pipes';
 import { CONTAINER, CONTAINERS, PIPE } from '../../src/shared/world/lot/layout';
 import { WEATHER_PARAMS } from '../../src/shared/world/weather';
 
-const at = (keys: [number, number][], x: number) => {
-  if (x <= keys[0][0]) return keys[0][1];
-  for (let i = 1; i < keys.length; i++) if (x <= keys[i][0]) { const [x0, a] = keys[i - 1], [x1, b] = keys[i]; return a + ((b - a) * (x - x0)) / (x1 - x0); }
-  return keys[keys.length - 1][1];
-};
 type V3 = [number, number, number];
 const box = (min: V3, max: V3) => ({ min, max });
 
@@ -36,46 +31,36 @@ describe('P5 the storm overview sees through the rain (high cameras only)', () =
     const cam = new THREE.PerspectiveCamera();
     const density = (y: number) => { cam.position.set(0, y, 0); cam.updateMatrixWorld(); sky.update(cam); return (scene.fog as THREE.FogExp2).density; };
     const clearLow = density(1.7), clearHigh = density(114);
-    expect(clearHigh / clearLow).toBeCloseTo(STYLE.mood.highFog.floor, 6);          // clear: the old floor
+    expect(clearHigh / clearLow).toBeCloseTo(STYLE.night.highFog.floor, 6);          // clear: the old floor
     const s = WEATHER_PARAMS.storm;
     sky.setWeather({ ...CLEAR_SKY, cloud: s.cloud, rain: s.rain, storm: s.storm, fog: s.fog, dark: s.dark });
     const stormLow = density(1.7), stormHigh = density(114), wxFog = 1 + 1.5 * s.fog + 0.8 * s.rain;
     expect(stormLow / clearLow).toBeCloseTo(wxFog, 6);                                // at player height the storm is full
-    expect(stormHigh / stormLow).toBeCloseTo(STYLE.mood.highFog.floor / Math.pow(wxFog, STYLE.mood.highFog.wx), 6);
+    expect(stormHigh / stormLow).toBeCloseTo(STYLE.night.highFog.floor / Math.pow(wxFog, STYLE.night.highFog.wx), 6);
     expect(stormHigh).toBeLessThan(stormLow * 0.35);
     expect(density(72) / stormLow).toBeCloseTo(1 - (72 - 12) / 130, 6);              // the West Yard overview (72 m): unchanged
     sky.dispose();
   });
 });
 
-describe('P5 exposure follows the time of day', () => {
-  const dusk = sunState(0.74).elevation, start = sunState(0.68).elevation, noon = sunState(0.5).elevation;
-
-  it('the ramp keeps the dusk lift at low sun and at night, and brings the day back to the pre-P4 exposure (1.0)', () => {
-    const k = YARD_RAMPS.exposure;
-    expect(dusk).toBeLessThan(4);
-    expect(at(k, dusk)).toBe(1);                                     // t = 0.74: P4's 1.25 stays
-    expect(at(k, -10)).toBe(1);                                      // night keeps P4's lift
-    for (const e of [start, noon]) {
-      expect(STYLE.grade.exposure * at(k, e)).toBeGreaterThanOrEqual(0.9);
-      expect(STYLE.grade.exposure * at(k, e)).toBeLessThanOrEqual(1.05);  // pre-P4 was 1.0: daytime is not re-lit
-    }
-    for (let e = 6; e < 42; e += 1) expect(at(k, e + 1)).toBeLessThanOrEqual(at(k, e) + 1e-9); // falls as the sun climbs
-    expect(Math.max(...k.map((x) => x[1]))).toBeLessThanOrEqual(1);  // never above P4's dusk exposure
-  });
-
-  it('the sky writes STYLE_EXPOSURE: 1 at dusk, the day value at noon, 1 again in a storm at noon', () => {
-    const sky = createYardSky(new THREE.Scene(), { clouds: false });
-    sky.setTimeOfDay(0.74);
-    expect(STYLE_EXPOSURE.value).toBeCloseTo(1, 6);
-    sky.setTimeOfDay(0.5);
-    expect(STYLE_EXPOSURE.value).toBeCloseTo(at(YARD_RAMPS.exposure, noon), 6);
-    expect(STYLE_EXPOSURE.value).toBeLessThan(0.9);
+describe('W13 the locked night: the clock does not change the image', () => {
+  it('the exposure multiplier stays 1 and the rig, fog and reflections are the same at any time of day', () => {
+    const scene = new THREE.Scene();
+    scene.add(createStyleLights());
+    const sky = createYardSky(scene, { clouds: false });
+    const snap = () => {
+      const lights = scene.getObjectByName('style_lights')!.children as THREE.Light[];
+      return JSON.stringify([STYLE_EXPOSURE.value, lights.map((l) => [l.intensity, l.color.getHex()]), (scene.fog as THREE.FogExp2).color.getHex(),
+        (STYLE_ENV.horizon.value as THREE.Color).getHex()]);
+    };
+    const at = [0.74, 0.5, 0.25, 0.0].map((t) => { sky.setTimeOfDay(t); return snap(); });
+    expect(new Set(at).size).toBe(1);
+    expect(STYLE_EXPOSURE.value).toBe(1);
+    expect(sky.timeOfDay).toBe(0);                                    // the API still keeps the time
     const storm = WEATHER_PARAMS.storm;
     sky.setWeather({ ...CLEAR_SKY, cloud: storm.cloud, rain: storm.rain, storm: storm.storm, fog: storm.fog, dark: storm.dark });
-    expect(STYLE_EXPOSURE.value).toBeCloseTo(1, 6);                  // a storm is dark at any hour: the lift stays
-    sky.setWeather({ ...CLEAR_SKY });
-    expect(STYLE_EXPOSURE.value).toBeLessThan(0.9);
+    expect(STYLE_EXPOSURE.value).toBe(1);
+    expect(snap()).not.toBe(at[0]);                                   // the weather still does change it (darker)
     sky.dispose();
   });
 });
@@ -122,11 +107,11 @@ describe('P5 interiors: the style side', () => {
   });
 
   it('every hardened material hands the lighting model its open factor; no program key changes (no new variants)', () => {
-    const m = toonMaterial({ color: 0x808080 }) as HardenedToonMaterial;
+    const m = toonMaterial({ color: 0x808080 }) as StyleMaterial;
     const key = m.customProgramCacheKey();
     const lm = (m as unknown as { setupLightingModel(): { open: unknown } }).setupLightingModel();
     expect('open' in lm).toBe(true);
-    expect(key).toBe((toonMaterial({ color: 0x808080 }) as HardenedToonMaterial).customProgramCacheKey());
+    expect(key).toBe((toonMaterial({ color: 0x808080 }) as StyleMaterial).customProgramCacheKey());
   });
 
   it('the CPU twin: a surface facing into a box is shut, one facing out of it is open, a mouth feathers in', () => {

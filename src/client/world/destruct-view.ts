@@ -2,25 +2,23 @@
 // stacks while they stand, low rubble once broken, and a debris burst when they break.
 //
 // Draw calls: every destructible's intact AND rubble prims are merged into one mesh per render group (solid / soft /
-// noink, + one crease-ink LineSegments2 for solid), the prim-mesh way. Each destructible owns index ranges in those
-// buffers; showing or hiding one rewrites only its ranges (degenerate triangles = hidden; its crease segments parked
-// far below the world), so a break costs a small buffer upload and no geometry rebuild or allocation. Debris: two
-// instanced meshes (destruct-debris.ts). Camera: invisible per-destructible proxies (layer 0 while standing).
+// noink), the prim-mesh way (W13: no crease-ink lines). Each destructible owns index ranges in those buffers; showing or
+// hiding one rewrites only its ranges (degenerate triangles = hidden), so a break costs a small buffer upload and no
+// geometry rebuild or allocation. Debris: two instanced meshes (destruct-debris.ts). Camera: invisible
+// per-destructible proxies (layer 0 while standing).
 //
 // Wiring (main.ts): the world view creates this and adds its camera proxies to cameraColliders; per frame
 //   worldView.destruct.sync(states)   (snapshot truth: late joins, resets, missed events)
 // and on every game event
 //   worldView.destruct.onGameEvent(ev)   (`ability destruct:<kind>` -> break now, with debris).
 import * as THREE from 'three/webgpu';
-import { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
-import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import type { EntityState, GameEvent } from '../../shared/protocol';
 import { EFlag, EntityKind } from '../../shared/types';
 import type { Destructible, PrimGroup, WorldData } from '../../shared/world/world-types';
 import { boxAabb } from '../../shared/world/destructibles';
 import { quatYXZ } from '../../shared/world/queries';
 import { hash2 } from '../../shared/world/noise';
-import { Builder, CREASE_DRAW_DISTANCE, creaseEdges, inkMaterial, primGeometry } from './prim-mesh';
+import { Builder, primGeometry } from './prim-mesh';
 import { toonFrom, toonNoInk } from './materials';
 import { worldColor } from './world-palette';
 import { createDebris, type DebrisSystem } from './destruct-debris';
@@ -28,12 +26,10 @@ import { createDebris, type DebrisSystem } from './destruct-debris';
 const GROUPS: PrimGroup[] = ['solid', 'soft', 'noink'];
 /** Baked debris landing surface around each destructible: SURF_N x SURF_N cells of SURF_CELL m. */
 const SURF_CELL = 0.5, SURF_N = 44;
-/** Where hidden crease segments are parked (below everything, never on screen). */
-const PARK_Y = -1e4;
 /** After a break event, ignore "standing" snapshot states this long (interpolated states lag the event). */
 const EVENT_GUARD_MS = 1500;
 
-interface Range { i0: number; i1: number; l0: number; l1: number }
+interface Range { i0: number; i1: number }
 interface Slot {
   def: Destructible;
   /** ranges[state][group]: state 0 = standing, 1 = rubble. */
@@ -50,9 +46,6 @@ interface GroupMesh {
   mesh: THREE.Mesh;
   index: THREE.BufferAttribute;
   orig: Uint16Array | Uint32Array;
-  lines: LineSegments2 | null;
-  lineBuf: THREE.InterleavedBuffer | null;
-  lineOrig: Float32Array | null;
 }
 
 export interface DestructView {
@@ -68,12 +61,13 @@ export interface DestructView {
   /** Lab/tests: force a state by WorldData index (with or without the debris burst). */
   setBroken(index: number, broken: boolean, fx?: boolean): void;
   isBroken(index: number): boolean;
+  /** Retired (W13: no crease lines); a no-op kept for the world view's quality switch. */
   setCreases(on: boolean): void;
   stats(): Record<string, number>;
   dispose(): void;
 }
 
-export function createDestructView(data: WorldData, opts: { creases?: boolean; surfaceAt?: (x: number, z: number, belowY: number) => number } = {}): DestructView {
+export function createDestructView(data: WorldData, opts: { surfaceAt?: (x: number, z: number, belowY: number) => number } = {}): DestructView {
   const defs = data.destructibles ?? [];
   const group = new THREE.Group();
   group.name = 'destructibles';
@@ -107,17 +101,16 @@ export function createDestructView(data: WorldData, opts: { creases?: boolean; s
       const prims = state ? def.rubble : def.prims;
       for (const g of GROUPS) {
         const b = builders.get(g)!;
-        const r: Range = { i0: b.idx.length, i1: 0, l0: b.lines.length, l1: 0 };
+        const r: Range = { i0: b.idx.length, i1: 0 };
         prims.forEach((p, pi) => {
           if ((p.g ?? 'solid') !== g) return;
-          const geo = primGeometry(p, g !== 'noink');
+          const geo = primGeometry(p);
           e.set(p.pitch ?? 0, p.yaw ?? 0, p.roll ?? 0, 'YXZ');
           m.compose(pos.set(p.x, p.y, p.z), q.setFromEuler(e), one);
           color.copy(worldColor(p.col)).multiplyScalar(1 + (hash2(pi, di * 2 + state, 99) - 0.5) * 0.08);
           b.add(geo, m, color);
-          if (g === 'solid') b.addLines(creaseEdges(geo), m);
         });
-        r.i1 = b.idx.length; r.l1 = b.lines.length;
+        r.i1 = b.idx.length;
         ranges[state].push(r);
       }
     }
@@ -157,24 +150,8 @@ export function createDestructView(data: WorldData, opts: { creases?: boolean; s
     const index = geo.getIndex()!;
     index.setUsage(THREE.DynamicDrawUsage);
     const orig = (index.array as Uint16Array | Uint32Array).slice();
-    let lines: LineSegments2 | null = null, lineBuf: THREE.InterleavedBuffer | null = null, lineOrig: Float32Array | null = null;
-    if (b.lines.length) {
-      const lg = new LineSegmentsGeometry();
-      lg.setPositions(new Float32Array(b.lines));
-      lines = new LineSegments2(lg, inkMaterial());
-      lines.name = `${mesh.name}_crease`;
-      lines.userData.styleInk = true;
-      lines.frustumCulled = false;
-      // P3: all destructibles' creases are one line set (the stacks sit in and around the Garage): drawn only near
-      // them. Its bounds are the standing + rubble segments where they stand (computed before any is parked).
-      lines.userData.drawDistance = CREASE_DRAW_DISTANCE;
-      lineBuf = (lg.getAttribute('instanceStart') as THREE.InterleavedBufferAttribute).data;
-      lineBuf.setUsage(THREE.DynamicDrawUsage);
-      lineOrig = (lineBuf.array as Float32Array).slice();
-      mesh.add(lines);
-    }
     group.add(mesh);
-    return { mesh, index, orig, lines, lineBuf, lineOrig };
+    return { mesh, index, orig };
   });
 
   /** Show (copy back) or hide (degenerate / park) one destructible state's ranges. */
@@ -188,13 +165,6 @@ export function createDestructView(data: WorldData, opts: { creases?: boolean; s
         else arr.fill(0, r.i0, r.i1);
         gm.index.addUpdateRange(r.i0, r.i1 - r.i0);
         gm.index.needsUpdate = true;
-      }
-      if (gm.lineBuf && gm.lineOrig && r.l1 > r.l0) {
-        const arr = gm.lineBuf.array as Float32Array;
-        if (on) arr.set(gm.lineOrig.subarray(r.l0, r.l1), r.l0);
-        else for (let k = r.l0; k < r.l1; k += 3) { arr[k] = 0; arr[k + 1] = PARK_Y; arr[k + 2] = 0; }
-        gm.lineBuf.addUpdateRange(r.l0, r.l1 - r.l0);
-        gm.lineBuf.needsUpdate = true;
       }
     });
   }
@@ -216,7 +186,7 @@ export function createDestructView(data: WorldData, opts: { creases?: boolean; s
     for (let i = 0; i < 3; i++) debris.update(1 / 60);
     debris.clear();
     paint(slots[0], 0, false); paint(slots[0], 0, true);
-    for (const gm of meshes) if (gm) { gm.index.clearUpdateRanges(); gm.lineBuf?.clearUpdateRanges(); }
+    for (const gm of meshes) if (gm) gm.index.clearUpdateRanges();
   }
 
   const byEntity = new Map<number, Slot>();
@@ -269,13 +239,13 @@ export function createDestructView(data: WorldData, opts: { creases?: boolean; s
       lastBreakMs = performance.now() - t0;
     },
     isBroken(index) { return slots[index]?.broken ?? false; },
-    setCreases(on) { for (const gm of meshes) if (gm?.lines) gm.lines.visible = on; },
+    setCreases() { /* W13: no crease lines */ },
     stats() {
       let tris = 0;
       for (const gm of meshes) if (gm) tris += gm.orig.length / 3;
       return {
         destructibles: slots.length, destructBroken: slots.filter((s) => s.broken).length,
-        destructDraws: meshes.filter(Boolean).length + meshes.filter((gm) => gm?.lines).length + (debris.alive ? 2 : 0),
+        destructDraws: meshes.filter(Boolean).length + (debris.alive ? 2 : 0),
         destructTris: tris, debrisAlive: debris.alive, destructBreaks: breaksShown, destructLastBreakMs: lastBreakMs,
       };
     },
@@ -283,7 +253,6 @@ export function createDestructView(data: WorldData, opts: { creases?: boolean; s
       for (const gm of meshes) {
         if (!gm) continue;
         gm.mesh.geometry.dispose();
-        gm.lines?.geometry.dispose();
       }
       for (const mt of Object.values(mats)) mt.dispose();
       debris.dispose();

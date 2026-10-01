@@ -206,7 +206,7 @@ describe('The Lot: colliders == visuals', () => {
       const ring = rings.find((r) => Math.hypot(r.x - p.x, r.y - p.y, r.z - p.z) < 1e-6)!;
       expect(ring).toBeTruthy();
       const mine = boxes.filter((b) => Math.hypot(b.x - p.x, b.z - p.z) < PIPE.len);
-      const geo = primGeometry(ring, true);
+      const geo = primGeometry(ring);
       e.set(ring.pitch ?? 0, ring.yaw ?? 0, ring.roll ?? 0, 'YXZ');
       m.compose(new THREE.Vector3(ring.x, ring.y, ring.z), q.setFromEuler(e), new THREE.Vector3(1, 1, 1));
       const pos = geo.getAttribute('position');

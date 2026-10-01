@@ -1,6 +1,7 @@
 // OWNER: L5 (juice), X3 (weapons + combat feedback). FX director: turns GameEvents + entity states into pooled
-// particles, tracers, impact marks, light pulses, comic onomatopoeia and camera reactions.
-// Draw calls: 4 total (solid particles, glow particles, words, impact decals) + a fixed pool of 0–2 pulse lights.
+// particles, tracers, impact marks, light pulses and camera reactions. W13 (docs/design/LOOK.md): the stylised-realistic
+// look has no comic onomatopoeia (the "POW!" / "BARK!" billboards are retired); hit feedback stays.
+// Draw calls: 3 total (solid particles, glow particles, impact decals) + a fixed pool of 0–2 pulse lights.
 //
 //   const fx = createFx(ctx.scene, ctx.camera, views, { heightAt, world: worldData });  // views: EntityViews
 //   bus.on('game', (ev) => { const r = fx.onGameEvent(ev); if (r.shake) cam.shake(r.shake); ... });
@@ -18,8 +19,6 @@ import { EFlag, EntityKind, Species } from '../../shared/types';
 import { WEAPONS } from '../../shared/content/weapons';
 import { FxRng, ParticlePool } from './particle-pool';
 import { createParticleMesh, type ParticleMesh } from './particle-mesh';
-import { createOnomatopoeiaView, type OnomatopoeiaView } from './onomatopoeia-view';
-import { OnomatopoeiaPicker, type WordContext } from './onomatopoeia';
 import { HitStop, makeReaction, reactionFor, type FxReaction, type ReactionContext } from './reactions';
 import { WeaponTable } from './weapon-fx';
 import { DecalKind, DecalPool } from './decal-pool';
@@ -43,7 +42,6 @@ export type FxQuality = 'low' | 'medium' | 'high';
 export interface FxOptions {
   solidCapacity?: number;
   glowCapacity?: number;
-  wordCapacity?: number;
   quality?: FxQuality;
   /** Terrain height for bouncing debris (e.g. worldData.height). Defaults to the event's own y (or `world`). */
   heightAt?: (x: number, z: number) => number;
@@ -56,7 +54,7 @@ export interface FxOptions {
 export interface FxEventContext { localId?: number; states?: Map<number, EntityState> }
 
 export interface FxStats {
-  solid: number; glow: number; words: number; decals: number; lights: number; drawCalls: number; cpuMs: number; peakCpuMs: number;
+  solid: number; glow: number; decals: number; lights: number; drawCalls: number; cpuMs: number; peakCpuMs: number;
 }
 
 export interface Fx {
@@ -96,20 +94,18 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
   solidPool.freshFirstFrame = glowPool.freshFirstFrame = true;
   const solidMesh: ParticleMesh = createParticleMesh(solidPool.capacity, 'solid');
   const glowMesh: ParticleMesh = createParticleMesh(glowPool.capacity, 'glow');
-  const words: OnomatopoeiaView = createOnomatopoeiaView(opts.wordCapacity ?? 14);
   const decalPool = new DecalPool(DECAL_CAPACITY, tier0.decals);
   const decalMesh: DecalMesh = createDecalMesh(DECAL_CAPACITY);
   const lights = new PulseLights(2, tier0.lights);
   const group = new THREE.Group();
   group.name = 'fx';
-  group.add(decalMesh.mesh, solidMesh.mesh, glowMesh.mesh, words.mesh, lights.group);
+  group.add(decalMesh.mesh, solidMesh.mesh, glowMesh.mesh, lights.group);
   scene.add(group);
 
   const rng = new FxRng(opts.seed ?? 0xc0ffee);
   const pools: P.FxPools = { solid: solidPool, glow: glowPool, rng, density: tier0.density };
   let casings = tier0.casings;
   const weapons = new WeaponTable();
-  const picker = new OnomatopoeiaPicker();
   const hitStop = new HitStop();
   const heightAt = opts.heightAt ?? (opts.world ? (x: number, z: number) => opts.world!.height(x, z) : null);
   // Without the world (not wired yet), impacts still know the terrain from heightAt: grass/dirt puffs + ground holes.
@@ -123,11 +119,9 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
   const camPos = new THREE.Vector3();
   const muzzle = new THREE.Vector3();
   const reaction: FxReaction = makeReaction();
-  const stats: FxStats = { solid: 0, glow: 0, words: 0, decals: 0, lights: 0, drawCalls: 0, cpuMs: 0, peakCpuMs: 0 };
+  const stats: FxStats = { solid: 0, glow: 0, decals: 0, lights: 0, drawCalls: 0, cpuMs: 0, peakCpuMs: 0 };
 
-  const speciesOf = (id: number) => states.get(id)?.species ?? -1;
   const weaponOf = (wpn: number) => weapons.id(wpn);
-  const wordCtx: WordContext = { localId: -1, now: 0, speciesOf, weaponOf, rand: () => rng.next() };
   const reactCtx: ReactionContext = { localId: -1, lx: 0, ly: 0, lz: 0, hasLocal: false, weaponOf };
 
   // Per-entity accumulators for continuous emitters (sprint dust, projectile trails).
@@ -160,12 +154,6 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
     const v = views?.get(id);
     if (v) return v.avatar.muzzleWorld(muzzle);
     return muzzle.set(fx, fy, fz);
-  };
-  const word = (ev: GameEvent, x: number, y: number, z: number) => {
-    // Never pop a word in the player's face (own death/jumps sit right under the camera; the HUD covers those).
-    if (near(x, y, z, 3)) return;
-    const pick = picker.pick(ev, wordCtx);
-    if (pick) words.spawn(pick.word, x, y, z, pick.scale);
   };
   /** A persistent mark where the surface allows it. */
   const mark = (x: number, y: number, z: number, radius: number, kind: number) => {
@@ -235,7 +223,6 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
     }
     if (projectile) {
       if (w.tracer === 'disc') P.discWhoosh(pools, m.x, m.y, m.z, m.x + dx * 1.6, m.y + dy * 1.6, m.z + dz * 1.6);
-      word(ev, m.x, m.y + 0.5, m.z);
       return; // the round is an entity: its trail comes from states, its blast from 'explode'
     }
     if (w.tracer === 'bullet') W.tracer(pools, m.x, m.y, m.z, ev.hx, ev.hy, ev.hz, w.tracerColor, w.tracerGlow, w.tracerWidth);
@@ -263,7 +250,6 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
         }
       }
     }
-    word(ev, m.x, m.y + 0.5, m.z);
   };
 
   const fx: Fx = {
@@ -287,9 +273,7 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
       stats.glow = glowMesh.sync(glowPool);
       stats.decals = decalMesh.sync(decalPool);
       stats.lights = lights.update(dt);
-      words.update(dt, camera);
-      stats.words = words.count;
-      stats.drawCalls = (stats.solid > 0 ? 1 : 0) + (stats.glow > 0 ? 1 : 0) + (stats.words > 0 ? 1 : 0) + (stats.decals > 0 ? 1 : 0);
+      stats.drawCalls = (stats.solid > 0 ? 1 : 0) + (stats.glow > 0 ? 1 : 0) + (stats.decals > 0 ? 1 : 0);
       const ms = performance.now() - t0;
       stats.cpuMs = stats.cpuMs * 0.9 + ms * 0.1;
       stats.peakCpuMs = Math.max(stats.peakCpuMs * 0.995, ms);
@@ -298,7 +282,6 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
     onGameEvent(ev, ctx) {
       if (ctx?.states) states = ctx.states;
       if (ctx?.localId !== undefined) localId = ctx.localId;
-      wordCtx.localId = localId; wordCtx.now = clock;
       const me = states.get(localId);
       reactCtx.localId = localId; reactCtx.hasLocal = !!me;
       if (me) { reactCtx.lx = me.x; reactCtx.ly = me.y; reactCtx.lz = me.z; }
@@ -320,14 +303,12 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
           const cl = Math.sqrt(cx * cx + cy * cy + cz * cz) || 1;
           cx /= cl; cy /= cl; cz /= cl;
           if (victim && victim.kind !== EntityKind.Vehicle && victim.kind !== EntityKind.Destructible) W.comicSplat(pools, ev.x, ev.y, ev.z, cx, cy, cz, ev.crit);
-          word(ev, ev.x, ev.y + 0.45, ev.z);
           break;
         }
         case 'death': {
           const s = states.get(ev.id);
           if (!s || !near(s.x, s.y, s.z)) break;
           P.deathPoof(pools, s.x, s.y, s.z, s.species === Species.Cat);
-          word(ev, s.x, s.y + 1.7, s.z);
           break;
         }
         case 'spawn': {
@@ -339,14 +320,12 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
           const s = states.get(ev.id);
           if (!s || !near(s.x, s.y, s.z, 50)) break;
           P.jumpDust(pools, s.x, s.y, s.z, ev.double);
-          word(ev, s.x, s.y + 0.3, s.z);
           break;
         }
         case 'land': {
           const s = states.get(ev.id);
           if (!s || !near(s.x, s.y, s.z, 50) || ev.impact < 4) break;
           P.landDust(pools, s.x, s.y, s.z, ev.impact);
-          word(ev, s.x, s.y + 0.4, s.z);
           break;
         }
         case 'explode': {
@@ -359,33 +338,23 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
           surfaces.classify(ev.x, ev.y, ev.z, 0, -1, 0, sHit);
           if (sHit.what === 0 && ev.y - gy < 1) { surfaces.classify(ev.x, gy, ev.z, 0, -1, 0, sHit); }
           if (sHit.what !== 0) mark(ev.x, sHit.what === 1 ? gy : ev.y, ev.z, Math.min(2.4, 0.3 + ev.r * 0.38), DecalKind.Scorch);
-          word(ev, ev.x, ev.y + 1.4, ev.z);
           break;
         }
         case 'pickup': {
           const s = states.get(ev.id);
-          if (s && near(s.x, s.y, s.z)) { P.pickupSparkle(pools, s.x, s.y, s.z); word(ev, s.x, s.y + 1.8, s.z); }
-          break;
-        }
-        case 'bark': {
-          const s = states.get(ev.id);
-          if (s && near(s.x, s.y, s.z, 45)) word(ev, s.x, s.y + 2, s.z);
+          if (s && near(s.x, s.y, s.z)) P.pickupSparkle(pools, s.x, s.y, s.z);
           break;
         }
         case 'ability': {
           if (!near(ev.x, ev.y, ev.z)) break;
           if (ev.ability.startsWith('destruct:')) {
-            // X1: a destructible broke (its planks/cans fly in the world view): dust, splinters, the comic word
+            // X1: a destructible broke (its planks/cans fly in the world view): dust and splinters
             const wall = ev.ability === 'destruct:wall_boards';
             P.destructDust(pools, ev.x, ev.y, ev.z, ground(ev.x, ev.y - 1, ev.z), wall ? 2.4 : 1.4, wall);
-            // the word pops on the viewer's side of the prop (a wall's center sits inside the wall plane)
-            const dx = camPos.x - ev.x, dz = camPos.z - ev.z, l = Math.sqrt(dx * dx + dz * dz) || 1, off = wall ? 1.4 : 0.8;
-            word(ev, ev.x + (dx / l) * off, ev.y + (wall ? 2.4 : 1.6), ev.z + (dz / l) * off);
             break;
           }
           const s = states.get(ev.id);
           P.abilityRing(pools, ev.x, ev.y, ev.z, s?.team ?? 0, ev.ability === 'bark_blast');
-          word(ev, ev.x, ev.y + 2, ev.z);
           break;
         }
         default:
@@ -409,7 +378,7 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
     setWorld(world) { surfaces.setWorld(world ?? (heightAt ? terrainOnly(heightAt) : null)); },
     dispose() {
       scene.remove(group);
-      solidMesh.dispose(); glowMesh.dispose(); words.dispose(); decalMesh.dispose(); lights.dispose();
+      solidMesh.dispose(); glowMesh.dispose(); decalMesh.dispose(); lights.dispose();
     },
   };
   return fx;

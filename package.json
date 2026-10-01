@@ -19,6 +19,7 @@
     "test:e2e": "playwright test",
     "gate": "node tools/gate.mjs",
     "godot": "bash tools/godot/play.sh",
+    "twin": "vite --open '/?mode=slab'",
     "gate:fast": "node tools/gate.mjs --fast",
     "server:prod": "tsx server/prod.ts",
     "start": "vite build && tsx server/prod.ts",

@@ -125,6 +125,7 @@ func _update_camera(delta: float) -> void:
 	var settle := exp(-delta * 3.0 / float(T.RIFLE.recoil_recover))
 	kick_pitch *= settle
 	kick_yaw *= settle
+	yaw_node.position.y = T.height(species) * 0.9 + step_offset  # a step-up eases the view up with the model
 	yaw_node.rotation.y = cam_yaw + kick_yaw
 	pitch_node.rotation.x = cam_pitch + kick_pitch
 	var f := 1.0 - exp(-14.0 * delta)

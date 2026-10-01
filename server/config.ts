@@ -1,6 +1,7 @@
 // Server configuration from environment variables (all optional). Shared by server/index.ts
 // (WebSocket authority, dev) and server/prod.ts (static dist/ + WebSocket on one port).
 import type { WireEncoding } from '../src/host/wire';
+import { SLAB } from '../src/shared/content/modes';
 
 export interface ServerConfig {
   host: string;
@@ -143,9 +144,11 @@ export function loadConfig(env: Env = process.env, defaults: Partial<ServerConfi
   };
 }
 
-/** Default bot fill per mode: PvP modes fill both teams; skirmish/boss-rush a corgi squad; adventure a squad of four. */
+/** Default bot fill per mode: PvP modes fill both teams; skirmish/boss-rush a corgi squad; adventure a squad of four;
+ *  slab (W13) a 1v1 (SLAB.teamSize a side: the human plays one bot). */
 export function botsForMode(mode: string, fallback: [number, number] = [3, 0]): [number, number] {
   if (mode === 'team-deathmatch' || mode === 'core-rush' || mode === 'base-assault') return [4, 4];
+  if (mode === 'slab') return [SLAB.teamSize, SLAB.teamSize];
   if (mode === 'adventure') return [4, 0];
   return fallback;
 }

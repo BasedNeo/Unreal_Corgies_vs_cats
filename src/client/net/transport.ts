@@ -4,7 +4,28 @@
 // ServerMsg objects before emulation, so emulated loss behaves like UDP loss on a real link.
 import type { ClientMsg, ServerMsg } from '../../shared/protocol';
 import { SnapDecoder, decodeServerFrame } from '../../host/wire';
-import type { WorkerBootConfig } from '../../host/worker-host';
+import type { SlabOverrides, WorkerBootConfig } from '../../host/worker-host';
+
+/**
+ * W13: an offline slab match shortened from the page URL, for tests and proofs: &slabWin=3 (first to 3),
+ * &slabTime=20 (20 s of regulation), &slabOvertime=5 (at most 5 s of overtime). Clamped; empty or non-numeric values
+ * are ignored; undefined when none is set. main.ts passes it to the worker only (WorkerBootConfig.slab); online
+ * rooms never see it.
+ */
+export function slabOverridesFromSearch(search: string): SlabOverrides | undefined {
+  const p = new URLSearchParams(search);
+  const num = (k: string, min: number, max: number): number | undefined => {
+    const raw = p.get(k);
+    const n = raw === null || raw.trim() === '' ? NaN : Number(raw);
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : undefined;
+  };
+  const o: SlabOverrides = {};
+  const win = num('slabWin', 1, 999), time = num('slabTime', 1, 3600), ot = num('slabOvertime', 0, 600);
+  if (win !== undefined) o.winScore = Math.round(win);
+  if (time !== undefined) o.timeLimit = time;
+  if (ot !== undefined) o.overtimeMax = ot;
+  return Object.keys(o).length ? o : undefined;
+}
 
 export interface TransportStats {
   bytesIn: number;

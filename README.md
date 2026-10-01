@@ -26,13 +26,17 @@ to 60 wins, then rematch.
 ## Play the web twin (Three.js)
 ```bash
 npm install
-npm run dev                 # http://localhost:5173 → main menu → pick a MATCH → PLAY
+npm run twin                # the same slab match in the browser (opens /?mode=slab)
+npm run dev                 # http://localhost:5173 → main menu → pick a MATCH → PLAY (SLAB is the twin)
 ```
+The twin plays the Godot match on the same six Lot kit GLBs with the same rules (Godot wins where they disagree):
+hold the slab alone to score 1/s, first to 60 or the most at 3:00, R or Enter rematch, `&2v2` for 2v2. Same look:
+stylised-realistic wet night, no ink. Same sounds (`public/assets/audio`, SYNTH placeholders).
 - Use a desktop browser with a real GPU (Chrome or Edge; WebGPU where available).
 - Online on your LAN: run `npm run start` (it builds, then serves the game and its WebSocket on port 8787). Friends
   open `http://<your-ip>:8787` and use ROOMS ▸ to join your room.
 - Useful URL params:
-  - `?mode=team-deathmatch|core-rush|yard-skirmish`
+  - `?mode=slab|team-deathmatch|core-rush|yard-skirmish`
   - `?boss=1` (boss rush: the Vac-Tank) or `?boss=madame_pointille` (the sniper elite)
   - `?mode=adventure&chapter=yard_day|tall_grass|garage_job|laser_dawn|porch_siege|last_ball`
   - `?quality=low|medium|high`

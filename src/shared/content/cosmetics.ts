@@ -16,7 +16,7 @@ import { TAUNTS } from './taunts';
 export type CosmeticSlot = 'coat' | 'neck' | 'taunt' | 'rank';
 export type CosmeticSpecies = 'corgi' | 'cat' | 'both';
 /** The modes that have a first-win unlock (the room modes). */
-export const FIRST_WIN_MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault', 'boss-rush', 'adventure'] as const;
+export const FIRST_WIN_MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault', 'boss-rush', 'adventure', 'slab'] as const;
 export type FirstWinMode = (typeof FIRST_WIN_MODES)[number];
 
 export type CosmeticUnlock =
@@ -74,6 +74,7 @@ export const COSMETICS: readonly CosmeticDef[] = [
   { id: 'taunt_cat_royal', slot: 'taunt', species: 'cat', name: 'Royal Highness', unlock: win('team-deathmatch') },
   { id: 'taunt_cat_hunter', slot: 'taunt', species: 'cat', name: 'Apex Hunter', unlock: gold('porch_siege') },
   { id: 'taunt_cat_midnight', slot: 'taunt', species: 'cat', name: '3 AM Zoomies', unlock: win('adventure') },
+  { id: 'taunt_cat_sunspot', slot: 'taunt', species: 'cat', name: 'Sun Spot', unlock: win('slab') }, // W13 slab
   { id: 'taunt_fetch', slot: 'taunt', species: 'both', name: 'Fetch This!', unlock: win('base-assault') }, // W9 G4a
   // --- rank (K3; the veteran kit + the species' insignia; no stat changes) ---
   { id: 'rank_none', slot: 'rank', species: 'both', name: 'No Rank', unlock: D },
@@ -98,6 +99,7 @@ export const TAUNT_PACKS: Readonly<Record<string, readonly string[]>> = {
   taunt_cat_royal: ['You may kiss the paw.', 'Peasant.', 'I own this yard. And you.', 'Bow before the floof.', 'Your defeat bores me.'],
   taunt_cat_hunter: ['Pounce. Pounce. Win.', 'You squeak like a toy.', 'Stalk. Wiggle. Gotcha.', 'Caught one!', 'Red dot? Red YOU.'],
   taunt_cat_midnight: ['3 AM. My hour.', 'Mrrrp? MRRRP!', 'Chaos is a lifestyle.', 'Knocked you off the shelf.', 'Blep.', 'Zoom. Zoom. Gone.'],
+  taunt_cat_sunspot: ['I sat here first.', 'If I fits, I sits.', 'Warm slab. Cold you.', 'Off my spot.', 'Mine. All of it.'], // W13 slab
   taunt_fetch: ['Tag, you lost it!', 'Squeak squeak. Mine.', 'Finders keepers!', 'Go fetch, slowpoke.', 'Ball? What ball?'],
 };
 
@@ -204,6 +206,7 @@ const MODE_WIN_HINT: Record<FirstWinMode, string> = {
   'base-assault': 'Win a Base Assault',
   'boss-rush': 'Beat a boss in Boss Rush',
   adventure: 'Finish an Adventure chapter',
+  slab: 'Win a Slab match',
 };
 
 /** Locker text for a locked item ("Reach level 4", "Gold paw: Yard Day", "Win a Core Rush"). */

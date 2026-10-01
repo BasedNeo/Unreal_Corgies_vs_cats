@@ -33,7 +33,23 @@ is copied into this project.
 - **Physics layers:** 1 world, 2 pets, 3 hitboxes (rifle rays hit 1 and 3).
 - **Look → all:** `look/look.gd` has `const LOOK := "stylised-realistic"`; a test fails on any other value.
 
+## Sound (W13)
+`game/sfx.gd` plays the shared cues at runtime from `../../public/assets/audio/` (the same WAVs as the web twin, made by
+`tools/audio/synth-cues.mjs`, SYNTH placeholders): rifle shot (3D at the muzzle), hit confirm, own / enemy slab tick,
+match end win / lose. No music. A missing file warns once and stays silent.
+
+## Flags (user args after `--`)
+- `--2v2`, `--bots-only`, `--debug`, `--perf N`: match options (G-GAME).
+- `--demo`: bots and the human start by the slab.
+- `--lineup <m>` (+ `--lineup-side`): the READ check: the human stands <m> from the slab, one corgi and one cat bot
+  stand still on it (facing, or in profile).
+- `--sfx-log`: prints `SFX <cue> <seconds>` for every cue played.
+- `--shot <png> [--frames N] [--cam x,y,z:tx,ty,tz]`: save a screenshot and quit (`proof.gd`).
+
 ## Proof
-- **Headless:** `godot --headless --path engines/godot --script res://tests/run.gd` runs every `tests/test_*.gd`.
+- **Headless:** `godot --headless --path engines/godot --script res://tests/run.gd` runs every `tests/test_*.gd`
+  (`-- --only <text>` runs the files whose name contains <text>).
+- **Bot balance:** `godot --headless --path engines/godot --script res://tests/balance.gd -- --format 2v2 --n 20 --seed 1
+  --speed 30` plays full bots-only matches and prints the win split (docs/handoff/G-BOT.md).
 - **Screenshots:** `xvfb-run -a godot --path engines/godot --rendering-method gl_compatibility --rendering-driver opengl3 -- --shot <png>`
   (container: Mesa llvmpipe). The project itself defaults to Forward+.

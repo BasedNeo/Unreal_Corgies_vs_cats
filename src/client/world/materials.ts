@@ -1,99 +1,90 @@
-// World materials, all toon-lit and sharing the style system's gradient (bands, floor) from toon():
-//  - terrainMaterial: palette ground (lawn stripes, clover, un-mowed edges, dirt, sand, mulch, mud)
-//    from world-space TSL noise + the chunk's `surf` attribute. No image textures.
-//  - toonNoInk: toon lighting WITHOUT the ink hull (foliage that sways, glass, water, decals). The
-//    TSL toonOutlinePass inks every material flagged isMeshToonNodeMaterial; clearing the flag on our
-//    own instance opts it out (lighting model unchanged). PROPOSED for style-webgpu.js.
-//  - waterMaterial: translucent stylized water (depth tint, shore foam, drifting ripple rings).
-//  - G1: WORLD_WEATHER uniforms (wet, rain, wind) shared by every world material: rain darkens and
-//    cools the ground, fills puddles in flat low spots and on paths (with rain ripple rings), and wind
-//    scales foliage sway amplitude (never its frequency, so gusts don't make the grass jump).
-//  - E4 (W7 HARDENED): every world material comes from the hardened style factory (toonMaterial: weathering masks,
-//    roughness/specular, wet sheen) when the style lane provides it, with a SURFACES preset per use (props 'world' or
-//    per-vertex `surface` values from prim-mesh, boards 'wood', ground 'ground', foliage, water); otherwise the v1
-//    toon path. The terrain reads the `battle` vertex attribute (terrain-view.ts from fortifications.ts): scorch,
-//    churned mud, standing puddles (extra wetness: near-mirror water even in clear weather) and twin tyre ruts.
+// World materials, all from the style factory (style-webgpu.js toonMaterial: the stylised-realistic StyleMaterial, a
+// PBR MeshStandardNodeMaterial with weathering and the night's wetness; docs/design/LOOK.md):
+//  - terrainMaterial: palette ground (lawn stripes, clover, un-mowed edges, sand, the E4 battle ground) from world-space
+//    TSL noise + the chunk's `surf` attribute; W13: with `ground: 'asphalt'` (The Lot) trodden ground (dirt, mulch,
+//    gravel, mud) is the Godot build's wet night asphalt [engines/godot/look/wet_ground.gdshader]; on the West Yard
+//    (`ground: 'yard'`) it stays wet dirt, mulch and sand with the same puddles. The asphalt: a dark binder with light aggregate, paving lanes with
+//    tar-sealed joints and patch repairs, cracks on old surfaces, broken aggregate on slopes; the palette colour only
+//    shades it (luminance), never tints it; a wet film (rough 0.3–0.45), puddles on the flat (mirror 0.03, flat, rain
+//    ripples) with a damp rim. No image textures.
+//  - toonNoInk: the factory's 'toon-noink' family (foliage that sways, glass, water, decals). Nothing is inked on the
+//    web any more (W13); the tag only groups these for the audits.
+//  - waterMaterial: translucent water (depth tint, shore foam, drifting ripple rings), near-mirror.
+//  - G1: WORLD_WEATHER uniforms (wet, rain, wind) shared by every world material: rain wets the ground further (the
+//    night never dries: STYLE_WEATHER.floor), grows the puddles and rings them, and wind scales foliage sway amplitude
+//    (never its frequency, so gusts don't make the grass jump).
+//  - E4: per-use SURFACES presets (props 'world' or per-vertex `surface` values from prim-mesh, boards 'wood', ground
+//    'ground', foliage, water). The terrain reads the `battle` vertex attribute (terrain-view.ts from fortifications.ts):
+//    scorch, churned mud, standing puddles and twin tyre ruts.
 import * as THREE from 'three/webgpu';
 import {
-  attribute, positionWorld, positionLocal, uv, time, sin, vec3, float, mix, smoothstep, step, fract,
-  mx_noise_float, uniform, abs, length, vec2, max, min, normalize, normalView, transformNormalToView, floor, normalWorld,
+  attribute, positionWorld, positionLocal, uv, time, sin, vec3, float, mix, smoothstep, step, fract, dot, fwidth,
+  mx_noise_float, mx_noise_vec3, mx_worley_noise_vec2, uniform, abs, length, vec2, max, min, normalize, normalView,
+  transformNormalToView, floor, normalWorldGeometry, clamp, luminance,
 } from 'three/tsl';
-import * as STYLE_FACTORY from '../style/style-webgpu.js';
+import { toonMaterial, STYLE_WEATHER, type StyleMaterial } from '../style/style-webgpu.js';
+import { STYLE } from '../style/style-tokens.js';
 import { worldColor } from './world-palette';
 
-const { toon } = STYLE_FACTORY;
-/** The hardened factory (W7 S4): a new uncached HardenedToonMaterial for code that sets its own nodes. */
-const hardenedFactory = (STYLE_FACTORY as unknown as Record<string, unknown>).toonMaterial as
-  | ((p: Record<string, unknown>) => THREE.MeshToonNodeMaterial) | undefined;
-/** True when world materials are HardenedToonMaterials (weathering, roughness, wetNode/roughnessNode hooks). */
-export const HARDENED_WORLD = typeof hardenedFactory === 'function';
+/** The material class every world material is (the style factory's StyleMaterial). */
+export type WorldMaterial = StyleMaterial;
 
 type Params = {
   color?: number; vertexColors?: boolean; side?: THREE.Side; transparent?: boolean; opacity?: number;
-  /** E4: SURFACES preset of the hardened factory (default 'world'). */
+  /** E4: SURFACES preset of the style factory (default 'world'). */
   surface?: string;
   /** E4: read (rough, metal, grime, wear) from the geometry's `surface` vec4 attribute (prim-mesh builds it). */
   surfaceAttr?: boolean;
-  /** internal: toon-lit without the ink hull. */
+  /** internal: false = the 'toon-noink' family tag. */
   ink?: boolean;
+  /** W13: overrides of the preset's surface values (e.g. wetK 0 for a material that wets itself). */
+  wetK?: number; puddle?: number; rough?: number; metal?: number;
 };
 
-/** New toon material sharing toon()'s gradient map (same bands as every styled object). */
-export function toonFrom(p: Params = {}): THREE.MeshToonNodeMaterial {
-  if (hardenedFactory) {
-    const m = hardenedFactory({
-      color: p.color ?? 0xffffff, vertexColors: !!p.vertexColors, side: p.side ?? THREE.FrontSide,
-      transparent: !!p.transparent, opacity: p.opacity ?? 1, surface: p.surface ?? 'world', surfaceAttr: !!p.surfaceAttr, ink: p.ink ?? true,
-    });
-    return m;
-  }
-  const ref = toon({ color: 0xffffff }) as THREE.MeshToonNodeMaterial;
-  const m = new THREE.MeshToonNodeMaterial({
-    color: p.color ?? 0xffffff, gradientMap: ref.gradientMap, vertexColors: !!p.vertexColors,
-    side: p.side ?? THREE.FrontSide, transparent: !!p.transparent, opacity: p.opacity ?? 1,
-  });
-  m.userData.style = 'toon';
-  return m;
+/** A new (uncached) world material from the style factory. */
+export function toonFrom(p: Params = {}): WorldMaterial {
+  return toonMaterial({
+    color: p.color ?? 0xffffff, vertexColors: !!p.vertexColors, side: p.side ?? THREE.FrontSide,
+    transparent: !!p.transparent, opacity: p.opacity ?? 1, surface: p.surface ?? 'world', surfaceAttr: !!p.surfaceAttr, ink: p.ink ?? true,
+    ...(p.wetK !== undefined ? { wetK: p.wetK } : {}), ...(p.puddle !== undefined ? { puddle: p.puddle } : {}),
+    ...(p.rough !== undefined ? { rough: p.rough } : {}), ...(p.metal !== undefined ? { metal: p.metal } : {}),
+  }) as WorldMaterial;
 }
 
-/**
- * Toon-lit material that the ink outline pass skips. toonOutlinePass inks any material with
- * isMeshToonMaterial OR isMeshToonNodeMaterial — and MeshToonNodeMaterial inherits
- * isMeshToonMaterial = true through setDefaultValues(new MeshToonMaterial()), so BOTH must be cleared.
- */
-export function toonNoInk(p: Params = {}): THREE.MeshToonNodeMaterial {
-  if (hardenedFactory) return toonFrom({ ...p, ink: false });
-  const m = toonFrom(p);
-  const flags = m as unknown as { isMeshToonNodeMaterial: boolean; isMeshToonMaterial: boolean };
-  flags.isMeshToonNodeMaterial = false;
-  flags.isMeshToonMaterial = false;
-  m.userData.style = 'toon-noink';
-  return m;
+/** The same material in the factory's 'toon-noink' family (foliage, glass, water, decals). */
+export function toonNoInk(p: Params = {}): WorldMaterial {
+  return toonFrom({ ...p, ink: false });
 }
 
 const c = (key: string) => uniform(worldColor(key).clone());
 
 /** Weather uniforms shared by all world materials (driven by the world view from the weather sample). */
 export const WORLD_WEATHER = {
-  /** Ground wetness 0..1 (darkening, puddles). */
+  /** Ground wetness 0..1 (the materials never go below STYLE_WEATHER.floor). */
   wet: uniform(0),
   /** Rain intensity 0..1 (puddle ripple rings). */
   rain: uniform(0),
   /** Foliage sway amplitude multiplier (1 = calm breeze). */
   wind: uniform(1),
-  /** Up to two running sprinklers: (x, z, reach, wetness 0..1) — their sweep darkens the grass. */
+  /** Up to two running sprinklers: (x, z, reach, wetness 0..1) — their sweep wets the grass. */
   spr0: uniform(new THREE.Vector4(0, 0, 1, 0)),
   spr1: uniform(new THREE.Vector4(0, 0, 1, 0)),
 };
 
-export interface TerrainMaterial { material: THREE.MeshToonNodeMaterial; uniforms: Record<string, ReturnType<typeof uniform>> }
+export interface TerrainMaterial { material: WorldMaterial; uniforms: Record<string, ReturnType<typeof uniform>> }
 
-export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.4, detail = true, bedLevel = -0.12 }: { ink?: boolean; yardHalf?: number; flatten?: number; detail?: boolean; /** W8: below this height the ground reads as a wet pond bed (The Lot's dry pits sit far lower). */ bedLevel?: number } = {}): TerrainMaterial {
+const lin = (a: readonly number[]) => { const k = new THREE.Color().setRGB(a[0], a[1], a[2], THREE.SRGBColorSpace); return vec3(k.r, k.g, k.b); };
+
+export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0, detail = true, bedLevel = -0.12, ground = 'yard' }: { ink?: boolean; yardHalf?: number; /** bends the shading normal toward up (0 = the true normal) */ flatten?: number; detail?: boolean; /** W8: below this height the ground reads as a wet pond bed (The Lot's dry pits sit far lower). */ bedLevel?: number; /** W13: 'asphalt' = trodden ground is the Godot wet paved asphalt (The Lot); 'yard' = it stays wet dirt, mulch and sand (the West Yard is a back yard) */ ground?: 'asphalt' | 'yard' } = {}): TerrainMaterial {
+  const paving = ground === 'asphalt';
+  const G = STYLE.ground;
   const U = {
     grass: c('grass'), grassDark: c('grassDark'), grassDry: c('grassDry'), clover: c('clover'),
     dirt: c('dirt'), sand: c('sand'), mulch: c('mulch'), bark: c('bark'), stripe: uniform(0.4), yardHalf: uniform(yardHalf),
     // E4 battle ground
     mud: c('mudWet'), soot: c('soot'), ash: c('ash'), rutGauge: uniform(0.85),
+    // W13 the wet night ground [godot wet_ground]
+    puddleCut: uniform(G.puddleCut),
   };
   const surf = attribute('surf', 'vec4');
   const p = positionWorld;
@@ -113,14 +104,17 @@ export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.
   const edge = (m: any, jitter: any) => smoothstep(0.44, 0.56, m.add(jitter));
   let col = mix(lawn, wildGrass, edge(surf.w, nMid.mul(0.25)));
   // Dirt paths: warm dirt with darker clods and pale pebbles.
+  const dirtK = edge(surf.x, nMid.mul(0.22)).toVar('groundDirt');
   const dirt = mix(mix(U.dirt, U.mulch, smoothstep(0.2, 0.28, nFine).mul(0.35)), U.sand, smoothstep(0.55, 0.6, nMid.add(nFine.mul(0.4))).mul(0.3));
-  col = mix(col, dirt, edge(surf.x, nMid.mul(0.22)));
-  // Sand: ripples.
+  col = mix(col, dirt, dirtK);
+  // Sand / gravel: ripples.
+  const sandK = edge(surf.y, nMid.mul(0.12)).toVar('groundSand');
   const sand = U.sand.mul(float(0.94).add(sin(p.x.mul(2.1).add(p.z.mul(0.7)).add(nMid.mul(4))).mul(0.05)));
-  col = mix(col, sand, edge(surf.y, nMid.mul(0.12)));
+  col = mix(col, sand, sandK);
   // Mulch: dark bark chips.
+  const mulchK = edge(surf.z, nMid.mul(0.2)).toVar('groundMulch');
   const mulch = mix(U.mulch, U.bark, smoothstep(0.18, 0.24, nFine).mul(0.5));
-  col = mix(col, mulch, edge(surf.z, nMid.mul(0.2)));
+  col = mix(col, mulch, mulchK);
   // E4 battle ground (terrain-view's `battle` attribute: scorch, mud, puddle, rut signed distance in m; 0/0/0/9 = none):
   //   churned mud with darker clods, twin tyre ruts (gauge 1.7 m) with a raised middle, blast scorch (soot core, ash
   //   ring, broken by noise) and standing puddles that stay after the rain.
@@ -133,63 +127,149 @@ export function createTerrainMaterial({ ink = true, yardHalf = 118, flatten = 0.
   col = mix(col, mudTone, mudK.mul(0.9));
   const sc = bat.x.add(nMid.mul(0.2)).add(nFine.mul(0.12));
   col = mix(col, U.ash, smoothstep(0.1, 0.28, sc).mul(0.5));
-  col = mix(col, U.soot, smoothstep(0.34, 0.68, sc).mul(0.9));
+  const sootK = smoothstep(0.34, 0.68, sc).mul(0.9);
+  col = mix(col, U.soot, sootK);
   const pud = smoothstep(0.5, 0.58, bat.z.add(nFine.mul(0.1)).add(nMid.mul(0.08))).toVar('battlePuddle');
   // Pond bed: dark mud under the water line.
-  const wet = smoothstep(bedLevel, bedLevel - 0.33, p.y);
-  col = mix(col, U.dirt.mul(0.55), wet);
-  // Neighbours' ground beyond the fence line: no mowing stripes, cooler and patchier (other people's
-  // lawns, unevenly kept), so the yard reads as the stage and the far field recedes (G1, L2 critique).
+  const bed = smoothstep(bedLevel, bedLevel - 0.33, p.y);
+  col = mix(col, U.dirt.mul(0.55), bed);
+  // Neighbours' ground beyond the fence line: no mowing stripes, cooler and patchier, so the map reads as the stage.
   const outside = smoothstep(U.yardHalf, U.yardHalf.add(14), max(abs(p.x), abs(p.z)));
   const plots = mx_noise_float(p.xz.mul(0.012).add(vec2(7.3, 1.9)));
   const neighbour = mix(mix(U.grassDark, U.grass, 0.55), mix(U.grassDry, U.grassDark, 0.35), smoothstep(-0.25, 0.35, plots))
     .mul(vec3(0.88, 0.95, 1.02)).mul(float(0.94).add(nMid.mul(0.05)));
   col = mix(col, neighbour, outside.mul(0.85));
-  // G1 rain: soaked ground reads darker and cooler; puddles gather on flat, low, trodden spots and
-  // mirror the grey sky; raindrops ring them. Everything scales with WORLD_WEATHER (0 = dry: no-op).
+
+  // --- W13 the wet night ground [godot wet_ground.gdshader] ---
+  // wetness: the weather's (or a sprinkler's), never under the night's floor
   const W = WORLD_WEATHER;
   const sprWet = (u: typeof W.spr0) => u.w.mul(float(1).sub(smoothstep(u.z.sub(1.5), u.z.add(0.5), length(p.xz.sub(vec2(u.x, u.y))))));
-  const wetAll = max(W.wet, max(sprWet(W.spr0), sprWet(W.spr1)));
-  const soaked = col.mul(vec3(0.66, 0.72, 0.8));
-  col = mix(col, soaked, wetAll.mul(0.9));
+  const wetG = max(max(W.wet, STYLE_WEATHER.floor), max(sprWet(W.spr0), sprWet(W.spr1))).clamp(0, 1).toVar('groundWet');
+  const flat = smoothstep(0.9, 0.97, normalWorldGeometry.y);            // 0 on berms and banks
+  // trodden ground (dirt, mulch, gravel, mud, ruts, scorch, the pond bed) is asphalt; lawn and the neighbours stay lawn
+  const trodden = max(max(max(dirtK, mulchK), sandK), max(mudK, max(sootK, bed))).mul(float(1).sub(outside)).toVar('groundTrodden');
+  // the paved part: dirt and mulch (gravel, churned mud, scorch and pond beds are loose: no joints, no patches)
+  const paved = max(dirtK, mulchK).mul(float(1).sub(max(sandK, max(mudK, max(sootK, bed))))).mul(flat).toVar('groundPaved');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TSL node types are too narrow for helpers
+  const n01 = (q: any) => mx_noise_float(q).mul(0.5).add(0.5);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const hash12 = (q: any) => fract(sin(dot(q, vec2(127.1, 311.7))).mul(43758.5453));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const aaLine = (d: any, w: number, fw: any) => float(1).sub(smoothstep(float(w).sub(fw), float(w).add(fw), d)).mul(clamp(float(w * 2).div(max(fw, float(1e-4))), 0, 1));
+  // tones: wear (wheel lanes, sun-bleached patches) at ~0.6 m and ~3 m
+  const wear = (detail ? n01(p.xz.div(G.grainScale).mul(15.4)) : n01(p.xz.mul(0.33))).toVar('groundWear');
+  const wear2 = n01(p.xz.div(G.grainScale * 5.3).mul(15.4).add(vec2(0.37, 0.11)));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TSL node types are too narrow for reassignment
+  let tone: any = wear.mul(0.4).add(wear2.mul(0.6)).sub(0.25);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let seal: any = float(0);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let stones: any = float(0.24);                                        // the aggregate's mean at range
+  if (detail && paving) {
+    // paving: lanes along z with a tar-sealed joint between them, a rare cross joint, and in one panel in four a patch
+    // repair (a fresher, darker rectangle with a sealed edge)
+    const [px, pz] = G.panel;
+    const q0 = p.xz.div(vec2(px, pz));
+    const q = vec2(q0.x, q0.y.add(hash12(vec2(floor(q0.x), 3.7))));
+    const cell = floor(q), f = fract(q);
+    const age = hash12(cell.add(0.5));
+    const jfw = fwidth(p.xz).mul(1.5);
+    const jd = float(0.5).sub(abs(f.sub(0.5))).mul(vec2(px, pz));         // metres to the panel's edges
+    let joint = max(aaLine(jd.x, G.joint * 0.5, jfw.x), aaLine(jd.y, G.joint * 0.5, jfw.y).mul(step(0.8, hash12(cell.add(9.1)))));
+    const rr = vec2(hash12(cell.add(1.3)), hash12(cell.add(2.9)));
+    const rr2 = vec2(hash12(cell.add(4.1)), hash12(cell.add(6.7)));
+    const plo = vec2(rr.x.mul(0.25).add(0.1), rr.y.mul(0.45).add(0.08));
+    const phi = min(plo.add(vec2(rr2.x.mul(0.3).add(0.3), rr2.y.mul(0.3).add(0.12))), vec2(0.92, 0.92));
+    const pd = min(f.sub(plo), phi.sub(f)).mul(vec2(px, pz));           // metres inside the patch (negative: outside)
+    const pin = min(pd.x, pd.y);
+    const psd = mix(length(max(pd.negate(), vec2(0, 0))), pin, step(0, pin));
+    const hasPatch = step(0.75, age);
+    const inPatch = hasPatch.mul(step(0, pin));
+    joint = max(joint, hasPatch.mul(aaLine(psd, G.joint * 0.5, max(jfw.x, jfw.y))));
+    // cracks: warped cellular edges (~5 m cells), only where the surface is old
+    const cw = p.xz.div(G.crackScale).mul(5.12);
+    const warp = vec2(mx_noise_float(cw.mul(0.8).add(vec2(4.7, 1.3))), mx_noise_float(cw.mul(0.8).add(vec2(-2.1, 8.9)))).mul(0.35);
+    const wf = mx_worley_noise_vec2(cw.add(warp));
+    const ce = wf.y.sub(wf.x);
+    const crack = aaLine(ce, 0.012, fwidth(ce)).mul(smoothstep(0.42, 0.6, wear2.add(age.sub(0.5).mul(0.4)))).mul(float(1).sub(inPatch));
+    seal = max(joint, crack).mul(paved).toVar('groundSeal');
+    tone = tone.sub(inPatch.mul(0.3)).add(step(age, 0.1).mul(0.15)).mul(paved).add(tone.mul(float(1).sub(paved)));
+    // aggregate: ~1 cm stones up close, their mean beyond a few metres (no shimmer)
+    const aggLod = float(1).sub(smoothstep(0.004, 0.02, length(fwidth(p.xz))));
+    const agg = n01(p.xz.div(G.aggScale).mul(40));
+    const agg2 = n01(p.xz.div(G.aggScale * 0.37).mul(40).add(vec2(0.5, 0.25)));
+    stones = mix(float(0.24), smoothstep(0.55, 0.85, agg).mul(0.55).add(smoothstep(0.6, 0.9, agg2).mul(0.3)), aggLod);
+  }
+  tone = tone.clamp(0, 1);
+  const binder = mix(lin(G.asphaltDark), lin(G.asphaltLight), tone);
+  // berms and banks: coarse dark wet grit (~4 cm, on their own face: 3D noise, no xz stretch), its mean at range
+  const grit = detail
+    ? mix(float(0.23), smoothstep(0.4, 0.95, n01(p.mul(25))).mul(0.7), float(1).sub(smoothstep(0.01, 0.05, length(fwidth(p)))))
+    : float(0.23);
+  const stonesK = mix(grit, stones.mul(mix(float(0.6), float(1), tone)), flat).clamp(0, 1).toVar('groundStones');
+  let asphalt = mix(binder, lin(G.aggregate), stonesK);
+  asphalt = asphalt.mul(mix(float(G.slopeDark), float(1), flat));       // the slopes face the floods: darker
+  // the palette colour only shades it (its luminance against the dirt's): gravel lighter, mulch and mud darker
+  const shade = clamp(luminance(col).div(luminance(U.dirt)), 0.5, 1.6);
+  asphalt = asphalt.mul(mix(float(1), shade, G.shade));
+  asphalt = mix(asphalt, lin(G.tar), seal);
+  if (paving) col = mix(col, asphalt, trodden);
+  // water: puddles on the flat (the grain breaks the rims), a damp rim, the wet film everywhere; more of it in rain
+  const pm = n01(p.xz.div(G.puddleScale).mul(3.07).add(vec2(3.1, -7.7))).add(wear.sub(0.5).mul(0.08)).add(stonesK.sub(0.24).mul(0.05));
+  const cut = U.puddleCut.sub(W.rain.mul(0.04));
+  const wetPud = smoothstep(0.4, 0.75, wetG);
+  const godotPuddle = smoothstep(cut, cut.add(0.035), pm).mul(flat).mul(wetPud);
+  const damp = smoothstep(cut.sub(0.1), cut, pm).mul(flat).mul(wetPud).mul(trodden);
+  // puddles: on trodden ground, the E4 standing puddles anywhere, never past the fence line
+  const puddle = (detail ? max(godotPuddle.mul(trodden), pud.mul(flat)) : pud.mul(flat)).mul(float(1).sub(outside)).clamp(0, 1).toVar('groundPuddle');
+  // the wet darkening [godot 0.7 everywhere]; the damp rim a bit more
+  col = col.mul(mix(float(1), float(G.darken), wetG)).mul(mix(float(1), float(G.dampAlbedo), damp));
+  // roughness [godot]: the wet film 0.3–0.45 (stones rougher), dry 0.75–0.9, slopes 0.62+, tar 0.18, the damp rim
+  // smoother; lawn: a wet sheen; churned mud: damp
+  let asphaltRough = mix(mix(float(0.75), float(0.9), stonesK), mix(float(G.wetRough[0]), float(G.wetRough[1]), stonesK.mul(1.4).clamp(0, 1)), wetG);
+  asphaltRough = mix(stonesK.mul(0.15).add(G.slopeRough), asphaltRough, flat);
+  asphaltRough = mix(asphaltRough, float(0.18), seal.mul(wetG));
+  asphaltRough = asphaltRough.mul(mix(float(1), float(G.dampRough), damp));
+  const lawnRough = mix(float(0.86), float(0.86 * STYLE.wet.roughPorous), wetG);
+  // the yard's trodden ground is wet dirt: a sheen, smoother at the puddles' damp rims
+  const dirtRough = mix(float(0.88), float(0.55), wetG).mul(mix(float(1), float(G.dampRough), damp));
+  let rough = mix(lawnRough, paving ? asphaltRough : dirtRough, trodden);
+  rough = mix(rough, float(0.5), mudK.mul(0.6));
+  // shading normal: a detail normal off the puddles and the tar [godot detail_nrm], rain ripples in the puddles
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TSL node types are too narrow for reassignment
+  let n: any = normalWorldGeometry;
+  if (flatten > 0) n = normalize(mix(n, vec3(0, 1, 0), flatten));
   if (detail) {
-    const flat = smoothstep(0.965, 0.995, normalWorld.y);
-    // puddles: mostly on trodden dirt/mulch, only the lowest spots of the lawn
-    const bare = max(surf.x, surf.z);
-    const lowSpot = mx_noise_float(p.xz.mul(0.13).add(vec2(3.1, -7.7))).add(bare.mul(0.55)).add(nFine.mul(0.06));
-    const puddle = smoothstep(0.56, 0.6, lowSpot).mul(flat).mul(smoothstep(0.35, 0.95, wetAll)).mul(float(1).sub(outside));
-    // dark water mirroring the grey sky, a lighter rim toward the deeper middle (no white blobs)
-    const sheen = mix(vec3(0.16, 0.19, 0.23), vec3(0.3, 0.35, 0.42), smoothstep(0.6, 0.72, lowSpot));
-    // raindrop rings: one ring per 1.3 m cell, random phase, only on puddles
-    const cellP = p.xz.div(1.3);
-    const cid = floor(cellP);
-    const ph = fract(sin(cid.x.mul(127.1).add(cid.y.mul(311.7))).mul(43758.5453));
-    const age = fract(time.mul(1.4).add(ph));
-    const rd = length(fract(cellP).sub(0.5));
-    const ring = smoothstep(0.05, 0.0, abs(rd.sub(age.mul(0.45)))).mul(float(1).sub(age)).mul(W.rain);
-    // (the hardened ground material pools its own near-mirror puddles when wet: G1's sheen only tints them)
-    col = mix(col, sheen, puddle.mul(HARDENED_WORLD ? 0.4 : 0.9));
-    col = col.add(vec3(ring.mul(max(puddle, pud)).mul(0.22)));
+    const nLod = float(1).sub(smoothstep(0.01, 0.05, length(fwidth(p.xz))));
+    const dn = mx_noise_vec3(vec3(p.x.mul(14.0), 0.5, p.z.mul(14.0))).xz.mul(0.3 * G.detailStrength).mul(nLod);
+    // one expanding ring per cell, random centre and phase: a radial normal kick
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TSL node types are too narrow for helpers
+    const ripple = (q: any, t: any) => {
+      const cell = floor(q);
+      const h = hash12(cell);
+      const v = fract(q).sub(0.5).sub(vec2(fract(h.mul(17.3)), fract(h.mul(31.7))).sub(0.5).mul(0.5));
+      const d = length(v);
+      const ph = fract(t.add(h));
+      const w = sin(d.sub(ph.mul(0.45)).mul(70)).mul(smoothstep(0.05, 0.0, abs(d.sub(ph.mul(0.45))))).mul(float(1).sub(ph));
+      return v.div(max(d, float(1e-3))).mul(w);
+    };
+    const r = ripple(p.xz.mul(1.7), time.mul(1.1)).add(ripple(p.xz.mul(2.3).add(5.1), time.mul(0.9).add(0.5)));
+    const kick = dn.mul(float(1).sub(puddle)).mul(float(1).sub(seal.mul(0.7))).add(r.mul(W.rain.mul(0.12).mul(puddle)));
+    n = normalize(n.add(vec3(kick.x, 0, kick.y)));
   }
-  // E4 standing puddles: dark water mirroring the sky even in clear weather (the hardened material also makes them
-  // glossy through wetNode)
-  col = mix(col, mix(vec3(0.1, 0.12, 0.14), vec3(0.24, 0.28, 0.33), smoothstep(0.55, 0.7, bat.z.add(nMid.mul(0.1)))), pud.mul(HARDENED_WORLD ? 0.55 : 0.85));
-  const material = ink ? toonFrom({ surface: 'ground' }) : toonNoInk({ surface: 'ground' });
+
+  // the factory material: no wetness of its own (wetK 0: this graph wets itself), the puddles through puddleNode
+  const material = toonFrom({ surface: 'ground', ink, wetK: 0, puddle: 0 });
   material.colorNode = col;
-  if (HARDENED_WORLD) {
-    // hardened hooks: churned mud is damp (a sheen even when dry), puddles are water
-    const hm = material as unknown as { wetNode: unknown; roughnessNode: unknown };
-    hm.wetNode = max(pud, mudK.mul(0.38));
-    hm.roughnessNode = mix(float(0.92), float(0.62), mudK);
-  }
-  // Stylized lighting: bend shading normals toward up so gentle lawn undulation doesn't flip toon
-  // bands into blotches; real slopes (mound, pond banks) still read. Geometry is untouched.
-  if (flatten > 0) material.normalNode = normalize(mix(normalView, transformNormalToView(vec3(0, 1, 0)), flatten));
+  material.roughnessNode = rough;
+  material.puddleNode = puddle;
+  // puddles are flat water
+  material.normalNode = mix(transformNormalToView(n), normalView, puddle).normalize();
   return { material, uniforms: U as unknown as Record<string, ReturnType<typeof uniform>> };
 }
 
-/** Foliage: vertex + instance colors, toon-lit, no ink, wind sway by uv.y^2 (bases stay planted). */
-export function createFoliageMaterial(strength: number, windDir: THREE.Vector2, opts: { side?: THREE.Side } = {}): THREE.MeshToonNodeMaterial {
+/** Foliage: vertex + instance colors, no ink, wind sway by uv.y^2 (bases stay planted). */
+export function createFoliageMaterial(strength: number, windDir: THREE.Vector2, opts: { side?: THREE.Side } = {}): WorldMaterial {
   const m = toonNoInk({ vertexColors: true, side: opts.side ?? THREE.DoubleSide, surface: 'foliage' });
   if (strength > 0) {
     const h = uv().y.mul(uv().y);
@@ -202,10 +282,10 @@ export function createFoliageMaterial(strength: number, windDir: THREE.Vector2, 
 }
 
 /**
- * Stylized water: needs a `depth` vertex attribute (meters of water under the vertex) and `center`
- * uniform for ripple rings.
+ * Water: needs a `depth` vertex attribute (meters of water under the vertex) and `center` uniform for ripple rings.
+ * Near-mirror (SURFACES.water): it reflects the night sky and the floods.
  */
-export function createWaterMaterial(center: THREE.Vector2): THREE.MeshToonNodeMaterial {
+export function createWaterMaterial(center: THREE.Vector2): WorldMaterial {
   const m = toonNoInk({ transparent: true, opacity: 0.86, surface: 'water' });
   const depth = attribute('depth', 'float');
   const shallow = c('water'), deep = uniform(new THREE.Color(0x236f9a)), foam = uniform(new THREE.Color(0xeaf8ff));
@@ -214,7 +294,7 @@ export function createWaterMaterial(center: THREE.Vector2): THREE.MeshToonNodeMa
   const d = length(p.xz.sub(ctr));
   const n = mx_noise_float(p.xz.mul(0.25).add(time.mul(0.05)));
   let col = mix(shallow, deep, smoothstep(0.1, 1.1, depth));
-  // drifting ripple rings (thin bright bands)
+  // drifting ripple rings (thin lighter bands)
   const ring = fract(d.mul(0.22).sub(time.mul(0.12)).add(n.mul(0.35)));
   col = mix(col, shallow.mul(1.25), step(0.93, ring).mul(smoothstep(0.05, 0.4, depth)));
   // shore foam: crisp band where the water is shallow
@@ -223,6 +303,5 @@ export function createWaterMaterial(center: THREE.Vector2): THREE.MeshToonNodeMa
   m.colorNode = col;
   m.opacityNode = max(float(0.62), min(float(0.95), float(0.62).add(depth.mul(0.3)).add(f)));
   m.depthWrite = false;
-  void abs;
   return m;
 }

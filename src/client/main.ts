@@ -5,6 +5,8 @@
 //             ?name=Rex&cls=assault&team=0|1  ·  ?lag=80&jitter=10&loss=1  network emulation
 //             ?webgl  force the WebGL2 backend  ·  ?bots=0,4  offline bot fill  ·  ?mode=yard-skirmish
 //             ?map=west_yard  the battleground (src/shared/world/maps.ts; online, the room's map wins)
+//             ?mode=slab  W13: the Godot game's match on The Lot (1 v 1; &2v2 for 2 v 2); draws The Lot's kit from
+//             the shared GLBs unless ?kit= says otherwise · &cam=slab  the Godot spectator's orbit over the slab
 import { debug } from './debug/debug-hook';
 import * as THREE from 'three/webgpu';
 import { createRenderContext } from './engine/renderer';
@@ -17,7 +19,7 @@ import { createRewardCard } from './ui/rewards'; // U2
 import { AwardsTally, createAwardsCard } from './ui/awards'; // W10 U3
 import { createWorldView } from './world/world-view';
 import { districtAt, surfaceAt } from '../shared/world/queries';
-import { createWorkerTransport, createWebSocketTransport, type NetEmulation, type Transport } from './net/transport';
+import { createWorkerTransport, createWebSocketTransport, slabOverridesFromSearch, type NetEmulation, type Transport } from './net/transport';
 import { NetClient } from './net/net-client';
 import { serverUrlForPage } from './net/server-url';
 import { InputState } from './input/input';
@@ -40,6 +42,9 @@ import { createInteractViews, createInteractPrompts } from './interact';
 import { createCoreRushView } from './modes/core-rush-view';
 import { createBaseAssaultView } from './modes/base-assault-view'; // W9 G4a: balls, stands, capture rings
 import { createBaseAssaultHud } from './ui/base-assault-hud'; // W9 G4a: ball strip, banners, markers, carrier cue
+import { createSlabView, type SlabReading } from './modes/slab-view'; // W13 TW-VIEW: the slab read-out (frame + fill)
+import { createSlabHud } from './ui/slab-hud'; // W13 TW-VIEW: scores to 60, clock / OVERTIME, slab line, winner screen
+import { SLAB } from '../shared/content/modes';
 import { createOrdnanceView, type OrdnanceAim } from './fx/ordnance-view'; // W9 X4: throwables, arc preview, telegraph
 import { createOrdnanceAudio } from './audio/presets-ordnance'; // W9 X4
 import { createOrdnanceHud } from './ui/ordnance-hud'; // W9 X4: the throwable slot
@@ -69,10 +74,18 @@ async function main(): Promise<void> {
   debug.backend = ctx.backend;
 
   // Wave 8: the battleground (?map=, kept only if it can host the mode); an online room's welcome can overrule it
-  const mapId = mapForRoom(params.get('map'), params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish', chapterById(params.get('chapter'))?.map); // W10: a chapter's own map
+  const bootMode = params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish';
+  const mapId = mapForRoom(params.get('map'), bootMode, chapterById(params.get('chapter'))?.map); // W10: a chapter's own map (W13: slab → The Lot)
   const mapTitle = MAPS[mapId].title;
   loadingStep(mapTitle === 'West Yard' ? 'Mowing West Yard…' : `Scouting ${mapTitle}…`);
   await new Promise((r) => setTimeout(r, 0)); // let the step text paint before the blocking world build
+  // W13: the slab match plays The Lot as the Godot game does, from the six shared kit GLBs (kit-glb.ts reads ?kit=glb
+  // when the world view is built; ?kit=<anything else> keeps the procedural stand-ins)
+  if (bootMode === 'slab' && !params.has('kit')) {
+    const p = new URLSearchParams(location.search);
+    p.set('kit', 'glb');
+    history.replaceState(history.state, '', `${location.pathname}?${p}${location.hash}`);
+  }
   const seed = Number(params.get('seed') ?? 1);
   const worldData = createWorldData(seed, mapId);
   const worldView = createWorldView(ctx.scene, worldData, { quality: q === 'medium' ? 'med' : q, grade: ctx.pipeline.grade.uniforms });
@@ -80,9 +93,11 @@ async function main(): Promise<void> {
 
   const em: NetEmulation = { lagMs: Number(params.get('lag') ?? 0), jitterMs: Number(params.get('jitter') ?? 0), lossPct: Number(params.get('loss') ?? 0) };
   const serverUrl = serverUrlForPage(); // ?server / ?online / ?room / page served by server/prod.ts
-  let mode = params.has('boss') ? 'boss-rush' : params.get('mode') ?? 'yard-skirmish';
+  let mode = bootMode;
   // Skirmish: a corgi squad of bots with you; cat waves come from the match rules. TDM / core-rush: bot-filled teams.
-  const botsFor = (m: string) => (params.get('bots') ?? (m === 'team-deathmatch' || m === 'core-rush' || m === 'base-assault' ? '4,4' : m === 'adventure' ? '4,0' : '3,0')).split(',').map(Number)
+  // W13 slab: team sizes, 1 v 1 (you plus one Cat bot) or, with &2v2 (Godot's --2v2), 2 v 2 (SLAB.teamSizes)
+  const slabSize = params.has('2v2') ? SLAB.teamSizes[SLAB.teamSizes.length - 1] : SLAB.teamSize;
+  const botsFor = (m: string) => (params.get('bots') ?? (m === 'team-deathmatch' || m === 'core-rush' || m === 'base-assault' ? '4,4' : m === 'adventure' ? '4,0' : m === 'slab' ? `${slabSize},${slabSize}` : '3,0')).split(',').map(Number)
     // W9 INT9 (Q4 P2-7): Base Assault is built for 4 v 4; ?bots= caps it at 8 a side (12 v 12 plus balls, stands and rings
     // went over the 400-draw budget)
     .map((n) => (m === 'base-assault' ? Math.min(n, 8) : n)) as [number, number];
@@ -101,7 +116,8 @@ async function main(): Promise<void> {
     if (match && !params.has('boss')) mode = match; // the menu's MATCH selector (offline only)
     const bots = botsFor(mode);
     loadingStep(serverUrl ? 'Calling the server…' : 'Waking up the squad…');
-    transport = serverUrl ? await createWebSocketTransport(serverUrl, em) : createWorkerTransport({ seed, mode, bots, map: mapId, chapter: mode === 'adventure' ? chapter : undefined, boss: mode === 'boss-rush' ? bossId : undefined }, em);
+    transport = serverUrl ? await createWebSocketTransport(serverUrl, em) : createWorkerTransport({ seed, mode, bots, map: mapId, chapter: mode === 'adventure' ? chapter : undefined, boss: mode === 'boss-rush' ? bossId : undefined,
+      slab: mode === 'slab' ? slabOverridesFromSearch(location.search) : undefined }, em); // W13: &slabWin / &slabTime / &slabOvertime (offline only)
     debug.transport = transport.kind;
     net = new NetClient(transport);
     // N2: both species' equipped looks (AUTO team and kiosk switches decide the species server-side)
@@ -125,6 +141,19 @@ async function main(): Promise<void> {
   // S1: Ordnance kiosks, Upgrade Cores, Golden Kibble, the mission beacon (3D) + E prompt, kit picker, buffs, mission card
   const interact = createInteractViews(ctx.scene, { world: worldData, camera: ctx.camera });
   const rush = createCoreRushView(ctx.scene, ui); // core-rush pads + A·B·C strip (idle in other modes)
+  // W13: the slab read-out on its real ground (the highest surface just above the slab centre's height)
+  const slabView = createSlabView(ctx.scene, { heightAt: (x, z) => surfaceAt(worldData, x, z, SLAB.center.y + 1.5).y, size: SLAB.size });
+  // __cvc.twin (probes, e2e): The Lot's kit pieces drawn from their shared GLBs (kitLoaded: 6 once all six load), the
+  // slab, the map. Refreshed while a slab match runs.
+  // match: the latest slab MatchState; restarts: rematches seen (ended → live) and the score they started at
+  const twin = { map: mapId as string, kits: 0, slab: null as SlabReading | null,
+    match: null as { phase: string; score: [number, number]; timeLeft: number; objective: string } | null, restarts: 0, restartScore: null as [number, number] | null };
+  (debug as unknown as { twin: typeof twin }).twin = twin;
+  let twinFrame = 0;
+  const twinDebug = (r: SlabReading | null) => {
+    twin.slab = r;
+    if (twinFrame++ % 60 === 0) twin.kits = worldView.stats().kitLoaded ?? 0;
+  };
   const assault = createBaseAssaultView(ctx.scene, { heightAt: (x, z) => worldData.height(x, z), heightOf: (id) => views.get(id)?.avatar.height, camera: ctx.camera }); // G4a (idle in other modes)
   const abilityViews = createAbilityViews(ctx.scene, { camera: ctx.camera }); // C2: drones, charges, barriers, spotted markers
   const advViews = createAdventureViews(ctx.scene); // A1: sentry cones (stealth steps), catnip bags
@@ -218,6 +247,7 @@ async function main(): Promise<void> {
   const prompts = createInteractPrompts(ui, { send: (msg) => net?.transport.send(msg), sound: (k) => audio.ui(k) });
   const planeHud = createPlaneHud(ui);
   const assaultHud = createBaseAssaultHud(ui, {}); // G4a (idle in other modes); W10 AU2: its sounds now play in the audio module
+  const slabHud = createSlabHud(ui, { winScore: SLAB.winScore }); // W13 (idle in other modes)
   const ordHud = createOrdnanceHud(document.getElementById('cvc-hud') ?? ui); // X4
   // A1: intro/outro captions, step barks, the squad-down beat, the chapter-complete card (+ device progress)
   const adventureUrl = (id: string) => {
@@ -252,9 +282,17 @@ async function main(): Promise<void> {
     const next = worldReloadSearch(location.search, { map: mapId, seed }, w);
     if (next) { loadingStep(`Moving to ${MAPS[w.map as keyof typeof MAPS]?.title ?? w.map}…`); location.search = next; }
   });
+  // W13: a slab match faces you at the slab on every spawn and rematch, as Godot does (match.gd: _yaw_to(spawn, slab))
+  const faceSlab = (id: number) => {
+    const s = net?.mode === 'slab' ? net.latestState(id) : null;
+    if (!s) return;
+    const c = slabView.reading ?? SLAB.center;
+    if (Math.hypot(c.x - s.x, c.z - s.z) > 0.5) input.yaw = Math.atan2(-(c.x - s.x), -(c.z - s.z));
+  };
   bus.on('localSpawn', (id) => {
     const s = net?.latestState(id);
     if (s) input.yaw = s.yaw;
+    faceSlab(id);
   });
   bus.on('disconnected', (reason) => {
     hud.notice(`Disconnected: ${reason}`);
@@ -274,6 +312,11 @@ async function main(): Promise<void> {
       mode: !serverUrl && mode === 'boss-rush' ? 'boss-rush' : undefined });
     if (awards) awardsCard.show(awards);
     awardsCard.sync(ms);
+    slabHud.onMatch(ms); // W13
+    if (ms.mode === 'slab') {
+      if (twin.match?.phase === 'ended' && ms.phase === 'live') { twin.restarts++; twin.restartScore = [ms.score[0], ms.score[1]]; }
+      twin.match = { phase: ms.phase, score: [ms.score[0], ms.score[1]], timeLeft: ms.timeLeft, objective: ms.objective };
+    }
   });
   bus.on('notice', (t) => hud.serverNotice(t));
   bus.on('chat', (m) => hud.chat(m.from, m.text, m.team));
@@ -290,6 +333,7 @@ async function main(): Promise<void> {
       if (ev.by !== ev.id && ev.by >= 0) views.trigger(ev.by, 'kill'); // K1: the killer's smug grin
     }
     if (ev.e === 'spawn') views.trigger(ev.id, 'spawn');
+    if (ev.e === 'spawn' && ev.id === net?.localEntity) faceSlab(ev.id); // W13
     if (ev.e === 'ability') views.trigger(ev.id, ev.ability);
     if (ev.e === 'bark') views.trigger(ev.id, 'emote'); // taunts and mission lines: the avatar acts it out
     bossFx.onGameEvent(ev);
@@ -313,6 +357,8 @@ async function main(): Promise<void> {
   });
 
   let acc = 0, seq = 0, last = performance.now(), fpsFrames = 0, fpsStart = last, menuT = 0;
+  const slabCam = params.get('cam') === 'slab'; // W13: the slab spectator camera (below)
+  let slabCamT = 0.6;
   // District name toast ("The Garage", "The Rooftops", "The Garden"): once you've been in a new one for 0.6 s, and not
   // again for the same district within 30 s, so walking along a border doesn't spam it.
   let districtCur = '', districtSince = 0, districtShown = '';
@@ -352,7 +398,10 @@ async function main(): Promise<void> {
     advViews.sync(states, adventure.view, pdt, worldView.weather.sight); // W11 F3: the sentries' real sight range
     interact.sync(states, pdt);
     prompts.update(states, localId, dt);
-    rush.sync(states, states.get(localId)?.team ?? 0, ctx.camera, dt);
+    // W13: a slab match's slab is a seed-0 Zone, like core-rush's pad A: each view reads Zones only in its own mode
+    const slabMatch = net?.match?.mode === 'slab';
+    rush.sync(slabMatch ? EMPTY : states, states.get(localId)?.team ?? 0, ctx.camera, dt);
+    slabView.sync(slabMatch ? states : EMPTY, pdt);
     assault.sync(states, localId, pdt); // G4a
     abilityViews.sync(states, (states.get(localId)?.team ?? -1) as TeamId | -1, pdt);
     worldView.destruct.sync(states); // X1: broken/standing from snapshots (late joins, resets)
@@ -394,6 +443,14 @@ async function main(): Promise<void> {
       ctx.camera.position.set(Math.sin(menuT) * 55, 18 + Math.sin(menuT * 0.7) * 4, Math.cos(menuT) * 55);
       ctx.camera.lookAt(0, 2, 0);
     }
+    if (slabCam && slabView.reading) {
+      // W13 ?cam=slab: Godot's spectator view of the slab (match.gd: 24 m out, 13 m up, orbiting at 0.12 rad/s) in place
+      // of the follow camera, for proof shots (the slab is 120-140 m from the team spawns); the match runs as usual
+      const c = slabView.reading;
+      slabCamT += dt * 0.12;
+      ctx.camera.position.set(c.x + Math.sin(slabCamT) * 24, c.y + 13, c.z + Math.cos(slabCamT) * 24);
+      ctx.camera.lookAt(c.x, c.y, c.z);
+    }
     hiddenCue.style.display = local && (local.flags & EFlag.Stealthed) && !(local.flags & EFlag.Dead) ? 'block' : 'none';
     spottedCue.style.display = local && (local.flags & EFlag.Spotted) && !(local.flags & EFlag.Dead) ? 'block' : 'none';
     let painted = false;
@@ -401,8 +458,9 @@ async function main(): Promise<void> {
       for (const s of states.values()) if (s.kind === EntityKind.Boss && sniperPainting(s, local.x, local.y, local.z)) { painted = true; break; }
     }
     dotCue.style.display = painted ? 'block' : 'none';
-    const cueUp = hiddenCue.style.display === 'block' || spottedCue.style.display === 'block' || painted || planeHud.shown || assaultHud.cueUp;
-    if (local && !(local.flags & EFlag.Dead)) {
+    const cueUp = hiddenCue.style.display === 'block' || spottedCue.style.display === 'block' || painted || planeHud.shown || assaultHud.cueUp
+      || slabHud.active; // W13: the slab HUD shows hud.gd's controls hint; the first-match tips wait (and stay unseen)
+    if (local && !(local.flags & EFlag.Dead) && !slabHud.active) { // W13: hud.gd names no districts
       const d = districtAt(worldData, local.x, local.z, local.y)?.name ?? '';
       if (d !== districtCur) { districtCur = d; districtSince = now; }
       else if (d && d !== districtShown && now - districtSince > 600 && now - (districtToastAt.get(d) ?? -1e9) > 30_000) {
@@ -436,7 +494,10 @@ async function main(): Promise<void> {
     debug.local = local ? { x: local.x, y: local.y, z: local.z, hp: local.hp, flags: local.flags } : null;
     debug.ready = !!local && debug.frames > 5;
     if ((local || !net) && debug.frames > 2) hideLoading();
-    hud.update({ cueUp, local, match: net?.match ?? null, roster: net?.roster ?? [], fps: debug.fps, rttMs: net?.stats.rttMs ?? 0, locked: input.locked || params.has('autoplay') || !net, backend: ctx.backend, transport: transport?.kind ?? 'none', states, holdScoreboard: awardsCard.up }); // W10 U3: awards, then the scoreboard
+    hud.update({ cueUp, local, match: net?.match ?? null, roster: net?.roster ?? [], fps: debug.fps, rttMs: net?.stats.rttMs ?? 0, locked: input.locked || params.has('autoplay') || !net, backend: ctx.backend, transport: transport?.kind ?? 'none', states, holdScoreboard: awardsCard.up || slabHud.winnerUp }); // W10 U3: awards, then the scoreboard (W13: not over the slab's winner screen; Tab still opens it)
+    slabHud.update({ match: net?.match ?? null, slab: slabView.reading, localId, local, roster: net?.roster ?? [], camera: ctx.camera }, dt);
+    input.enterReloads = slabHud.winnerUp && !hud.menuOpen && !hud.chatOpen; // W13: R or Enter rematches (as in Godot)
+    if (slabHud.active) twinDebug(slabView.reading);
     hitFx.update();
     assaultHud.update({ states, localId, roster: net?.roster ?? [], match: net?.match ?? null, camera: ctx.camera, ballAt: (t) => assault.ballPosition(t) }, dt); // G4a
   });

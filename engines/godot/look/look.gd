@@ -1,17 +1,25 @@
 extends Node
 ## Look (lane G-LOOK owns this folder): stylised-realistic wet night on The Lot (LOOK LOCKED, Wave 12). No ink outlines.
-## - Environment: moonlit overcast sky shader, height + distance fog (volumetric on Forward+), AgX, glow on emissives
-##   only (HDR threshold), SSAO and SSR (Forward+), a muted teal/warm grade.
+## Wave 13 (G-ATMOS): a night sky (not dusk), wet asphalt (not mud), sodium pools that read from the play cameras, and
+## the Forward+-only effects (SSR, volumetric fog) requested only on Forward+.
+## - Environment: moonlit overcast night sky shader, height + distance fog (volumetric on Forward+), AgX, glow on
+##   emissives only (HDR threshold), SSAO, SSR (Forward+ only), a muted teal/warm grade.
 ## - One sodium SpotLight3D per World.floodlights() entry (shadows on a few), an emissive lens on the FloodLamp piece.
-## - Wet asphalt shader on group `ground`; `kit` and `prims` materials darkened and smoothed in place (maps kept).
+## - Wet asphalt shader on group `ground`; `kit` and `prims` materials darkened and smoothed in place (maps kept); the
+##   ditch water (group `water`) a dark, still mirror.
 ## - pet_material(kind, species, team) for G-GAME; cheap rain around the camera.
 ## Materials go on after World.built (or at once if the world was already built when the look woke up).
 ## Command line (after `--`): `--look off` (the skeleton look, for A/B), `--look-quality low|medium|high`,
 ## `--look-stats` (prints draws / frame time at the end of a `--shot` run).
 const LOOK := "stylised-realistic"
 enum Quality { LOW, MEDIUM, HIGH }
-const SODIUM := Color(1.0, 0.55, 0.2)  # high-pressure sodium, ~2000 K
-const MOON_DIR := Vector3(-0.4, 0.55, -0.73)  # towards the moon (behind the cloud deck)
+const SODIUM := Color(1.0, 0.62, 0.28)  # high-pressure sodium, ~2100 K
+const MOON_DIR := Vector3(-0.4, 0.55, -0.73)  # towards the moon (behind the cloud deck, seen through a break)
+# The night's key values (sRGB colours). docs/handoff/G-ATMOS.md lists them for the web twin.
+const SKY_ZENITH := Color(0.03, 0.042, 0.08)
+const SKY_HORIZON := Color(0.11, 0.13, 0.17)  # the fog colour too: far silhouettes sink into the horizon haze
+const MOON_COLOR := Color(0.62, 0.72, 0.95)
+const FLOOD_ENERGY := 38.0
 const WET_DARKEN := 0.7
 const WET_ROUGH := 0.55
 const PetMaterials := preload("res://look/pet_materials.gd")
@@ -35,6 +43,7 @@ var _flood_root: Node3D
 var _practical_root: Node3D
 var _rain: GPUParticles3D
 var _ground_mat: ShaderMaterial
+var _water_mat: StandardMaterial3D
 var _sky_mat: ShaderMaterial
 var _wet := {}
 var _lens := {}
@@ -42,6 +51,8 @@ var _streaks: NoiseTexture2D
 var _applied := false
 var _pets: RefCounted
 var _forward_plus := true
+## The rendering method the look builds for. Empty: RenderingServer's, read in _ready (a test may set it first).
+var rendering_method := ""
 var _stats := false
 var _stat_frames := 90
 var _n := 0
@@ -49,7 +60,9 @@ var _t0 := 0
 
 
 func _ready() -> void:
-	_forward_plus = RenderingServer.get_current_rendering_method() == "forward_plus"
+	if rendering_method == "":
+		rendering_method = RenderingServer.get_current_rendering_method()
+	_forward_plus = rendering_method == "forward_plus"
 	quality = Quality.HIGH if _forward_plus else Quality.MEDIUM
 	_parse_args()
 	_pets = PetMaterials.new()
@@ -113,6 +126,9 @@ func apply() -> void:
 		for n in get_tree().get_nodes_in_group(grp):
 			for g in _geometry(n):
 				_wet_instance(g, grp)
+	for n in get_tree().get_nodes_in_group("water"):
+		for g in _geometry(n):
+			g.material_override = _water_material()
 	_lamp_lenses()
 	_build_floods()
 	_build_practicals()
@@ -127,7 +143,8 @@ func pet_material(kind: String, species: int, team: int) -> Material:
 	return _pets.get_material(kind, species, team)
 
 
-## Public quality knob (LOW: no volumetrics / SSR / SSAO / rain / flood shadows; MEDIUM; HIGH).
+## Public quality knob (LOW: no volumetrics / SSR / SSAO / rain / flood shadows; MEDIUM; HIGH). SSR and volumetric fog
+## exist only on Forward+ (see features()).
 func set_quality(q: int) -> void:
 	quality = clampi(q, Quality.LOW, Quality.HIGH)
 	if enabled and environment != null:
@@ -136,6 +153,15 @@ func set_quality(q: int) -> void:
 
 
 # ------------------------------------------------------------------------------------------------ environment
+## Which costly effects a renderer and quality get. SSR and volumetric fog exist only on Forward+: requesting them on
+## Compatibility (or Mobile) prints an engine warning and does nothing, so they are never requested there.
+static func features(method: String, q: int) -> Dictionary:
+	var fplus := method == "forward_plus"
+	var mid := q >= Quality.MEDIUM
+	return {"ssao": mid, "ssr": fplus and mid, "volumetric_fog": fplus and mid, "rain": mid,
+		"flood_shadows": [0, 2, 4][clampi(q, Quality.LOW, Quality.HIGH)]}
+
+
 func _build_environment() -> void:
 	environment = Environment.new()
 	var e := environment
@@ -143,30 +169,35 @@ func _build_environment() -> void:
 	_sky_mat.shader = SKY_SHADER
 	_sky_mat.set_shader_parameter("cloud_noise", _noise_tex(512, 0.008, 7, 5, false))
 	_sky_mat.set_shader_parameter("moon_dir", MOON_DIR)
+	_sky_mat.set_shader_parameter("zenith_color", SKY_ZENITH)
+	_sky_mat.set_shader_parameter("horizon_color", SKY_HORIZON)
 	var sky := Sky.new()
 	sky.sky_material = _sky_mat
 	sky.radiance_size = Sky.RADIANCE_SIZE_128
 	e.background_mode = Environment.BG_SKY
 	e.sky = sky
+	# ambient: half the (now dark) sky, half a cold moonlit fill, so pets and the slab stay readable off the floods
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	e.ambient_light_sky_contribution = 1.0
-	e.ambient_light_energy = 0.75
+	e.ambient_light_color = Color(0.2, 0.25, 0.36)
+	e.ambient_light_sky_contribution = 0.5
+	e.ambient_light_energy = 1.6
 	e.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	e.tonemap_mode = Environment.TONE_MAPPER_AGX
-	e.tonemap_exposure = 1.25
+	e.tonemap_exposure = 1.5
+	e.tonemap_agx_contrast = 1.3  # a little deeper night blacks than the default 1.25
 	# glow only on emissives: HDR threshold above anything lit, no bloom of the whole frame
 	e.glow_enabled = true
 	e.glow_hdr_threshold = 1.3
 	e.glow_intensity = 0.7
 	e.glow_bloom = 0.0
 	e.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
-	# distance fog tinted like the horizon, plus a low ground mist
+	# distance fog the colour of the horizon haze, plus a low ground mist
 	e.fog_enabled = true
 	e.fog_mode = Environment.FOG_MODE_EXPONENTIAL
-	e.fog_light_color = Color(0.13, 0.145, 0.17)
+	e.fog_light_color = SKY_HORIZON
 	e.fog_light_energy = 1.0
-	e.fog_density = 0.0042  # ~57 % at 200 m: the far side of the Lot stays a silhouette, not a wall
-	e.fog_sky_affect = 0.2
+	e.fog_density = 0.0045  # ~59 % at 200 m: the far side of the Lot stays a silhouette, not a wall
+	e.fog_sky_affect = 0.15
 	e.fog_aerial_perspective = 0.3
 	e.fog_height = 1.0
 	e.fog_height_density = 0.03
@@ -174,7 +205,7 @@ func _build_environment() -> void:
 	e.adjustment_enabled = true
 	e.adjustment_brightness = 1.0
 	e.adjustment_contrast = 1.06
-	e.adjustment_saturation = 0.82
+	e.adjustment_saturation = 0.85
 	e.adjustment_color_correction = _grade()
 	_world_env = WorldEnvironment.new()
 	_world_env.name = "Env"
@@ -182,8 +213,8 @@ func _build_environment() -> void:
 	add_child(_world_env)
 	moon = DirectionalLight3D.new()
 	moon.name = "Moon"
-	moon.light_color = Color(0.62, 0.72, 0.95)
-	moon.light_energy = 0.3
+	moon.light_color = MOON_COLOR
+	moon.light_energy = 0.5
 	moon.light_angular_distance = 2.5
 	moon.light_volumetric_fog_energy = 0.25
 	moon.light_specular = 0.0  # behind cloud: no hard glint; the sky's moonlit patch reflects instead
@@ -197,35 +228,40 @@ func _build_environment() -> void:
 func _apply_quality() -> void:
 	var e := environment
 	var hi := quality == Quality.HIGH
-	var mid := quality >= Quality.MEDIUM
-	e.ssao_enabled = mid
+	var f := features(rendering_method, quality)
+	e.ssao_enabled = f.ssao
 	e.ssao_radius = 1.4
 	e.ssao_intensity = 1.8
 	e.ssao_power = 1.4
-	e.ssr_enabled = mid
-	e.ssr_max_steps = 64 if hi else 32
-	e.ssr_fade_in = 0.1
-	e.ssr_fade_out = 2.0
-	e.ssr_depth_tolerance = 0.5
-	e.volumetric_fog_enabled = mid
-	e.volumetric_fog_density = 0.009
-	e.volumetric_fog_albedo = Color(0.82, 0.85, 0.9)
-	e.volumetric_fog_anisotropy = 0.45
-	e.volumetric_fog_length = 96.0 if hi else 64.0
-	e.volumetric_fog_ambient_inject = 0.04  # haze comes from the lamps, not a blue veil over long views
-	e.volumetric_fog_sky_affect = 0.0
-	e.volumetric_fog_temporal_reprojection_enabled = true
-	if _forward_plus and mid:
+	# SSR / volumetric fog: not touched at all where they do not exist (each setter re-sends its whole group to the
+	# server, and the server warns about the group on Compatibility). Both default to off.
+	if f.ssr or e.ssr_enabled:
+		e.ssr_enabled = f.ssr
+	if f.ssr:
+		e.ssr_max_steps = 64 if hi else 32
+		e.ssr_fade_in = 0.1
+		e.ssr_fade_out = 2.0
+		e.ssr_depth_tolerance = 0.5
+	if f.volumetric_fog or e.volumetric_fog_enabled:
+		e.volumetric_fog_enabled = f.volumetric_fog
+	if f.volumetric_fog:
+		e.volumetric_fog_density = 0.009
+		e.volumetric_fog_albedo = Color(0.82, 0.85, 0.9)
+		e.volumetric_fog_anisotropy = 0.45
+		e.volumetric_fog_length = 96.0 if hi else 64.0
+		e.volumetric_fog_ambient_inject = 0.04  # haze comes from the lamps, not a blue veil over long views
+		e.volumetric_fog_sky_affect = 0.0
+		e.volumetric_fog_temporal_reprojection_enabled = true
 		RenderingServer.environment_set_volumetric_fog_volume_size(128 if hi else 64, 96 if hi else 48)
-	moon.shadow_enabled = mid
+	moon.shadow_enabled = quality >= Quality.MEDIUM
 	moon.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS if hi else DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	moon.directional_shadow_max_distance = 140.0 if hi else 80.0
 	if _rain != null:
-		_rain.emitting = raining and mid
-		_rain.visible = raining and mid
+		_rain.emitting = raining and f.rain
+		_rain.visible = raining and f.rain
 		_rain.amount = 2000 if hi else 1200
 	if _ground_mat != null:
-		_ground_mat.set_shader_parameter("rain", 1.0 if raining and mid else 0.0)
+		_ground_mat.set_shader_parameter("rain", 1.0 if raining and f.rain else 0.0)
 
 
 func _grade() -> Texture2D:
@@ -255,6 +291,33 @@ func _noise_tex(size: int, freq: float, seed_: int, octaves: int, normal: bool) 
 	return t
 
 
+## Cellular noise: CELL_VALUE = one flat random tone per cell (aggregate stones); DISTANCE2_SUB = ~0 on the cell
+## edges (a crack network; `warp` bends the edges so they wander like cracks, not tiles).
+func _cell_tex(size: int, freq: float, seed_: int, ret: int, warp: float) -> NoiseTexture2D:
+	var n := FastNoiseLite.new()
+	n.noise_type = FastNoiseLite.TYPE_CELLULAR
+	n.seed = seed_
+	n.frequency = freq
+	n.fractal_type = FastNoiseLite.FRACTAL_NONE
+	n.cellular_distance_function = FastNoiseLite.DISTANCE_EUCLIDEAN
+	n.cellular_return_type = ret
+	n.cellular_jitter = 0.9
+	if warp > 0.0:
+		n.domain_warp_enabled = true
+		n.domain_warp_type = FastNoiseLite.DOMAIN_WARP_SIMPLEX
+		n.domain_warp_amplitude = warp
+		n.domain_warp_frequency = freq * 4.0
+		n.domain_warp_fractal_type = FastNoiseLite.DOMAIN_WARP_FRACTAL_PROGRESSIVE
+		n.domain_warp_fractal_octaves = 3
+	var t := NoiseTexture2D.new()
+	t.width = size
+	t.height = size
+	t.seamless = true
+	t.noise = n
+	t.generate_mipmaps = true
+	return t
+
+
 # ------------------------------------------------------------------------------------------------ surfaces
 func _geometry(n: Node) -> Array:
 	var out: Array = []
@@ -271,10 +334,25 @@ func _ground_material() -> ShaderMaterial:
 		_ground_mat.resource_name = "look_wet_ground"
 		_ground_mat.shader = GROUND_SHADER
 		_ground_mat.set_shader_parameter("grain_tex", _noise_tex(512, 0.03, 21, 5, false))
+		_ground_mat.set_shader_parameter("agg_tex", _cell_tex(512, 0.11, 27, FastNoiseLite.RETURN_CELL_VALUE, 0.0))
+		_ground_mat.set_shader_parameter("crack_tex", _cell_tex(512, 0.01, 39, FastNoiseLite.RETURN_DISTANCE2_SUB, 18.0))
 		_ground_mat.set_shader_parameter("puddle_tex", _noise_tex(256, 0.012, 33, 3, false))
-		_ground_mat.set_shader_parameter("detail_nrm", _noise_tex(512, 0.045, 45, 4, true))
-		_ground_mat.set_shader_parameter("rain", 1.0 if raining and quality >= Quality.MEDIUM else 0.0)
+		_ground_mat.set_shader_parameter("detail_nrm", _noise_tex(512, 0.08, 45, 3, true))
+		_ground_mat.set_shader_parameter("rain", 1.0 if raining and features(rendering_method, quality).rain else 0.0)
 	return _ground_mat
+
+
+## The ditches: dark, still water (G-WORLD's "mud" tint read as brown paint at night): a near-black body with a mirror
+## surface, so it carries the sky, the lamps and (Forward+) SSR.
+func _water_material() -> StandardMaterial3D:
+	if _water_mat == null:
+		_water_mat = StandardMaterial3D.new()
+		_water_mat.resource_name = "look_water"
+		_water_mat.albedo_color = Color(0.02, 0.022, 0.025, 0.92)
+		_water_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_water_mat.roughness = 0.04
+		_water_mat.metallic_specular = 0.5
+	return _water_mat
 
 
 func _wet_instance(g: GeometryInstance3D, grp: String) -> void:
@@ -462,7 +540,7 @@ func _build_floods() -> void:
 	if _world == null or not _world.has_method("floodlights"):
 		return
 	var list: Array = _world.floodlights()
-	var shadows: int = [0, 2, 4][quality]
+	var shadows: int = features(rendering_method, quality).flood_shadows
 	var stride := maxi(1, ceili(float(list.size()) / maxf(1.0, float(shadows))))
 	var shadowed := 0
 	for i in list.size():
@@ -472,13 +550,15 @@ func _build_floods() -> void:
 		var s := SpotLight3D.new()
 		s.name = "Flood%d" % i
 		s.light_color = SODIUM
-		s.light_energy = 22.0
+		s.light_energy = FLOOD_ENERGY
 		s.light_indirect_energy = 0.5
-		s.light_volumetric_fog_energy = 1.2
+		s.light_volumetric_fog_energy = 0.4  # a halo in the haze, not an orange dust storm at play height
 		s.light_specular = 1.0
 		s.spot_range = clampf(pos.distance_to(tgt) * 2.0, 30.0, 90.0)
-		s.spot_angle = 38.0
-		s.spot_angle_attenuation = 0.8
+		# a pool, not a floodlit field: a narrower cone, a flat-topped hot centre and a defined edge (the W12 42-degree
+		# soft cone lit the whole pit evenly, so no pool read from the play cameras)
+		s.spot_angle = 32.0
+		s.spot_angle_attenuation = 1.6
 		s.spot_attenuation = 0.9
 		s.shadow_enabled = shadowed < shadows and i % stride == 0
 		if s.shadow_enabled:

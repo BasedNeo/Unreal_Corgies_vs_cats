@@ -92,7 +92,8 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
   // W8: the yard edge, the far-scenery radius and the pond-bed level follow the map (the West Yard's values are unchanged)
   const b = data.bounds;
   const edge = b ? Math.max(-b.minX, b.maxX, -b.minZ, b.maxZ) : data.halfExtent;
-  const terrainMat = createTerrainMaterial({ ink: opts.terrainInk ?? false, detail: P.terrainDetail, yardHalf: edge + 1, bedLevel: data.bedLevel ?? -0.12 });
+  // W13: The Lot's trodden ground is the Godot build's wet asphalt; the West Yard's dirt paths stay dirt (a back yard)
+  const terrainMat = createTerrainMaterial({ ink: opts.terrainInk ?? false, detail: P.terrainDetail, yardHalf: edge + 1, bedLevel: data.bedLevel ?? -0.12, ground: data.map === 'the_lot' ? 'asphalt' : 'yard' });
   const terrain = createTerrainView(data, terrainMat.material);
   root.add(terrain.group);
 

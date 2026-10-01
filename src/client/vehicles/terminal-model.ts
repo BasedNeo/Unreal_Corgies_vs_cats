@@ -3,7 +3,6 @@
 // the lawn where the kart pops out. Kiosk space: +Y up, screen faces -Z, ground at y = 0.
 // Draw calls: body (vertex-colored toon) + crease ink + screen (glow) + pad ring (toon) = 4.
 import * as THREE from 'three/webgpu';
-import type { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { PALETTE } from '../style/style-tokens.js';
 import { Team, type TeamId } from '../../shared/types';
 import { PartBuilder, at, rbox, box, cyl, cone, torus } from './parts';
@@ -11,7 +10,6 @@ import { KART_PALETTES } from './kart-model';
 
 export interface TerminalAssets {
   body: THREE.BufferGeometry;
-  lines: LineSegmentsGeometry | null;
   /** Unit screen quad anchored at its bottom edge (scale.y = fill). */
   screen: THREE.BufferGeometry;
   pad: THREE.BufferGeometry;
@@ -58,7 +56,7 @@ export function terminalAssets(team: TeamId): TerminalAssets {
   }
   // Chevrons on the pad side pointing to where the kart appears.
   for (let i = 0; i < 2; i++) b.add(cone(0.12, 0.2, 3), at(0.6, 1.25 - i * 0.26, 0, Math.PI / 2, 0, -Math.PI / 2, 1, 1, 0.3), P.trim);
-  const { geometry, lines } = b.build();
+  const { geometry } = b.build();
 
   const screen = new THREE.PlaneGeometry(SCREEN.w, SCREEN.h);
   screen.translate(0, SCREEN.h / 2, 0);
@@ -71,12 +69,12 @@ export function terminalAssets(team: TeamId): TerminalAssets {
     pb.add(box(0.36, 0.02, 0.1), at(Math.cos(ang) * 0.8, 0.02, Math.sin(ang) * 0.8, 0, -ang), P.trim);
   }
   const pad = pb.build().geometry;
-  a = { body: geometry, lines, screen, pad, triangles: geometry.index!.count / 3 + 2 + pad.index!.count / 3 };
+  a = { body: geometry, screen, pad, triangles: geometry.index!.count / 3 + 2 + pad.index!.count / 3 };
   cache.set(key, a);
   return a;
 }
 
 export function releaseTerminalAssets(): void {
-  for (const a of cache.values()) { a.body.dispose(); a.lines?.dispose(); a.screen.dispose(); a.pad.dispose(); }
+  for (const a of cache.values()) { a.body.dispose(); a.screen.dispose(); a.pad.dispose(); }
   cache.clear();
 }
