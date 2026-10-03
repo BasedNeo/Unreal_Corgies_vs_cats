@@ -103,12 +103,13 @@ describe('X4 ordnance: allocations', () => {
     };
     throwOnly(6000); // JIT warm-up: the first few thousand throws still settle optimized code on the heap
     for (let i = 0; i < 100; i++) cycle(i); // more warm-up (bounce/blast branches, Rapier's caches)
-    let h0 = heapAfterGc();
-    throwOnly(3000);
-    const throwGrown = heapAfterGc() - h0;
-    h0 = heapAfterGc();
-    for (let i = 0; i < 400; i++) cycle(i);
-    const cycleGrown = heapAfterGc() - h0;
+    // A leak grows the heap on every pass; one-time settling (optimized code, inline caches, the entities Map's
+    // rehash) grows it once. So each figure is the smaller of two passes: CI run 150 measured +104,912 B for one pass of
+    // 400 cycles on code that measured under 96 KB in run 149.
+    const grownOver = (fn: () => void) => { const h0 = heapAfterGc(); fn(); return heapAfterGc() - h0; };
+    const throwGrown = Math.min(grownOver(() => throwOnly(3000)), grownOver(() => throwOnly(3000)));
+    const cycles = () => { for (let i = 0; i < 400; i++) cycle(i); };
+    const cycleGrown = Math.min(grownOver(cycles), grownOver(cycles));
     const perThrow = Math.max(0, transient(() => throwOnly(200)) - transient(() => { for (let i = 0; i < 200; i++) tick(); })) / 200;
     console.log(`[X4 alloc] authority: 3000 throws ${throwGrown >= 0 ? '+' : ''}${throwGrown} B (${(throwGrown / 3000).toFixed(2)} B/throw), 400 full throw → flight → blast cycles ${cycleGrown >= 0 ? '+' : ''}${cycleGrown} B; transient ≈ ${perThrow.toFixed(0)} B/throw over idle ticks (boxed doubles, the entities Map's amortized rehash)`);
     expect(throwGrown).toBeLessThan(96 * 1024);
