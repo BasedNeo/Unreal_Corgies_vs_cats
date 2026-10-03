@@ -75,8 +75,8 @@ var _demo_done := false
 var _demo_live := false
 ## --lineup: where the human stands (set by _place_lineup).
 var lineup_spot := Vector3.ZERO
-## Respawn points per team (W14, _pick_respawn_slots): every one within RESPAWN_BAND s of straight-line sprint time to
-## the slab of every other team's.
+## Respawn points per team (_pick_respawn_slots). The W14 rule keeps each within RESPAWN_BAND s of straight-line sprint
+## time of every other team's; on The Lot the Cats' are data instead (CAT_SLOTS), 0.49-0.76 s of measured trip behind.
 var respawn_slots := [[], []]
 const RESPAWN_BAND := 0.3
 ## Spacing of the Corgis' respawn points along their slot-0 line (more than a capsule's width).
@@ -292,13 +292,12 @@ func start_match() -> void:
 	match_started.emit()
 
 ## Match-start slots (W13 G-BOT): equal time, not equal distance. The Corgis' slots run from their farthest spawn (slot 0,
-## the human's: spawn 0, with the straight walk up the slab path) to the nearest. Every other team's slot k is the
-## unused spawn whose straight-line sprint time to the slab (distance / the species' sprint, tuning.gd MOVE) is closest
-## to the Corgis' slot k. On The Lot that is 14.95 s for the Corgis' slot 0 (143.5 m at 9.6 m/s) and 15.05 s for the
-## Cats' (132.4 m at 8.8 m/s); 14.64 s and 14.60 s for slot 1. In the data's own order the Corgis started 143.5 m out
-## and the Cats 119.0 m (the Cat side was first on the slab in 199 of 200 bots-only matches); at equal distance the
-## faster-sprinting Corgis were first in 100 of 100 (docs/handoff/G-BOT.md). `spawns` itself keeps the data order
-## (--demo, --lineup and respawns read it).
+## the human's: spawn 0, with the straight walk up the slab path) to the nearest. On The Lot the Cats' first slots are
+## data, matched on measured trips (CAT_SLOTS, W15); further Cat slots, and every slot on another map, are the unused
+## spawn whose straight-line sprint time to the slab (distance / the species' sprint, tuning.gd MOVE) is closest to
+## the Corgis' slot k. In the data's own order the Corgis started 143.5 m out and the Cats 119.0 m (the Cat side was
+## first on the slab in 199 of 200 bots-only matches); at equal distance the faster-sprinting Corgis were first in 100
+## of 100 (docs/handoff/G-BOT.md). `spawns` itself keeps the data order (--demo, --lineup and respawns read it).
 func start_slots(team: int) -> Array:
 	var ref: Array = spawns[0].duplicate()
 	ref.sort_custom(func(a: Vector3, b: Vector3) -> bool: return _sprint_time(a, 0) > _sprint_time(b, 0))
@@ -317,6 +316,47 @@ func start_slots(team: int) -> Array:
 		out.append(left[best])
 		left.remove_at(best)
 	out.append_array(left)
+	var fixed: Array = _cat_slots("start") if team == 1 else []
+	if not fixed.is_empty():
+		out = fixed + out.filter(func(p: Vector3) -> bool: return not fixed.has(p))
+	return out
+
+## The Cat Cadre's start and respawn slots on The Lot (W15 G-BOT): data, not an estimate. Each is a Cat spawn (its index
+## in the_lot.json's spawns["1"], and its x, z to check the data still matches) with the measured trip of a lone bot
+## sprinting along its nav path from there to the slab's edge (tests/balance.gd --routes, the mean of 11 runs, each
+## with its own goal on the slab). They are matched to the Corgis' measured trips (CORGI_TRIPS: their slots are
+## unchanged) plus CAT_OFFSET. docs/qa/w15/bot-route.md has the numbers:
+## - W14, straight-line time: the Cats' slot 0 at (62, 117), measured 15.56 s; slot 1 at (74, 105), 14.56 s; a
+##   respawn at (56, 117), 15.64 s. 2v2 bots-only went 47-73 (Cat 61 %, n 120). Nav-path time was worse (73 %).
+## - Matched to equal lone trips (row z = 111, 14.93-15.05 s): 2v2 43-77 (Cat 64 %, n 120), 1v1 41-39. In a match the
+##   Cats still reached the slab 0.7 s sooner per life (16.0 against 16.7 s): within sight of an enemy a bot runs, and
+##   the Cat runs faster (6.6 against 6.4 m/s), and the Corgis' way in from the pit is in sight of the slab longer.
+## - CAT_OFFSET 0.6 s: every Cat start AND respawn slot moves to the row z = 117, 0.49-0.76 s of measured lone trip per
+##   life behind the Corgis' (start 0 +0.57 s, start 1 +0.74 s, respawns +0.49 to +0.76 s). Pooled: 2v2 52-68 (Cat
+##   57 %, n 120), 1v1 42-38 (n 80). No 2v2 row differs from another significantly (Fisher p >= 0.29), and 2v2 seeds
+##   101-160 alone are 62 % Cat (60 % on a rerun).
+const CAT_OFFSET := 0.6
+const CAT_SLOTS := {
+	"start": [{"i": 2, "x": 56.0, "z": 117.0, "trip": 15.64}, {"i": 6, "x": 62.0, "z": 117.0, "trip": 15.56}],
+	"respawn": [{"i": 2, "x": 56.0, "z": 117.0, "trip": 15.64}, {"i": 6, "x": 62.0, "z": 117.0, "trip": 15.56},
+		{"i": 10, "x": 68.0, "z": 117.0, "trip": 15.61}],
+}
+## The Corgis' measured trips, the same way (slots 0 and 1: spawns 0 and 4; respawn: spawn 0 and the two points on its
+## line to the slab), for CAT_SLOTS and tests/test_game_respawn.gd.
+const CORGI_TRIPS := {"start": [15.07, 14.82], "respawn": [15.07, 15.01, 14.88]}
+
+## The Cats' data slots of `kind` ("start" or "respawn"), or [] when the spawns are not The Lot's (another map, the
+## skeleton world): then the straight-line rule picks them.
+func _cat_slots(kind: String) -> Array:
+	var out: Array = []
+	for e in CAT_SLOTS[kind]:
+		var i: int = e.i
+		if spawns.size() < 2 or i >= spawns[1].size():
+			return []
+		var sp: Vector3 = spawns[1][i]
+		if absf(sp.x - float(e.x)) > 0.01 or absf(sp.z - float(e.z)) > 0.01:
+			return []
+		out.append(sp)
 	return out
 
 ## Straight-line sprint time from `sp` to the slab centre for `team`'s species (team = species in this game).
@@ -424,13 +464,42 @@ func respawn_left(pet: Node) -> float:
 			return r[1]
 	return 0.0
 
-## Respawn points (W14 G-MOVE): equal time, like the start (start_slots), for every respawn. The window is the
+## The bases' names on The Lot (src/shared/world/lot/layout.ts): the Corgis' foundation pit, the Cats' scaffolds.
+const BASE_NAMES := ["THE FOUNDATION", "THE SCAFFOLDS"]
+## --demo's first match respawns a pet at its demo spot, on its own side beside the slab.
+const DEMO_SPOT_NAME := "THE SLAB'S EDGE"
+
+## Where `team` comes back after a knockout, for the HUD (W15 DEATH): the base's name, the centre of the team's
+## respawn points, its straight-line distance to the slab's centre and the species' sprint time over it (a straight-line
+## lower bound: measured bot trips are 0.4-0.6 s longer, a human's straight run about 2 s, docs/qa/w15/bot-route.md). Read-only;
+## empty before the match has its spawns. With `pet` during --demo's first match, where that pet really comes back:
+## its demo spot beside the slab (_physics_process respawns it there), named DEMO_SPOT_NAME.
+func respawn_zone(team: int, pet: Node = null) -> Dictionary:
+	if _demo_live and pet != null and slab != null:
+		var dp := _demo_spot(pet, int(pet.get_meta("slot", 1)))
+		var dd := Vector2(dp.x - slab.center.x, dp.z - slab.center.z).length()
+		return {"name": DEMO_SPOT_NAME, "pos": dp, "dist": dd, "sprint_s": dd / float(T.MOVE[team].sprint)}
+	var slots: Array = respawn_slots[team] if not respawn_slots[team].is_empty() else spawns[team]
+	if slots.is_empty() or slab == null:
+		return {}
+	var pos := Vector3.ZERO
+	for sp in slots:
+		pos += sp
+	pos /= float(slots.size())
+	var dist := Vector2(pos.x - slab.center.x, pos.z - slab.center.z).length()
+	return {"name": BASE_NAMES[team], "pos": pos, "dist": dist, "sprint_s": dist / float(T.MOVE[team].sprint)}
+
+## Respawn points (W14 G-MOVE, W15 G-BOT). The W14 rule matches straight-line sprint time, like the start (start_slots).
+## On The Lot the Cats' are data instead (CAT_SLOTS "respawn", measured trips 15.56-15.64 s against the Corgis'
+## 14.88-15.07 s: 0.49-0.76 s behind, CAT_OFFSET). The rest is the W14 rule, which still picks the Corgis' points
+## and, on another map, everyone's. The window is the
 ## RESPAWN_BAND s of sprint time that ends at the Corgis' slot 0 (14.95 s on The Lot: spawn 0, the slab path's
 ## line). Corgi points: slot 0 and points RESPAWN_STEP m apart on from it, on its straight line to the slab, while
 ## they stay in the window (14.95, 14.81, 14.68 s: the Corgis' only straight walk out of the pit is that line; from 7
 ## of their 16 spawns a straight walk stalls at the pit wall or in trench T1, W14 probe). Other teams: their spawns
 ## inside the window (the Cats: 14.74 s and 14.79 s; from every Cat spawn the straight walk reaches the slab), else the
-## one nearest it. So any two respawns of different teams are at most RESPAWN_BAND s apart. At W13 a respawn took the
+## one nearest it. Under this rule any two respawns of different teams are at most RESPAWN_BAND s apart; on The Lot the
+## Cats' data respawns are not. At W13 a respawn took the
 ## team spawn farthest from the nearest enemy: about 143.5 m for both teams, 14.95 s for a Corgi but 16.31 s for a Cat
 ## (docs/qa/w14/respawn.md).
 func _pick_respawn_slots() -> void:
@@ -446,6 +515,10 @@ func _pick_respawn_slots() -> void:
 		var hit := _ground_hit(p)
 		pts.append(hit.position + Vector3(0, s0.y - _ground_y_at(s0), 0) if not hit.is_empty() else p)
 	respawn_slots[0] = pts
+	var fixed := _cat_slots("respawn")
+	if not fixed.is_empty():
+		respawn_slots[1] = fixed
+		return
 	for t in range(1, 2):
 		var inside: Array = []
 		var nearest: Vector3 = spawns[t][0]

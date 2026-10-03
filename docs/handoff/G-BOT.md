@@ -290,6 +290,33 @@ bot.gd, with seeds 1-40/1-60 and 101-140/101-160:
   1. slots from measured bot trip times (test_game_respawn.gd changes with it);
   2. the ramp hops (cosmetic).
 
+## 11c. Wave 15 ROUTE (A1): Cat slots from measured bot trips
+`docs/qa/w15/bot-route.md` has the tables. match.gd `CAT_SLOTS` holds the Cats' start and respawn slots as data,
+each with its measured lone-bot trip (`balance.gd --routes`, 11 runs).
+- **Equal trips first (the one A1 change):** 2v2 went 43-77 (Cat 64 %). In a match the Cats still reached the slab
+  0.7 s sooner per life: the run gait in sight of an enemy, and the Corgis' exposed way in.
+- **Then `CAT_OFFSET` 0.6 (the one allowed start offset).** It moves every Cat start AND respawn slot to the row
+  z = 117, 0.49-0.76 s of measured lone trip per life behind the Corgis' (start 0 +0.57 s, start 1 +0.74 s,
+  respawns +0.49 to +0.76 s). Result: 1v1 42-38 (Cat 48 %, n 80), 2v2 52-68 (Cat 57 %, n 120).
+- **The bar, read on the pooled n** (the lead's ruling, as in W13/W14): neither side is over 60 %. Per seed set,
+  2v2 seeds 101-160 are 62 % Cat (60 % on a rerun), so under that reading A1 is still over. The lane stopped after
+  the one allowed change, as the card says.
+- **Significance:** no 2v2 row differs significantly from another (pairwise Fisher p >= 0.29 at n 120). Held share
+  with the offset is 51.2 % Cat in 2v2 and 49.4 % in 1v1.
+- **Tests:** `test_game_respawn.gd` checks the measured trips. On HEAD's match.gd it fails at start slot 0, the Cats'
+  (62, 117), 0.40 s off, and at the respawn (56, 117), 0.62 s off. Suite: HEAD + the A1 files, 16/16 PASS.
+- **Seeds do not replay across processes.** A rerun of the shipped 2v2 on seeds 101-160 changed 15 of 60 winners.
+- **Human play:** a human Corgi running straight (about 16.9 s) is about 1.3 s behind the Cat bots (15.5-15.6 s)
+  every life. That is narrower than W14's 2.0-2.3 s.
+
+## 11d. Wave 15 HOPS (A2): the wall-only jump fix, measured on the new slots
+`docs/qa/w15/bot-route.md` § A2. The Corgi bots' hops are all 60 m or more from the slab, on the pit ramp and the
+trench notches. None happens in a fight: 4 of about 110,000 shots were at an airborne pet.
+- **Cost of removing them:** 0.08-0.10 s per Corgi trip.
+- **2v2, n 120:** 56 % Cat shipped against 58 % with the fix, inside run-to-run noise (an identical rerun changed 15
+  of 60 winners).
+- **Not applied:** with the fix, seeds 101-160 measure 63 % Cat. bot.gd is unchanged.
+
 ## 12. Commands
 ```
 G=<Godot 4.7.2>

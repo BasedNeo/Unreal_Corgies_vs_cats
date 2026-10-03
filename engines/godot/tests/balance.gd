@@ -8,7 +8,10 @@ extends SceneTree
 ## --format 1v1|2v2   one Corgi bot vs one Cat bot, or two vs two (match.gd opts, as --bots-only / --bots-only --2v2)
 ## --n N              matches, one after the other on the same world (match.gd start_match, the R rematch path)
 ## --seed S           match i uses seed S + i for the global RNG (spawn jitter) and every bot's and rifle's RNG, and
-##                    resets the bots' think state, so a seed replays the same match in another run
+##                    resets the bots' think state. A seed does NOT reliably replay a match in another process: a rerun
+##                    of the shipped 2v2 on seeds 101-160 changed 15 of 60 winners, while seeds 1-60 changed none (a
+##                    likely cause, not proven: the boot's pre-match physics ticks depend on wall time). Treat each seed
+##                    block as an independent sample.
 ## --speed K          K x 60 physics ticks per real second with Engine.time_scale K: every tick still steps 1/60 s
 ##                    (test_game_soak's method). The run goes up to K x real time, slower if the CPU cannot keep up.
 ##                    --speed 1 is real time.
@@ -23,8 +26,20 @@ extends SceneTree
 ##                    the Cat bot comes from its start slot and fights you for S s per trial (n trials). Prints where the
 ##                    bot is from its first sight of you on (inside the margin, in the volume's edge band, on the lip,
 ##                    farther out), how often the slab flips to contested, and your points after it arrived
-## --routes           pathing only, no fight: one bot of each side in turn walks from each of its team's 16 spawns to
-##                    the slab alone; prints time to the slab, jumps, step-ups and the longest stall per spawn
+## --trace            per match, a TRACE line: bot jumps per side by distance from the slab (and how many in a fight),
+##                    seconds airborne (all, and within 30 m of the slab), shots at airborne and grounded targets with
+##                    their hit rates, and deaths by distance from the slab (and how many airborne); per Corgi life,
+##                    the time to cross the slab path's band (PATH_S along its line: the pit ramp, trench notches),
+##                    seconds there with a teammate within 1.5 m; stalls (0.6 s under 0.6 m/s off the slab, as bot.gd
+##                    counts stuck) by distance from the slab
+## --duel M           species check: a thinking bot on the slab shoots a still bot of the other species standing on
+##                    open ground M m away (the --lineup spot), n times each way round (Corgi shooting a Cat, Cat
+##                    shooting a Corgi); prints the hit rate and the time to kill per shooter species
+## --routes           pathing only, no fight: one bot of each side in turn walks from each of its team's 16 spawns (and
+##                    each respawn point that is not a spawn) to the slab alone; prints time to the slab's edge, jumps,
+##                    step-ups and the longest stall per point, and which start slot / respawn point it is. With
+##                    --reps R every point runs R times (seeds S + i + 1000 r: a different goal on the slab each time)
+##                    and the line gives the mean and the range
 ## Per match: format, seed, winner, score, takedowns per side, seconds with a pet of each side on the slab, seconds
 ## each side held it alone (scored), shots / hits / hit rate per side, first arrival on the slab per side, and the
 ## mean spawn-to-slab time per life.
@@ -41,10 +56,15 @@ var seed0 := 1
 var speed := 8.0
 var max_game := 0.0
 var events := false
+var trace := false
+## Distance bins from the slab's centre for --trace: under 20 m, 20-60, 60-100, 100 m and over.
+const BINS := [20.0, 60.0, 100.0]
 var jump_up := -1.0
 var routes := false
+var reps := 1
 var ttk := 0.0
 var holder := 0.0
+var duel := 0.0
 
 func _init() -> void:
 	_run.call_deferred()
@@ -60,10 +80,13 @@ func _args() -> void:
 			"--speed": speed = maxf(1.0, float(v))
 			"--max-game": max_game = float(v)
 			"--events": events = true
+			"--trace": trace = true
 			"--jump-up": jump_up = float(v)
 			"--routes": routes = true
+			"--reps": reps = maxi(1, int(v))
 			"--ttk": ttk = float(v)
 			"--holder": holder = float(v)
+			"--duel": duel = float(v)
 
 func _run() -> void:
 	_args()
@@ -77,6 +100,8 @@ func _run() -> void:
 		o = {"lineup": ttk}
 	if holder > 0.0:
 		o = {"human": true, "allies": 0, "enemies": 1, "think": true}
+	if duel > 0.0:
+		o = {"human": false, "allies": 0, "enemies": 1, "think": true}
 	for k in o:
 		game.opts[k] = o[k]
 	root.add_child(main)
@@ -108,6 +133,10 @@ func _run() -> void:
 		await _holder(game)
 		quit(0)
 		return
+	if duel > 0.0:
+		await _duel(game)
+		quit(0)
+		return
 	for i in 2:  # match.gd picks its slots by nav path on the first tick the map serves paths
 		await physics_frame
 	_print_slots(game)
@@ -133,33 +162,79 @@ func _routes(game: Node) -> void:
 				var home: Vector3 = game.spawns[o.team][15]
 				o.respawn(home, 0.0)
 		var team: int = b.team
-		var spawns: Array = game.spawns[team]
-		for i in spawns.size():
-			_reseed(game, seed0 + i)
-			game.start_match()
-			var sp: Vector3 = spawns[i]
-			b.respawn(sp, game._yaw_to(sp, game.slab.center))
+		var pts: Array = []  # [point, label]
+		for i in game.spawns[team].size():
+			pts.append([game.spawns[team][i], "spawn %2d" % i])
+		var rs = game.get("respawn_slots")
+		if rs is Array:
+			for q in rs[team]:
+				if not game.spawns[team].any(func(x): return (x as Vector3).distance_to(q) < 0.3):
+					pts.append([q, "respawn pt"])
+		var starts: Array = game.start_slots(team) if game.has_method("start_slots") else []
+		for k in pts.size():
+			var sp: Vector3 = pts[k][0]
+			var tags: Array = []
+			for j in mini(2, starts.size()):
+				if (starts[j] as Vector3).distance_to(sp) < 0.3:
+					tags.append("start slot %d" % j)
+			if rs is Array and rs[team].any(func(x): return (x as Vector3).distance_to(sp) < 0.3):
+				tags.append("respawn")
+			var times: Array = []
+			var band_t := 0.0
+			var band_n := 0
+			var air_t := 0.0
 			var j0: int = b.jumps
 			var s0: int = b.steps
-			var t0: float = game.elapsed
-			var stall := 0.0
 			var worst := 0.0
-			var reached := -1.0
-			while game.playing() and game.elapsed - t0 < 60.0:
-				await physics_frame
-				if game.slab.contains(b.global_position):
-					reached = game.elapsed - t0
-					break
-				stall = stall + 1.0 / 60.0 if Vector2(b.velocity.x, b.velocity.z).length() < 1.0 else 0.0
-				worst = maxf(worst, stall)
+			for r in reps:
+				_reseed(game, seed0 + k + 1000 * r)
+				game.start_match()
+				b.respawn(sp, game._yaw_to(sp, game.slab.center))
+				var t0: float = game.elapsed
+				var stall := 0.0
+				var reached := -1.0
+				var b_in := -1.0
+				var b_out := -1.0
+				while game.playing() and game.elapsed - t0 < 60.0:
+					await physics_frame
+					if game.slab.contains(b.global_position):
+						reached = game.elapsed - t0
+						break
+					stall = stall + 1.0 / 60.0 if Vector2(b.velocity.x, b.velocity.z).length() < 1.0 else 0.0
+					worst = maxf(worst, stall)
+					if not b.is_on_floor():
+						air_t += 1.0 / 60.0
+					var sl := _path_s(b.global_position)
+					if b_in < 0.0 and sl >= PATH_S.x:
+						b_in = game.elapsed - t0
+					if b_out < 0.0 and sl >= PATH_S.y:
+						b_out = game.elapsed - t0
+				times.append(reached)
+				if team == 0 and b_in >= 0.0 and b_out >= 0.0:
+					band_t += b_out - b_in
+					band_n += 1
+			var ok: Array = times.filter(func(x): return x >= 0.0)
 			var d := Vector2(sp.x - game.slab.center.x, sp.z - game.slab.center.z).length()
-			all[team].append({"t": reached, "j": b.jumps - j0, "s": b.steps - s0, "stall": worst, "d": d})
+			var mean := -1.0
+			if ok.size() == times.size():
+				mean = 0.0
+				for x in ok:
+					mean += x
+				mean /= ok.size()
+			all[team].append({"t": mean, "j": b.jumps - j0, "s": b.steps - s0, "stall": worst, "d": d})
 			var st := ""
-			if game.has_method("_sprint_time") and game.has_method("_line_len"):
-				st = " · sprint time by line %.2f s, by nav path %.2f s" % [game._line_len(sp) / float(T.MOVE[team].sprint),
-					game._sprint_time(sp, team)]
-			print("ROUTE %s spawn %2d (%.1f m): %s · jumps %d · step-ups %d · longest stall %.2f s%s" % [SIDE[team], i, d,
-				"slab in %.2f s" % reached if reached >= 0.0 else "NOT REACHED in 60 s", b.jumps - j0, b.steps - s0, worst, st])
+			if game.has_method("_sprint_time"):
+				st = " · straight-line sprint %.2f s" % (d / float(T.MOVE[team].sprint))
+			var span := ""
+			if reps > 1 and not ok.is_empty():
+				span = " (%.2f-%.2f, %d runs)" % [ok.min(), ok.max(), times.size()]
+			var extra := " · airborne %.2f s per run" % (air_t / reps)
+			if band_n > 0:
+				extra += " · slab-path band (%.0f-%.0f m along its line) crossed in %.2f s" % [PATH_S.x, PATH_S.y, band_t / band_n]
+			print("ROUTE %s %s (%.1f, %.1f) %.1f m%s: %s%s · jumps %.1f · step-ups %.1f per run · longest stall %.2f s%s%s" % [
+				SIDE[team], pts[k][1], sp.x, sp.z, d, " [" + ", ".join(tags) + "]" if not tags.is_empty() else "",
+				"slab in %.2f s" % mean if mean >= 0.0 else "NOT REACHED in 60 s (%d of %d)" % [times.size() - ok.size(), times.size()],
+				span, float(b.jumps - j0) / reps, float(b.steps - s0) / reps, worst, st, extra])
 	for team in 2:
 		var ok: Array = all[team].filter(func(r): return r.t >= 0.0)
 		var ts: Array = ok.map(func(r): return r.t)
@@ -173,8 +248,9 @@ func _routes(game: Node) -> void:
 			worst = maxf(worst, r.stall)
 		for r in ok:
 			slow = maxf(slow, r.t)
-		print("ROUTES %s · reached %d/%d · mean %s s · slowest %.2f s · jumps %d · step-ups %d · longest stall %.2f s · ledge jump %.2f m" % [
-			SIDE[team], ok.size(), all[team].size(), _mean_s(ts), slow, js, ss, worst, float(bots[0].ledge_jump)])
+		print("ROUTES %s · reached %d/%d · mean %s s · slowest %.2f s · jumps %.1f · step-ups %.1f per point · longest stall %.2f s · ledge jump %.2f m" % [
+			SIDE[team], ok.size(), all[team].size(), _mean_s(ts), slow, float(js) / maxf(1, all[team].size() * reps),
+			float(ss) / maxf(1, all[team].size() * reps), worst, float(bots[0].ledge_jump)])
 	print("ROUTES in %.0f s real" % ((Time.get_ticks_msec() - t_real) / 1000.0))
 
 ## The Cat bot (thinking) on its lineup spot against you at the lineup spot; the Corgi bot is taken out (parked at its
@@ -250,6 +326,54 @@ func _ttk(game: Node) -> void:
 			ttk, mode, t_kill.size(), n, _mean_s(t_kill), _mean_s(t_fire), _pct(hits, shots), hits, shots, cuts,
 			moved / maxf(game_t, 0.001)])
 
+func _duel(game: Node) -> void:
+	var corgi: Node = game.pets.filter(func(p): return p.team == 0)[0]
+	var cat: Node = game.pets.filter(func(p): return p.team == 1)[0]
+	game._place_lineup(duel)
+	var spot: Vector3 = game.lineup_spot + Vector3(0, 0.05, 0)
+	var c: Vector3 = game.slab.center + Vector3(0, 0.05, 0)
+	print("DUEL target spot (%.1f, %.1f), %.1f m from the slab's centre" % [spot.x, spot.z,
+		Vector2(spot.x - c.x, spot.z - c.z).length()])
+	for pair in [[corgi, cat], [cat, corgi]]:
+		var shooter: Node = pair[0]
+		var target: Node = pair[1]
+		var shots := 0
+		var hits := 0
+		var heads := 0
+		var ttk: Array = []
+		var cut := 0
+		for i in n:
+			_reseed(game, seed0 + i)
+			game._respawns.clear()
+			target.respawn(spot, game._yaw_to(spot, c))
+			target.think = false
+			target.shield = 0.0
+			shooter.respawn(c, game._yaw_to(c, spot))
+			shooter.think = true
+			var f := [0, 0, 0]
+			var on_fire := func(res: Dictionary) -> void:
+				f[0] += 1
+				if res.get("target") == target:
+					f[1] += 1
+					if res.get("head", false):
+						f[2] += 1
+			shooter.rifle.fired.connect(on_fire)
+			var t0: float = game.elapsed
+			while target.alive and game.elapsed - t0 < 20.0:
+				game.score = [0, 0]
+				game.time_left = T.MATCH_TIME
+				await physics_frame
+			shooter.rifle.fired.disconnect(on_fire)
+			shots += f[0]
+			hits += f[1]
+			heads += f[2]
+			if target.alive:
+				cut += 1
+			else:
+				ttk.append(game.elapsed - t0)
+		print("DUEL %s bot shooting a still %s at %.0f m: %d/%d kills · time to kill %s s · hit rate %s (%d/%d) · head hits %d" % [
+			SIDE[shooter.team], SIDE[target.team], duel, ttk.size(), n, _mean_s(ttk), _pct(hits, shots), hits, shots, heads])
+
 func _holder(game: Node) -> void:
 	var you: Node = game.player
 	var cat: Node = game.pets.filter(func(p): return p != you)[0]
@@ -306,20 +430,38 @@ func _holder(game: Node) -> void:
 		n, holder, watched, _pct_f(where.inner, watched), MARGIN, _pct_f(where.band, watched), _pct_f(where.lip, watched),
 		_pct_f(where.far, watched), float(flips) / maxf(1.0, n), float(pts_after) / maxf(1.0, arrived)])
 
-## Start slots 0-1 and the respawn points per team, with their sprint times (match.gd _sprint_time), when match.gd has them.
+## Start slots 0-1 and the respawn points per team, with the straight-line sprint time and, when match.gd keeps one
+## beside the slot (CAT_SLOTS, CORGI_TRIPS, W15), the measured lone-bot trip.
 func _print_slots(game: Node) -> void:
-	if not game.has_method("start_slots") or not game.has_method("_sprint_time"):
+	if not game.has_method("start_slots"):
 		return
+	var cm: Dictionary = (game.get_script() as Script).get_script_constant_map()
 	for t in 2:
 		var out: Array = []
 		var sl: Array = game.start_slots(t)
 		for k in mini(2, sl.size()):
-			out.append("slot %d (%.0f, %.0f) %.2f s" % [k, sl[k].x, sl[k].z, game._sprint_time(sl[k], t)])
+			out.append("slot %d (%.0f, %.0f) line %.2f s%s" % [k, sl[k].x, sl[k].z, _line_s(game, sl[k], t),
+				_measured(cm, game, t, sl[k], "start", k)])
 		var rs = game.get("respawn_slots")
 		if rs is Array and not rs[t].is_empty():
-			var ts: Array = rs[t].map(func(p): return "%.2f" % game._sprint_time(p, t))
-			out.append("respawns %s s" % ", ".join(ts))
+			var ts: Array = []
+			for j in rs[t].size():
+				ts.append("(%.0f, %.0f) line %.2f s%s" % [rs[t][j].x, rs[t][j].z, _line_s(game, rs[t][j], t),
+					_measured(cm, game, t, rs[t][j], "respawn", j)])
+			out.append("respawns " + ", ".join(ts))
 		print("SLOTS %s · %s" % [SIDE[t], " · ".join(out)])
+
+static func _line_s(game: Node, p: Vector3, t: int) -> float:
+	return Vector2(p.x - game.slab.center.x, p.z - game.slab.center.z).length() / float(T.MOVE[t].sprint)
+
+static func _measured(cm: Dictionary, game: Node, t: int, p: Vector3, kind: String, k: int) -> String:
+	if t == 1:
+		for e in cm.get("CAT_SLOTS", {}).get(kind, []):
+			if absf(float(e.x) - p.x) < 0.3 and absf(float(e.z) - p.z) < 0.3:
+				return ", measured %.2f s" % float(e.trip)
+		return ""
+	var tr: Array = cm.get("CORGI_TRIPS", {}).get(kind, [])
+	return ", measured %.2f s" % float(tr[k]) if k < tr.size() else ""
 
 func _reseed(game: Node, s: int) -> void:
 	seed(s)
@@ -347,10 +489,14 @@ func _match(game: Node, s: int) -> Dictionary:
 	var r := {"seed": s, "downs": [0, 0], "falls": [0, 0], "on": [0.0, 0.0], "hold": [0.0, 0.0], "contested": 0.0,
 		"shots": [0, 0], "hits": [0, 0], "dmg": [0.0, 0.0], "first": [-1.0, -1.0], "route": [[], []],
 		"died_en_route": [0, 0], "def_kills": [0, 0], "kill_d": [[], []], "log": [], "pet_on": [0.0, 0.0],
-		"inner": [0.0, 0.0], "lip_fight": [0.0, 0.0], "exits": [0, 0]}
+		"inner": [0.0, 0.0], "lip_fight": [0.0, 0.0], "exits": [0, 0], "jump_bins": [[0, 0, 0, 0], [0, 0, 0, 0]],
+		"jump_fight": [0, 0], "air": [0.0, 0.0], "air_near": [0.0, 0.0], "sh_air": [0, 0], "hit_air": [0, 0],
+		"sh_gnd": [0, 0], "hit_gnd": [0, 0], "death_bins": [[0, 0, 0, 0], [0, 0, 0, 0]], "death_air": [0, 0],
+		"band": [], "band_contact": 0.0, "stall_bins": [[0, 0, 0, 0], [0, 0, 0, 0]]}
 	var life := {}
 	for p in game.pets:
-		life[p] = {"t0": 0.0, "reached": false, "alive": true, "on": false}
+		life[p] = {"t0": 0.0, "reached": false, "alive": true, "on": false, "j": int(p.get("jumps")) if p.get("jumps") != null else 0,
+			"b_in": -1.0, "b_out": -1.0, "stall": 0.0}
 	var cons: Array = []
 	var on_down := func(pet: Node, killer: Node) -> void:
 		var t: float = game.elapsed
@@ -362,18 +508,31 @@ func _match(game: Node, s: int) -> Dictionary:
 			r.kill_d[killer.team].append(d)
 			if game.slab.contains(killer.global_position) and not game.slab.contains(pet.global_position):
 				r.def_kills[killer.team] += 1
-			r.log.append("%.2f %s > %s %.1f m" % [t, killer.display_name, pet.display_name, d])
+			r.log.append("%.2f %s > %s %.1f m%s" % [t, killer.display_name, pet.display_name, d,
+				" · victim %.0f m from the slab%s" % [_flat_d(game, pet.global_position), ", airborne" if not pet.is_on_floor() else ""] if trace else ""])
+		var vd := _flat_d(game, pet.global_position)
+		r.death_bins[pet.team][_bin(vd)] += 1
+		if not pet.is_on_floor():
+			r.death_air[pet.team] += 1
 		if not life[pet].reached:
 			r.died_en_route[pet.team] += 1
 	game.pet_down.connect(on_down)
 	cons.append([game.pet_down, on_down])
 	for p in game.pets:
 		var team: int = p.team
+		var shooter: Node = p
 		var on_fire := func(res: Dictionary) -> void:
 			r.shots[team] += 1
-			if res.get("target") != null:
+			var hit: bool = res.get("target") != null
+			if hit:
 				r.hits[team] += 1
 				r.dmg[team] += float(res.get("damage", 0.0))
+			var tg = shooter.get("target")
+			if tg != null and is_instance_valid(tg):
+				var k := "air" if not tg.is_on_floor() else "gnd"
+				r["sh_" + k][team] += 1
+				if hit:
+					r["hit_" + k][team] += 1
 		p.rifle.fired.connect(on_fire)
 		cons.append([p.rifle.fired, on_fire])
 	var dt := 1.0 / 60.0
@@ -393,9 +552,43 @@ func _match(game: Node, s: int) -> Dictionary:
 			r.contested += dt
 		for p in game.pets:
 			var l: Dictionary = life[p]
+			var jn = p.get("jumps")
+			if jn != null and int(jn) > int(l.j):
+				r.jump_bins[p.team][_bin(_flat_d(game, p.global_position))] += int(jn) - int(l.j)
+				var tg = p.get("target")
+				if tg != null and tg.alive and p.get("target_visible"):
+					r.jump_fight[p.team] += int(jn) - int(l.j)
+				l.j = int(jn)
+			if p.alive and not p.is_on_floor():
+				r.air[p.team] += dt
+				if _flat_d(game, p.global_position) < 30.0:
+					r.air_near[p.team] += dt
 			if p.alive and not l.alive:
 				l.t0 = game.elapsed
 				l.reached = false
+				l.b_in = -1.0
+				l.b_out = -1.0
+			if trace and p.alive:
+				var hs := Vector2(p.velocity.x, p.velocity.z).length()
+				if hs < 0.6 and not game.slab.contains(p.global_position):
+					l.stall += dt
+					if l.stall >= 0.6 and l.stall - dt < 0.6:
+						r.stall_bins[p.team][_bin(_flat_d(game, p.global_position))] += 1
+				else:
+					l.stall = 0.0
+				if p.team == 0:
+					var sl := _path_s(p.global_position)
+					if l.b_in < 0.0 and sl >= PATH_S.x and sl < PATH_S.y:
+						l.b_in = game.elapsed
+					if l.b_in >= 0.0 and l.b_out < 0.0:
+						if sl >= PATH_S.y:
+							l.b_out = game.elapsed
+							r.band.append(l.b_out - l.b_in)
+						else:
+							for q in game.pets:
+								if q != p and q.team == 0 and q.alive and q.global_position.distance_to(p.global_position) < 1.5:
+									r.band_contact += dt
+									break
 			l.alive = p.alive
 			if p.alive and not l.reached and game.slab.contains(p.global_position):
 				l.reached = true
@@ -428,10 +621,37 @@ func _match(game: Node, s: int) -> Dictionary:
 	print("  slab position (Corgi-Cat) · %.0f m from the edge %s-%s of slab time · fighting a holder from the lip %.1f-%.1f s · steps off the slab alive %d-%d" % [
 		MARGIN, _pct_f(r.inner[0], r.pet_on[0]), _pct_f(r.inner[1], r.pet_on[1]), r.lip_fight[0], r.lip_fight[1],
 		r.exits[0], r.exits[1]])
+	if trace:
+		print("  trace (Corgi | Cat) · jumps by distance <20/20-60/60-100/100+ m %s | %s, in a fight %d | %d · airborne %.1f | %.1f s (within 30 m %.1f | %.1f s) · hit rate on airborne targets %s (%d) | %s (%d), on grounded %s (%d) | %s (%d) · deaths by distance %s | %s, airborne %d | %d" % [
+			str(r.jump_bins[0]), str(r.jump_bins[1]), r.jump_fight[0], r.jump_fight[1], r.air[0], r.air[1], r.air_near[0],
+			r.air_near[1], _pct(r.hit_air[0], r.sh_air[0]), r.sh_air[0], _pct(r.hit_air[1], r.sh_air[1]), r.sh_air[1],
+			_pct(r.hit_gnd[0], r.sh_gnd[0]), r.sh_gnd[0], _pct(r.hit_gnd[1], r.sh_gnd[1]), r.sh_gnd[1],
+			str(r.death_bins[0]), str(r.death_bins[1]), r.death_air[0], r.death_air[1]])
+		print("  trace band (Corgi lives crossing %.0f-%.0f m of the slab path) n %d mean %s s · with a teammate within 1.5 m %.1f s · stalls by distance %s | %s" % [
+			PATH_S.x, PATH_S.y, r.band.size(), _mean_s(r.band), r.band_contact, str(r.stall_bins[0]), str(r.stall_bins[1])])
 	if events:
 		for e in r.log:
 			print("  ", e)
 	return r
+
+## The slab path (src/shared/world/lot/layout.ts SLAB_PATH): the line from Corgi spawn 0 (-74, -123) to the slab's
+## centre; its ramp and trench notches lie between PATH_S.x and PATH_S.y m along it.
+const PATH_A := Vector2(-74.0, -123.0)
+const PATH_B := Vector2(0.0, 0.0)
+const PATH_S := Vector2(26.0, 64.0)
+
+static func _path_s(p: Vector3) -> float:
+	var d := (PATH_B - PATH_A).normalized()
+	return (Vector2(p.x, p.z) - PATH_A).dot(d)
+
+static func _flat_d(game: Node, p: Vector3) -> float:
+	return Vector2(p.x - game.slab.center.x, p.z - game.slab.center.z).length()
+
+static func _bin(d: float) -> int:
+	for i in BINS.size():
+		if d < BINS[i]:
+			return i
+	return BINS.size()
 
 func _summary(rows: Array, real_s: float) -> void:
 	var wins := [0, 0]
@@ -470,6 +690,31 @@ func _summary(rows: Array, real_s: float) -> void:
 		fmt, MARGIN, _pct_f(tot.inner[0], tot.pet_on[0]), _pct_f(tot.inner[1], tot.pet_on[1]), tot.pet_on[0], tot.pet_on[1],
 		tot.lip_fight[0], tot.lip_fight[1], (tot.lip_fight[0] + tot.lip_fight[1]) / maxf(1.0, m), tot.exits[0], tot.exits[1],
 		(tot.exits[0] + tot.exits[1]) / maxf(1.0, m)])
+	if trace:
+		var tj := [[0, 0, 0, 0], [0, 0, 0, 0]]
+		var td := [[0, 0, 0, 0], [0, 0, 0, 0]]
+		var tt := {"jump_fight": [0, 0], "air": [0.0, 0.0], "air_near": [0.0, 0.0], "sh_air": [0, 0], "hit_air": [0, 0],
+			"sh_gnd": [0, 0], "hit_gnd": [0, 0], "death_air": [0, 0]}
+		var tsb := [[0, 0, 0, 0], [0, 0, 0, 0]]
+		var band: Array = []
+		var contact := 0.0
+		for r in rows:
+			band.append_array(r.band)
+			contact += r.band_contact
+			for t in 2:
+				for b in 4:
+					tj[t][b] += r.jump_bins[t][b]
+					td[t][b] += r.death_bins[t][b]
+					tsb[t][b] += r.stall_bins[t][b]
+				for k in tt:
+					tt[k][t] += r[k][t]
+		print("SUMMARY %s trace band · Corgi lives crossing the slab path's %.0f-%.0f m: n %d, mean %s s · with a teammate within 1.5 m %.0f s in all · stalls by distance <20/20-60/60-100/100+ m %s | %s" % [
+			fmt, PATH_S.x, PATH_S.y, band.size(), _mean_s(band), contact, str(tsb[0]), str(tsb[1])])
+		print("SUMMARY %s trace (Corgi | Cat) · jumps by distance <20/20-60/60-100/100+ m %s | %s, in a fight %d | %d · airborne %.0f | %.0f s (within 30 m %.0f | %.0f s) · hit rate on airborne targets %s (%d shots) | %s (%d), on grounded %s (%d) | %s (%d) · deaths by distance %s | %s, airborne %d | %d" % [
+			fmt, str(tj[0]), str(tj[1]), tt.jump_fight[0], tt.jump_fight[1], tt.air[0], tt.air[1], tt.air_near[0],
+			tt.air_near[1], _pct(tt.hit_air[0], tt.sh_air[0]), tt.sh_air[0], _pct(tt.hit_air[1], tt.sh_air[1]), tt.sh_air[1],
+			_pct(tt.hit_gnd[0], tt.sh_gnd[0]), tt.sh_gnd[0], _pct(tt.hit_gnd[1], tt.sh_gnd[1]), tt.sh_gnd[1],
+			str(td[0]), str(td[1]), tt.death_air[0], tt.death_air[1]])
 	print("SUMMARY %s %.0f s of game time in %.0f s real (x%.1f)" % [fmt, game_s, real_s, game_s / maxf(0.001, real_s)])
 
 ## In the slab's score volume (slab.gd contains()) and at least `margin` m inside every edge of its square.
