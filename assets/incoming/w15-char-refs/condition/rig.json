@@ -1,0 +1,268 @@
+{
+  "pets": {
+    "corgi": {
+      "species": 0,
+      "team": 0,
+      "team_name": "CORGI COMPANY",
+      "ortho_size_m": 2.126,
+      "fit_frames": {
+        "front": {
+          "ortho_size_m": 1.492,
+          "px": [
+            768,
+            1024
+          ]
+        },
+        "left": {
+          "ortho_size_m": 1.514,
+          "px": [
+            1024,
+            768
+          ]
+        },
+        "right": {
+          "ortho_size_m": 1.514,
+          "px": [
+            1024,
+            768
+          ]
+        },
+        "back": {
+          "ortho_size_m": 1.492,
+          "px": [
+            768,
+            1024
+          ]
+        },
+        "threequarter": {
+          "ortho_size_m": 1.863,
+          "px": [
+            1024,
+            768
+          ]
+        },
+        "top": {
+          "ortho_size_m": 2.018,
+          "px": [
+            768,
+            1024
+          ]
+        }
+      },
+      "bounds_with_rifle_m": {
+        "min": [
+          -0.275,
+          -0.005,
+          -1.024
+        ],
+        "max": [
+          0.307,
+          1.327,
+          0.778
+        ]
+      },
+      "bounds_pet_only_m": {
+        "min": [
+          -0.275,
+          -0.005,
+          -1.024
+        ],
+        "max": [
+          0.275,
+          1.327,
+          0.778
+        ]
+      },
+      "capsule_m": {
+        "radius": 0.36,
+        "height": 1.2
+      },
+      "rifle_mount_m": [
+        0.27,
+        0.64,
+        -0.3
+      ],
+      "body_length_m": 1.26,
+      "back_height_m": 0.66,
+      "body_length_to_back_height": 1.91,
+      "leg_length_m": 0.24,
+      "head_top_m": 0.96,
+      "ear_tip_m": 1.327,
+      "ear_height_m": 0.515,
+      "head_height_m": 0.36,
+      "tail_top_m": 0.63,
+      "tallest_point_m": 1.327,
+      "turnaround": {
+        "ortho_size_m": 1.643,
+        "px": [
+          2048,
+          819
+        ],
+        "panels": [
+          "front",
+          "right",
+          "back"
+        ],
+        "gap_m": 0.35
+      }
+    },
+    "cat": {
+      "species": 1,
+      "team": 1,
+      "team_name": "CAT CADRE",
+      "ortho_size_m": 2.068,
+      "fit_frames": {
+        "front": {
+          "ortho_size_m": 1.684,
+          "px": [
+            768,
+            1024
+          ]
+        },
+        "left": {
+          "ortho_size_m": 1.684,
+          "px": [
+            1024,
+            768
+          ]
+        },
+        "right": {
+          "ortho_size_m": 1.684,
+          "px": [
+            1024,
+            768
+          ]
+        },
+        "back": {
+          "ortho_size_m": 1.684,
+          "px": [
+            768,
+            1024
+          ]
+        },
+        "threequarter": {
+          "ortho_size_m": 1.958,
+          "px": [
+            1024,
+            768
+          ]
+        },
+        "top": {
+          "ortho_size_m": 1.505,
+          "px": [
+            768,
+            1024
+          ]
+        }
+      },
+      "bounds_with_rifle_m": {
+        "min": [
+          -0.25,
+          0.0,
+          -0.68
+        ],
+        "max": [
+          0.257,
+          1.504,
+          0.664
+        ]
+      },
+      "bounds_pet_only_m": {
+        "min": [
+          -0.25,
+          0.0,
+          -0.658
+        ],
+        "max": [
+          0.25,
+          1.504,
+          0.664
+        ]
+      },
+      "capsule_m": {
+        "radius": 0.33,
+        "height": 1.26
+      },
+      "rifle_mount_m": [
+        0.22,
+        0.76,
+        -0.22
+      ],
+      "body_length_m": 0.856,
+      "back_height_m": 0.77,
+      "body_length_to_back_height": 1.11,
+      "leg_length_m": 0.53,
+      "head_top_m": 1.065,
+      "ear_tip_m": 1.196,
+      "ear_height_m": 0.21,
+      "head_height_m": 0.27,
+      "tail_top_m": 1.504,
+      "tallest_point_m": 1.504,
+      "turnaround": {
+        "ortho_size_m": 1.684,
+        "px": [
+          2048,
+          819
+        ],
+        "panels": [
+          "front",
+          "right",
+          "back"
+        ],
+        "gap_m": 0.35
+      }
+    }
+  },
+  "views": {
+    "front": [
+      0.0,
+      0.0,
+      0.75
+    ],
+    "left": [
+      -90.0,
+      0.0,
+      1.33333333333333
+    ],
+    "right": [
+      90.0,
+      0.0,
+      1.33333333333333
+    ],
+    "back": [
+      180.0,
+      0.0,
+      0.75
+    ],
+    "threequarter": [
+      40.0,
+      12.0,
+      1.33333333333333
+    ],
+    "top": [
+      0.0,
+      90.0,
+      0.75
+    ]
+  },
+  "backdrop_srgb": [
+    0.5,
+    0.5,
+    0.5
+  ],
+  "projection": "orthographic",
+  "lineup_side": {
+    "ortho_size_m": 4.352,
+    "corgi_at": [
+      0,
+      0,
+      -1.05
+    ],
+    "cat_at": [
+      0,
+      0,
+      0.95
+    ]
+  },
+  "size_px": 1024
+}

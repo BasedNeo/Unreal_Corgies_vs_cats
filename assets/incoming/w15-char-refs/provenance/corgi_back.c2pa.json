@@ -1,0 +1,115 @@
+{
+ "delivered": "corgi/corgi_back.jpg",
+ "call_id": "c032",
+ "raw_file": "c032_0_corgi_patch2_back.jpg",
+ "raw_sha256": "14d7e365ad49d0f26dd796913b451e54075542fa6fbcc489cea9b81803757e39",
+ "reader": "c2pa-python 0.38.0",
+ "manifest_store": {
+  "active_manifest": "urn:c2pa:dc824391-6e7a-40f1-850e-b28f9e8a9b18",
+  "manifests": {
+   "urn:c2pa:dc824391-6e7a-40f1-850e-b28f9e8a9b18": {
+    "claim_generator_info": [
+     {
+      "name": "Grok Imagine",
+      "version": "0.0.0",
+      "org.contentauth.c2pa_rs": "0.76.2"
+     }
+    ],
+    "title": "20c167b1-92e2-9968-a5ee-87bafc8cb277-0",
+    "instance_id": "xmp:iid:c150c415-9941-433e-a6b8-9a6e26ece92a",
+    "assertions": [
+     {
+      "label": "c2pa.actions.v2",
+      "data": {
+       "actions": [
+        {
+         "action": "c2pa.created",
+         "softwareAgent": "Grok Imagine",
+         "digitalSourceType": "http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia"
+        }
+       ]
+      }
+     },
+     {
+      "label": "c2pa.creative_work",
+      "data": {
+       "author": [
+        {
+         "@type": "Organization",
+         "name": "SpaceXAI"
+        }
+       ]
+      }
+     }
+    ],
+    "signature_info": {
+     "alg": "Ed25519",
+     "issuer": "Self-signed ephemeral certificate (Content Authenticity SDK) -- LOCAL USE ONLY",
+     "common_name": "xAI Grok Imagine",
+     "cert_serial_number": "32282370714168489"
+    },
+    "label": "urn:c2pa:dc824391-6e7a-40f1-850e-b28f9e8a9b18",
+    "claim_version": 2
+   }
+  },
+  "validation_status": [
+   {
+    "code": "signingCredential.untrusted",
+    "url": "self#jumbf=/c2pa/urn:c2pa:dc824391-6e7a-40f1-850e-b28f9e8a9b18/c2pa.signature",
+    "explanation": "signing certificate untrusted"
+   }
+  ],
+  "validation_results": {
+   "activeManifest": {
+    "success": [
+     {
+      "code": "claimSignature.insideValidity",
+      "url": "self#jumbf=/c2pa/urn:c2pa:dc824391-6e7a-40f1-850e-b28f9e8a9b18/c2pa.signature",
+      "explanation": "claim signature valid"
+     },
+     {
+      "code": "claimSignature.validated",
+      "url": "self#jumbf=/c2pa/urn:c2pa:dc824391-6e7a-40f1-850e-b28f9e8a9b18/c2pa.signature",
+      "explanation": "claim signature valid"
+     },
+     {
+      "code": "assertion.hashedURI.match",
+      "url": "self#jumbf=/c2pa/urn:c2pa:dc824391-6e7a-40f1-850e-b28f9e8a9b18/c2pa.assertions/c2pa.hash.data",
+      "explanation": "hashed uri matched: self#jumbf=c2pa.assertions/c2pa.hash.data"
+     },
+     {
+      "code": "assertion.hashedURI.match",
+      "url": "self#jumbf=/c2pa/urn:c2pa:dc824391-6e7a-40f1-850e-b28f9e8a9b18/c2pa.assertions/c2pa.actions.v2",
+      "explanation": "hashed uri matched: self#jumbf=c2pa.assertions/c2pa.actions.v2"
+     },
+     {
+      "code": "assertion.hashedURI.match",
+      "url": "self#jumbf=/c2pa/urn:c2pa:dc824391-6e7a-40f1-850e-b28f9e8a9b18/c2pa.assertions/c2pa.creative_work",
+      "explanation": "hashed uri matched: self#jumbf=c2pa.assertions/c2pa.creative_work"
+     },
+     {
+      "code": "assertion.dataHash.match",
+      "url": "self#jumbf=/c2pa/urn:c2pa:dc824391-6e7a-40f1-850e-b28f9e8a9b18/c2pa.assertions/c2pa.hash.data",
+      "explanation": "data hash valid"
+     }
+    ],
+    "informational": [
+     {
+      "code": "signingCredential.ocsp.skipped",
+      "url": "self#jumbf=/c2pa/urn:c2pa:dc824391-6e7a-40f1-850e-b28f9e8a9b18/c2pa.signature",
+      "explanation": "OCSP fetching skipped"
+     }
+    ],
+    "failure": [
+     {
+      "code": "signingCredential.untrusted",
+      "url": "self#jumbf=/c2pa/urn:c2pa:dc824391-6e7a-40f1-850e-b28f9e8a9b18/c2pa.signature",
+      "explanation": "signing certificate untrusted"
+     }
+    ]
+   },
+   "specVersion": "2.4.0"
+  },
+  "validation_state": "Valid"
+ }
+}

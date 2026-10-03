@@ -1,0 +1,507 @@
+{
+ "_note": "Landmarks read off 10-50 px grids by eye (+-10 px). Column ranges [x0,x1] pick the torso (VB), the ear or tail tip. 'ground' is given where the lowest pixel is not the right ground (3/4 views: the rear paws). Placeholder rows are the targets, measured the same way.",
+ "corgi_side_placeholder": {
+  "image": "assets/incoming/w15-char-refs/condition/corgi_right_fit.png",
+  "view": "side",
+  "torso": [
+   300,
+   550
+  ],
+  "tip_cols": [
+   650,
+   850
+  ],
+  "rump_x": 105,
+  "chest_x": 780,
+  "ear_tip_y": 46,
+  "ear_base_mid_y": 270,
+  "crown_y": 239,
+  "chin_y": 375,
+  "team": "blue"
+ },
+ "corgi_side_c013_0_old": {
+  "image": "raw:c013_0_corgi_view_right_med.jpg",
+  "view": "side",
+  "torso": [
+   520,
+   760
+  ],
+  "tip_cols": [
+   950,
+   1200
+  ],
+  "rump_x": 280,
+  "chest_x": 1051,
+  "ear_tip_y": 127,
+  "ear_base_mid_y": 325,
+  "crown_y": 300,
+  "chin_y": 520,
+  "team": "blue"
+ },
+ "corgi_side_c026_0": {
+  "image": "raw:c026_0_corgi_patch_side.jpg",
+  "view": "side",
+  "torso": [
+   560,
+   760
+  ],
+  "tip_cols": [
+   1000,
+   1250
+  ],
+  "rump_x": 251,
+  "chest_x": 1126,
+  "team": "blue"
+ },
+ "corgi_side_c026_1": {
+  "image": "raw:c026_1_corgi_patch_side.jpg",
+  "view": "side",
+  "torso": [
+   560,
+   760
+  ],
+  "tip_cols": [
+   1050,
+   1250
+  ],
+  "rump_x": 245,
+  "chest_x": 1140,
+  "ear_tip_y": 129,
+  "ear_base_mid_y": 420,
+  "crown_y": 375,
+  "chin_y": 580,
+  "team": "blue"
+ },
+ "corgi_master_c008_1_old": {
+  "image": "raw:c008_1_corgi_master_ears.jpg",
+  "view": "3/4",
+  "ear_tip_y": 120,
+  "ear_base_mid_y": 270,
+  "crown_y": 235,
+  "chin_y": 410,
+  "team": "blue"
+ },
+ "corgi_master_c027_0": {
+  "image": "raw:c027_0_corgi_patch_master.jpg",
+  "view": "3/4",
+  "ear_tip_y": 130,
+  "ear_base_mid_y": 410,
+  "crown_y": 345,
+  "chin_y": 597,
+  "team": "blue"
+ },
+ "corgi_master_c027_1": {
+  "image": "raw:c027_1_corgi_patch_master.jpg",
+  "view": "3/4",
+  "team": "blue"
+ },
+ "corgi_front_placeholder": {
+  "image": "assets/incoming/w15-char-refs/condition/corgi_front_fit.png",
+  "view": "front",
+  "ear_tip_y": 55,
+  "ear_base_mid_y": 352,
+  "crown_y": 305,
+  "chin_y": 505
+ },
+ "corgi_front_c012_0_old": {
+  "image": "raw:c012_0_corgi_view_front_med.jpg",
+  "view": "front",
+  "ear_tip_y": 137,
+  "ear_base_mid_y": 400,
+  "crown_y": 363,
+  "chin_y": 743
+ },
+ "corgi_front_c028_0_try1": {
+  "image": "raw:c028_0_corgi_patch_front.jpg",
+  "view": "front",
+  "ear_tip_y": 133,
+  "ear_base_mid_y": 431,
+  "crown_y": 358,
+  "chin_y": 757
+ },
+ "corgi_front_c031_0_try2": {
+  "image": "raw:c031_0_corgi_patch2_front.jpg",
+  "view": "front",
+  "ear_tip_y": 100,
+  "ear_base_mid_y": 515,
+  "crown_y": 440,
+  "chin_y": 840
+ },
+ "corgi_front_c031_1_try2": {
+  "image": "raw:c031_1_corgi_patch2_front.jpg",
+  "view": "front",
+  "ear_tip_y": 120,
+  "ear_base_mid_y": 482,
+  "crown_y": 398,
+  "chin_y": 825
+ },
+ "corgi_back_placeholder": {
+  "image": "assets/incoming/w15-char-refs/condition/corgi_back_fit.png",
+  "view": "back (H: crown to collar)",
+  "ear_tip_y": 55,
+  "ear_base_mid_y": 350,
+  "crown_y": 320,
+  "chin_y": 495
+ },
+ "corgi_back_c014_0_old": {
+  "image": "raw:c014_0_corgi_view_back_med.jpg",
+  "view": "back (H: crown to collar)",
+  "ear_tip_y": 189,
+  "ear_base_mid_y": 417,
+  "crown_y": 343,
+  "chin_y": 537
+ },
+ "corgi_back_c029_0_try1": {
+  "image": "raw:c029_0_corgi_patch_back.jpg",
+  "view": "back (H: crown to collar)",
+  "ear_tip_y": 157,
+  "ear_base_mid_y": 415,
+  "crown_y": 352,
+  "chin_y": 604
+ },
+ "corgi_back_c032_0_try2": {
+  "image": "raw:c032_0_corgi_patch2_back.jpg",
+  "view": "back (H: crown to collar)",
+  "ear_tip_y": 110,
+  "ear_base_mid_y": 425,
+  "crown_y": 327,
+  "chin_y": 572
+ },
+ "corgi_head_c018_1_old": {
+  "image": "raw:c018_1_corgi_detail_head_med.jpg",
+  "view": "head 3/4",
+  "ear_tip_y": 30,
+  "ear_base_mid_y": 480,
+  "crown_y": 360,
+  "chin_y": 930
+ },
+ "corgi_head_c030_0_try1": {
+  "image": "raw:c030_0_corgi_patch_head.jpg",
+  "view": "head 3/4",
+  "ear_tip_y": 49,
+  "ear_base_mid_y": 508,
+  "crown_y": 424,
+  "chin_y": 989
+ },
+ "corgi_head_c033_1_try2": {
+  "image": "raw:c033_1_corgi_patch2_head.jpg",
+  "view": "head 3/4",
+  "ear_tip_y": 113,
+  "ear_base_mid_y": 586,
+  "crown_y": 508,
+  "chin_y": 1017
+ },
+ "cat_side_placeholder": {
+  "image": "assets/incoming/w15-char-refs/condition/cat_right_fit.png",
+  "view": "side",
+  "torso": [
+   400,
+   560
+  ],
+  "tip_cols": [
+   207,
+   330
+  ],
+  "ear_cols": [
+   650,
+   760
+  ],
+  "team": "crimson"
+ },
+ "cat_side_c016_0_old": {
+  "image": "raw:c016_0_cat_view_right_med.jpg",
+  "view": "side",
+  "torso": [
+   550,
+   900
+  ],
+  "tip_cols": [
+   337,
+   490
+  ],
+  "ear_cols": [
+   1050,
+   1240
+  ],
+  "team": "crimson",
+  "coat": true
+ },
+ "cat_side_c034_0_try1": {
+  "image": "raw:c034_0_cat_patch_side.jpg",
+  "view": "side",
+  "torso": [
+   555,
+   900
+  ],
+  "tip_cols": [
+   355,
+   500
+  ],
+  "ear_cols": [
+   1050,
+   1200
+  ],
+  "team": "crimson",
+  "coat": true
+ },
+ "cat_side_c038_1_try2": {
+  "image": "raw:c038_1_cat_patch2_side.jpg",
+  "view": "side",
+  "torso": [
+   561,
+   900
+  ],
+  "tip_cols": [
+   400,
+   520
+  ],
+  "ear_cols": [
+   1000,
+   1170
+  ],
+  "team": "crimson",
+  "coat": true
+ },
+ "cat_master_placeholder": {
+  "image": "assets/incoming/w15-char-refs/condition/cat_threequarter_fit.png",
+  "view": "3/4 (VB: rear vest)",
+  "torso": [
+   422,
+   520
+  ],
+  "tip_cols": [
+   342,
+   420
+  ],
+  "ear_cols": [
+   580,
+   700
+  ]
+ },
+ "cat_master_c009_0_old": {
+  "image": "raw:c009_0_cat_master_tail.jpg",
+  "view": "3/4 (VB: rear vest)",
+  "torso": [
+   462,
+   600
+  ],
+  "tip_cols": [
+   342,
+   460
+  ],
+  "ear_cols": [
+   700,
+   800
+  ],
+  "coat": true
+ },
+ "cat_master_c035_1_try1": {
+  "image": "raw:c035_1_cat_patch_master.jpg",
+  "view": "3/4 (VB: rear vest)",
+  "torso": [
+   646,
+   840
+  ],
+  "tip_cols": [
+   486,
+   610
+  ],
+  "ear_cols": [
+   1000,
+   1090
+  ],
+  "coat": true
+ },
+ "cat_master_c039_0_try2": {
+  "image": "raw:c039_0_cat_patch2_master.jpg",
+  "view": "3/4 (VB: rear vest)",
+  "torso": [
+   671,
+   830
+  ],
+  "tip_cols": [
+   511,
+   630
+  ],
+  "ear_cols": [
+   900,
+   1070
+  ],
+  "coat": true
+ },
+ "cat_front_placeholder": {
+  "image": "assets/incoming/w15-char-refs/condition/cat_front_fit.png",
+  "view": "front",
+  "tip_cols": [
+   350,
+   430
+  ],
+  "ear_cols": [
+   300,
+   340
+  ]
+ },
+ "cat_front_c015_1_old": {
+  "image": "raw:c015_1_cat_view_front_med.jpg",
+  "view": "front",
+  "tip_cols": [
+   500,
+   600
+  ],
+  "ear_cols": [
+   700,
+   740
+  ],
+  "coat": true
+ },
+ "cat_front_c040_1_try2": {
+  "image": "raw:c040_1_cat_patch2_front.jpg",
+  "view": "front",
+  "tip_cols": [
+   500,
+   600
+  ],
+  "ear_cols": [
+   700,
+   740
+  ],
+  "coat": true
+ },
+ "cat_back_placeholder": {
+  "image": "assets/incoming/w15-char-refs/condition/cat_back_fit.png",
+  "view": "back",
+  "tip_cols": [
+   350,
+   430
+  ],
+  "ear_cols": [
+   300,
+   340
+  ]
+ },
+ "cat_back_c017_0_old": {
+  "image": "raw:c017_0_cat_view_back_med.jpg",
+  "view": "back",
+  "tip_cols": [
+   620,
+   720
+  ],
+  "ear_cols": [
+   468,
+   510
+  ],
+  "coat": true
+ },
+ "cat_back_c041_0_try2": {
+  "image": "raw:c041_0_cat_patch2_back.jpg",
+  "view": "back",
+  "tip_cols": [
+   620,
+   720
+  ],
+  "ear_cols": [
+   468,
+   510
+  ],
+  "coat": true
+ },
+ "cat_head_c021_1_old": {
+  "image": "raw:c021_1_cat_detail_head_med.jpg",
+  "view": "head",
+  "coat": true,
+  "coat_box": [
+   250,
+   200,
+   750,
+   600
+  ]
+ },
+ "cat_head_c042_1": {
+  "image": "raw:c042_1_cat_coat_head.jpg",
+  "view": "head",
+  "coat": true,
+  "coat_box": [
+   250,
+   200,
+   750,
+   600
+  ]
+ },
+ "cat_armour_c022_0_old": {
+  "image": "raw:c022_0_cat_detail_armour_med.jpg",
+  "view": "armour",
+  "coat": true,
+  "coat_box": [
+   150,
+   870,
+   330,
+   1160
+  ]
+ },
+ "cat_armour_c043_1": {
+  "image": "raw:c043_1_cat_coat_armour.jpg",
+  "view": "armour",
+  "coat": true,
+  "coat_box": [
+   150,
+   870,
+   330,
+   1160
+  ]
+ },
+ "cat_rifle_c023_0_old": {
+  "image": "raw:c023_0_cat_detail_rifle_med.jpg",
+  "view": "rifle",
+  "coat": true,
+  "coat_box": [
+   250,
+   980,
+   650,
+   1180
+  ]
+ },
+ "cat_rifle_c044_1": {
+  "image": "raw:c044_1_cat_coat_rifle.jpg",
+  "view": "rifle",
+  "coat": true,
+  "coat_box": [
+   250,
+   980,
+   650,
+   1180
+  ]
+ },
+ "cat_rifle_c044_0": {
+  "image": "raw:c044_0_cat_coat_rifle.jpg",
+  "view": "rifle",
+  "coat": true,
+  "coat_box": [
+   250,
+   980,
+   650,
+   1180
+  ]
+ },
+ "cat_insitu_c045_0": {
+  "image": "raw:c045_0_cat_coat_insitu.jpg",
+  "view": "in-situ",
+  "coat": true,
+  "coat_box": [
+   1000,
+   300,
+   1120,
+   420
+  ]
+ },
+ "cat_insitu_c025_0_old": {
+  "image": "raw:c025_0_cat_insitu_night_med.jpg",
+  "view": "in-situ",
+  "coat": true,
+  "coat_box": [
+   1000,
+   300,
+   1120,
+   420
+  ]
+ }
+}
