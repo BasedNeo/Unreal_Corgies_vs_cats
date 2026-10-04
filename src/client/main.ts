@@ -145,13 +145,17 @@ async function main(): Promise<void> {
   const slabView = createSlabView(ctx.scene, { heightAt: (x, z) => surfaceAt(worldData, x, z, SLAB.center.y + 1.5).y, size: SLAB.size });
   // __cvc.twin (probes, e2e): The Lot's kit pieces drawn from their shared GLBs (kitLoaded: 6 once all six load), the
   // slab, the map. Refreshed while a slab match runs.
-  // match: the latest slab MatchState; restarts: rematches seen (ended → live) and the score they started at
+  // match: the latest slab MatchState (and its snapshot tick); restarts: rematches seen (ended → live) and the score they
+  // started at. W15 Sprint D (two clients online, tests/e2e/net-slab.spec.ts): log, the last 120 snapshots' [tick,
+  // timeLeft, corgis, cats, phase], so two pages can be compared tick for tick; view, the local view angles (rad).
   const twin = { map: mapId as string, kits: 0, slab: null as SlabReading | null,
-    match: null as { phase: string; score: [number, number]; timeLeft: number; objective: string } | null, restarts: 0, restartScore: null as [number, number] | null };
+    match: null as { phase: string; score: [number, number]; timeLeft: number; objective: string; tick: number } | null, restarts: 0, restartScore: null as [number, number] | null,
+    log: [] as Array<[number, number, number, number, string]>, view: { yaw: 0, pitch: 0 } };
   (debug as unknown as { twin: typeof twin }).twin = twin;
   let twinFrame = 0;
   const twinDebug = (r: SlabReading | null) => {
     twin.slab = r;
+    twin.view.yaw = input.yaw; twin.view.pitch = input.pitch;
     if (twinFrame++ % 60 === 0) twin.kits = worldView.stats().kitLoaded ?? 0;
   };
   const assault = createBaseAssaultView(ctx.scene, { heightAt: (x, z) => worldData.height(x, z), heightOf: (id) => views.get(id)?.avatar.height, camera: ctx.camera }); // G4a (idle in other modes)
@@ -295,6 +299,7 @@ async function main(): Promise<void> {
     faceSlab(id);
   });
   bus.on('disconnected', (reason) => {
+    console.warn(`[net] disconnected: ${reason}`); // the toast below lasts 3.3 s; e2e failure reports read the console
     hud.notice(`Disconnected: ${reason}`);
     if (!net?.canReconnect) return;
     const btn = document.createElement('button');
@@ -315,7 +320,10 @@ async function main(): Promise<void> {
     slabHud.onMatch(ms); // W13
     if (ms.mode === 'slab') {
       if (twin.match?.phase === 'ended' && ms.phase === 'live') { twin.restarts++; twin.restartScore = [ms.score[0], ms.score[1]]; }
-      twin.match = { phase: ms.phase, score: [ms.score[0], ms.score[1]], timeLeft: ms.timeLeft, objective: ms.objective };
+      const tick = net?.latest()?.tick ?? 0;
+      twin.match = { phase: ms.phase, score: [ms.score[0], ms.score[1]], timeLeft: ms.timeLeft, objective: ms.objective, tick };
+      twin.log.push([tick, ms.timeLeft, ms.score[0], ms.score[1], ms.phase]);
+      if (twin.log.length > 120) twin.log.splice(0, twin.log.length - 120);
     }
   });
   bus.on('notice', (t) => hud.serverNotice(t));

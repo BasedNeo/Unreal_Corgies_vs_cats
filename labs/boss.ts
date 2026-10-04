@@ -256,7 +256,7 @@ async function main(): Promise<void> {
     info.textContent = `boss lab · view=${view} · ${ctx.backend} · ${fps.toFixed(0)} fps${frozen ? ` · frozen at t=${T}s` : ''}\n` +
       (bv ? `Vac-Tank ${bv.stats.triangles} tris (mech ${bv.stats.mechTriangles} + pilot ${bv.stats.pilotTriangles}) · ${bv.stats.drawCalls} draws · ${bv.stats.bones} mech bones\n` : '') +
       (f ? `state ${BOSS_ATTACK_NAMES[f.attack]} / stage ${f.stage} · phase ${f.phase2 ? 2 : 1} · hp ${Math.round(s!.hp)}/${s!.maxHp} · telegraph fx ${tfx.stats.rings} rings ${tfx.stats.beams} beams ${tfx.stats.hairballs} hairballs\n` : 'boss gone\n') +
-      `frame: ${inf.drawCalls ?? inf.calls ?? '?'} draw calls (incl. ink + shadow passes)`;
+      `frame: ${inf.drawCalls ?? inf.calls ?? '?'} draw calls (incl. shadow passes)`;
     (globalThis as unknown as { __boss: unknown }).__boss = { ready: true, frozen, view, t: simT, state: f, stats: bv?.stats ?? null, fx: tfx.stats };
   });
 }

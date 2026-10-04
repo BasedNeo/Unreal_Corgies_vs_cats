@@ -12,7 +12,7 @@ import * as THREE from 'three/webgpu';
 import {
   toon, toonMaterial, glow, stylize, pbr, setStyleDetail, styleDetail, surfaceOf, createGrade, gradeCurveAt,
   StyleMaterial, StyleLightingModel, StyleScenePass, STYLE_WEATHER, STYLE_ENV, DETAIL_BY_TIER, LOOK,
-  buildComicOutput, buildStyleOutput, createComicPipeline, createStylePipeline, toneMappingOf, createStyleLights,
+  buildStyleOutput, createStylePipeline, toneMappingOf, createStyleLights,
 } from '../../src/client/style/style-webgpu.js';
 import { PALETTE, STYLE, SURFACES } from '../../src/client/style/style-tokens.js';
 import { paintSurface, smoothNormalsByPosition } from '../../src/client/style/style-utils.js';
@@ -24,9 +24,8 @@ const SRC = (f: string) => readFileSync(new URL(`../../src/client/style/${f}`, i
 
 describe('no ink', () => {
   it('the post chain has no outline pass: one plain scene pass, bloom on emissives, the grade', () => {
-    const out = buildComicOutput(new THREE.Scene(), new THREE.PerspectiveCamera());
-    expect(buildComicOutput).toBe(buildStyleOutput);
-    expect(createComicPipeline).toBe(createStylePipeline);
+    const out = buildStyleOutput(new THREE.Scene(), new THREE.PerspectiveCamera());
+    expect(typeof createStylePipeline).toBe('function');
     expect(out.scenePass).toBeInstanceOf(StyleScenePass);
     expect(out.scenePass).toBeInstanceOf(THREE.PassNode);
     expect(out.scenePass).not.toBeInstanceOf(THREE.ToonOutlinePassNode);
@@ -48,7 +47,7 @@ describe('no ink', () => {
     const before = (mesh.geometry.getAttribute('normal').array as Float32Array).slice();
     const root = new THREE.Group();
     root.add(mesh);
-    stylize(root, { surface: 'metal', creases: true });
+    stylize(root, { surface: 'metal' });
     expect(mesh.children.length).toBe(0);
     expect(Array.from(mesh.geometry.getAttribute('normal').array as Float32Array)).toEqual(Array.from(before));
     const m = mesh.material as unknown as StyleMaterial;

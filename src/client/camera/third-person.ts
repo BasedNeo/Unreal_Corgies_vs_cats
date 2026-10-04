@@ -82,7 +82,7 @@ export function createThirdPersonCamera(camera: THREE.PerspectiveCamera): Camera
       solids = [];
       for (const o of objects) o.traverse((c) => {
         const m = c as THREE.Mesh & { isLineSegments2?: boolean; isInstancedMesh?: boolean };
-        if (m.isMesh && !m.isLineSegments2 && !m.userData.styleInk && !m.userData.noCameraCollide) solids.push(m);
+        if (m.isMesh && !m.isLineSegments2 && !m.userData.noCameraCollide) solids.push(m);
       });
     },
     shake(a) { trauma = Math.min(1, trauma + a * shakeScale); },

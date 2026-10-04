@@ -470,7 +470,7 @@ export function buildBody(mb: MeshBuilder, plan: BodyPlan, coat: Coat, q: number
   }
 
   mb.begin('mouth').surface(SURF.skin);
-  // Ink lip line (philtrum + mouth). Its ends are weighted to the mouth-corner bones, so the face rig
+  // Dark lip line (philtrum + mouth). Its ends are weighted to the mouth-corner bones, so the face rig
   // bends it into a smirk, grin or snarl; the middle stays on the head.
   const INK_LIP = mixHex(PALETTE.ink, coat.nose, 0.25);
   const lipPts: V3[] = [];
@@ -563,7 +563,6 @@ export function buildBody(mb: MeshBuilder, plan: BodyPlan, coat: Coat, q: number
     // Look direction: forward, turned slightly outward and down (cute focus).
     const yaw = -ey.look * k, pitch = -0.08;
     const L: V3 = [-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)];
-    const onEye = (d: number): V3 => [L[0] * r * d, L[1] * r * d, L[2] * r * d];
     const faceRot: V3 = [pitch, yaw, 0];
     // Iris, pupil and highlight are spherical caps ON the eyeball (radius ≤ 1.05 r), with the pole on
     // their own direction: every point stays inside the lid shells (1.1 r), so lowered lids cover them
@@ -601,12 +600,7 @@ export function buildBody(mb: MeshBuilder, plan: BodyPlan, coat: Coat, q: number
     for (let i = 0; i < lo.idx.length; i += 3) { const tmp = lo.idx[i + 1]; lo.idx[i + 1] = lo.idx[i + 2]; lo.idx[i + 2] = tmp; }
     mb.add(toModel(lo), headClean(c[0], c[1] - r, c[2] - r * 0.5, 0, 0), { rigid: `lidLo.${s}` });
     }
-    // X eyes for the comic death read (collapsed inside the head unless dead).
-    const xe = onEye(1.05);
-    for (const a of [0.785, -0.785]) {
-      // Flat diamond bars (4 × 2: 8 triangles each): they only ever show on a dead face.
-      mb.add(toModel(xform(ellipsoid([0, 0, 0], [r * 0.16, r * 0.95, r * 0.1], 4, 2, { p: 3 }), xe, [pitch, yaw, a])), PALETTE.ink, { rigid: 'xEyes' });
-    }
+    // W15 (stylised-realistic): no comic X eyes on a dead face; the face rig closes the lids instead.
     // Brow: a wedge, thick at the inner end, so an angled brow reads as a V (fierce) or a tent (worried).
     const bw = plan.brow, BL = bw.r[0], BT = bw.r[1];
     const brow = sweep([[-k * BL, -BT * 0.2, BT * 0.25], [-k * BL * 0.1, BT * 0.35, 0], [k * BL, -BT * 0.3, BT * 0.5]],

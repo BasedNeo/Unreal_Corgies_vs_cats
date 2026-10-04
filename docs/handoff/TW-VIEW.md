@@ -4,6 +4,134 @@
 TW-SIM's `slab` authority (contract: the slab section of `src/shared/content/modes.ts`). Godot is the main build: the
 read-out, HUD text and colours copy `engines/godot/game/slab.gd`, `hud.gd` and `tuning.gd`.
 
+## W15 Sprint D (item 12): two people play the slab match online
+**Status: done for integration; nothing committed or staged.** Base HEAD `54a0abf` (first built on `b222e37`; the
+must-fix round below is proven on `54a0abf`). The card: "Second client on the twin if rooms exist". Rooms exist
+(`server/rooms.ts`; a named room takes `?mode=slab` from its first joiner), so this is built and proven, with no
+server change.
+
+### What it proves (`tests/e2e/net-slab.spec.ts`)
+The Node authority (`npx tsx server/index.ts`, `MODE=slab`, on the first free port from `NET_SLAB_PORT`, default
+8791, up to 8799) and two pages, each in a browser of its own as in `net.spec.ts`, join one named room with
+`?mode=slab&room=<name>&server=ws://…&name=Alpha&team=0` and `…&name=Bravo&team=1`. The room's bots come from that URL
+setup (`botsForMode('slab')`: one a side), and the bot fill drops each side's bot as its human joins, so it is a 1 v 1
+of people. The test then checks:
+1. **Each sees the other.** Each page's snapshot has the other page's player entity (kind Player) and two pets in
+   all. `YOU: CORGI COMPANY` on Alpha's page and `YOU: CAT CADRE` on Bravo's.
+2. **The same score and clock, tick for tick.** Each page logs every slab snapshot's
+   `[tick, timeLeft, corgis, cats, phase]` (`__cvc.twin.log`, the last 120). At every tick both pages logged (at
+   least 10 required), the entries are equal. This is compared four times:
+   - at the start (0 – 0), where the HUD scores must also read the same and the clocks within a second;
+   - at the takedown (0 – 0, or a few Corgi points if Alpha crossed or stood on the slab);
+   - while the Corgis score: Alpha holds the slab alone, and the logs are compared once Alpha has 3 points or more;
+   - at the end, on the result (phase `ended`, a non-zero score).
+3. **A takedown by one player.**
+   - Both pets walk toward the slab at the same time. Each releases W once it is within 7 m of the slab's edge, and
+     the spec waits until each has stopped (two reads 0.5 s apart agree). It then asserts that Bravo is off the slab
+     (`onSlab` false) with at least 1 m to spare, that the Cats have 0 points, and that they still have 0 points
+     2.5 s later. Bravo never steps on the slab, so the fight cannot race a Cat win.
+   - Alpha turns to Bravo and walks until it is 10 m away, across the slab. The Corgis may score while Alpha stands
+     on it. At 40 m, The Lot's stacks and crates stood in the line of fire.
+   - Alpha aims with a test-only gamepad (an init script). It feeds input.ts's right stick for an exact
+     count of samples, so the view turns by an exact angle onto the authority's crosshair ray (`AIM_RAY`). Alpha then
+     holds LT and RT until Bravo's local pet has the Dead flag. If the match ends first, the spec fails and says so.
+   - Only then does it read the death panel: it polls Bravo's HUD (up to 15 s) until the panel shows. It must read
+     `TAKEN DOWN BY Alpha  ·` ■ `CORGI COMPANY`, `YOU: CAT CADRE`, `BACK AT THE SCAFFOLDS  ·  132 m TO THE SLAB` and
+     `BACK IN 0.0`–`3.9`. Alpha's page shows no panel.
+   - `Alpha  >  Bravo` shows in the kill feed on both pages.
+4. **The rematch from one page resets both.** Alpha turns to the slab's centre and holds the slab until the match
+   ends (60 points or the horn); both pages show the winner screen. R goes in on Alpha's page once the authority's
+   own clock is past the end: the spec reads `__cvc.net.tick` at the end and waits until it is at least
+   `end + SLAB.rematchDelay × TICK_HZ + 6`, as `modes.spec.ts` does (the server drops time on overrun, so a wall-clock
+   wait can lose the press). R is pressed once. Both pages then count a restart from `[0, 0]`, hide the winner
+   screen and read 0 – 0, from a result that was not 0 – 0.
+
+**Not tested here: the HUD's cue resets on a rematch.** No death panel, confirm, wedge, red flash or feed line is
+still up when R lands online (in the proof runs R came 64–82 s after the takedown, and a feed line lasts 9 s at
+most), so a check that they are gone would pass with or without the reset. They are proven offline: `tests/e2e/modes.spec.ts` (SLAB rematch: a feed line is up when R
+lands, and the rematch clears it) and `tests/unit/slab-hud.test.ts` §5 (every cue).
+
+### What changed
+- `src/client/main.ts`:
+  - in the slab twin's debug block (`__cvc.twin`, slab only): `match.tick`, the snapshot tick of the latest
+    MatchState; `log`, the last 120 snapshots' `[tick, timeLeft, corgis, cats, phase]`; `view`, the local `yaw` and
+    `pitch`;
+  - on the bus's `disconnected`: `console.warn("[net] disconnected: <reason>")` before the toast. The toast lasts
+    3.3 s, so a failure report read later would miss it; the console keeps it.
+- `tests/e2e/net-slab.spec.ts` (new). The must-fix round after the verifier's run on `54a0abf`:
+  1. the rematch waits on the authority's tick, not `waitForTimeout(1500)`;
+  2. Bravo stops clearly off the slab, and the spec asserts that, and that the Cats have and gain no points, before
+     Alpha fires. Both pets now walk to the slab at the same time, then Alpha closes to 10 m (see batch 3 below);
+  3. the fire loop stops on the Dead flag, and the death panel is read after that, by polling;
+  4. the "no leftovers" checks after the rematch are gone (they could not fail; see above);
+  5. the tick logs are compared at the takedown, while scoring and at the end, not only at 0 – 0;
+  6. new shots (below);
+  7. on a failure the spec prints the server log and, per page, any `[net] disconnected:` reason from the console, its
+     net state (`connected`, `tick`, `rttMs`, `pending`), its text and its last 30 console lines;
+  8. the server's `BOTS` env is gone: the room's bots come from its first joiner's URL, so it did nothing.
+- The spec also raises the server's `KICK_SCORE` to 1000. No code reason for it was found. `main.ts` caps a frame at
+  0.25 s, so one input message carries at most about 15 commands plus 3 resends, under `MAX_CMDS_PER_MSG` (32). A slow
+  frame sends fewer messages, not more, and `net.spec.ts` plays two SwiftShader pages at the default of 20. It was
+  raised after one unexplained drop ("Bravo left the yard") while I built the spec, and that drop's cause was never
+  found. At 1000, refused frames are tolerated silently instead of ending in a 1008 kick.
+
+`NET_SLAB_DEBUG=1` logs each aim and fire step and saves the view at each aim, for diagnosis.
+
+### Proof (private copy `scratchpad/tw-e`: HEAD `54a0abf` plus `src/client/main.ts` and `tests/e2e/net-slab.spec.ts`)
+- `npx tsc --noEmit`: exit 0. `node tools/check-boundaries.mjs`: `BOUNDARIES: PASS`.
+- `npx vitest run` slab-hud, slab-view, slab-view-input, slab-mode, net-wire, net-room-setup: **94/94**.
+- `npx playwright test tests/e2e/net-slab.spec.ts --repeat-each=3`: **3 passed (5.1 m)**, on a box at load 5–20. The
+  config's 2 workers ran two of the runs at once, so four SwiftShader browsers were up at the same time. The private
+  config serves the pages from vite preview on port 5189, and the authorities took 8791 and 8792.
+
+  | Run | Bravo settled off the slab | Alpha settled off it | Fire to takedown | Logs at the takedown | While scoring | At the end | R after the takedown |
+  |---|---|---|---|---|---|---|---|
+  | 1 | 6.0 m | 5.6 m (fired from on it) | 6 s | 120 ticks, 14 – 0, 89.6 s left | 120, 18 – 0 | 115, 60 – 0 `ended` | 64 s |
+  | 2 | 4.8 m | 4.6 m | 5 s | 120, 2 – 0, 89.5 s | 117, 3 – 0 | 120, 60 – 0 | 82 s |
+  | 3 | 5.7 m | 3.0 m | 4 s | 120, 0 – 0, 131.4 s | 120, 3 – 0 | 120, 60 – 0 | 68 s |
+
+  At the start the logs agreed at 113–120 common ticks (0 – 0), and the HUD clocks within a second. Every run's R
+  rematched both pages to 0 – 0 from 60 – 0. Every server and browser was stopped by its process group afterwards,
+  and ports 5189 and 8791–8799 were free.
+- `npx playwright test tests/e2e/modes.spec.ts` (once, same copy): **5 passed (2.3 m)**.
+- **Final spec text on the full Sprint D tree** (confirm round, `scratchpad/trial-sd2` = HEAD `54a0abf` plus every Sprint D file): `net-slab.spec.ts` **1 passed (2.2 m)**. Bravo settled 4.8 m off the slab and Alpha 5.3 m; the takedown came 3 s after Alpha started firing, with 122.4 s on the clock. The logs agreed at 119 / 120 / 120 / 120 common ticks (start; takedown 9 – 0; scoring 11 – 0; end 60 – 0 `ended`). R went in 57 s after the takedown and rematched both pages from 60 – 0. `modes.spec.ts` 5 passed; smoke, locker and net specs 6 passed. The 3-run batch above ran an earlier text of the spec: its log ends at 09:03, and the spec was last edited at 09:09.
+- Earlier batches this round, each on an earlier version of the spec:
+  - Batch 1 (before the scoring compare and the aim shots): 3 passed. Two of the three ended on the horn (38 – 0 and
+    49 – 0), with the takedown at 40 and 54 s left.
+  - Batch 2: 3 passed, but in one run Bravo settled only 1.3 m off the slab. It then stopped 4.5 m short of the edge
+    and ran on 3.2 m. The stop is now 7 m short.
+  - Batch 3: 1 failed, 2 passed. The two pets still walked one after the other, and on the loaded box the two 132 m
+    walks used up most of the 180 s clock. In the failed run Alpha crossed a corner of the slab on its way (1 point),
+    and the horn ended the match 1 – 0 before the takedown. The spec's guard reported it ("the match ended before the
+    takedown"). A second run passed only because its takedown landed at the horn. The pets now walk at the same
+    time, and the takedown came with 89–131 s left in batch 4.
+
+### Shots
+All four are the e2e's own screenshots from the confirm run of the final spec on HEAD `54a0abf` plus every Sprint D file (`scratchpad/trial-sd2`; 1 passed, 2.2 m), at 640 × 360 and quality low (JPEG 85). They replace a first set from `scratchpad/tw-e` (HEAD plus only `main.ts` and the spec), which drew the takedown dust with the pre-Sprint-D particle shader as an opaque, hard-edged grey blob.
+- **`net-slab-a-aim.jpg` (Alpha's page, first aim):** Alpha's corgi seen from behind, aiming down its sights from on the slab (`SLAB  CORGI COMPANY HOLDING  +1/s`). Bravo's cat stands at the crosshair about 10 m away: red cap, ears and grey coat all readable. 4 – 0, 2:07, 30 / 30.
+- **`net-slab-b-aim.jpg` (Bravo's page, the same moment):** Bravo's cat seen from behind, and Alpha's corgi on the slab about 10 m ahead: orange coat and blue kit readable. `SLAB 13 m` / `CORGI COMPANY` over the slab. 4 – 0, 2:08, 30 / 30. **This is the shot with both pets readable.**
+- **`net-slab-a.jpg` (Alpha's page, takedown):** `Alpha  >  Bravo` in the feed. Bravo goes down at the crosshair in a small, soft, translucent dust puff, with no ink, stars or white pop. Alpha's corgi is in front with its muzzle glow; 15 / 30 rounds left.
+- **`net-slab-b.jpg` (Bravo's page, takedown):** `Alpha  >  Bravo` in the feed. The death panel reads `TAKEN DOWN BY Alpha  ·` ■ `CORGI COMPANY`, `YOU: CAT CADRE`, `BACK AT THE SCAFFOLDS  ·  132 m TO THE SLAB` and `BACK IN 2.0`. 0 HP. The downed cat sits in soft dark dust, its red cap still showing.
+- Both takedown shots show 2:04 and 7 – 0.
+
+### Open (Sprint D)
+1. **Hit test at range.** From 40 m on Alpha's approach, a pallet stack blocks the line to Bravo. The spec meets at
+   10 m instead. It does not test long-range hits.
+2. **Timeouts and the abuse meter.** The spec raises the server's idle, peer and congestion timeouts to 180 s (as
+   `net.spec.ts` does) because SwiftShader frames can take seconds, and `KICK_SCORE` to 1000 (see above: no
+   code reason was found). The defaults are
+   untested here.
+3. **One unexplained drop.** While I built the spec (on `b222e37`), Bravo once left the room before the rematch
+   ("Bravo left the yard"). It has not come back in any run since, including the 12 this round. If it does,
+   the failure report now gives the client's disconnect reason.
+4. **The match clock.** Each pet walks 132 m from its scaffolds, and the authority moves a pet only by the inputs its
+   page sends, so slow frames walk it slower. Walking both at once leaves 89–131 s on the clock at the takedown. On a
+   much busier box the horn could still fall first. If it falls before Alpha crosses the slab (0 – 0), the match
+   goes to overtime and the fight carries on. If the Corgis already lead, the match ends and the spec fails, saying
+   so.
+5. **The slab marker over Alpha's own pet** (`net-slab-a-aim.jpg`): at 1–2 m from the slab's centre, the marker is
+   drawn where the centre projects, which is on the pet. I have not looked into this.
+
 ## W15 Sprint C: the rematch (§5) and parity with hud.gd (contract revision 4)
 **Status: done for integration; nothing committed or staged.** Base HEAD `816489c` (Sprint B landed). Godot wins: each
 number below is read from `engines/godot/game/hud.gd`.

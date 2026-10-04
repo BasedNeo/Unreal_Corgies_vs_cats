@@ -3,8 +3,8 @@
 // since Wave 13: a muted, moonlit overcast night after rain. The HARDENED comic look (ink hull, crease lines, stepped
 // toon bands, the dusk grade) is retired (docs/design/HARDENED.md).
 // Public API (unchanged names, new look): toon(), toonMaterial(), glow(), stylize(), pbr(),
-// createStyleLights(), createGrade(), buildComicOutput() / createComicPipeline() (aliases of buildStyleOutput() /
-// createStylePipeline()). Never import 'three' next to 'three/webgpu' in one app.
+// createStyleLights(), createGrade(), buildStyleOutput(), createStylePipeline() (W15 deleted the old comic-named
+// aliases). Never import 'three' next to 'three/webgpu' in one app.
 //
 // Materials. toon() keeps its parameters and returns a StyleMaterial: a MeshStandardNodeMaterial (GGX, physically based)
 // with roughness and metalness per surface (SURFACES presets or per-vertex `surface` values), procedural weathering in
@@ -491,8 +491,7 @@ export function glow(color = PALETTE.glowCyan, intensity = 3) {
  * toon() style materials keeping colour, map, emissive and (from PBR materials) roughness/metalness. `surface` sets the
  * weathering preset for everything converted. Adds no ink and leaves the geometry (and its normals) alone.
  * @param {THREE.Object3D} root
- * @param {{ creases?: boolean, creaseDeg?: number, remap?: (m: any, o: any) => any, surface?: string }} [opts]
- *   creases / creaseDeg are ignored (W13: no crease ink); kept so old calls still work
+ * @param {{ remap?: (m: any, o: any) => any, surface?: string }} [opts]
  */
 export function stylize(root, { remap, surface } = {}) {
   root.traverse((o) => {
@@ -776,8 +775,6 @@ export function buildStyleOutput(scene, camera, opts = {}) {
   const outputNode = grade.node(renderOutput(scenePass.add(bloomPass).mul(STYLE_EXPOSURE)));
   return { outputNode, scenePass, bloomPass, grade };
 }
-/** The old name of buildStyleOutput (callers and labs). */
-export const buildComicOutput = buildStyleOutput;
 
 /** Tone mapping from the tokens ('agx' | 'aces' | 'neutral'). */
 export function toneMappingOf(name = STYLE.toneMapping) {
@@ -799,5 +796,3 @@ export function createStylePipeline(renderer, scene, camera, opts = {}) {
   pipeline.outputNode = built.outputNode;
   return { pipeline, ...built, render: () => pipeline.render(), setSize: (w, h) => renderer.setSize(w, h) };
 }
-/** The old name of createStylePipeline (engine/renderer.ts). */
-export const createComicPipeline = createStylePipeline;

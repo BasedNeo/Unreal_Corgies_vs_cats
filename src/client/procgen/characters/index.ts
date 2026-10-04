@@ -1,5 +1,5 @@
 // OWNER: L1 characters lane (C3 added looks, K2 the HARDENED veterans). Procedural corgi + cat characters: one
-// parameterized anthropomorphic body plan, a shared 47-bone skeleton, automatic skin weights, a face rig with
+// parameterized anthropomorphic body plan, a shared 46-bone skeleton, automatic skin weights, a face rig with
 // expressions, faction armour + team signal + class kit, and code-authored animation (src/client/anim).
 //
 // Draw calls per character: 1 skinned body (fur + face + suit + armour, vertex colors) + 1 rigid weapon

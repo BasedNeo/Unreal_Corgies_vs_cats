@@ -1,11 +1,12 @@
-# LISTEN: the six cues, measured and logged (W15 Sprints B and C, lane A-HOOK)
+# LISTEN: the six cues, measured and logged (W15 Sprints B, C and D, lane A-HOOK)
 
 **Nobody has listened to these cues.** No machine used so far has an audio device. This page holds numbers and
 play logs only. It makes no claim that any cue sounds good. The human ear step at the end is **NOT DONE**.
 
 Base: `9139c7a` plus the working tree, in a private copy. The patch round's web runs used HEAD `ace71ca`, which is
 `9139c7a` plus a test-only commit. Sprint C (the sound tests hardened, §1 re-measured) ran on HEAD `816489c` plus the
-working tree. No cue file was changed.
+working tree. Sprint D (in slab mode only the six cues play; the intensity guard; §2 "W15 D") is checked on HEAD
+`54a0abf` plus the working tree: `tests/unit/audio-*.test.ts` passes 139 of 139 (15 files). No cue file was changed.
 
 ## 1. The files
 
@@ -208,6 +209,71 @@ of the patch-round tree, one click each, logged no `silent` line:
   `SFX match_end_win` at `[33.7s]`. The score was 8-0, CORGI COMPANY WINS.
 - `?mode=slab&webgl&autoplay&sfxlog&cam=slab&slabWin=5`: `SFX slab_tick_enemy` ×5 and `SFX match_end_lose` at
   `[26.5s]`. The score was 0-5, CAT CADRE WINS.
+
+### W15 D: in slab mode the web plays only the six shared cues (Godot wins)
+
+**Ruling.** The lead's ruling on Sprint D's open question: Godot wins. In slab mode the web twin plays the same event
+sounds as Godot, which are exactly the six SYNTH cues. Other modes are unchanged.
+- **Code.** In `src/client/audio/index.ts`, `onGameEvent` in slab mode plays the shared cue for the event, if it has
+  one, and returns before the web's own event sounds.
+- **Missing files.** When a cue's file is missing or still loading, the web used to play its synth stand-in. Now the
+  cue stays silent, as in Godot.
+- **No new cue.** Nothing was added, so there is nothing new to measure. Nobody has listened to the result.
+- **Superseded.** Sprint D's first step dropped only the death "poof" (`S.poof`, "soft poof + a comedy squeaky-toy
+  wheeze"). This replaces that step.
+
+**Event sounds per build, slab mode.** "—" means no sound.
+
+| Event | Godot | Web, slab mode now | Web slab mode before (dropped now) |
+|---|---|---|---|
+| Your shot | `rifle_shot`, 3D at the muzzle | `rifle_shot`, centred | the brass tinkle, the bullet's surface impact |
+| Another pet's shot | `rifle_shot`, 3D | `rifle_shot`, 3D (ref 4 m, cut at 80 m) | its surface impact near you |
+| Your shot lands (the kill shot too) | `hit_confirm` | `hit_confirm` | the thwack at the victim |
+| You are hit / someone else is hit | — | — | the thwack |
+| Your kill (a death by you) | — | — | the poof, the victim's yelp or meow, the kill thump (`hitThud` k2), the kill sting (`sting` k0) |
+| Any other death, a fall | — | — | the poof, the victim's yelp or meow |
+| Your own death | — | — | the poof, your yelp or meow, the death sting (`sting` k3) |
+| A slab point, yours / theirs | `slab_tick` / `slab_tick_enemy` | the same | the same |
+| The match ends, won / lost or drawn | `match_end_win` / `match_end_lose` | the same | the same (the generic score stings were already off) |
+| Spawn, jump, land, reload, taunt | — | — | sparkle, boing, landing thud, reload clicks, voice and bark |
+| A shared file missing or loading | that cue is silent | that cue is silent | the synth shot and hit thud stood in |
+
+Pickups, explosions, abilities, vehicles and ordnance do not exist in slab mode (no ordnance, pickups, vehicles or
+class ability: `src/shared/content/modes.ts`).
+
+**What still plays on the web in slab mode.** These are not event sounds, so the ruling leaves them:
+
+| Sound | Why it stays | Godot |
+|---|---|---|
+| Footsteps | Driven every frame by each pet's speed, not by an event | none |
+| The Lot's site ambience (`site-ambience.ts`: rain on steel and tarps, drips, the crane, the floodlight hum, the ditch, the far site) | Continuous beds, not events | none |
+| The weather beds: the rain, the wind bed and the storm roar (`weather.ts:116-118` set their levels) | Continuous beds that follow the world's weather clock, not events | none |
+| Thunder (`weather.ts:139`) | A one-shot from the world's weather clock: a lightning strike, heard after the sound's travel time, not a game event. The Lot storms in its first weather cycle (`layout.ts` `LOT_WEATHER`) | none |
+| Interface clicks (menus, settings) | Interface, not the match | none |
+| The reward card's blip at the match end (`audio.ui('open')`: wired at `main.ts:274`, played at `rewards.ts:99` when `main.ts:405` shows the card for the match result) and the awards card's blip (`main.ts:277`, `awards.ts:518`, shown at `main.ts:318` when the match has awards) | Interface: a card opening, not a match event | none |
+
+Music is off in slab mode (W15).
+
+**Tests** (`tests/unit/audio-slab-cues.test.ts`).
+- One round covers your shot, the kill shot, your kill, being hit, your own death, a fall, spawn, jump, land, reload
+  and a taunt.
+  - In another mode the round plays the web's own sounds: poof, meow, yelp, sting, hit thud, thwack, brass, sparkle,
+    boing, thud, reload clicks.
+  - In slab mode the same round plays exactly two sounds: `synth_rifle_shot.wav` and `synth_hit_confirm.wav`.
+- The missing-file case now expects silence, not the synth shot.
+- The shared-files case now expects no brass.
+
+**Mutants.**
+- With the slab gate removed, five tests fail. The new test fails with
+  `expected [] to deeply equal [ 'synth_rifle_shot.wav', …(1) ]`.
+- With the gate letting deaths through (`ev.e !== 'death'`), the new test fails with
+  `plays: , , poof, meow, hitThud, sting, poof, yelp, sting, poof, meow: expected 11 to be 2`.
+
+**Intensity guard.** `src/client/audio/intensity.ts` now checks `ev.by >= 0 && ev.by === c.localId`. With no local pet
+(localId -1), a fall (`by: -1`) used to count as your kill: `deathNear * 1.5` = 0.15 of combat intensity.
+- `tests/unit/audio-intensity-fall.test.ts`: a far fall adds 0 with no local pet, and 0 while you play. Your kill and
+  your own fall still add 0.15.
+- **Mutant:** without the guard the test fails: `expected 0.15000000000000002 to be +0`.
 
 ## 3. Human ear step: NOT DONE
 

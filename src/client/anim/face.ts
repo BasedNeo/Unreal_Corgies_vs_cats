@@ -169,8 +169,8 @@ export class FaceController {
       o.snarl = Math.max(o.snarl, h);
       o.jaw = Math.max(o.jaw, 0.18 * h);
     }
-    // Comic death read: eyes wide (X marks drawn by the rig), tongue out.
-    if (i.dead) { o.lidUp = 0; o.lidLo = 0; o.tongue = 1; o.jaw = 0.35; o.earsDroop = 0.9; o.tilt = 0.3; o.smile = -0.3; o.snarl = 0; o.chin = 0; }
+    // Death (W15, stylised-realistic): the lids shut, the jaw slack, ears down; no comic X eyes, no tongue out.
+    if (i.dead) { o.lidUp = 1; o.lidLo = 0.6; o.tongue = 0; o.jaw = 0.12; o.earsDroop = 0.9; o.tilt = 0.3; o.smile = 0; o.snarl = 0; o.chin = 0; }
     return o;
   }
 }

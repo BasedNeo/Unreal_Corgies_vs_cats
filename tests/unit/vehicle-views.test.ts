@@ -111,7 +111,6 @@ describe('plane views (R1)', () => {
       const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
       if (mat && !(o as unknown as { isLineSegments2?: boolean }).isLineSegments2) expect(['toon', 'glow']).toContain(mat.userData.style);
     });
-    root.traverse((o) => { if ((o as unknown as { isLineSegments2?: boolean }).isLineSegments2) expect(o.userData.styleInk).toBe(true); });
     // Bank eases toward the snapshot roll (no snapping), pitch follows the state, the root sits on the pivot.
     const r0 = root.rotation.z;
     expect(r0).toBeGreaterThan(0);

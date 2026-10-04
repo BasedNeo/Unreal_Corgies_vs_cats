@@ -510,13 +510,12 @@ export class CharacterAnimator {
       // Mouth corners bend the lip line: grin up, frown down, smirk one-sided, snarl back and out.
       const side = s === 'L' ? 1 : -0.45;
       p.o(b[`mouth.${s}`], k * (fp.snarl * 0.005 + Math.max(0, fp.smile) * 0.004), fp.smile * 0.015 + fp.smirk * side * 0.013 + fp.snarl * 0.004 - fp.jaw * 0.014, fp.snarl * 0.01);
-      const ps = dead ? 0.0001 : fp.pupil;
+      const ps = fp.pupil;
       p.s(b[`pupil.${s}`], ps * (cat ? 0.35 + 0.9 * fp.slit : 1), ps, 1);
-      if (dead) p.s(b[`eye.${s}`], 0.0001);
     }
-    p.s(b.xEyes, dead ? 1 : 0.0001);
+    // W15: no comic X eyes on death (the mesh is gone); a dead face shuts its lids (face.ts).
     p.r(b.jaw, -fp.jaw * 0.6, 0, 0);
-    // Tongue slides out past the chin and droops (happy pant, zoomies, derp, death).
+    // Tongue slides out past the chin and droops (happy pant, zoomies, derp; never on death since W15).
     const tg = fp.tongue;
     p.o(b.tongue, 0, -0.03 * tg, -0.075 * tg);
     p.r(b.tongue, -0.55 * tg, 0, 0);

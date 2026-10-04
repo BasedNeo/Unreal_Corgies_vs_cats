@@ -31,7 +31,7 @@ import { createDestructView, type DestructView } from './destruct-view';
 import { surfaceAt } from '../../shared/world/queries';
 import { createLotKitView, kitFlag, splitLotKitPrims, type LotKitView } from '../assets/kit-glb';
 
-/** Post grade uniforms (createComicPipeline(...).grade.uniforms) the weather may desaturate. */
+/** Post grade uniforms (createStylePipeline(...).grade.uniforms) the weather may desaturate. */
 export interface GradeUniforms { saturation: { value: number } }
 
 export interface WorldViewOptions {

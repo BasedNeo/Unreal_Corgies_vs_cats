@@ -8,14 +8,17 @@
 
 /** Fragment shape (SDF) drawn by the particle material. X3 added Shard (splinters, metal chips), Splat (a lobed
  *  blob: the hairball's goo and stains; W15 retired the comic hit splat), Casing (ejected brass / shells), Petal
- *  (muzzle-flash tongues, fire) and Glow (a soft light spill: glow only). */
-export const Shape = { Puff: 0, Streak: 1, Ring: 2, Star: 3, Tuft: 4, Chunk: 5, Burst: 6, Shard: 7, Splat: 8, Casing: 9, Petal: 10, Glow: 11 } as const;
+ *  (muzzle-flash tongues, fire) and Glow (a soft light spill). W15 (stylised-realistic, no comic) retired the comic
+ *  Star (3) and the spiky Burst (6): their ids stay unused so the other ids keep their values. W15 added Drop (12): a
+ *  crisp round drop or clod (water, goo, a soil spray), since a Puff is a soft translucent blob. */
+export const Shape = { Puff: 0, Streak: 1, Ring: 2, Tuft: 4, Chunk: 5, Shard: 7, Splat: 8, Casing: 9, Petal: 10, Glow: 11, Drop: 12 } as const;
 /** Vertex placement: camera-facing quad, quad stretched along an axis, or flat on the ground (XZ). */
 export const Mode = { Billboard: 0, Stretched: 1, Ground: 2 } as const;
-/** Size over life. Linear s0→s1 · Pop: overshoot to s1 then shrink to 0 · HoldShrink: s0→s1 then shrink out. */
-export const Curve = { Linear: 0, Pop: 1, HoldShrink: 2 } as const;
+/** Size over life. Linear s0→s1 · HoldShrink: s0→s1 then shrink out. (W15 retired the cartoon overshoot "Pop",
+ *  id 1: it stays unused.) */
+export const Curve = { Linear: 0, HoldShrink: 2 } as const;
 /** Color over life. None: constant · Fade: color × (1−t)² (glow systems, additive) · Flash: bright first 25% ·
- *  Soft: opacity × (1−t)^1.5 (solids draw it as a comic halftone screen-door: smoke wisps, dust that thins out). */
+ *  Soft: opacity × (1−t)^1.5 (real alpha on solids since W15: smoke wisps, dust that thins out). */
 export const Fade = { None: 0, Fade: 1, Flash: 2, Soft: 3 } as const;
 
 export interface ParticleSpec {
@@ -32,7 +35,7 @@ export interface ParticleSpec {
   drag: number;
   /** Rotation (radians) and spin (rad/s). */
   rot: number; spin: number;
-  /** Shape parameter: ink width for solids (0 = none), ring thickness for rings. */
+  /** Shape parameter: ring band thickness (Ring only; W15: nothing is inked, so other shapes ignore it). */
   param: number;
   /** Stretched mode: world length along a fixed axis (ax,ay,az). 0 = derive from velocity (head-anchored streak). */
   len: number; ax: number; ay: number; az: number;
@@ -40,7 +43,7 @@ export interface ParticleSpec {
   stretch: number;
   /** Ground plane for bouncing debris (−Infinity = none) and restitution. */
   floorY: number; bounce: number;
-  /** Opacity 0..1 (solids: halftone screen-door coverage; glow: scales the color). */
+  /** Opacity 0..1 (solids: real alpha; glow: scales the color). */
   alpha: number;
 }
 
@@ -53,7 +56,7 @@ export function resetSpec(s: ParticleSpec): ParticleSpec {
   s.life = 0.5; s.size0 = 0.2; s.size1 = 0.2; s.curve = Curve.Linear;
   s.r = s.g = s.b = 1; s.fade = Fade.None;
   s.shape = Shape.Puff; s.mode = Mode.Billboard;
-  s.gravity = 0; s.drag = 0; s.rot = 0; s.spin = 0; s.param = 0.2;
+  s.gravity = 0; s.drag = 0; s.rot = 0; s.spin = 0; s.param = 0;
   s.len = 0; s.ax = 0; s.ay = 1; s.az = 0; s.stretch = 0;
   s.floorY = -Infinity; s.bounce = 0.3; s.alpha = 1;
   return s;
@@ -197,12 +200,6 @@ export class ParticlePool {
 
 /** Size-over-life curves (exported for tests). */
 export function sizeAt(curve: number, s0: number, s1: number, t: number): number {
-  if (curve === Curve.Pop) {
-    // Quick back-out overshoot to s1 in the first 18%, then an ease-in shrink to zero.
-    if (t < 0.18) { const u = t / 0.18, c = 1.9; const v = u - 1; return s1 * (1 + (c + 1) * v * v * v + c * v * v); }
-    const u = (t - 0.18) / 0.82;
-    return s1 * (1 - u * u * u);
-  }
   if (curve === Curve.HoldShrink) {
     if (t < 0.7) return s0 + (s1 - s0) * (t / 0.7);
     const u = (t - 0.7) / 0.3;

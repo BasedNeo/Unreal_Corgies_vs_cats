@@ -60,7 +60,7 @@ export function muzzle(p: FxPools, w: WeaponFx, x: number, y: number, z: number,
     S.x = x + dx * 0.08; S.y = y + dy * 0.08; S.z = z + dz * 0.08; S.vx = dx * 2.5; S.vy = dy * 2.5; S.vz = dz * 2.5; S.drag = 6;
     S.shape = Shape.Ring; S.param = 0.07; S.life = 0.2; S.size0 = sz * 0.3; S.size1 = sz * 1.2; S.fade = Fade.Soft;
     color(S, C.mist);
-    p.solid.spawn(S); // an inked comic shockwave ring (air, not light)
+    p.solid.spawn(S); // a soft shockwave ring (air, not light)
     for (let i = 0; i < 3; i++) {
       resetSpec(S);
       const a = (i / 3) * Math.PI * 2 + R.sym(0.4), o = sz * 0.5;
@@ -78,7 +78,7 @@ export function muzzle(p: FxPools, w: WeaponFx, x: number, y: number, z: number,
   S.x = x + dx * sz * 0.15; S.y = y + dy * sz * 0.15; S.z = z + dz * sz * 0.15;
   S.life = 0.045; S.size0 = sz * 0.34; S.size1 = sz * 0.15; S.shape = Shape.Puff; S.fade = Fade.Fade; colorHex(S, 0xfff6d0, 3);
   p.glow.spawn(S);
-  S.life = 0.06; S.size0 = sz * 0.6; S.size1 = sz * 0.3; S.shape = Shape.Burst; S.rot = R.sym(Math.PI); colorHex(S, w.flashColor, 2.2);
+  S.life = 0.06; S.size0 = sz * 0.6; S.size1 = sz * 0.3; S.shape = Shape.Glow; S.rot = R.sym(Math.PI); colorHex(S, w.flashColor, 2.2);
   p.glow.spawn(S);
   // forward flame tongue(s)
   if (w.flashLen > 0) {
@@ -122,7 +122,7 @@ export function muzzle(p: FxPools, w: WeaponFx, x: number, y: number, z: number,
   smoke(p, w.klass === 'shotgun' ? C.mist : C.smoke, w.smoke, x, y, z, dx, dy, dz, sz);
 }
 
-/** Muzzle smoke: halftone wisps that drift forward, rise, grow and thin out. */
+/** Muzzle smoke: soft wisps that drift forward, rise, grow and thin out. */
 export function smoke(p: FxPools, c: readonly number[], count: number, x: number, y: number, z: number, dx: number, dy: number, dz: number, scale: number): void {
   const R = p.rng;
   for (let i = 0, k = n(p, count); i < k; i++) {
@@ -132,7 +132,7 @@ export function smoke(p: FxPools, c: readonly number[], count: number, x: number
     S.vx = dx * f + R.sym(0.35); S.vy = dy * f + R.range(0.2, 0.6); S.vz = dz * f + R.sym(0.35);
     S.drag = 2.2; S.gravity = -0.35; S.life = R.range(0.55, 1.05);
     S.size0 = 0.04 + scale * 0.15; S.size1 = R.range(0.16, 0.3) * (0.6 + scale); S.curve = Curve.Linear;
-    S.shape = Shape.Puff; S.param = 0; S.rot = R.sym(3); S.spin = R.sym(0.8);
+    S.shape = Shape.Puff; S.rot = R.sym(3); S.spin = R.sym(0.8);
     S.fade = Fade.Soft; S.alpha = R.range(0.35, 0.55); color(S, c, R.range(0.9, 1.08));
     p.solid.spawn(S);
   }
@@ -177,7 +177,7 @@ export function casing(p: FxPools, kind: 'rifle' | 'pistol' | 'magnum' | 'shell'
   const big = kind === 'magnum' || kind === 'shell';
   // a touch oversized for pet scale, so the brass reads at 4 m
   S.size0 = kind === 'pistol' ? 0.024 : big ? 0.042 : 0.031; S.size1 = S.size0;
-  S.shape = Shape.Casing; S.rot = R.sym(Math.PI); S.spin = R.sym(26) + (R.next() < 0.5 ? -14 : 14); S.param = 0.22;
+  S.shape = Shape.Casing; S.rot = R.sym(Math.PI); S.spin = R.sym(26) + (R.next() < 0.5 ? -14 : 14);
   S.floorY = floorY + S.size0 * 0.5; S.bounce = 0.42;
   color(S, kind === 'shell' ? C.hull : R.next() < 0.3 ? C.brassHi : C.brass);
   p.solid.spawn(S);
@@ -211,7 +211,7 @@ export function impact(p: FxPools, surface: number, x: number, y: number, z: num
     case Surface.Metal: {
       // hot white flash + a fan of sparks + two dark shards + a wisp
       resetSpec(S);
-      S.x = px; S.y = py; S.z = pz; S.life = 0.06; S.size0 = 0.2 * k; S.size1 = 0.06; S.shape = Shape.Burst; S.fade = Fade.Fade;
+      S.x = px; S.y = py; S.z = pz; S.life = 0.06; S.size0 = 0.2 * k; S.size1 = 0.06; S.shape = Shape.Glow; S.fade = Fade.Fade;
       S.rot = R.sym(3); colorHex(S, 0xfff2d0, 3.6);
       p.glow.spawn(S);
       for (let i = 0, c = n(p, 8 * k); i < c; i++) {
@@ -230,7 +230,7 @@ export function impact(p: FxPools, surface: number, x: number, y: number, z: num
         resetSpec(S);
         S.x = px; S.y = py; S.z = pz; S.vx = vx * 3; S.vy = vy * 3 + 1; S.vz = vz * 3;
         S.gravity = 14; S.life = R.range(0.4, 0.6); S.size0 = 0.04; S.size1 = 0.026; S.curve = Curve.HoldShrink;
-        S.shape = Shape.Shard; S.rot = R.sym(3); S.spin = R.sym(20); S.param = 0.3; S.floorY = groundY; S.bounce = 0.3;
+        S.shape = Shape.Shard; S.rot = R.sym(3); S.spin = R.sym(20); S.floorY = groundY; S.bounce = 0.3;
         color(S, C.steel);
         p.solid.spawn(S);
       }
@@ -245,7 +245,7 @@ export function impact(p: FxPools, surface: number, x: number, y: number, z: num
         const sp = R.range(2.5, 6) * Math.sqrt(k);
         S.x = px; S.y = py; S.z = pz; S.vx = vx * sp; S.vy = vy * sp + 1; S.vz = vz * sp;
         S.gravity = 13; S.drag = 1; S.life = R.range(0.5, 0.9); S.size0 = R.range(0.048, 0.08) * Math.sqrt(k); S.size1 = 0.04;
-        S.curve = Curve.HoldShrink; S.shape = Shape.Shard; S.rot = R.sym(3); S.spin = R.sym(18); S.param = 0.26;
+        S.curve = Curve.HoldShrink; S.shape = Shape.Shard; S.rot = R.sym(3); S.spin = R.sym(18);
         S.floorY = groundY; S.bounce = 0.3;
         color(S, i % 3 === 0 ? C.woodDark : i % 3 === 1 ? C.woodLight : C.wood);
         p.solid.spawn(S);
@@ -260,7 +260,7 @@ export function impact(p: FxPools, surface: number, x: number, y: number, z: num
         const sp = R.range(2.5, 6);
         S.x = px; S.y = py; S.z = pz; S.vx = vx * sp; S.vy = vy * sp + 1; S.vz = vz * sp;
         S.gravity = 15; S.life = R.range(0.45, 0.8); S.size0 = R.range(0.034, 0.06) * Math.sqrt(k); S.size1 = 0.028;
-        S.curve = Curve.HoldShrink; S.shape = i % 2 ? Shape.Shard : Shape.Chunk; S.rot = R.sym(3); S.spin = R.sym(16); S.param = 0.3;
+        S.curve = Curve.HoldShrink; S.shape = i % 2 ? Shape.Shard : Shape.Chunk; S.rot = R.sym(3); S.spin = R.sym(16);
         S.floorY = groundY; S.bounce = 0.35; color(S, i % 2 ? C.stone : C.stoneLight);
         p.solid.spawn(S);
       }
@@ -282,7 +282,7 @@ export function impact(p: FxPools, surface: number, x: number, y: number, z: num
         S.x = x + R.sym(0.08); S.y = y + 0.02; S.z = z + R.sym(0.08);
         S.vx = R.sym(1.3) - dx * 0.8; S.vy = R.range(2.5, 5.2) * Math.sqrt(k); S.vz = R.sym(1.3) - dz * 0.8;
         S.gravity = 12; S.life = R.range(0.45, 0.75); S.size0 = R.range(0.04, 0.07) * Math.sqrt(k); S.size1 = 0.025;
-        S.curve = Curve.HoldShrink; S.shape = Shape.Puff; S.param = 0.28; S.floorY = y - 0.02; S.bounce = 0;
+        S.curve = Curve.HoldShrink; S.shape = Shape.Drop; S.floorY = y - 0.02; S.bounce = 0;
         color(S, i % 2 ? C.water : C.waterLight);
         p.solid.spawn(S);
       }
@@ -299,7 +299,7 @@ export function impact(p: FxPools, surface: number, x: number, y: number, z: num
         resetSpec(S);
         S.x = px; S.y = py; S.z = pz; S.vx = vx * 2.5; S.vy = vy * 2.5 + 1.2; S.vz = vz * 2.5;
         S.gravity = 5; S.drag = 2.5; S.life = R.range(0.5, 0.8); S.size0 = 0.05; S.size1 = 0.035; S.curve = Curve.HoldShrink;
-        S.shape = Shape.Tuft; S.rot = R.sym(3); S.spin = R.sym(8); S.param = 0.3; color(S, i % 2 ? C.fibre : C.dust);
+        S.shape = Shape.Tuft; S.rot = R.sym(3); S.spin = R.sym(8); color(S, i % 2 ? C.fibre : C.dust);
         p.solid.spawn(S);
       }
       puff(p, C.dust, px, py, pz, nx, ny, nz, 0.2 * k, 0.6);
@@ -313,7 +313,7 @@ export function impact(p: FxPools, surface: number, x: number, y: number, z: num
         const sp = R.range(2.5, 5.5) * Math.sqrt(k);
         S.x = px; S.y = py; S.z = pz; S.vx = vx * sp; S.vy = vy * sp + 1.2; S.vz = vz * sp;
         S.gravity = 16; S.life = R.range(0.5, 0.8); S.size0 = R.range(0.04, 0.08) * Math.sqrt(k); S.size1 = 0.034; S.curve = Curve.HoldShrink;
-        S.shape = Shape.Chunk; S.rot = R.sym(3); S.spin = R.sym(14); S.param = 0.34; S.floorY = groundY; S.bounce = 0.3;
+        S.shape = Shape.Chunk; S.rot = R.sym(3); S.spin = R.sym(14); S.floorY = groundY; S.bounce = 0.3;
         color(S, sand ? C.sand : i % 2 ? C.dirt : C.mulch);
         p.solid.spawn(S);
       }
@@ -322,14 +322,14 @@ export function impact(p: FxPools, surface: number, x: number, y: number, z: num
           resetSpec(S);
           S.x = px; S.y = py; S.z = pz; S.vx = R.sym(2); S.vy = R.range(2, 4); S.vz = R.sym(2);
           S.gravity = 8; S.drag = 2.5; S.life = R.range(0.4, 0.7); S.size0 = 0.06; S.size1 = 0.035; S.curve = Curve.HoldShrink;
-          S.shape = Shape.Tuft; S.rot = R.sym(3); S.spin = R.sym(10); S.param = 0.3; color(S, i % 2 ? C.grass : C.grassDark);
+          S.shape = Shape.Tuft; S.rot = R.sym(3); S.spin = R.sym(10); color(S, i % 2 ? C.grass : C.grassDark);
           p.solid.spawn(S);
         }
       }
-      // spray column (a quick upward jet of dark soil)
+      // spray column (a quick upward jet of dark soil: a crisp round clod)
       resetSpec(S);
       S.x = px; S.y = py; S.z = pz; S.vx = rx * 3.5; S.vy = ry * 3.5 + 1; S.vz = rz * 3.5; S.gravity = 10; S.drag = 3;
-      S.life = 0.28; S.size0 = 0.05 * k; S.size1 = 0.16 * k; S.shape = Shape.Puff; S.param = 0.14; S.rot = R.sym(3);
+      S.life = 0.28; S.size0 = 0.05 * k; S.size1 = 0.16 * k; S.shape = Shape.Drop; S.rot = R.sym(3);
       color(S, sand ? C.sand : C.mulch);
       p.solid.spawn(S);
       puff(p, sand ? C.sand : C.dust, px, py, pz, nx, ny, nz, 0.26 * k, 0.75);
@@ -338,13 +338,13 @@ export function impact(p: FxPools, surface: number, x: number, y: number, z: num
   }
 }
 
-/** A dust/sawdust puff that pops then thins out in halftone. */
+/** A dust/sawdust puff that swells, then thins out. */
 function puff(p: FxPools, c: readonly number[], x: number, y: number, z: number, nx: number, ny: number, nz: number, size: number, alpha: number): void {
   const R = p.rng;
   resetSpec(S);
   S.x = x; S.y = y; S.z = z; S.vx = nx * 0.8; S.vy = ny * 0.8 + 0.35; S.vz = nz * 0.8; S.drag = 2.5; S.gravity = -0.2;
   S.life = R.range(0.5, 0.75); S.size0 = size * 0.4; S.size1 = size; S.curve = Curve.Linear; S.shape = Shape.Puff;
-  S.param = 0.1; S.rot = R.sym(3); S.fade = Fade.Soft; S.alpha = alpha; color(S, c);
+  S.rot = R.sym(3); S.fade = Fade.Soft; S.alpha = alpha; color(S, c);
   p.solid.spawn(S);
 }
 
@@ -362,7 +362,7 @@ export function clawSlash(p: FxPools, x: number, y: number, z: number, rx: numbe
 
 /**
  * The HARDENED explosion extras on top of L5's `explosion()`: a rolling fireball of petals and hot puffs, a dark
- * smoke column that rises and thins in halftone, long-lived embers and a dirt spray fountain.
+ * smoke column that rises and thins out, long-lived embers and a dirt spray fountain.
  */
 export function explosionExtras(p: FxPools, x: number, y: number, z: number, r: number, groundY: number): void {
   const R = p.rng;
@@ -381,14 +381,14 @@ export function explosionExtras(p: FxPools, x: number, y: number, z: number, r: 
     colorHex(S, i % 3 ? PALETTE.glowOrange : PALETTE.accentHot, R.range(1.5, 2.1));
     p.glow.spawn(S);
   }
-  // hot inner fireball puffs (inked, bright) that roll up
+  // hot inner fireball puffs (bright) that roll up
   for (let i = 0, c = n(p, 6); i < c; i++) {
     resetSpec(S);
     const a = R.range(0, Math.PI * 2);
     S.x = x + Math.cos(a) * 0.3 * k; S.y = y + 0.4 * k; S.z = z + Math.sin(a) * 0.3 * k;
     S.vx = Math.cos(a) * R.range(1, 2.5) * k; S.vy = R.range(2, 4) * k; S.vz = Math.sin(a) * R.range(1, 2.5) * k;
-    S.drag = 3; S.gravity = -1; S.life = R.range(0.3, 0.5); S.size0 = 0.3 * k; S.size1 = R.range(0.6, 0.9) * k; S.curve = Curve.Pop;
-    S.shape = Shape.Puff; S.rot = R.sym(3); S.param = 0.1; color(S, i % 2 ? C.fireCore : C.fireHot, 0.95);
+    S.drag = 3; S.gravity = -1; S.life = R.range(0.3, 0.5); S.size0 = 0.3 * k; S.size1 = R.range(0.6, 0.9) * k; S.curve = Curve.HoldShrink;
+    S.shape = Shape.Puff; S.rot = R.sym(3); color(S, i % 2 ? C.fireCore : C.fireHot, 0.95);
     p.solid.spawn(S);
   }
   // dark smoke column
@@ -398,7 +398,7 @@ export function explosionExtras(p: FxPools, x: number, y: number, z: number, r: 
     S.x = x + Math.cos(a) * rr; S.y = y + 0.5 + i * 0.12 * k; S.z = z + Math.sin(a) * rr;
     S.vx = Math.cos(a) * 0.4 + R.sym(0.3); S.vy = R.range(1.4, 2.8); S.vz = Math.sin(a) * 0.4 + R.sym(0.3);
     S.drag = 0.9; S.gravity = -0.5; S.life = R.range(1.6, 2.6); S.size0 = 0.35 * k; S.size1 = R.range(0.9, 1.4) * k;
-    S.shape = Shape.Puff; S.rot = R.sym(3); S.spin = R.sym(0.6); S.param = 0.05; S.fade = Fade.Soft; S.alpha = R.range(0.7, 0.9);
+    S.shape = Shape.Puff; S.rot = R.sym(3); S.spin = R.sym(0.6); S.fade = Fade.Soft; S.alpha = R.range(0.7, 0.9);
     color(S, i % 3 === 0 ? C.smoke : C.smokeDark);
     p.solid.spawn(S);
   }
@@ -419,7 +419,7 @@ export function explosionExtras(p: FxPools, x: number, y: number, z: number, r: 
     S.x = x + Math.cos(a) * 0.2; S.y = groundY + 0.1; S.z = z + Math.sin(a) * 0.2;
     S.vx = Math.cos(a) * sp; S.vz = Math.sin(a) * sp; S.vy = R.range(6, 11) * Math.sqrt(k);
     S.gravity = 18; S.life = R.range(0.9, 1.4); S.size0 = R.range(0.06, 0.12) * k; S.size1 = 0.05; S.curve = Curve.HoldShrink;
-    S.shape = Shape.Chunk; S.rot = R.sym(3); S.spin = R.sym(14); S.param = 0.3; S.floorY = groundY; S.bounce = 0.3;
+    S.shape = Shape.Chunk; S.rot = R.sym(3); S.spin = R.sym(14); S.floorY = groundY; S.bounce = 0.3;
     color(S, i % 2 ? C.mulch : C.dirt);
     p.solid.spawn(S);
   }

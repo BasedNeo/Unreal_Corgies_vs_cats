@@ -98,7 +98,7 @@ src/client/
   net/                             transports (+ emulation), NetClient (interpolation, prediction, reconnect),
                                    prediction.ts, server-url.ts, loopback (tests)
   views/                           Avatar contract, entity-views (entity → avatar), nameplates
-  procgen/characters/  anim/       procedural corgi/cat bodies, skeleton (47 bones), class silhouette gear, weapons ·
+  procgen/characters/  anim/       procedural corgi/cat bodies, skeleton (46 bones), class silhouette gear, weapons ·
                                    animator (glide pose, kill grin), face, springs; silhouette.ts = range-readability check
                                    W7 K2: armoured veterans (gear.ts splits faction armour from team signal);
                                    MeshBuilder.surface is a per-vertex weathering channel for S4's material; the

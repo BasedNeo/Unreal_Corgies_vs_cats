@@ -2,10 +2,10 @@
 // adaptive music from combat intensity. S2 added vehicle engine loops (vehicle-loops.ts), vehicle/destructible
 // event voices (abilitySfx) and the adventure step/chapter stingers. W10 AU2: Base Assault's ball voices, calls and
 // capture fanfare (presets-objective.ts) replace the generic pickup chime / score sting for its events, and its carrier
-// tension drives the music's pulse layer (music-tension.ts); engine.focus follows the local character. W13 A-HOOK: in a
-// slab match the shared WAVs (slab-cues.ts, as Godot's sfx.gd) take the place of the synth rifle report, the shooter's
-// hit thud and the score stings, and play the slab ticks and the match end; `?sfxlog` prints `SFX <cue>` per cue. There is
-// no music bed in slab mode (Godot has none): the adaptive music stops while a slab match runs.
+// tension drives the music's pulse layer (music-tension.ts); engine.focus follows the local character. W13 A-HOOK: a
+// slab match plays the shared WAVs (slab-cues.ts, as Godot's sfx.gd): the rifle shot, the hit confirm, the slab ticks
+// and the match end; `?sfxlog` prints `SFX <cue>` per cue. W15 D (Godot wins): those six are the ONLY event sounds in
+// slab mode, and there is no music bed (Godot has none). Non-event sound (footsteps, the site's ambience) stays.
 //
 //   const audio = createAudio();                                   // attaches first-gesture unlock
 //   bus.on('game', (ev) => audio.onGameEvent(ev));
@@ -157,9 +157,9 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
   const sfxLog = typeof location !== 'undefined' && new URLSearchParams(location.search).has('sfxlog');
   let slabLoadQueued = false;
   let slabMusicOff = false;
-  /** Plays a slab cue from its file. False: the file is not there (still loading, or missing), so the caller may play
-   *  the synth it replaces (the shot, the hit thud); the ticks and the end sting then stay silent, as in Godot. */
-  const slabPlay = (c: SlabCuePlay): boolean => {
+  /** Plays a slab cue from its file. Without the file (still loading, or missing) the cue stays silent, as in Godot;
+   *  with ?sfxlog it prints `SFX <cue>`, or `SFX <cue> silent (<why>)` when it could not play. */
+  const slabPlay = (c: SlabCuePlay): void => {
     const r = slabSamples.recipe(c.cue);
     const gain = slabCueGain(c.cue);
     const shot = c.cue === 'rifle_shot';
@@ -167,7 +167,6 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
       : engine.play(r, c.at ? { x: c.at.x, y: c.at.y, z: c.at.z, gain, priority: 1, category: 'fire', refDist: SLAB_SHOT_REF, maxDist: SLAB_SHOT_MAX }
         : { bus: shot ? 'sfx' : 'ui', gain, priority: shot ? 2 : 3, category: shot ? 'fire' : 'ui' }) ? '' : 'culled';
     if (sfxLog) console.log(why ? `SFX ${c.cue} silent (${why})` : `SFX ${c.cue}`);
-    return !!r;
   };
   // your side for the slab cues: the local pet's team, kept while that pet is missing from a frame's states;
   // Corgi Company (0) with no local pet at all, as Godot's --bots-only (sfx.gd my_team)
@@ -279,13 +278,21 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
         if (sfxLog && slabCues.active) { const c = slabEventCue(ev, localId); if (c) console.log(`SFX ${c.cue} silent (audio locked)`); }
         return;
       }
-      const slab = slabCues.active;
+      // W15 D (lead ruling, Godot wins): in slab mode the twin plays only the event sounds Godot plays, the six shared
+      // cues (the ticks and the end sting come from bus 'match' above). Every other event sound stays out there: the
+      // brass and the impacts, the hit thwack, the death poof, voice, kill thump and stings, spawn, jump, land, reload
+      // and bark sounds, and the synth stand-ins for a missing or loading file (Godot is silent then).
+      if (slabCues.active) {
+        const c = slabEventCue(ev, localId);
+        if (c) slabPlay(c);
+        return;
+      }
       switch (ev.e) {
         case 'fire': {
           const w = weapons.id(ev.wpn);
           const g = FIRE_GAIN[w];
           const mine = ev.id === localId;
-          if (!(slab && slabPlay(slabEventCue(ev, localId)!))) engine.play(FIRE[w], mine ? { gain: g[0], priority: 2, category: 'fire' } : { x: ev.x, y: ev.y, z: ev.z, gain: g[1], priority: 1, category: 'fire', maxDist: 80, refDist: 4 });
+          engine.play(FIRE[w], mine ? { gain: g[0], priority: 2, category: 'fire' } : { x: ev.x, y: ev.y, z: ev.z, gain: g[1], priority: 1, category: 'fire', maxDist: 80, refDist: 4 });
           const fx = WEAPON_FX[w];
           // brass on the ground: your own gun only (everyone's would be noise)
           if (mine && fx.casing !== 'none') engine.play(S.brassTinkle, { k: fx.casing === 'shell' ? 1 : 0, gain: 0.5, priority: 0, category: 'foot' });
@@ -304,7 +311,7 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
         case 'hit': {
           engine.play(S.thwack, ev.dst === localId ? { k: ev.crit ? 1 : 0, gain: 0.9, priority: 3, category: 'hit' } : { x: ev.x, y: ev.y, z: ev.z, k: ev.crit ? 1 : 0, priority: 1, category: 'hit' });
           // X3: the shooter's confirmation is a body thud under the tick (same frame as the hitmarker)
-          if (ev.src === localId && ev.dst !== localId && !(slab && slabPlay({ cue: 'hit_confirm' }))) engine.play(S.hitThud, { bus: 'ui', k: ev.crit ? 1 : 0, gain: 0.75, priority: 3, category: 'ui' });
+          if (ev.src === localId && ev.dst !== localId) engine.play(S.hitThud, { bus: 'ui', k: ev.crit ? 1 : 0, gain: 0.75, priority: 3, category: 'ui' });
           break;
         }
         case 'death': {
@@ -352,7 +359,6 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
           break;
         }
         case 'score': {
-          if (slab) break; // W13 A-HOOK: the slab's ticks and end sting come from the MatchState (bus 'match' above)
           if (objective.onGameEvent(ev, localId, states)) break; // W10 AU2: Base Assault's own cues
           if (ev.reason === 'step') { pendingStep = true; break; }
           if (ev.reason === 'chapter') {

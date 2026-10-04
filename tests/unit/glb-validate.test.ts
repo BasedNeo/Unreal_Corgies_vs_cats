@@ -70,7 +70,7 @@ describe('P-GLB1 pbr()', () => {
     expect(toon({ color: 0x808080 }).userData.style).toBe('toon');
     const g = new THREE.Group();
     g.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x808080 })));
-    stylize(g, { creases: false });
+    stylize(g);
     expect((g.children[0] as THREE.Mesh).material).toHaveProperty('userData.style', 'toon');
   });
 });

@@ -1,4 +1,4 @@
-// Ordnance lab (W9 X4): a real Sim in the page (a small range at dusk), the real comic pipeline, EntityViews, the X3
+// Ordnance lab (W9 X4): a real Sim in the page (a small range at dusk), the real style pipeline, EntityViews, the X3
 // FX director and the ordnance view + HUD slot, stepped one sim tick per rendered frame (deterministic: captures pause at
 // exact ticks — frame-by-frame slow motion).
 //   /labs/ordnance.html?webgl&view=corgi   a corgi aims (the arc preview), throws a Squeaker Grenade at two cats

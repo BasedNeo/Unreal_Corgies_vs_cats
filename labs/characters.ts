@@ -1,5 +1,5 @@
 // Character lab: lineups / turntables / action poses / face close-ups of the procedural cast,
-// rendered through the real comic pipeline (toon bands, ink outline pass, bloom, grade).
+// rendered through the real style pipeline (the stylised-realistic look: PBR style materials, bloom, grade; no ink).
 //
 // URL params
 //   view=grid|front|side|back|action|face|portrait|turntable|ots|lineup|roster|vets|closeup   camera + layout preset (default grid)
@@ -9,10 +9,8 @@
 //     character a veteran; swap=1 puts each species in the other team's signal colours (the tests' mixed case).
 //   anim=idle|walk|run|sprint|jump|fall|glide|aim|aimfwd|fire|hit|kill|death|emote|slide|swim|cycle   (default: per view)
 //   lineup: every class x both species at `dist` m (default 35) from a gameplay camera (`fov`, default 62 =
-//     hip-fire), groups facing the camera / away (`facing=front,back,side`). sil=1 renders flat ink silhouettes.
+//     hip-fire), groups facing the camera / away (`facing=front,back,side`). sil=1 renders flat dark silhouettes.
 //   camera overrides (any view): cam=x,y,z  at=x,y,z  fov=deg
-//   inkfar=8   EXPERIMENT (lab only): cap the ink hull's screen-constant width beyond 8 m, so distant ink
-//              thins like world-space lines (the proposal for the style lane, see docs/handoff/K1.md)
 //   species=corgi|cat  cls=assault  coat=red|tabby|…  team=0|1  expr=smug|…  npc (NPC tier)
 //   t=1.5   pre-simulate 1.5 s at 60 Hz, then freeze (deterministic screenshots); live=1 keeps running
 //   webgl   force the WebGL2 backend (headless probe)        labels=0   hide name tags     bare=1   hide the weapons
@@ -225,24 +223,7 @@ class Driver {
   }
 }
 
-/** Lab-only experiment: ink width constant in screen space up to `d` m, then constant in world space. */
-function capInkDistance(d: number): void {
-  type OutlinePass = { thicknessNode: unknown; _createMaterial(): THREE.NodeMaterial };
-  const proto = (THREE as unknown as { ToonOutlinePassNode: { prototype: OutlinePass } }).ToonOutlinePassNode.prototype;
-  const orig = proto._createMaterial;
-  proto._createMaterial = function (this: OutlinePass) {
-    const m = orig.call(this);
-    const mvp = TSL.cameraProjectionMatrix.mul(TSL.modelViewMatrix);
-    const pos = mvp.mul(TSL.vec4(TSL.positionLocal, 1));
-    const pos2 = mvp.mul(TSL.vec4(TSL.positionLocal.add(TSL.normalLocal.negate()), 1));
-    const thickness = this.thicknessNode as ReturnType<typeof TSL.float>;
-    m.vertexNode = pos.add(TSL.normalize(pos.sub(pos2)).mul(thickness).mul(TSL.min(pos.w, TSL.float(d))));
-    return m;
-  };
-}
-
 async function main(): Promise<void> {
-  if (P.has('inkfar')) capInkDistance(Number(P.get('inkfar')));
   const app = document.getElementById('app')!;
   const ctx = await createRenderContext(app, { forceWebGL: P.has('webgl') });
   const { scene, camera, renderer } = ctx;
@@ -271,7 +252,7 @@ async function main(): Promise<void> {
   const mask = P.get('mask') === '1';
   let maskMat: THREE.Material | null = null;
   if (mask) {
-    // K3 readability bench: characters flat white on black, nothing else (a style glow material: unlit, not inked).
+    // K3 readability bench: characters flat white on black, nothing else (a style glow material: unlit).
     scene.background = new THREE.Color(0x000000);
     scene.fog = null;
     ground.visible = false; pad.visible = false;
@@ -288,11 +269,11 @@ async function main(): Promise<void> {
     av.root.rotation.y = s.yaw;
     if (s.expr) av.setExpression(s.expr);
     if (P.get('bare') === '1') av.root.traverse((o) => { if (o.name.startsWith('weapon')) o.visible = false; }); // inspect the armour
-    if (maskMat) av.root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && !o.userData.styleInk) m.material = maskMat!; if (o.userData.styleInk) o.visible = false; });
+    if (maskMat) av.root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.material = maskMat!; });
     if (P.get('sil') === '1') {
-      // Flat ink silhouettes (style-system material): judge class shapes without color or face detail.
+      // Flat dark silhouettes (style-system material): judge class shapes without color or face detail.
       silMat ??= toon({ color: PALETTE.ink });
-      av.root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && !o.userData.styleInk) m.material = silMat!; });
+      av.root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.material = silMat!; });
     }
     scene.add(av.root);
     drivers.push(new Driver(av, s.anim, i * 0.9));
@@ -375,7 +356,7 @@ async function main(): Promise<void> {
     const inf = renderer.info.render as unknown as { drawCalls?: number; calls?: number; triangles?: number };
     info.textContent = `character lab · view=${view} · ${ctx.backend} · ${fps.toFixed(0)} fps\n` +
       `${drivers.length} characters · ${npc ? 'NPC' : 'hero'} tier · ${totalTris} tris (≤ ${Math.max(...drivers.map((d) => d.av.stats.triangles))} each) · ≤ ${maxDraws} draws each\n` +
-      `frame: ${inf.drawCalls ?? inf.calls ?? '?'} draw calls (incl. ink + shadow passes)` + (freeze ? ` · frozen at t=${P.get('t')}s` : '');
+      `frame: ${inf.drawCalls ?? inf.calls ?? '?'} draw calls (incl. shadow passes)` + (freeze ? ` · frozen at t=${P.get('t')}s` : '');
     (globalThis as unknown as { __lab: unknown }).__lab = { ready: true, frames: rendered, characters: drivers.length, fps, scene, THREE, TSL, boxes };
   });
 }

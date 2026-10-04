@@ -1,6 +1,6 @@
 // OWNER: boss lane (E1). Madame Pointillé, the Dot Artiste — the Siamese sniper elite's model.
 //
-// Built from the character lane's kit, like B1's pilot (species plan, fur/face builder, 47-bone skeleton,
+// Built from the character lane's kit, like B1's pilot (species plan, fur/face builder, 46-bone skeleton,
 // CharacterAnimator with its face rig and aim layer, the Overwatch laser rifle), at 1.4× a cat, plus her own
 // gear (original look): a black turtleneck, a crimson ascot whose striped tails stream over her left shoulder,
 // a paintbrush tucked behind her right ear, and a tilted crimson beret with a black stalk. Siamese points

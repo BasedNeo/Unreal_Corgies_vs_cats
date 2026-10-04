@@ -1,10 +1,10 @@
-// Weapons lab (X3): the HARDENED weapon models and their combat feedback on a small firing range, through the real
-// comic pipeline, FX director, audio and hitmarker.
+// Weapons lab (X3): the weapon models and their combat feedback on a small firing range, through the real
+// style pipeline, FX director, audio and hitmarker.
 //   /labs/weapons.html?webgl&view=models            every weapon, both factions (x3 scale for inspection; &scale=1)
 //   &view=fire&wpn=squeaker_rifle&surf=metal         one armed pet firing at a panel (surf: dirt|grass|metal|wood|stone|water)
 //   &view=fire&wpn=all                               the six weapons in a firing line
 //   &view=impacts&wpn=squeaker_rifle                  bullets landing on every surface (marks accumulate)
-//   &view=hits                                       a cat taking hits: fur, comic splat, THWACK, crit, kill + hitmarker
+//   &view=hits                                       a cat taking hits: fur tufts, a soft glow, crit, kill + hitmarker
 //   &view=explode                                    a tennis-mortar round going off on dirt (fireball, smoke, scorch)
 //   &cam=side|ots|front|impact (impact: close on the hit point)   &mood=dusk|day   &quality=low|medium|high   &slow=0.25 (slow motion)   &period=0.6 (s)
 // Deterministic: fixed 1/60 s steps per rendered frame (× slow). Captures set window.__wlab.pause = true to hold a
@@ -91,7 +91,7 @@ async function main(): Promise<void> {
 let stepHook: ((dt: number) => void) | null = null;
 
 // ---------------------------------------------------------------------------------------------
-// models: every weapon, both factions, with the character's material setup (vertex-colour toon + crease ink + glow)
+// models: every weapon, both factions, with the character's material setup (vertex-colour style material + glow)
 
 function buildModels(scene: THREE.Scene, camera: THREE.PerspectiveCamera, label: (t: string, at: THREE.Vector3) => void): void {
   const scale = Number(P.get('scale') ?? 3);

@@ -27,7 +27,7 @@ export function colorViews(root: THREE.Object3D): ColorViews {
   const zf = new Float32Array(W * H).fill(Infinity), zb = new Float32Array(W * H).fill(-Infinity);
   root.traverse((o) => {
     const m = o as THREE.Mesh & { isLineSegments2?: boolean };
-    if (!m.isMesh || m.isLineSegments2 || o.userData.styleInk) return;
+    if (!m.isMesh || m.isLineSegments2) return;
     const g = m.geometry, pos = g.getAttribute('position'), col = g.getAttribute('color'), idx = g.index;
     if (!col) return;
     const skinned = (o as THREE.SkinnedMesh).isSkinnedMesh ? (o as THREE.SkinnedMesh) : null;

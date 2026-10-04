@@ -25,7 +25,7 @@ export function silhouetteMasks(root: THREE.Object3D): SilhouetteMasks {
   const pts: number[] = [];
   root.traverse((o) => {
     const m = o as THREE.Mesh & { isLineSegments2?: boolean };
-    if (!m.isMesh || m.isLineSegments2 || o.userData.styleInk) return;
+    if (!m.isMesh || m.isLineSegments2) return;
     const g = m.geometry, pos = g.getAttribute('position'), idx = g.index;
     const skinned = (o as THREE.SkinnedMesh).isSkinnedMesh ? (o as THREE.SkinnedMesh) : null;
     const world: number[] = new Array(pos.count * 3);

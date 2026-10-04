@@ -68,7 +68,9 @@ and Godot disagree, Godot wins. The web has used the same look since Wave 13. It
   surfaces something to mirror, and lamp halos stand in for the volumetric glow.
 - **No comic FX.** No onomatopoeia ("POW!", "BARK!"), no comic splat on hits (fur tufts, one team chunk and a soft glow;
   no ink, no Pop, no stars), and a takedown is a short, muted dust and grit burst, not a white poof with stars (W15). Hit
-  markers, the kill feed and damage feedback stay.
+  markers, the kill feed and damage feedback stay. Particles have no ink rim, halftone or toon bands: puffs are soft-edged
+  and fade with real alpha, flashes and respawns are soft glows, and nothing pops or overshoots. A dead pet shuts its
+  eyes: no X eyes, no tongue (W15 Sprint D).
 
 ## Rules
 - All materials go through the style factory (`toon()`, `toonMaterial()`, `glow()`, `stylize()`, `pbr()`).

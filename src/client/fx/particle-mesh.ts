@@ -1,19 +1,18 @@
 // OWNER: L5 (juice). GPU side of the particle system: ONE draw call per system (instanced quad) with a TSL
-// material that billboards / stretches / lays quads flat in the vertex stage and draws comic shapes as SDFs in
-// the fragment stage.
+// material that billboards / stretches / lays quads flat in the vertex stage and draws shapes as SDFs in the
+// fragment stage.
 //
-// Two flavors (both non-toon, so toonOutlinePass never gives them a hull — the ink is drawn in-shader):
-//  - 'solid': opaque cutout shapes, flat 2-tone fill + warm-black ink rim. Colors stay ≤ ~0.85 luminance so
-//    bloom never catches them (STYLE_GUIDE: only emissives glow). Fur tufts, dust, debris, smoke.
+// Two flavors. W15 (stylised-realistic, docs/design/LOOK.md): nothing is inked, banded or screened any more.
+//  - 'solid': alpha-blended shapes in a flat colour with a soft top-lit gradient. Puffs (dust, smoke) are soft-edged
+//    discs; tufts, chunks, shards and casings keep a crisp, anti-aliased edge. Opacity (ParticleSpec.alpha and
+//    Fade.Soft) is real alpha. Colours stay ≤ ~0.85 luminance so bloom never catches them (only emissives glow).
 //  - 'glow':  additive, unlit, colors multiplied > 1 so the bloom pass picks them up — the same contract as
 //    style-webgpu glow(). Muzzle flashes, tracers, lasers, sparks, explosion flash.
 import * as THREE from 'three/webgpu';
 import {
   vec2, vec3, vec4, float, uv, positionGeometry, cameraViewMatrix, cameraProjectionMatrix,
-  instancedDynamicBufferAttribute, cos, sin, length, abs, atan, select, smoothstep, max, min, mix, pow, step,
-  screenCoordinate, fract, sqrt,
+  instancedDynamicBufferAttribute, cos, sin, length, abs, atan, select, smoothstep, max, min, mix, pow, step, sqrt,
 } from 'three/tsl';
-import { PALETTE } from '../style/style-tokens.js';
 import { createInstanceArrays, type InstanceArrays, type ParticlePool } from './particle-pool';
 
 export type ParticleFlavor = 'solid' | 'glow';
@@ -26,7 +25,11 @@ export interface ParticleMesh {
   dispose(): void;
 }
 
-const INK = new THREE.Color(PALETTE.ink);
+/**
+ * Draw order (W15): solids are alpha-blended now, so they must draw AFTER the ground-level transparent layers they hover
+ * over (water 2, blob shadows 2, floodlight pools 3) and BEFORE the rain sheet (4) and the additive glows (5).
+ */
+export const PARTICLE_RENDER_ORDER = { solid: 3.5, glow: 5 } as const;
 
 export function createParticleMesh(capacity: number, flavor: ParticleFlavor): ParticleMesh {
   const arrays = createInstanceArrays(capacity);
@@ -78,7 +81,7 @@ export function createParticleMesh(capacity: number, flavor: ParticleFlavor): Pa
     mat.vertexNode = cameraProjectionMatrix.mul(view);
   }
 
-  // ---- fragment: comic shapes as signed distances (d < 0 inside) in p ∈ [-1,1]² ----
+  // ---- fragment: shapes as signed distances (d < 0 inside) in p ∈ [-1,1]² ----
   // Plain node-graph builder (not a TSL Fn): plain expressions keep the graph stack-free, and
   // discarding goes through material.maskNode instead of If/Discard.
   const sdf = () => {
@@ -86,13 +89,10 @@ export function createParticleMesh(capacity: number, flavor: ParticleFlavor): Pa
     const shape = aCol.w, param = aMisc.z;
     const r = length(p);
     const ang = atan(p.y, p.x);
-    const puff = r.sub(float(0.9).add(sin(ang.mul(7).add(aMisc.x.mul(3))).mul(0.06)));
+    const disc = r.sub(0.9);
     const ring = abs(r.sub(0.78)).sub(max(param, 0.04));
-    const star = pow(abs(p.x), 0.5).add(pow(abs(p.y), 0.5)).sub(1);
     const tuft = length(vec2(p.x.mul(2.4), p.y)).sub(0.95);
     const chunk = max(abs(p.x), abs(p.y)).sub(0.72);
-    const spikes = float(0.58).add(pow(abs(cos(ang.mul(4))), 3).mul(0.4));
-    const burst = r.sub(spikes);
     const streak = r.sub(0.95);
     // X3 shapes. Shard: thin diamond sliver (splinters, metal chips). Splat: a blob with lobes (the hairball's
     // goo and stains; W15 retired the comic hit splat). Casing: rounded capsule 1:2.5 (brass, shells). Petal: flame
@@ -105,38 +105,37 @@ export function createParticleMesh(capacity: number, flavor: ParticleFlavor): Pa
     const py = p.y.clamp(-1, 1);
     const petalW = sqrt(max(float(1).sub(py).mul(0.5), 0)).mul(0.9).mul(smoothstep(-1, -0.72, py));
     const petal = abs(p.x).sub(petalW);
-    // Shape ids: 0 Puff · 1 Streak · 2 Ring · 3 Star · 4 Tuft · 5 Chunk · 6 Burst · 7 Shard · 8 Splat · 9 Casing · 10 Petal
-    // · 11 Glow (a disc; the glow flavor gives it a soft quadratic falloff instead of a hot edge)
-    return select(shape.lessThan(0.5), puff,
+    // Shape ids: 0 Puff (a disc) · 1 Streak · 2 Ring · 4 Tuft · 5 Chunk · 7 Shard · 8 Splat · 9 Casing · 10 Petal
+    // · 11 Glow (a disc; the glow flavor gives it a soft quadratic falloff instead of a hot edge) · 12 Drop (the same
+    // disc, but a solid draws it crisp, not soft like a Puff). 3 and 6 (the retired Star and Burst) are never spawned.
+    return select(shape.lessThan(0.5), disc,
       select(shape.lessThan(1.5), streak,
-        select(shape.lessThan(2.5), ring,
-          select(shape.lessThan(3.5), star,
-            select(shape.lessThan(4.5), tuft,
-              select(shape.lessThan(5.5), chunk,
-                select(shape.lessThan(6.5), burst,
-                  select(shape.lessThan(7.5), shard,
-                    select(shape.lessThan(8.5), splat,
-                      select(shape.lessThan(9.5), casing,
-                        select(shape.lessThan(10.5), petal, r.sub(1))))))))))));
+        select(shape.lessThan(3.5), ring,
+          select(shape.lessThan(4.5), tuft,
+            select(shape.lessThan(6.5), chunk,
+              select(shape.lessThan(7.5), shard,
+                select(shape.lessThan(8.5), splat,
+                  select(shape.lessThan(9.5), casing,
+                    select(shape.lessThan(10.5), petal, select(shape.lessThan(11.5), r.sub(1), disc))))))))));
   };
 
   if (flavor === 'solid') {
+    // Real alpha (W15): one alpha-blended draw that tests depth but never writes it, so a soft puff never cuts a hole
+    // in what is behind it. Puffs are soft translucent blobs (dust and smoke); every other solid keeps a crisp edge with a
+    // thin anti-aliasing band. No ink rim, no toon crescent, no halftone screen-door.
+    mat.transparent = true;
+    mat.depthWrite = false;
     const d = sdf();
-    // Opacity (aAxis.w) as a comic halftone screen-door: dots on a 5 px grid shrink as it thins (smoke wisps, dust
-    // fading out). Opacity 1 covers every pixel (the dot radius passes the cell corner), so opaque shapes are unchanged.
-    const cell = fract(screenCoordinate.div(5)).sub(0.5);
-    const dots = length(cell).lessThanEqual(aAxis.w.mul(0.72));
-    mat.maskNode = d.lessThanEqual(0).and(dots);
     const p = uv().mul(2).sub(1);
-    // 2-tone toon fill: a lower-right crescent in shade (key light from the upper left), like the toon bands.
-    const k = p.x.sub(p.y).mul(0.7071).add(length(p).mul(0.25));
-    const shade = smoothstep(0.42, 0.47, k);
-    const fill = mix(aCol.rgb, aCol.rgb.mul(0.7), shade);
-    // Rings use param as band thickness: ink both edges with a thinner line.
-    const isRing = aCol.w.greaterThan(1.5).and(aCol.w.lessThan(2.5));
-    const inkW = select(isRing, aMisc.z.mul(0.45), aMisc.z);
-    const ink = step(inkW.negate(), d).mul(step(0.001, inkW));
-    mat.colorNode = vec4(mix(fill, vec3(INK.r, INK.g, INK.b), ink), 1);
+    const isPuff = aCol.w.lessThan(0.5);
+    // a puff is translucent all through (peak 0.85) and falls off like a soft blob, never a solid disc
+    const soft = pow(float(1).sub(smoothstep(0, 1, length(p))), 1.3).mul(0.85);
+    const crisp = float(1).sub(smoothstep(-0.04, 0.02, d));
+    const alpha = select(isPuff, soft, crisp).mul(aAxis.w);
+    mat.opacityNode = alpha;
+    mat.maskNode = alpha.greaterThan(0.004);
+    // A soft top-lit gradient (continuous, not a band): the lower half sits a little darker.
+    mat.colorNode = aCol.rgb.mul(mix(float(0.8), float(1), smoothstep(-1, 0.8, p.y)));
   } else {
     mat.transparent = true;
     mat.depthWrite = false;
@@ -159,7 +158,7 @@ export function createParticleMesh(capacity: number, flavor: ParticleFlavor): Pa
   mesh.frustumCulled = false;
   mesh.castShadow = false;
   mesh.receiveShadow = false;
-  mesh.renderOrder = flavor === 'glow' ? 5 : 1;
+  mesh.renderOrder = flavor === 'glow' ? PARTICLE_RENDER_ORDER.glow : PARTICLE_RENDER_ORDER.solid;
   mesh.userData.noCameraCollide = true;
   mesh.userData.fxArrays = arrays; // debug/lab inspection
   // Stays visible with 0 instances: the renderer builds the pipeline at load (no draw is issued while

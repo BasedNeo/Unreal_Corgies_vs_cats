@@ -1,6 +1,6 @@
 // OWNER: X3. GPU side of the impact marks: ONE draw call for every bullet hole and scorch (instanced quads laid on
 // the hit surface), a non-toon material (no ink hull) that draws each mark as a signed-distance shape in the fragment
-// stage: an inked hole with a rim that tells the surface (bright dented steel, pale splintered wood, chipped stone,
+// stage: a dark hole with a rim that tells the surface (bright dented steel, pale splintered wood, chipped stone,
 // a dark pock in soil), or a sooty scorch with a ragged edge. Alpha-blended, depth-tested, never writes depth.
 import * as THREE from 'three/webgpu';
 import {
@@ -64,7 +64,7 @@ export function createDecalMesh(capacity: number): DecalMesh {
     const isWood = surf.greaterThan(4.5).and(surf.lessThan(5.5));
     const isStone = surf.greaterThan(2.5).and(surf.lessThan(3.5));
     const isSoil = surf.lessThan(2.5);
-    // --- bullet hole: an inked core, a rim that tells the surface ---
+    // --- bullet hole: a dark core, a rim that tells the surface ---
     const wob = sin(ang.mul(7).add(seed)).mul(0.035).add(sin(ang.mul(13).sub(seed.mul(0.7))).mul(0.02));
     const core = r.sub(float(0.2).add(wob));
     const spikes = pow(abs(sin(ang.mul(2.5).add(seed))), 6).mul(0.42).add(pow(abs(sin(ang.mul(4).sub(seed))), 10).mul(0.25));
@@ -77,9 +77,9 @@ export function createDecalMesh(capacity: number): DecalMesh {
     const ringT = smoothstep(0.2, 0.44, r);
     const rimCol = select(isMetal, mix(steel, dent, ringT.mul(0.85)),
       select(isWood, rawWood, select(isStone, chip, soil)));
-    const ink = lin(PALETTE.ink);
-    const holeCol = select(core.lessThanEqual(0), ink, rimCol);
-    // Soil pocks are soft and dark; the rest are crisp with an ink hairline at the core edge.
+    const hole = lin(PALETTE.ink);
+    const holeCol = select(core.lessThanEqual(0), hole, rimCol);
+    // Soil pocks are soft and dark; the rest have a crisp edge.
     const edgeSoft = select(isSoil, smoothstep(0, -0.25, rim), smoothstep(0.02, -0.01, rim));
     const holeA = select(core.lessThanEqual(0), float(0.96), edgeSoft.mul(select(isSoil, float(0.7), float(0.85))));
     // --- scorch: soot with a ragged edge and a brown halo ---
@@ -88,7 +88,7 @@ export function createDecalMesh(capacity: number): DecalMesh {
     // soot core → brown char → a pale ash rim, so a scorch still reads on dark, wet dusk ground
     const char = mix(lin(PALETTE.ink).mul(0.6), lin(PALETTE.mulch).mul(0.8), smoothstep(0.15, edge.mul(0.7), r));
     const soot = mix(char, lin(PALETTE.concrete).mul(0.75), smoothstep(edge.mul(0.72), edge.mul(0.92), r));
-    // speckles of unburnt ground inside the scorch (comic stipple)
+    // speckles of unburnt ground inside the scorch
     const speck = fract(sin(vec2(p.x.mul(91.3), p.y.mul(47.9)).dot(vec2(12.9898, 78.233)).add(seed)).mul(43758.5));
     const scorchA = float(1).sub(smoothstep(edge.mul(0.55), edge, r)).mul(0.88).mul(select(speck.greaterThan(0.93), float(0.55), float(1)));
     const isHole = kind.lessThan(0.5);

@@ -39,7 +39,7 @@ function hardenWorld(root: THREE.Object3D): number {
   let n = 0;
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
-    if (!mesh.isMesh || o.userData.styleInk) return;
+    if (!mesh.isMesh) return;
     const swap = (m: THREE.Material): THREE.Material => {
       const style = m.userData?.style;
       if ((style !== 'toon' && style !== 'toon-noink') || (m as unknown as { isStyleMaterial?: boolean }).isStyleMaterial) return m;
@@ -168,7 +168,7 @@ async function main() {
       if (floods) floods.group.visible = false;
       ctx.scene.traverse((o) => { if (o.name === 'sky_dome') o.visible = false; });
       const white = glow(0xffffff, 1);
-      for (const b of bench) b.root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && !o.userData.styleInk) m.material = white; if (o.userData.styleInk) o.visible = false; });
+      for (const b of bench) b.root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.material = white; });
       const g = (ctx.pipeline as unknown as { grade: { uniforms: Record<string, { value: number }> } }).grade.uniforms;
       g.vignette.value = 0; g.grain.value = 0;
     }

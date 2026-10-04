@@ -476,7 +476,7 @@ export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; pla
     batchGroup.add(bm);
     if (look === 'pbr') bm.material = pbr(material, piece.pbrOpts ?? {});
     // the toon side: toon() keeps the colour map; the ORM/normal maps have no place in the toon model (surface preset)
-    else stylize(batchGroup, { creases: false, remap: (m: THREE.MeshStandardMaterial) => toon({ color: m.color?.getHex() ?? 0xffffff, map: m.map ?? null, surface: piece.toonSurface, vertexColors: piece.paintTint, ...(piece.toonSurface === 'metal' ? { rough: 0.55, metal: 0.2 } : {}) }) });
+    else stylize(batchGroup, { remap: (m: THREE.MeshStandardMaterial) => toon({ color: m.color?.getHex() ?? 0xffffff, map: m.map ?? null, surface: piece.toonSurface, vertexColors: piece.paintTint, ...(piece.toonSurface === 'metal' ? { rough: 0.55, metal: 0.2 } : {}) }) });
     drawn = b.select(placements.map(() => force ?? 0));          // drawn before the first update() picks by distance
     version++;
     batch = b;

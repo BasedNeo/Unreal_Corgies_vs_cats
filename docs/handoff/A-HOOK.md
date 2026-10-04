@@ -64,20 +64,26 @@ gets every game event, and it now listens to bus `match` itself.
   - on live → ended it plays win or lose (a draw plays lose). When the last point and the end land in one snapshot,
     the tick plays and then the sting, the same order as Godot;
   - the first slab snapshot only sets the baseline, a rematch plays nothing, and another mode resets the tracker.
-- **What changes in slab mode.**
-  - The shared file replaces the synth rifle report for every shot. So both builds play the same shot; brass and
-    impacts stay.
-  - It replaces the shooter's hit thud.
-  - The generic `score` stings (`win` / `reset`) are skipped.
+- **What changes in slab mode** (W15 D, the lead's ruling: Godot wins).
+  - The web's event sounds are exactly Godot's six shared cues. `onGameEvent` plays the event's shared cue, if there
+    is one, and returns (`src/client/audio/index.ts`, the `slabCues.active` gate).
+  - Everything else that an event triggers stays out:
+    - the synth rifle report, the brass and the bullet impacts;
+    - the hit thwack and the shooter's hit thud;
+    - the death poof, the victims' voices, and the kill and death stings;
+    - the spawn, jump, land, reload and taunt sounds;
+    - the generic `score` stings.
   - **No music bed** (the lead's decision: Godot has none). The adaptive music stops when a slab match starts and
-    never starts during one. It starts again in another mode. Footsteps and ambience stay.
+    never starts during one. It starts again in another mode.
+  - **Non-event sound stays:** footsteps, The Lot's ambience, the weather beds and thunder, and the interface blips.
+    `docs/qa/w15/LISTEN.md` §2 "W15 D" lists them with an event-sounds-per-build table.
   - Other modes are untouched: no file is fetched there, and the unit test checks this.
 - **Loading.** On the first slab `MatchState`, the six files are fetched once from `/assets/audio/` and decoded with
   `engine.whenReady`, after the first gesture unlocks audio. They play through the engine's voice limiter and
   buses as a `sampleRecipe`.
   - A missing file gets one `console.warn` for all of them, and its cue is silent.
-  - While the files are still loading, or when one is missing, the shot and the hit confirm fall back to the web's
-    old synth. This is the one difference from Godot, which stays silent.
+  - While the files are still loading, or when one is missing, that cue is silent, as in Godot. Before W15 D the shot
+    and the hit confirm fell back to the web's old synth.
 - **Levels.** `SLAB_CUE_DB` equals sfx.gd's `VOLUME_DB`, and the test parses sfx.gd to keep the two builds in step.
 - **`?sfxlog`** prints `SFX <cue>` on every play. A cue that is selected but cannot play prints
   `SFX <cue> silent (audio locked | loading | no file | culled)`.

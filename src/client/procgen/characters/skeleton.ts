@@ -1,4 +1,4 @@
-// One shared skeleton template (47 bones ≤ 48) for every species. Species/variants only move rest
+// One shared skeleton template (46 bones ≤ 48) for every species. Species/variants only move rest
 // positions and scales, so every procedural animation retargets across corgis and cats for free.
 import type { RigTemplate } from '../../anim/rig';
 import type { BodyPlan } from './species';
@@ -9,14 +9,13 @@ export const BONE_NAMES = [
   'brow.L', 'brow.R',
   'eyeSocket.L', 'eye.L', 'pupil.L', 'lidUp.L', 'lidLo.L',
   'eyeSocket.R', 'eye.R', 'pupil.R', 'lidUp.R', 'lidLo.R',
-  'xEyes',
   'tail1', 'tail2', 'tail3', 'tail4',
   'clav.L', 'upperArm.L', 'foreArm.L', 'hand.L',
   'clav.R', 'upperArm.R', 'foreArm.R', 'hand.R',
   'thigh.L', 'shin.L', 'foot.L',
   'thigh.R', 'shin.R', 'foot.R',
   'weapon', 'butt',
-  // K1: mouth corners (smirk, grin, snarl) — they bend the ink mouth line drawn on the muzzle / pads.
+  // K1: mouth corners (smirk, grin, snarl) — they bend the dark mouth line drawn on the muzzle / pads.
   'mouth.L', 'mouth.R',
 ] as const;
 export type BoneName = (typeof BONE_NAMES)[number];
@@ -27,7 +26,6 @@ const PARENT: Record<BoneName, BoneName | null> = {
   'brow.L': 'head', 'brow.R': 'head',
   'eyeSocket.L': 'head', 'eye.L': 'eyeSocket.L', 'pupil.L': 'eye.L', 'lidUp.L': 'eyeSocket.L', 'lidLo.L': 'eyeSocket.L',
   'eyeSocket.R': 'head', 'eye.R': 'eyeSocket.R', 'pupil.R': 'eye.R', 'lidUp.R': 'eyeSocket.R', 'lidLo.R': 'eyeSocket.R',
-  xEyes: 'head',
   tail1: 'hips', tail2: 'tail1', tail3: 'tail2', tail4: 'tail3',
   'clav.L': 'chest', 'upperArm.L': 'clav.L', 'foreArm.L': 'upperArm.L', 'hand.L': 'foreArm.L',
   'clav.R': 'chest', 'upperArm.R': 'clav.R', 'foreArm.R': 'upperArm.R', 'hand.R': 'foreArm.R',
@@ -182,7 +180,6 @@ export function buildRigTemplate(p: BodyPlan): RigTemplate {
     set(`shin.${s}`, j.knee[s], j.ankle[s]);
     set(`foot.${s}`, j.ankle[s], j.toe[s]);
   }
-  set('xEyes', add(hd, p.cranium.c), add(hd, p.cranium.c));
   const tp = p.tail.pts;
   for (let i = 0; i < 4; i++) set(`tail${i + 1}` as BoneName, tp[i], tp[i + 1]);
   set('weapon', [0.12, p.chestY, -0.25], [0.12, p.chestY, -0.55]);

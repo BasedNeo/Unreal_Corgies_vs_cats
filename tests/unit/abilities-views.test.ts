@@ -39,7 +39,6 @@ describe('ability views', () => {
     scene.traverse((o) => {
       const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
       if (mat && !(o as unknown as { isLineSegments2?: boolean }).isLineSegments2) expect(['toon', 'glow']).toContain(mat.userData.style);
-      if ((o as unknown as { isLineSegments2?: boolean }).isLineSegments2) expect(o.userData.styleInk).toBe(true);
     });
     // enemy charge: sunk into its mound, no trigger ring; ally charge: full + ring
     const ally = scene.getObjectByName('ability_20')!, enemy = scene.getObjectByName('ability_21')!;

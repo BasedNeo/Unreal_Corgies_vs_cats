@@ -147,12 +147,12 @@ export function createAdventureViews(scene: THREE.Scene): AdventureViews {
         leaf.rotation.set(Math.sin(a) * 0.7, 0, -Math.cos(a) * 0.7);
         body.add(leaf);
       }
-      stylize(body, { creases: false });
+      stylize(body);
     } else if (kind === 'tennis_ball') {
       body.add(new THREE.Mesh(ballGeo, toon({ color: PALETTE.tennisBall })));
       body.add(new THREE.Mesh(seamGeo, toon({ color: PALETTE.catWhite })));
       body.rotation.z = 0.35;
-      stylize(body, { creases: false });
+      stylize(body);
     } else {
       body.add(new THREE.Mesh(bundleGeo, glow(PALETTE.accentHot, 1.8)));
     }

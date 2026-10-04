@@ -28,7 +28,8 @@ export function intensityFor(ev: GameEvent, c: IntensityContext): number {
       if (ev.src === c.localId) return INTENSITY.hitDealt;
       return dist(c, ev.x, ev.y, ev.z) < R ? INTENSITY.hitNear : 0;
     case 'death': {
-      if (ev.id === c.localId || ev.by === c.localId) return INTENSITY.deathNear * 1.5;
+      // a fall (by -1) is nobody's kill: with no local pet (localId -1) it must not count as yours
+      if (ev.id === c.localId || (ev.by >= 0 && ev.by === c.localId)) return INTENSITY.deathNear * 1.5;
       const p = c.posOf(ev.id);
       return p && dist(c, p.x, p.y, p.z) < R ? INTENSITY.deathNear : 0;
     }

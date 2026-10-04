@@ -2,7 +2,7 @@
 //   · the thrown ones: a battered rubber Squeaker Grenade (hazard-ochre ribbed rubber, gunmetal cap, a spoon and pin,
 //     a wrap of team tape) and a wet, taped Hairball Bomb (a lumpy fur mass in two tapes of team colour, a brass clip,
 //     a wick). Instanced per faction and team (≤ 4 draws), tumbling in flight, lifted by their radius so they sit on
-//     the ground; toon materials from the style factory (the ink pass outlines them).
+//     the ground; materials from the style factory (nothing is inked).
 //   · the fuse telegraph, readable by the TARGET: a cap light (squeaker) or a spitting wick (hairball) blinking faster
 //     as the fuse runs down (EntityState.ammo = fuse ticks left), a tick sound per blink (cue), and in the last
 //     ORDNANCE_RULES.telegraph seconds a danger ring on the ground at the blast radius.

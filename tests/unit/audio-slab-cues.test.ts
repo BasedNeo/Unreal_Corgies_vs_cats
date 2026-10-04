@@ -145,7 +145,7 @@ describe('slab cues through createAudio', () => {
     audio.onGameEvent(fire(1)); // yours: centred
     expect(plays[0].o.x).toBeUndefined();
     expect(fileOf(f, n)).toBe('synth_rifle_shot.wav');
-    expect(plays.some((p) => p.r === S.brassTinkle)).toBe(true); // the rest of the web's gun sound stays
+    expect(plays.some((p) => p.r === S.brassTinkle)).toBe(false); // W15 D: Godot plays the shot only, no brass
     plays.length = 0; n = at();
     audio.onGameEvent(hit(1, 2));
     expect(plays.some((p) => p.r === S.hitThud)).toBe(false);
@@ -162,7 +162,7 @@ describe('slab cues through createAudio', () => {
     expect(f.nodes.slice(n).filter((x) => x.kind === 'src').map((x) => (x.buffer as { tag: string }).tag)).toEqual(['synth_slab_tick.wav', 'synth_match_end_win.wav']);
   });
 
-  it('a missing file: one warning, that cue silent (the shot falls back to the synth), the rest still play', async () => {
+  it('a missing file: one warning, that cue silent (no synth stand-in, as Godot), the rest still play', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { f, audio, plays } = await rig(['rifle_shot', 'slab_tick']);
     bus.emit('match', ms({ score: [0, 0] }));
@@ -170,7 +170,7 @@ describe('slab cues through createAudio', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0][0])).toContain('rifle_shot, slab_tick');
     audio.onGameEvent(fire(2));
-    expect(plays[0].r).toBe(S.rifleShot);
+    expect(plays).toEqual([]); // W15 D: no synth shot in its place
     const n = f.nodes.length;
     bus.emit('match', ms({ score: [1, 0] })); // your tick: no file, silent
     expect(fileOf(f, n)).toBe('');
@@ -260,6 +260,38 @@ describe('slab cues through createAudio', () => {
     bus.emit('match', ms({ score: [1, 0], phase: 'ended', winner: 0 }));
     expect(lines).toEqual(['SFX rifle_shot', 'SFX slab_tick', 'SFX slab_tick_enemy', 'SFX slab_tick_enemy', 'SFX match_end_lose',
       'SFX slab_tick', 'SFX match_end_win']);
+  });
+
+  it('W15 D (Godot wins): in slab mode a kill, a death and your own death play only the shared cues', async () => {
+    const { f, audio, plays } = await rig(); // you are pet 1, a Corgi; pet 2 is a Cat
+    const round = () => {
+      audio.onGameEvent(fire(1)); // your shot
+      audio.onGameEvent({ e: 'hit', src: 1, dst: 2, dmg: 120, x: 0, y: 1, z: -5, crit: false }); // it lands and takes the Cat down
+      audio.onGameEvent({ e: 'death', id: 2, by: 1 }); // your kill
+      audio.onGameEvent(hit(2, 1)); // you are hit
+      audio.onGameEvent({ e: 'death', id: 1, by: 2 }); // your own death
+      audio.onGameEvent({ e: 'death', id: 2, by: -1 }); // a fall
+      audio.onGameEvent({ e: 'spawn', id: 1 });
+      audio.onGameEvent({ e: 'jump', id: 1, double: false });
+      audio.onGameEvent({ e: 'land', id: 1, impact: 20 });
+      audio.onGameEvent({ e: 'reload', id: 1 });
+      audio.onGameEvent({ e: 'bark', id: 2, line: 'mrrow?' });
+    };
+    // the control: in another mode the same round plays the web's own sounds, the death ones included
+    bus.emit('match', ms({ mode: 'team-deathmatch' }));
+    round();
+    for (const r of [S.poof, S.meow, S.yelp, S.sting, S.hitThud, S.thwack, S.brassTinkle, S.sparkle, S.boing, S.thud, S.reloadClicks]) {
+      expect(plays.some((p) => p.r === r), `another mode plays ${r.name}`).toBe(true);
+    }
+    // slab mode: the shot and the hit confirm from their files, and nothing else
+    bus.emit('match', ms({ score: [0, 0] }));
+    await settle(); await settle();
+    plays.length = 0;
+    const n = f.nodes.length;
+    round();
+    const files = f.nodes.slice(n).filter((x) => x.kind === 'src' && (x.buffer as { tag?: string } | null)?.tag).map((x) => (x.buffer as { tag: string }).tag);
+    expect(files).toEqual(['synth_rifle_shot.wav', 'synth_hit_confirm.wav']);
+    expect(plays.length, `plays: ${plays.map((p) => p.r.name).join(', ')}`).toBe(files.length);
   });
 });
 

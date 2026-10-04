@@ -1,4 +1,4 @@
-// OWNER: K3 (char-3). The Wave 9 PvE squad kits on the shared 47-bone rig (docs/handoff/K3.md). Original designs.
+// OWNER: K3 (char-3). The Wave 9 PvE squad kits on the shared 46-bone rig (docs/handoff/K3.md). Original designs.
 //
 //   alley  ALLEY-CAT RAIDERS: light, fast flankers in scavenged kit. A patched leather jerkin, a knotted bandana with
 //          streaming tails (team colour), a giant bottle cap strapped on the left shoulder (team-colour top), bottle caps
