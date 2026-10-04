@@ -412,6 +412,29 @@ describe('slab mode: kit, rematch, bots', () => {
     expect(isInvulnerable(sim, c)).toBe(false);
   });
 
+  it('CI 154: a Reload held over a late burst of inputs (the Room replays it as catch-up) still rematches', async () => {
+    // The e2e that caught it: a slow browser frame sends 15 commands at once, all with R held, after the Room had
+    // frozen the starving player (owed ticks). The first of them is the press edge; it must reach a regular tick.
+    const sim = await Sim.create({ seed: SEED, map: 'the_lot' });
+    sim.state.matchConfig = { slab: { timeLimit: 1, overtimeMax: 1 } }; // nobody on the slab: 0-0, then a draw at 2 s
+    const room = new Room(sim, { mode: 'slab', botsPerTeam: [0, 0] });
+    room.join({ id: 'h', send: () => {} }, { t: 'hello', v: PROTOCOL_VERSION, name: 'Ann', team: 0, cls: 'assault' });
+    const slot = room.players.get('h')!;
+    const e = sim.entities.get(slot.entity)!;
+    let seq = 0;
+    const send = (...buttons: number[]) => room.handle('h', { t: 'input', cmds: buttons.map((b) => ({ ...emptyInput(++seq), yaw: e.yaw, buttons: b })) });
+    let t = 0;
+    while ((sim.state.match as MatchState | undefined)?.phase !== 'ended' && t++ < 600) { send(0); room.tick(); }
+    expect(match(sim)).toMatchObject({ phase: 'ended', winner: -1, objective: SLAB_TEXT.draw });
+    for (let i = 0; i < (SLAB.rematchDelay + 0.5) * 60; i++) { send(0); room.tick(); } // past the rematch delay
+    for (let i = 0; i < 8; i++) room.tick(); // its inputs are late: the player is frozen, owed ticks pile up
+    expect(slot.net.owed).toBe(8); // so the burst below is replayed as catch-up (movement-only extras) where it can be
+    send(Btn.Reload, Btn.Reload, Btn.Reload, Btn.Reload, Btn.Reload, 0, 0); // the late burst: R held over 5 commands
+    room.tick();
+    expect(match(sim)).toMatchObject({ phase: 'live', score: [0, 0], winner: -1 }); // the press edge took its own tick
+    room.dispose();
+  });
+
   it('X2: Reload mid-match (live) is not a rematch request', async () => {
     const sim = await slabSim();
     const c = pet(sim, Team.Corgis);

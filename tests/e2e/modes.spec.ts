@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import { SLAB } from '../../src/shared/content/modes';
+import { TICK_HZ } from '../../src/shared/constants';
 
 // The main menu's MATCH selector really starts the chosen mode (menu → PlayOptions.match → worker Room → match
 // system → snapshot). Core Rush is the proof: its three Core Pads are EntityKind.Zone (8) in the snapshot.
@@ -126,8 +128,12 @@ test('MATCH: SLAB from the menu starts the slab match on The Lot with its HUD an
 // rematch the HUD shows 0 - 0 and no leftovers: no death panel, no hit confirm, no wedge, no red flash, and the kill
 // feed is empty. This is a smoke check of the real build: the cue resets are proven in tests/unit/slab-hud.test.ts
 // (§5), since no cue can honestly be up at a rematch here (a production build has no &slabHurt, and the winner screen
-// hides the panel and the cues). The kill feed can be: a takedown of the Cat bot rides the next snapshot from the
-// offline worker (a test-only Worker wrapper adds the event to it), so its line is up when R / Enter rematch.
+// hides the panel and the cues). The kill feed can be: a takedown of the Cat bot rides every snapshot of the result
+// from the offline worker (a test-only Worker wrapper adds the event), so the feed is full and its newest line is under
+// a snapshot old when R / Enter rematch; only the rematch's clear can empty it (its lines stay 9 s). The check counts
+// frames, not seconds (CI 154: under SwiftShader the first frame after a rematch can take ~2 s): one frame after the
+// HUD's first frame since the rematch's snapshot, the feed is empty. And the key goes in once the authority's own clock
+// is SLAB.rematchDelay past the end (its tick), not after a wall-clock guess.
 test('SLAB: the match ends on the winner screen; R, then Enter, rematch to 0-0', async ({ page }) => {
   test.setTimeout(300_000);
   const errors: string[] = [];
@@ -138,8 +144,12 @@ test('SLAB: the match ends on the winner screen; R, then Enter, rematch to 0-0',
       constructor(...a: ConstructorParameters<typeof Worker>) {
         super(...a);
         this.addEventListener('message', (e: MessageEvent) => {
-          const m = e.data, add = (window as any).__e2eAddEvent;
-          if (add && m && m.t === 'snap' && Array.isArray(m.ev)) { m.ev.push(add); (window as any).__e2eAddEvent = null; }
+          const m = e.data, w = window as any;
+          if (!w.__e2eFeed || !m || m.t !== 'snap' || !Array.isArray(m.ev)) return;
+          if (m.match?.phase === 'ended') { m.ev.push({ ...w.__e2eFeed }); return; } // a fresh takedown on each result snapshot
+          // the rematch's snapshot (this listener runs before the game's): its next frame renders the HUD; read one after
+          w.__e2eFeed = null;
+          requestAnimationFrame(() => requestAnimationFrame(() => { w.__e2eFeedAfter = document.querySelectorAll('#cvc-hud .kf .kf-e').length; }));
         });
       }
     };
@@ -154,20 +164,26 @@ test('SLAB: the match ends on the winner screen; R, then Enter, rematch to 0-0',
     await expect(win).toContainText('R / Enter / Start: rematch');
     await expect(page.locator('#cvc-hud .bn')).toBeHidden(); // no comic "WIN!" burst over it
     await expect(page.locator('#cvc-slab [data-slab-state]')).toBeHidden(); // over: the slab claims no holder
-    const before = (await twin()).restarts;
-    // a takedown in the kill feed (you over the Cat bot): it would stay 9 s, well past the rematch, unless cleared
+    const { restarts: before, match: ended } = await twin();
+    expect(ended?.phase).toBe('ended');
+    // the authority takes the Reload edge SLAB.rematchDelay s after its end tick (at or before the latest snapshot's)
+    const endTick: number = await page.evaluate(() => (globalThis as any).__cvc.net.tick);
+    await page.waitForFunction((t) => (globalThis as any).__cvc.net.tick >= t, endTick + SLAB.rematchDelay * TICK_HZ + 6,
+      { timeout: 30_000, polling: 100 });
+    // takedowns in the kill feed (you over the Cat bot), one per result snapshot until the rematch's
     await page.evaluate(() => {
       const cvc = (globalThis as any).__cvc, me = cvc.localEntity;
       const cat = (cvc.net.entities as number[][]).find((e) => e[1] <= 1 && e[0] !== me)!;
-      (window as any).__e2eAddEvent = { e: 'death', id: cat[0], by: me };
+      (window as any).__e2eFeedAfter = undefined;
+      (window as any).__e2eFeed = { e: 'death', id: cat[0], by: me };
     });
     const feed = page.locator('#cvc-hud .kf .kf-e');
-    await expect(feed).toHaveCount(1, { timeout: 10_000 });
-    await page.waitForTimeout(1500); // SLAB.rematchDelay (1 s) after the end
+    await expect(feed).not.toHaveCount(0, { timeout: 10_000 });
     await page.keyboard.press(key);
-    await page.waitForFunction((n) => (globalThis as any).__cvc.twin.restarts > n, before, { timeout: 60_000, polling: 100 });
+    await page.waitForFunction((n) => (globalThis as any).__cvc.twin.restarts > n && (window as any).__e2eFeedAfter !== undefined, before,
+      { timeout: 60_000, polling: 100 });
     expect((await twin()).restartScore).toEqual([0, 0]);
-    await expect(feed).toHaveCount(0, { timeout: 2_000 }); // §5: the rematch cleared it (its 9 s are not up)
+    expect(await page.evaluate(() => (window as any).__e2eFeedAfter)).toBe(0); // §5: the rematch cleared it
     await expect(win).toBeHidden({ timeout: 30_000 });
     await expect(page.locator('#cvc-slab [data-slab-s0]')).toHaveText('0');
     await expect(page.locator('#cvc-slab [data-slab-s1]')).toHaveText('0');

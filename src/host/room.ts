@@ -366,10 +366,13 @@ export class Room {
     net.starveRun = 0;
     // Catch-up (bounded by the real-time credit): owed frozen ticks replay right away, up to CATCHUP_MAX_PER_TICK
     // inputs per tick; otherwise a persistently deep queue is trimmed by one extra input per tick. Extra inputs run
-    // movement only, so they stop at a change in combat buttons (a fire/ability press must reach its own tick).
+    // movement only, so they stop at a change in combat buttons on either side (a fire/ability/reload press or a
+    // release must reach its own tick): an extra input carries the buttons of the one before it AND the one after it.
+    // CI 154: a Reload held over a late burst was replayed as an extra, its edge written into prevButtons, and the
+    // regular tick saw a held button (no rematch, no ability).
     let extras = 0;
     while (e && !e.dead && e.char && !(e.flags & EFlag.Mounted) && p.queue.length && net.credit >= 2 && extras < CATCHUP_MAX_PER_TICK - 1
-      && ((p.queue[0].buttons ^ cmd.buttons) & COMBAT_BUTTONS) === 0
+      && ((cmd.buttons ^ e.prevButtons) & COMBAT_BUTTONS) === 0 && ((p.queue[0].buttons ^ cmd.buttons) & COMBAT_BUTTONS) === 0
       && (net.owed > 0 || (extras === 0 && net.lastMinDepth >= CATCHUP_MIN_DEPTH))) {
       this.stepExtra(e, cmd);
       net.credit--;
