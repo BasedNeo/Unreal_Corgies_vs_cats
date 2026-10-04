@@ -1,8 +1,145 @@
-# TW-VIEW handoff — the slab match in the browser (Wave 13)
+# TW-VIEW handoff — the slab match in the browser (Wave 13; W15 HUD contract)
 
 **Status: done for integration; nothing committed or staged.** The web client plays the Godot game's match against
 TW-SIM's `slab` authority (contract: the slab section of `src/shared/content/modes.ts`). Godot is the main build: the
 read-out, HUD text and colours copy `engines/godot/game/slab.gd`, `hud.gd` and `tuning.gd`.
+
+## W15: the HUD contract (docs/qa/w15/HUD_CONTRACT.md, revision 3)
+**Status: done for integration; nothing committed or staged.** Base `9139c7a` (HEAD `eb0ae36` adds an alloc test and
+art, none of these files). This is the Sprint B patch round after the independent check failed: placement in rev. 3's
+order, a pure per-frame model (`slabHudFrame`) with tests that kill the check's mutants, the dead gate, the centred
+death panel, the in-tree `&slabHurt`, the 132 m data, and new shots. The words below are copied from the contract.
+
+### What changed
+- **§1 The slab marker.**
+  - It hangs at the slab centre + 4.5 m. Above the shape are two lines: `SLAB  <N> m` (the **camera's** ground
+    distance, whole metres) and the state word.
+  - | State | Word | Shape | Colour |
+    |---|---|---|---|
+    | Nobody on the slab | `NEUTRAL` | a hollow diamond | white |
+    | One team alone | `CORGI COMPANY` / `CAT CADRE` | a filled diamond | the team colour, lightened 0.35 |
+    | Both teams | `CONTESTED` | an outline cut by a bar wider than the diamond | amber |
+  - **Placement, rev. 3 order** (`slabMarkerPlace`, Godot `hud.gd place_marker`), in 720p px scaled by the screen:
+    1. Clamp the anchor into the safe area: 16 from the sides, 110 from the top (`SLAB_SAFE`), 112 from the bottom.
+       Behind the camera it goes to the bottom edge, mirrored.
+    2. If the box overlaps another living pet's screen box, move up until it clears with 2 of clearance
+       (`SLAB_MARKER_CLEAR`), by at most 120 and never above the safe top.
+    3. If that cannot clear it, put it just under the lowest pet it still covers (2 of clearance), clamped to the
+       safe bottom.
+    4. If neither clears, it stays where step 2 left it. Nothing clamps after the dodge.
+  - `slabPetBoxes` projects the 8 corners of each living pet's box and **skips the player's own pet**.
+  - It hides while you stand on the slab, while you are down, and once the match is over (`slabMarkerShown`).
+- **§2 The death panel.**
+  - Four lines, centred on the screen (`top: 50%; transform: translate(-50%, -50%)`) on a dim rounded backing
+    (black, alpha 0.55; `SLAB_DEATH_BACKING`):
+    - `TAKEN DOWN BY <name>  ·  <TEAM>`, with a square (Corgi Company) or triangle (Cat Cadre) glyph before the
+      team name, in its colour. With no killer: `TAKEN DOWN BY THE LOT`. The name is the room's (roster), else
+      `Cat <id>` / `Pup <id>` (`slabKillerOf`).
+    - `YOU: <TEAM>`.
+    - `BACK AT <BASE>  ·  <N> m TO THE SLAB`.
+    - `BACK IN <s.s>`.
+  - `slabRespawnZone` runs the sim's own rule (`slabRespawnPoints`, now typed `SlabLayout`, so the web builds a real
+    `{ worldData: { spawns: SpawnPoint[], height } }` and the old `as unknown as Sim` cast is gone) on The Lot's
+    spawns and takes the centre of the points:
+    - THE FOUNDATION 142 m: the Corgis' three points from slot 0 toward the slab;
+    - THE SCAFFOLDS **132 m**: the Cats' three data slots (Godot `CAT_SLOTS`) at (56, 117), (62, 117) and (68, 117),
+      as in Godot.
+- **§3 Hits.**
+  - The confirms are drawn on a dark underlay, so they read in grey:
+    | Kind | Shape | Colour | Shown |
+    |---|---|---|---|
+    | Body | an X of four lines, 5–10 px | white | 0.18 s |
+    | Head | the X plus an 11 px diamond | yellow | 0.18 s |
+    | Kill | a heavier X, 6–14 px, plus a ring 18 px across | red | 0.35 s |
+  - A received hit draws a wedge on a 110 px ring. It points at where the attacker stood **at its hit** (stored with
+    the hit), from you, relative to the camera's facing; it turns with the camera and never follows the attacker. It
+    fades over 0.6 s.
+  - The HP bar shows the HP just lost as a white chip with a dark seam. It drains over 0.4 s and follows the hit
+    points every frame.
+  - The red flash is hud.gd's `_dmg_t * 0.5`, never above 0.175.
+  - **While you are down there is no confirm and no wedge**, and your own knockout clears the stored wedges, so none
+    come back with you (`slabHudFrame`, `SlabHitCues`).
+- **§4 Fields.** Unchanged from rev. 2: `YOU: <TEAM>` over the HP; the slab line hides once the match is won; fps only
+  with `?debug`; the rematch line `R / Enter: rematch`.
+- **The frame model.** `slabHudFrame(frame & {w, h}, state, now)` returns `{ marker: {lines, shape, color, dist, x, y,
+  box, dodge} | null, death: {lines, glyph} | null, confirm | null, wedges: [{src, angle, alpha}], chipTop, flash }`.
+  `slabHudEvent(state, ev, now)` feeds it the bus's game events. `createSlabHud.update()` only writes that result
+  (and the existing pure field helpers) to the DOM.
+- **`&slabHurt` (offline only, for reproducible shots).** `src/host/worker-host.ts`: `SLAB_HURT` makes the nearest
+  living enemy really hit the human (`applyDamage`, the shot path) for 25 at 8 s and 12 s of sim time and take it
+  down at 16 s, then again every 16 s; a step it cannot take (down, protected, no enemy) is skipped. It runs after
+  each tick of the offline worker's room. The gate `slabHurtOn(cfg)`: the offline worker only (no online room or Node
+  server reads it), mode `slab`, `slab.hurt === true`, and never in a production build (`import.meta.env.PROD`).
+  `src/client/net/transport.ts` (mine since W13) reads `&slabHurt` into `SlabOverrides.hurt`: one line; main.ts
+  already hands the overrides to the worker transport only. `hurt` never reaches `matchConfig.slab`.
+
+### Files (W15)
+| Path | Change |
+|---|---|
+| `src/client/ui/slab-hud.ts` | §1–§4 models, the rev. 3 placement (`SLAB_SAFE`, `SLAB_MARKER_CLEAR`, `slabMarkerPlace`, `slabPetBoxes`), `slabHudState` / `slabHudEvent` / `slabKillerOf` / `slabHudFrame`, the dead gate, the centred `.dp`, and the DOM that only writes the frame. `slabMarkerDodge` is gone. |
+| `src/client/modes/slab-view.ts` | `SlabReading.pets`: the frame's living players and bots. |
+| `src/client/net/transport.ts` | `&slabHurt` → `SlabOverrides.hurt` (one line plus the doc comment). |
+| `src/host/worker-host.ts` | `SlabOverrides.hurt`, `SLAB_HURT`, `slabHurtOn`, `slabHurtStep`, and the hook after each room tick when the gate passes. `slabOverrides()` still passes only the three numbers to the match. |
+| `tests/unit/slab-hud.test.ts` | **New**, 28 tests (placement rev. 3, the own-pet skip, the frame model's M16–M20 and dead-gate tests, 132 m). |
+| `tests/unit/slab-view.test.ts` | The reading's pets. |
+| `tests/unit/slab-view-input.test.ts` | Plus 3: the `&slabHurt` parse, the gate (and that the server, the room, the sim and the online transport never name it), and a real offline slab room taking two cycles of the schedule. |
+| `tests/e2e/modes.spec.ts` | The slab menu case also checks the marker's two lines, its shape attribute, and the YOU line. |
+| `docs/qa/w15/hud-web-death.jpg` (+ new `-gray`), `hud-web-hit-received.jpg` (+ `-gray`), `fx-takedown-web.jpg` | Retaken from the tree this round (below). The marker, hits and win shots are Sprint B's: placement then used a 104 px top and no pet stood near the marker in them. |
+
+`main.ts`, `hud.ts`, `hit-feedback.ts`, `input.ts` and `src/sim` are untouched by me in W15.
+
+### Proof
+Private copy `scratchpad/tw-r3`: HEAD `ace71ca` (= `9139c7a` + an alloc test; `eb0ae36` adds only art) plus these
+files and tw-sim's (`src/sim/match/slab.ts`, `index.ts`, `slab-mode.test.ts`) and tw-look's (`src/client/fx/*`).
+- `npx tsc --noEmit`: exit 0. `node tools/check-boundaries.mjs`: `BOUNDARIES: PASS`. (Also both on the shared tree.)
+- `npx vitest run` slab-hud, slab-view, slab-view-input, slab-mode: **66/66** (28 + 10 + 6 + 22).
+- `npx playwright test tests/e2e/modes.spec.ts -g SLAB` (private config, port 4391), once: **2 passed (50.6 s)**. It
+  ran before the `SLAB_HURT` gaps went from 1.2 / 1.4 s to 4 / 4 s; the e2e builds for production, where the gate keeps
+  `&slabHurt` off, so that change cannot reach it.
+- Mutants, each applied to the proof copy alone, then restored (`cmp` with the tree after each set):
+  | Mutant | Result | Failing test |
+  |---|---|---|
+  | M16 the wedge follows the attacker live | killed | M16: a wedge points where the attacker stood AT ITS HIT |
+  | M17 the death panel never shows | killed | M17 + M19: down while the match runs |
+  | M18 the marker distance comes from the player | killed | M18: the marker's distance is the CAMERA's |
+  | M19 the killer is always THE LOT | killed | M17 + M19: down while the match runs |
+  | M20 no HP chip | killed | M20: the HP chip follows your HP |
+  | clamp after the dodge (the old order) | killed | Godot's top case: anchor (640, -300), a pet at (600, 100, 80 x 60) |
+  | own pet not skipped | killed (2) | your own pet never pushes the marker; your own pet right under the anchor |
+  | no dead gate | killed | down: no confirm and no wedges |
+  | your knockout keeps the wedges | killed | down: no confirm and no wedges |
+  | gate: production build not excluded | killed | the gate |
+  | gate: any mode | killed | the gate |
+  | gate: any truthy flag | killed | the gate |
+  | gate: never on | killed | the gate |
+- `src/client/fx/presets.ts` checked before shooting: `furHit` has a tuft loop, one team chunk and one Glow; no Star
+  loop, no stuffing loop.
+- **Shots**, from a copy of the tree served by a private vite on port 5187 (stopped by PID), at
+  `/?mode=slab&webgl&slabHurt&autoplay` (`autoplay` only skips the menu), 1280 x 720, quality high. I looked at each.
+  Headless SwiftShader draws about one frame every 1–3 s, so the private harness (a Playwright init script on the
+  page's main thread only; nothing in the tree) steps the page clock: `performance.now` and `requestAnimationFrame`
+  advance a set time per drawn frame, as a fast machine's would. The worker runs the sim in real time. Between shots
+  the page draws at 320 x 180 so earlier FX age out in page time, and it is set back to 1280 x 720 as the target
+  event lands. Once the event's snapshot is delivered, later snapshots wait until the shot is taken (pongs pass), then
+  arrive in order. The ages below are page time since the event's arrival, read back from the HUD's DOM.
+  | File | What it shows |
+  |---|---|
+  | `hud-web-hit-received.jpg` (+ `-gray`) | A real `&slabHurt` hit from Cat 2 (sim tick 2402, a cycle's first hit, HP 120 → 95). **FX age 0.116 s:** two or three fur tufts by the pet's head; furHit's 0.08 s glow has gone, and furHit has no dust. **Chip age 0.100 s:** the white chip spans 95–113.75 of 120, with its seam. The wedge at alpha 0.81 points straight up the ring (rotate 0.1°) toward where the bot stood on the slab, so it lands on the marker (Open 2). The flash is 0.117. `SLAB  146 m` / `CAT CADRE`. |
+  | `hud-web-death.jpg` (+ `-gray`) | The knockout at tick 1922, **FX age 0.600 s**: `TAKEN DOWN BY Cat 2  ·  ▲ CAT CADRE`, `YOU: CORGI COMPANY`, `BACK AT THE FOUNDATION  ·  142 m TO THE SLAB`, **`BACK IN 2.4`**, centred on the backing. There is no marker. **Chip:** 0–55 of 120 (46.1 %); it started when the HP drop reached the frame, about 0.5 s after the event (Open 3). Most of the takedown dust has gone; one flat grey puff near the end of its 0.7 s life remains behind the neck, with a few tufts and the team chunk. The glyph and the four lines read in grey. |
+  | `fx-takedown-web.jpg` | 800 x 600 crop of a live killing hit (tick 3842), **FX age 0.200 s**: `takedownDust`'s flat dark-grey puffs around the pet. **Measured dust:** rgb(62, 55, 62) to rgb(71, 67, 78) (`#3e373e`–`#47434e`), on ground of about rgb(18, 10, 22). There are fur tufts and the blue team chunk, and no white poof, star or inked cloud. **Chip age: none yet.** The HUD in this frame still shows 70 HP and no panel, because the dead state reaches the frame by the interpolation delay (Open 3). |
+
+### Open (W15)
+1. **The knockout FX is tw-look's final set.** The comic deathPoof (inked cloud with stars) is retired: a knockout
+   now plays `takedownDust` (dark grey night-smoke puffs, grit and a few fur tufts), and tw-look removed furHit's pop
+   (no Star loop, no stuffing loop; tufts, one team chunk and a single soft glow). I checked
+   `src/client/fx/presets.ts` before shooting. The death panel's backing stays for lit scenery.
+2. **The wedge can overlap the marker.** With the attacker straight ahead at long range (the Cat bot on the slab
+   seen from the Corgi spawn), the wedge 110 px up the ring lands on the marker's words. Both follow the contract's
+   geometry; the wedge draws on top. Sprint C parity.
+3. **The HP chip follows the event by the interpolation delay.** Events reach the HUD on arrival; the local hit
+   points come from the interpolated state, so the bar (and the chip) start up to `interpDelay` (0.1–0.25 s) after
+   the wedge and the FX: up to `interpDelay` (0.1–0.25 s) at frame rate; longer when frames stall (headless SwiftShader, a background tab), as in this shot (~0.5 s). Godot has no such delay. Not changed here (net-client, not mine).
+4. **Not wired:** the web cue log for §3's six sounds belongs to a-hook (`src/client/audio`).
 
 ## What the page does
 - `?mode=slab` (or MATCH › SLAB in the main menu, which reloads into it) plays The Lot. TW-SIM's `maps.ts` MODE_HOME

@@ -1,6 +1,7 @@
 // X3: weapons + combat feedback — surface classification, pooled impact marks, light pulses, the presentation table,
 // view kick / FOV punch (presentation only), the hitmarker model, and zero-allocation weapon recipes.
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import v8 from 'node:v8';
 import vm from 'node:vm';
 import { Surface, SurfaceMap, makeSurfaceHit, surfaceOfType, type SurfaceWorld } from '../../src/client/fx/surfaces';
@@ -309,7 +310,15 @@ describe('hitmarker model', () => {
 });
 
 describe('weapon recipes', () => {
-  it('spawn muzzle flashes, tracers, brass, every surface impact, splats and explosions without allocating', () => {
+  it('the pet hit is fur tufts, one team chunk and a soft glow; no ink, no Pop, no stars: the comic splat is gone and the hit path never calls it (W15)', () => {
+    expect('comicSplat' in W).toBe(false);
+    const fx = readFileSync(new URL('../../src/client/fx/index.ts', import.meta.url), 'utf8');
+    expect(fx).not.toMatch(/comicSplat|Splat/);
+    const hitCase = fx.slice(fx.indexOf("case 'hit':"), fx.indexOf("case 'death':"));
+    expect(hitCase).toContain('P.furHit(');
+    expect(hitCase.match(/\b[PW]\.\w+\(/g)).toEqual(['P.furHit(']);
+  });
+  it('spawn muzzle flashes, tracers, brass, every surface impact and explosions without allocating', () => {
     const pools: FxPools = { solid: new ParticlePool(1600), glow: new ParticlePool(900), rng: new FxRng(3), density: 1 };
     const out = createInstanceArrays(1600);
     const kinds = [Surface.Dirt, Surface.Grass, Surface.Sand, Surface.Stone, Surface.Metal, Surface.Wood, Surface.Water, Surface.Soft];
@@ -319,7 +328,6 @@ describe('weapon recipes', () => {
       W.casing(pools, 'rifle', 0.1, 1, 0.4, 1, 0, 0, 0, 0, 1, 0);
       W.casing(pools, 'shell', 0.1, 1, 0.4, 1, 0, 0, 0, 0, 1, 0);
       for (const k of kinds) W.impact(pools, k, 2, 1, -9, 0, 0, 1, 0, 0, -1, 1, 0);
-      W.comicSplat(pools, 0, 1, -5, 0, 0, 1, true);
       W.groundGlow(pools, 0, 0, 0, 0xff9b3d, 0.7, 0.4);
       W.clawSlash(pools, 0, 1, -1, 1, 0);
       W.explosionExtras(pools, 4, 0, -10, 4.2, 0);

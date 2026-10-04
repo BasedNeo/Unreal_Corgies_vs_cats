@@ -169,9 +169,14 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
     if (sfxLog) console.log(why ? `SFX ${c.cue} silent (${why})` : `SFX ${c.cue}`);
     return !!r;
   };
+  // your side for the slab cues: the local pet's team, kept while that pet is missing from a frame's states;
+  // Corgi Company (0) with no local pet at all, as Godot's --bots-only (sfx.gd my_team)
+  let slabTeam = 0;
   const offMatch = bus.on('match', (ms) => {
     const me = states.get(localId);
-    for (const cue of slabCues.update(ms, me ? me.team : 0)) slabPlay({ cue });
+    if (me) slabTeam = me.team;
+    else if (localId < 0) slabTeam = 0;
+    for (const cue of slabCues.update(ms, slabTeam)) slabPlay({ cue });
     if (slabCues.active !== slabMusicOff) { // no music bed in slab mode: stop it on the way in, start it on the way out
       slabMusicOff = slabCues.active;
       if (slabMusicOff) music?.stop(); else if (engine.unlocked) music?.start();

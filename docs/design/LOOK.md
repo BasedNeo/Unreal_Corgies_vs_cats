@@ -66,8 +66,9 @@ and Godot disagree, Godot wins. The web has used the same look since Wave 13. It
 - **Time of day.** It is kept as an API (and in the authority's schedule) but no longer changes the image.
 - **Reflections.** The browser has no SSR, SSAO or volumetric fog. A fake sky reflection (`STYLE_ENV`) gives wet
   surfaces something to mirror, and lamp halos stand in for the volumetric glow.
-- **No comic words.** The FX no longer pop onomatopoeia ("POW!", "BARK!"). Hit markers, the kill feed and damage
-  feedback stay.
+- **No comic FX.** No onomatopoeia ("POW!", "BARK!"), no comic splat on hits (fur tufts, one team chunk and a soft glow;
+  no ink, no Pop, no stars), and a takedown is a short, muted dust and grit burst, not a white poof with stars (W15). Hit
+  markers, the kill feed and damage feedback stay.
 
 ## Rules
 - All materials go through the style factory (`toon()`, `toonMaterial()`, `glow()`, `stylize()`, `pbr()`).

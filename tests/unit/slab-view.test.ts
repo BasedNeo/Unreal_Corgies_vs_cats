@@ -4,14 +4,14 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three/webgpu';
 import type { EntityState, MatchState } from '../../src/shared/protocol';
-import { Anim, EFlag, EntityKind, Team } from '../../src/shared/types';
+import { Anim, EFlag, EntityKind, Team, type EntityKindId } from '../../src/shared/types';
 import { SLAB, SLAB_TEXT, SLAB_ZONE_SEED } from '../../src/shared/content/modes';
 import { PALETTE } from '../../src/client/style/style-tokens.js';
 import {
   SLAB_CONTESTED, SLAB_NEUTRAL, buildFillGeometry, buildFrameGeometry, createSlabView, lighten, mixColor, readSlab, slabLook,
 } from '../../src/client/modes/slab-view';
 import {
-  SLAB_CLICK_TO_PLAY, SLAB_CLOCK_COLOR, SLAB_HINT, SLAB_REMATCH, SLAB_TEAM_NAMES, slabAmmoText, slabClock, slabClockText, slabDownText, slabFeedText, slabFrac,
+  SLAB_CLICK_TO_PLAY, SLAB_CLOCK_COLOR, SLAB_HINT, SLAB_REMATCH, SLAB_TEAM_NAMES, slabAmmoText, slabClock, slabClockText, slabFeedText, slabFrac,
   slabHpColor, slabHudColor, slabLineFor, slabOvertime, slabShowDebug, slabStateText, slabWinner,
 } from '../../src/client/ui/slab-hud';
 
@@ -30,6 +30,11 @@ describe('slab read-out (3D)', () => {
     expect(readSlab(map(st({})))).toMatchObject({ id: 4, x: 0, z: 0, holder: -1, contested: false });
     expect(readSlab(map(st({ team: Team.Cats })))!.holder).toBe(1);
     expect(readSlab(map(st({ team: Team.Corgis, flags: EFlag.Busy })))).toMatchObject({ holder: -1, contested: true });
+    // W15: the frame's living players and bots ride along (the HUD's marker dodges them, its wedges aim at them)
+    const pet = (id: number, kind: EntityKindId, team: 0 | 1, flags = 0) => st({ id, kind, team, species: team, seed: id, x: id, y: 0.1, z: -id, flags });
+    const r = readSlab(map(pet(7, EntityKind.Player, 0), st({}), pet(8, EntityKind.Bot, 1), pet(9, EntityKind.Bot, 1, EFlag.Dead), pet(10, EntityKind.Projectile, 1)))!;
+    expect(r.id).toBe(4);
+    expect(r.pets).toEqual([{ id: 7, team: 0, species: 0, x: 7, y: 0.1, z: -7 }, { id: 8, team: 1, species: 1, x: 8, y: 0.1, z: -8 }]);
   });
 
   it('colours as slab.gd: dim white neutral (fill 6 %), team colour lightened 0.2 held (14 %), amber to white contested', () => {
@@ -136,13 +141,11 @@ describe('slab HUD model', () => {
     expect(slabFrac(75, 60)).toBe(1);
   });
 
-  it('you, as hud.gd: hit points green above 40, "30 / 30" or RELOADING, the down countdown, the hint, clock colours', () => {
+  it('you, as hud.gd: hit points green above 40, "30 / 30" or RELOADING, the hint, clock colours', () => {
     expect(slabHpColor(120)).toBe(0x8ce673);
     expect(slabHpColor(40)).toBe(0xff664d);
     expect(slabAmmoText({ ammo: 17, flags: 0 })).toBe('17 / 30'); // the Squeaker Rifle's magazine
     expect(slabAmmoText({ ammo: 0, flags: EFlag.Reloading })).toBe('RELOADING');
-    expect(slabDownText(2.44)).toBe('TAKEN DOWN  ·  back in 2.4');
-    expect(slabDownText(-0.2)).toBe('TAKEN DOWN  ·  back in 0.0');
     expect(SLAB_HINT).toMatch(/Hold the slab alone to score/);
     expect(SLAB_HINT).not.toMatch(/\bQ\b|[Aa]bility/); // the slab kit has no ability
     expect([SLAB_CLOCK_COLOR[''], SLAB_CLOCK_COLOR.low, SLAB_CLOCK_COLOR.ot]).toEqual([0xffffff, 0xff7366, 0xff9933]);

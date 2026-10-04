@@ -6,8 +6,9 @@
 // reusable ParticleSpec and calling spawn(spec) — nothing is allocated per spawn or per frame after
 // construction (proved by tests/unit/fx-particles.test.ts).
 
-/** Fragment shape (SDF) drawn by the particle material. X3 added Shard (splinters, metal chips), Splat (comic hit
- *  splat), Casing (ejected brass / shells), Petal (muzzle-flash tongues, fire) and Glow (a soft light spill: glow only). */
+/** Fragment shape (SDF) drawn by the particle material. X3 added Shard (splinters, metal chips), Splat (a lobed
+ *  blob: the hairball's goo and stains; W15 retired the comic hit splat), Casing (ejected brass / shells), Petal
+ *  (muzzle-flash tongues, fire) and Glow (a soft light spill: glow only). */
 export const Shape = { Puff: 0, Streak: 1, Ring: 2, Star: 3, Tuft: 4, Chunk: 5, Burst: 6, Shard: 7, Splat: 8, Casing: 9, Petal: 10, Glow: 11 } as const;
 /** Vertex placement: camera-facing quad, quad stretched along an axis, or flat on the ground (XZ). */
 export const Mode = { Billboard: 0, Stretched: 1, Ground: 2 } as const;

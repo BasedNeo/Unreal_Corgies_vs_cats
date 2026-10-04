@@ -191,3 +191,71 @@ frames took 7–50 s here.
 
 Files: `docs/qa/w13/web-noink-lot.jpg`, `web-noink-yard.jpg`, `web-look-lot-before-after.jpg` (top row: the lab at
 the bookmark; bottom row: autoplay).
+
+## W15 (coordinator): the last comic FX retired on the web twin
+The look lock is stylised-realistic, so the takedown pop and the hit splat go. The change is global and as small as
+it could be.
+
+**Takedown.**
+- `deathPoof` is gone. `takedownDust` (`fx/presets.ts`) replaces it: 8 wet-night smoke puffs, 6 dark grit chunks and
+  6 fur tufts.
+- The puffs swell then shrink out (HoldShrink, not Pop) and the grit falls back to the ground and bounces.
+- The fur tufts stay.
+- Gone: the white puffs, the Pop curve, the three glowing accentHot stars, the ink rims (param 0) and the halftone.
+- New colours `smokeNight`, `smokeNightLight` and `grit`: 0x4b5057 ×0.18, 0x6b7076 ×0.16 and 0x2f2d2b ×0.2.
+- The scale is low on purpose. Particles are unlit, and the night exposure lifts them hard. At ×0.9 the grey showed
+  as 0xb7b5b2 on screen; it now shows as about 0x585c60 to 0x62666a (lab render, not the committed shot).
+
+**Hits.**
+- `comicSplat`, its `splat` and `splatHi` colours, and its call in `fx/index.ts` ('hit') are gone.
+- The surface impacts are unchanged. `furHit` was changed in the patch round below.
+- `Shape.Splat`, `Shape.Star` and `Curve.Pop` stay. Their other callers: the hairball goo, the respawn, pickup and
+  ordnance sparkles, and `furHit`.
+
+**Tests.**
+- `fx-particles`: the takedown spawns no glow and only Puff, Chunk and Tuft (never Star). The dust and grit are
+  dark, near-neutral greys (max < 0.12, spread < 0.02). No particle has a rim or halftone. The recipe source has no
+  `Shape.Star`, `Curve.Pop`, `p.glow`, `C.white` or `Fade.Soft`. `deathPoof` is gone.
+- `fx-weapons`: `comicSplat` is gone from the module and from `fx/index.ts`. The 'hit' case calls `P.furHit` only.
+- Mutation check: putting a Star back in the takedown, or a second recipe call in 'hit', fails both tests.
+
+**Shot.** `docs/qa/w15/fx-takedown-web.jpg` is tw-view's live `?mode=slab&webgl&slabHurt` killing hit (tick 3842,
+FX age 0.200 s; dust measured rgb(62,55,62)-(71,67,78)); see TW-VIEW.md. The first-round lab before/after is retired
+and not in the repo.
+
+### W15 patch round (lead: Sprint B check BLOCKER)
+The killing hit sends 'hit' then 'death' in the same tick (`src/sim/combat/damage.ts`), so `furHit` still bloomed
+comic FX over every rifle takedown.
+
+**`furHit` (`fx/presets.ts`).**
+- Removed:
+  - the white stuffing puffs, which used Curve.Pop and ink;
+  - the four gold Pop Stars on a crit.
+- Changed:
+  - the tufts and the team chunk now have param 0 (no ink);
+  - the impact flash is a soft `Shape.Glow`, not a spiky `Shape.Burst`.
+- `C.stuffing` is deleted; nothing else used it.
+
+**Night scale.** Coat and team solids on both the hit and the takedown now carry `FUR_NIGHT` = ×0.35. At full
+strength the cat's grey tufts showed as #c6c6c0, near white. The lead asked for this on the takedown tufts; I applied
+it to the hit's tufts and team chunk too, because the cap test covers every particle.
+
+**Test.** A new test in `fx-particles` spawns `furHit` and `takedownDust` into one fresh pool, for cat and corgi,
+crit and plain, at two densities. For every particle it checks:
+- the shape is not Star, Burst or Splat;
+- `misc.z` is 0;
+- the pool's curve field is never Pop (the field index is proven first);
+- the solids are opaque;
+- tufts stay at or under 0.21 for a cat and 0.32 for a corgi, and other solids at or under 0.3;
+- the only glow is a single `Shape.Glow`.
+
+**Mutant checks.** Each of these fails the test: a Star put back in `furHit`; the stuffing loop (it fails on ink,
+and on Pop alone with param 0); white takedown tufts; full-strength hit tufts; Burst instead of Glow; the team
+chunk inked.
+
+**Wording.** The `presets-weapons` header, the `fx-weapons` test title and LOOK.md now read: "fur tufts, one team
+chunk and a soft glow; no ink, no Pop, no stars".
+
+**Shot.** `docs/qa/w15/fx-takedown-web.jpg` is tw-view's live `?mode=slab&webgl&slabHurt` killing hit (tick 3842,
+FX age 0.200 s; dust measured rgb(62,55,62)-(71,67,78)); see TW-VIEW.md.
+

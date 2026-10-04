@@ -13,7 +13,11 @@ import type { GameEvent, MatchState, ServerMsg } from '../../src/shared/protocol
 import { PROTOCOL_VERSION } from '../../src/shared/constants';
 import { SLAB, SLAB_TEXT, SLAB_ZONE_SEED, onSlab, type SlabConfig } from '../../src/shared/content/modes';
 import { weaponIndex } from '../../src/shared/content/weapons';
-import { MODES, slabRespawnPoints, slabSlotOf, slabSlots, slabSprintTime, slabZone } from '../../src/sim/match';
+import {
+  MODES, SLAB_CAT_OFFSET, SLAB_CAT_SLOTS, SLAB_CORGI_TRIPS, slabCatSlots, slabRespawnPoints, slabSlotOf, slabSlots, slabZone, type SlabLayout,
+} from '../../src/sim/match';
+import { createWorldData } from '../../src/shared/world/world-data';
+import type { SpawnPoint } from '../../src/shared/world/world-types';
 import { applyDamage, isInvulnerable, kill, respawnNow } from '../../src/sim/combat';
 import { WebSocket as WsClient } from 'ws';
 import { startGameServer } from '../../server/app';
@@ -61,6 +65,32 @@ function offSlab(sim: Sim, e: SimEntity): void {
 }
 
 const src = (e: SimEntity) => ({ id: e.id, team: e.team, weapon: weaponIndex('squeaker_rifle') });
+
+/** Godot's W14 rule, written out independently: straight-line sprint time to the slab centre (classes.ts sprint speeds). */
+const w14Time = (p: { x: number; z: number }, team: TeamId) => Math.hypot(p.x - SLAB.center.x, p.z - SLAB.center.z) / (team === Team.Cats ? 8.8 : 9.6);
+/** W14 start_slots for the Cats: indices (in their spawn list) greedily matched to the Corgis' farthest-first times. */
+function w14CatOrder(cats: readonly SpawnPoint[], corgis: readonly SpawnPoint[]): number[] {
+  const ref = [...corgis].sort((a, b) => w14Time(b, Team.Corgis) - w14Time(a, Team.Corgis));
+  const left = cats.map((_, i) => i), out: number[] = [];
+  for (const r of ref) {
+    if (!left.length) break;
+    const want = w14Time(r, Team.Corgis);
+    let best = 0;
+    for (let i = 1; i < left.length; i++) if (Math.abs(w14Time(cats[left[i]], Team.Cats) - want) < Math.abs(w14Time(cats[left[best]], Team.Cats) - want)) best = i;
+    out.push(left[best]);
+    left.splice(best, 1);
+  }
+  return [...out, ...left];
+}
+/** W14 _pick_respawn_slots for the Cats: their spawns within 0.3 s below the Corgis' slot 0, else the one nearest the middle. */
+function w14CatRespawns(cats: readonly SpawnPoint[], corgis: readonly SpawnPoint[]): SpawnPoint[] {
+  const t0 = Math.max(...corgis.map((p) => w14Time(p, Team.Corgis)));
+  const inside = cats.filter((p) => w14Time(p, Team.Cats) <= t0 + 1e-4 && w14Time(p, Team.Cats) >= t0 - 0.3 - 1e-4);
+  if (inside.length) return inside;
+  let nearest = cats[0];
+  for (const p of cats) if (Math.abs(w14Time(p, Team.Cats) - (t0 - 0.15)) < Math.abs(w14Time(nearest, Team.Cats) - (t0 - 0.15))) nearest = p;
+  return [nearest];
+}
 
 describe('slab mode: data and registry', () => {
   it('matches the Godot game: the slab of the_lot.json and the rules of tuning.gd', () => {
@@ -164,7 +194,7 @@ describe('slab mode: scoring', () => {
     // killed between ticks: the respawn runs in the 181st tick (a kill inside a tick respawns 180 ticks later)
     expect(steps).toBe(181);
     expect(match(sim).score).toEqual([3, 0]); // the corpse on the slab never contested it
-    // W14 (Godot best_spawn): on the Cats' respawn point farthest from the corgi (both are cat spawns in the band), facing the slab
+    // W14 (Godot best_spawn): on the Cats' respawn point farthest from the corgi (The Lot's data points, W15), facing the slab
     const pts = slabRespawnPoints(sim, Team.Cats);
     const far = [...pts].sort((a, b) => Math.hypot(b.x - c.pos.x, b.z - c.pos.z) - Math.hypot(a.x - c.pos.x, a.z - c.pos.z))[0];
     expect([k.pos.x, k.pos.z, k.yaw]).toEqual([far.x, far.z, far.yaw]);
@@ -297,7 +327,7 @@ describe('slab mode: kit, rematch, bots', () => {
       expect([e.pos.x, e.pos.z]).toEqual([slot.x, slot.z]);
       expect(isInvulnerable(sim, e)).toBe(true);
     }
-    expect(Math.abs(slabSprintTime(c.pos.x, c.pos.z, c.team) - slabSprintTime(k.pos.x, k.pos.z, k.team))).toBeLessThan(0.3);
+    expect([k.pos.x, k.pos.z]).toEqual([56, 117]); // W15: the Cats' start slot 0 on The Lot (Godot CAT_SLOTS)
     run(sim, 60);
     expect(isInvulnerable(sim, c)).toBe(false);
   });
@@ -333,56 +363,128 @@ describe('slab mode: kit, rematch, bots', () => {
     expect(b.dead).toBe(false);
   });
 
-  it('W14 (Godot start_slots, _pick_respawn_slots): both teams start and respawn at equal straight-line sprint time to the slab', async () => {
+  it('W14/W15 (Godot start_slots, _pick_respawn_slots, CAT_SLOTS): the slots on The Lot', async () => {
     const sim0 = await Sim.create({ seed: SEED, map: 'the_lot' });
     sim0.state.room = { mode: 'slab' };
     const slots = [slabSlots(sim0, Team.Corgis), slabSlots(sim0, Team.Cats)];
     expect(slots[0].length).toBe(16);
     expect(slots[1].length).toBe(16);
-    for (let k = 0; k < 6; k++) expect(Math.abs(slots[0][k].time - slots[1][k].time)).toBeLessThan(0.3);
-    // slot 0: the Corgis' farthest spawn (143.5 m at 9.6 m/s), the Cat spawn 132.4 m out (at 8.8 m/s)
+    // Corgis (unchanged since W14): farthest first, slot 0 their spawn 0 (143.5 m at 9.6 m/s)
     expect(Math.hypot(slots[0][0].x, slots[0][0].z)).toBeCloseTo(143.5, 1);
     expect(slots[0][0].time).toBeCloseTo(14.95, 2);
-    expect(Math.hypot(slots[1][0].x, slots[1][0].z)).toBeCloseTo(132.4, 1);
-    expect(slots[1][0].time).toBeCloseTo(15.05, 2);
-    for (let i = 1; i < 16; i++) expect(slots[0][i].time).toBeLessThanOrEqual(slots[0][i - 1].time); // farthest first
-    // respawn points: the Corgis' slot 0 and two points 1.3 m on toward the slab; the two Cat spawns in the band
+    for (let i = 1; i < 16; i++) expect(slots[0][i].time).toBeLessThanOrEqual(slots[0][i - 1].time);
+    // Cats (W15): CAT_SLOTS start first (spawns 2 and 6: (56, 117), (62, 117)), then the W14 order of the rest
+    const cats = sim0.worldData.spawns.filter((p) => p.team === Team.Cats);
+    const idx = (s: { x: number; z: number }) => cats.findIndex((p) => p.x === s.x && p.z === s.z);
+    expect(slots[1].slice(0, 2).map((s) => [idx(s), s.x, s.z])).toEqual([[2, 56, 117], [6, 62, 117]]);
+    expect(slots[1].slice(2).map(idx)).toEqual(w14CatOrder(cats, sim0.worldData.spawns.filter((p) => p.team === Team.Corgis)).filter((i) => i !== 2 && i !== 6));
+    // respawn points: the Corgis' slot 0 and two points 1.3 m on toward the slab; the Cats' CAT_SLOTS respawn row
     const resp = [slabRespawnPoints(sim0, Team.Corgis), slabRespawnPoints(sim0, Team.Cats)];
     expect(resp[0].map((p) => +p.time.toFixed(2))).toEqual([14.95, 14.82, 14.68]); // (143.5 m, then 1.3 m and 2.6 m nearer, at 9.6 m/s)
-    expect(resp[1].map((p) => [p.x, p.z, +p.time.toFixed(2)])).toEqual([[56, 117, 14.74], [68, 111, 14.79]]);
-    for (const a of resp[0]) for (const b of resp[1]) expect(Math.abs(a.time - b.time)).toBeLessThan(0.3);
-    // a 2v2 room: everyone starts on its slot; then everyone is downed and comes back to the same slot
+    expect(resp[1].map((p) => [idx(p), p.x, p.z])).toEqual([[2, 56, 117], [6, 62, 117], [10, 68, 117]]);
+    // the data's reference (as Godot's test_game_respawn.gd): each Cat slot's measured trip is the Corgis' + 0.49-0.76 s
+    for (const kind of ['start', 'respawn'] as const) {
+      SLAB_CAT_SLOTS[kind].forEach((c, k) => {
+        const lag = c.trip - SLAB_CORGI_TRIPS[kind][k];
+        expect(lag).toBeGreaterThanOrEqual(0.49 - 1e-9);
+        expect(lag).toBeLessThanOrEqual(0.76 + 1e-9);
+        expect(Math.abs(lag - SLAB_CAT_OFFSET)).toBeLessThan(0.17);
+      });
+    }
+    // a 2v2 room: everyone starts on its slot; then everyone is downed and comes back on a respawn point
     const sim = await Sim.create({ seed: SEED, map: 'the_lot' });
     const room = new Room(sim, { mode: 'slab', botsPerTeam: [2, 2] });
     room.tick();
     const pets = () => [Team.Corgis, Team.Cats].map((t) => [...sim.entities.values()].filter((e) => e.char && e.team === t).sort((a, b) => (a.data.slabSlot as number) - (b.data.slabSlot as number)));
-    const check = () => {
+    {
       const [cs, ks] = pets();
       expect(cs.map((e) => e.data.slabSlot)).toEqual([0, 1]);
       expect(ks.map((e) => e.data.slabSlot)).toEqual([0, 1]);
-      for (let i = 0; i < 2; i++) {
-        for (const e of [cs[i], ks[i]]) {
-          const s = slabSlotOf(sim, e)!;
-          expect([e.pos.x, e.pos.z, e.yaw]).toEqual([s.x, s.z, s.yaw]);
-        }
-        expect(Math.abs(slabSprintTime(cs[i].pos.x, cs[i].pos.z, Team.Corgis) - slabSprintTime(ks[i].pos.x, ks[i].pos.z, Team.Cats))).toBeLessThan(0.3);
+      for (const e of [...cs, ...ks]) {
+        const s = slabSlotOf(sim, e)!;
+        expect([e.pos.x, e.pos.z, e.yaw]).toEqual([s.x, s.z, s.yaw]);
       }
-    };
-    check();
+      expect(ks.map((e) => [e.pos.x, e.pos.z])).toEqual([[56, 117], [62, 117]]);
+    }
     for (let i = 0; i < 60; i++) room.tick(); // they walk off
     const [cs, ks] = pets();
     for (const e of [...cs, ...ks]) kill(sim, e, src(e.team === Team.Corgis ? ks[0] : cs[0]));
     for (let i = 0; i < 181; i++) room.tick();
     for (const e of [...cs, ...ks]) expect(e.dead).toBe(false);
-    // everyone back on a respawn point of its team (teammates on different ones), facing the slab, all within 0.3 s
+    // everyone back on a respawn point of its team (teammates on different ones), facing the slab
     for (const team of [cs, ks]) {
       const pts = slabRespawnPoints(sim, team[0].team);
       const at = team.map((e) => pts.findIndex((p) => p.x === e.pos.x && p.z === e.pos.z && p.yaw === e.yaw));
       expect(at.every((i) => i >= 0)).toBe(true);
       expect(new Set(at).size).toBe(team.length);
     }
-    for (const a of cs) for (const b of ks) expect(Math.abs(slabSprintTime(a.pos.x, a.pos.z, Team.Corgis) - slabSprintTime(b.pos.x, b.pos.z, Team.Cats))).toBeLessThan(0.3);
     room.dispose();
+  });
+
+  it("W15: the web's Cat slots are match.gd's CAT_SLOTS (indices, coordinates, trips) and the_lot.json's spawns", () => {
+    const gd = readFileSync('engines/godot/game/match.gd', 'utf8');
+    const block = /const CAT_SLOTS := \{([\s\S]*?)\n\}/.exec(gd)![1];
+    const entries = (kind: string) => {
+      const list = new RegExp(`"${kind}": \\[([\\s\\S]*?)\\]`).exec(block)![1];
+      return [...list.matchAll(/\{"i": (\d+), "x": ([\d.-]+), "z": ([\d.-]+), "trip": ([\d.]+)\}/g)].map((m) => ({ i: +m[1], x: +m[2], z: +m[3], trip: +m[4] }));
+    };
+    expect(SLAB_CAT_SLOTS.start).toEqual(entries('start'));
+    expect(SLAB_CAT_SLOTS.respawn).toEqual(entries('respawn'));
+    expect(SLAB_CAT_SLOTS.respawn.length).toBe(3);
+    expect(SLAB_CAT_OFFSET).toBe(Number(/const CAT_OFFSET := ([\d.]+)/.exec(gd)![1]));
+    const trips = /const CORGI_TRIPS := \{"start": \[([^\]]*)\], "respawn": \[([^\]]*)\]\}/.exec(gd)!;
+    expect(SLAB_CORGI_TRIPS.start).toEqual(trips[1].split(',').map(Number));
+    expect(SLAB_CORGI_TRIPS.respawn).toEqual(trips[2].split(',').map(Number));
+    // each entry's x, z is the spawn at its index in the_lot.json spawns["1"] (the web's Cat spawns, same order)
+    const lot = JSON.parse(readFileSync('engines/godot/data/the_lot.json', 'utf8')) as { spawns: Record<string, number[][]> };
+    const lotCats = createWorldData(SEED, 'the_lot').spawns.filter((p) => p.team === Team.Cats);
+    for (const e of [...SLAB_CAT_SLOTS.start, ...SLAB_CAT_SLOTS.respawn]) {
+      expect([lot.spawns['1'][e.i][0], lot.spawns['1'][e.i][2]]).toEqual([e.x, e.z]);
+      expect([lotCats[e.i].x, lotCats[e.i].z]).toEqual([e.x, e.z]);
+    }
+  });
+
+  it('W15 guard and fallback: off The Lot (or with a moved spawn) the W14 straight-line rule picks the Cat slots', async () => {
+    // the West Yard: no data slots; the Cats' starts are the W14 greedy match, their respawns the band rule
+    const yard = createWorldData(SEED, 'west_yard');
+    const layout: SlabLayout = { worldData: yard }; // a layout, not a Sim: no cast
+    expect(slabCatSlots(layout, 'start')).toEqual([]);
+    expect(slabCatSlots(layout, 'respawn')).toEqual([]);
+    const cats = yard.spawns.filter((p) => p.team === Team.Cats), corgis = yard.spawns.filter((p) => p.team === Team.Corgis);
+    expect(slabSlots(layout, Team.Cats).map((s) => cats.findIndex((p) => p.x === s.x && p.z === s.z))).toEqual(w14CatOrder(cats, corgis));
+    expect(slabRespawnPoints(layout, Team.Cats).map((s) => [s.x, s.z])).toEqual(w14CatRespawns(cats, corgis).map((p) => [p.x, p.z]));
+    // The Lot with the Cats' spawn 2 moved 2 cm: the guard (0.01 m) drops the data, W14 picks again
+    const lot = createWorldData(SEED, 'the_lot');
+    let n = -1;
+    const moved = lot.spawns.map((p) => (p.team === Team.Cats && ++n === 2 ? { ...p, x: p.x + 0.02 } : p));
+    const off: SlabLayout = { worldData: { spawns: moved, height: (x, z) => lot.height(x, z) } };
+    expect(slabCatSlots(off, 'start')).toEqual([]);
+    const offCats = moved.filter((p) => p.team === Team.Cats), lotCorgis = moved.filter((p) => p.team === Team.Corgis);
+    expect(slabSlots(off, Team.Cats).map((s) => offCats.findIndex((p) => p.x === s.x && p.z === s.z))).toEqual(w14CatOrder(offCats, lotCorgis));
+    expect(slabRespawnPoints(off, Team.Cats).map((s) => [s.x, s.z])).toEqual(w14CatRespawns(offCats, lotCorgis).map((p) => [p.x, p.z]));
+    // and the untouched Lot as a plain layout gives the data slots (what the client HUD runs)
+    expect(slabRespawnPoints({ worldData: lot }, Team.Cats).map((s) => [s.x, s.z])).toEqual([[56, 117], [62, 117], [68, 117]]);
+  });
+
+  it("W15: the Cats' respawn zone is 132 m from the slab centre, as Godot's respawn_zone(1); the Corgis' 142 m", () => {
+    // Godot: the centroid of respawn_slots[1] (CAT_SLOTS "respawn" -> the_lot.json spawns["1"][i]), its x/z distance to
+    // the slab centre (the_lot.json slab.center), computed here from the Godot data alone
+    const gd = readFileSync('engines/godot/game/match.gd', 'utf8');
+    const resp = /"respawn": \[([\s\S]*?)\]/.exec(/const CAT_SLOTS := \{([\s\S]*?)\n\}/.exec(gd)![1])![1];
+    const ids = [...resp.matchAll(/"i": (\d+)/g)].map((m) => +m[1]);
+    const lot = JSON.parse(readFileSync('engines/godot/data/the_lot.json', 'utf8')) as { spawns: Record<string, number[][]>; slab: { center: number[] } };
+    const gx = ids.reduce((a, i) => a + lot.spawns['1'][i][0], 0) / ids.length, gz = ids.reduce((a, i) => a + lot.spawns['1'][i][2], 0) / ids.length;
+    const godot = Math.hypot(gx - lot.slab.center[0], gz - lot.slab.center[2]);
+    expect(Math.round(godot)).toBe(132);
+    // the web: the centroid of slabRespawnPoints (what the death panel's BACK AT reads)
+    const zone = (team: TeamId) => {
+      const pts = slabRespawnPoints({ worldData: createWorldData(SEED, 'the_lot') }, team);
+      const x = pts.reduce((a, p) => a + p.x, 0) / pts.length, z = pts.reduce((a, p) => a + p.z, 0) / pts.length;
+      return Math.hypot(x - SLAB.center.x, z - SLAB.center.z);
+    };
+    expect(zone(Team.Cats)).toBeCloseTo(godot, 6);
+    expect(Math.round(zone(Team.Cats))).toBe(132);
+    expect(Math.round(zone(Team.Corgis))).toBe(142); // unchanged (Godot test_hud_death.gd: 142 m TO THE SLAB)
   });
 
   it('a respawned bot of each team reaches the slab from its respawn point (bots only, deterministic)', async () => {

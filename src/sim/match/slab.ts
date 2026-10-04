@@ -11,6 +11,7 @@ import { SLAB, SLAB_ZONE_SEED, onSlab, type SlabConfig } from '../../shared/cont
 import { CLASSES, moveStatsFor } from '../../shared/content/classes';
 import { COMBAT_RULES } from '../../shared/content/weapons';
 import { ensureCombat, equipWeapon, ticksOf } from '../combat/state';
+import type { SpawnPoint } from '../../shared/world/world-types';
 
 /** The slab's state (plain data on the Zone entity: `e.slab`). */
 export interface SlabZoneState {
@@ -30,9 +31,9 @@ declare module '../entity' {
 /** Slab view for bots, tests and tools (a read-only copy). */
 export interface SlabInfo { id: EntityId; x: number; y: number; z: number; holder: TeamId | -1; contested: boolean; counts: [number, number] }
 
-/** SLAB with the test/soak overrides in sim.state.matchConfig.slab. */
-export function slabConfig(sim: Sim): SlabConfig {
-  const o = (sim.state.matchConfig as { slab?: Partial<SlabConfig> } | undefined)?.slab;
+/** SLAB with the test/soak overrides in sim.state.matchConfig.slab (a layout without `state`: SLAB as is). */
+export function slabConfig(sim: { readonly state?: Record<string, unknown> }): SlabConfig {
+  const o = (sim.state?.matchConfig as { slab?: Partial<SlabConfig> } | undefined)?.slab;
   return { ...SLAB, ...o };
 }
 
@@ -161,18 +162,58 @@ export function slabRespawnDelay(sim: Sim, kills: ReadonlyArray<{ victim: Entity
   }
 }
 
-// ------------------------------------------------------------------ start slots and respawn points (W14)
+// ------------------------------------------------------------------ start slots and respawn points (W14, W15)
 // Godot match.gd start_slots() / _sprint_time(): both teams start at equal straight-line SPRINT TIME to the slab, not at
 // equal distance (the Corgis sprint 9.6 m/s, the Cats 8.8: classes.ts, copied by tuning.gd). The Corgis' slots run from
 // their farthest spawn (slot 0) to the nearest; the Cats' slot k is the unused cat spawn whose sprint time is closest to
-// the Corgis' slot k. On The Lot slots 0-5 match within 0.22 s (slot 0: 143.5 m / 14.95 s vs 132.4 m / 15.05 s); from
-// slot 6 on the leftovers drift apart (0.37 s, then 1-4 s), past any team size this mode uses. A pet takes its slot at
-// the match start (and a restart), facing the slab.
+// the Corgis' slot k (on The Lot this rule alone would match slots 0-5 within 0.22 s; the Cats' first two are data
+// there since W15, below). A pet takes its slot at the match start (and a restart), facing the slab.
 // Respawns (Godot match.gd _pick_respawn_slots() / best_spawn(), lane G-MOVE): every respawn point of every team lies
 // within RESPAWN_BAND (0.3 s) of sprint time below the Corgis' slot 0 (t0). The Corgis' points are slot 0 and points
 // RESPAWN_STEP (1.3 m) apart from it on its straight line to the slab while they stay in the band (14.95, 14.81,
-// 14.68 s); the Cats' are their spawns inside the band (14.74 s and 14.79 s), else the one nearest its middle. A respawn
+// 14.68 s); the Cats' are their spawns inside the band, else the one nearest its middle (on The Lot: data, W15). A respawn
 // takes the team's point no living teammate stands on (within 1.2 m) that is farthest from the nearest living enemy.
+// W15 (Godot CAT_SLOTS, lane G-BOT, docs/qa/w15/bot-route.md): on The Lot the Cats' first start slots and all their
+// respawn points are data instead, matched on measured lone-bot trips (+ CAT_OFFSET 0.6 s), every one on the row
+// z = 117: start (56, 117) then (62, 117); respawn (56, 117), (62, 117), (68, 117). Each entry names its spawn's index in
+// the Cats' spawn list (the_lot.json spawns["1"], the sim's order) and its x, z; when a spawn is missing or off by more
+// than 0.01 m (another map) the W14 rule above picks them. The Corgis' slots and points are unchanged.
+
+/**
+ * What the slot rules read: the map's spawns and ground height, and optionally the sim's state (matchConfig overrides).
+ * A Sim is one; so is a client-side layout, without a cast.
+ */
+export interface SlabLayout {
+  readonly worldData: { readonly spawns: readonly SpawnPoint[]; height(x: number, z: number): number };
+  readonly state?: Record<string, unknown>;
+}
+
+/** One Cat data slot (Godot CAT_SLOTS): its index in the Cats' spawns, the spawn's x, z (the guard) and its measured trip (s). */
+export interface SlabCatSlot { readonly i: number; readonly x: number; readonly z: number; readonly trip: number }
+
+/** Godot match.gd CAT_SLOTS (W15), verbatim. */
+export const SLAB_CAT_SLOTS: { readonly start: readonly SlabCatSlot[]; readonly respawn: readonly SlabCatSlot[] } = {
+  start: [{ i: 2, x: 56, z: 117, trip: 15.64 }, { i: 6, x: 62, z: 117, trip: 15.56 }],
+  respawn: [{ i: 2, x: 56, z: 117, trip: 15.64 }, { i: 6, x: 62, z: 117, trip: 15.56 }, { i: 10, x: 68, z: 117, trip: 15.61 }],
+};
+/** Godot CAT_OFFSET (s: the Cats' measured trip over the Corgis', per slot) and CORGI_TRIPS (s), the data's reference. */
+export const SLAB_CAT_OFFSET = 0.6;
+export const SLAB_CORGI_TRIPS: { readonly start: readonly number[]; readonly respawn: readonly number[] } = {
+  start: [15.07, 14.82],
+  respawn: [15.07, 15.01, 14.88],
+};
+
+/** The Cats' data slots of `kind` (Godot _cat_slots), or [] when the spawns are not The Lot's (then the W14 rule picks). */
+export function slabCatSlots(sim: SlabLayout, kind: 'start' | 'respawn'): SpawnPoint[] {
+  const cats = sim.worldData.spawns.filter((s) => s.team === Team.Cats);
+  const out: SpawnPoint[] = [];
+  for (const e of SLAB_CAT_SLOTS[kind]) {
+    const sp = cats[e.i];
+    if (!sp || Math.abs(sp.x - e.x) > 0.01 || Math.abs(sp.z - e.z) > 0.01) return [];
+    out.push(sp);
+  }
+  return out;
+}
 
 /** A start / respawn slot: the spawn point, the facing toward the slab centre, and its straight-line sprint time (s). */
 export interface SlabSlot { x: number; y: number; z: number; yaw: number; time: number }
@@ -187,8 +228,11 @@ function slotAt(x: number, y: number, z: number, team: TeamId, cfg: SlabConfig):
   return { x, y, z, yaw: Math.atan2(-(cfg.center.x - x), -(cfg.center.z - z)), time: slabSprintTime(x, z, team, cfg) };
 }
 
-/** A team's slots in order (Godot start_slots): the Corgis' farthest first; each Cat slot matched to the Corgi slot's time. */
-export function slabSlots(sim: Sim, team: TeamId, cfg: SlabConfig = slabConfig(sim)): SlabSlot[] {
+/**
+ * A team's slots in order (Godot start_slots): the Corgis' farthest first; each Cat slot matched to the Corgi slot's
+ * time, with The Lot's data slots (slabCatSlots 'start') first.
+ */
+export function slabSlots(sim: SlabLayout, team: TeamId, cfg: SlabConfig = slabConfig(sim)): SlabSlot[] {
   const own = (t: TeamId) => sim.worldData.spawns.filter((s) => s.team === t);
   const time = (s: { x: number; z: number }, t: TeamId) => slabSprintTime(s.x, s.z, t, cfg);
   const ref = own(Team.Corgis).sort((a, b) => time(b, Team.Corgis) - time(a, Team.Corgis));
@@ -204,15 +248,17 @@ export function slabSlots(sim: Sim, team: TeamId, cfg: SlabConfig = slabConfig(s
     left.splice(best, 1);
   }
   out.push(...left);
-  return out.map((s) => slotAt(s.x, s.y, s.z, team, cfg));
+  const fixed = team === Team.Cats ? slabCatSlots(sim, 'start') : [];
+  const order = fixed.length ? [...fixed, ...out.filter((p) => !fixed.includes(p))] : out;
+  return order.map((s) => slotAt(s.x, s.y, s.z, team, cfg));
 }
 
 /** Godot RESPAWN_BAND (s) and RESPAWN_STEP (m). */
 export const SLAB_RESPAWN_BAND = 0.3;
 const RESPAWN_STEP = 1.3;
 
-/** A team's respawn points (Godot _pick_respawn_slots), in Godot's order. */
-export function slabRespawnPoints(sim: Sim, team: TeamId, cfg: SlabConfig = slabConfig(sim)): SlabSlot[] {
+/** A team's respawn points (Godot _pick_respawn_slots), in Godot's order; on The Lot the Cats' are its data slots. */
+export function slabRespawnPoints(sim: SlabLayout, team: TeamId, cfg: SlabConfig = slabConfig(sim)): SlabSlot[] {
   const s0 = slabSlots(sim, Team.Corgis, cfg)[0];
   if (!s0) return [];
   const t0 = s0.time;
@@ -228,6 +274,8 @@ export function slabRespawnPoints(sim: Sim, team: TeamId, cfg: SlabConfig = slab
     }
     return out;
   }
+  const fixed = team === Team.Cats ? slabCatSlots(sim, 'respawn') : [];
+  if (fixed.length) return fixed.map((s) => slotAt(s.x, s.y, s.z, team, cfg));
   const own = sim.worldData.spawns.filter((s) => s.team === team);
   if (!own.length) return [];
   const mid = t0 - SLAB_RESPAWN_BAND * 0.5;

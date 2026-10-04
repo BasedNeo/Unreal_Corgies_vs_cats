@@ -14,12 +14,20 @@ function rgb(hex: number, k = 1): [number, number, number] {
 }
 const C = {
   dust: rgb(0xe9dcc0, 0.82), dustDark: rgb(0xb9a47e, 0.8), dirt: rgb(PALETTE.dirt), mulch: rgb(PALETTE.mulch),
-  grass: rgb(PALETTE.grass), grassDark: rgb(PALETTE.grassDark), stuffing: rgb(0xfff6e4, 0.84),
+  grass: rgb(PALETTE.grass), grassDark: rgb(PALETTE.grassDark),
   corgiFur: rgb(PALETTE.corgiOrange), corgiCream: rgb(PALETTE.corgiCream, 0.85), catFur: rgb(PALETTE.catGrey), catDark: rgb(PALETTE.catBlack, 1.4),
   teamCorgis: rgb(PALETTE.teamCorgis), teamCats: rgb(PALETTE.teamCats), gold: rgb(PALETTE.teamCorgisTrim),
   smoke: rgb(0x7a7268, 0.9), smokeLight: rgb(0xc9c0b0, 0.82), fire: rgb(0xff5a14), fireHot: rgb(0xffa412),
   water: rgb(PALETTE.water), waterLight: rgb(0xbfeaff, 0.85), white: rgb(0xfff4dc, 0.84),
+  // the takedown's wet-night smoke and grit (W15): cool, muted greys. Particles are unlit and the night exposure lifts
+  // them hard, so the scale is low on purpose: these land at ~0x585c60 / 0x62666a (grit ~0x40) on screen, a shade over
+  // the wet asphalt instead of a white pop (measured in a SwiftShader lab render)
+  smokeNight: rgb(0x4b5057, 0.18), smokeNightLight: rgb(0x6b7076, 0.16), grit: rgb(0x2f2d2b, 0.2),
 };
+
+/** Coat and team colours on hit and takedown solids (W15): unlit particles under the night exposure need ×0.35 to sit in
+ *  the grade (full strength, the cat's grey tufts showed near white). */
+const FUR_NIGHT = 0.35;
 
 function color(s: ParticleSpec, c: readonly number[], k = 1): void { s.r = c[0] * k; s.g = c[1] * k; s.b = c[2] * k; }
 function colorHex(s: ParticleSpec, hex: number, k: number): void { s.r = ((hex >> 16) & 255) / 255 * k; s.g = ((hex >> 8) & 255) / 255 * k; s.b = (hex & 255) / 255 * k; }
@@ -100,7 +108,12 @@ export function discWhoosh(p: FxPools, x0: number, y0: number, z0: number, x1: n
   tracer(p, x0, y0, z0, x1, y1, z1, PALETTE.corgiCream, 1.6, 0.09);
 }
 
-/** Character hit: fur tufts in the victim's coat, stuffing puffs, a team-colored fleck; crits add stars. */
+/**
+ * Character hit (W15, stylised-realistic, no comic): fur tufts in the victim's coat, one team-coloured fleck and a
+ * soft glow at the impact. No ink (param 0), no Pop, no stars, no stuffing puffs, no spiky burst. The killing hit
+ * lands in the same tick as the takedown, so the solids carry the same night scale as takedownDust's tufts (×0.35:
+ * at full strength the cat's grey coat showed near white, #c6c6c0, under the night exposure).
+ */
 export function furHit(p: FxPools, x: number, y: number, z: number, cat: boolean, team: number, crit: boolean, dirX: number, dirZ: number): void {
   const R = p.rng;
   const fur = cat ? C.catFur : C.corgiFur, fur2 = cat ? C.catDark : C.corgiCream;
@@ -110,36 +123,19 @@ export function furHit(p: FxPools, x: number, y: number, z: number, cat: boolean
     S.x = x; S.y = y; S.z = z;
     S.vx = dirX * R.range(1, 4) + R.sym(3); S.vy = R.range(1.5, 5); S.vz = dirZ * R.range(1, 4) + R.sym(3);
     S.gravity = 7; S.drag = 2.2; S.life = R.range(0.45, 0.8); S.size0 = R.range(0.07, 0.12); S.size1 = 0.05; S.curve = Curve.HoldShrink;
-    S.shape = Shape.Tuft; S.rot = R.sym(Math.PI); S.spin = R.sym(10); S.param = 0.3;
-    color(S, i % 3 === 2 ? fur2 : fur);
-    p.solid.spawn(S);
-  }
-  for (let i = 0, k = n(p, crit ? 4 : 2); i < k; i++) {
-    resetSpec(S);
-    S.x = x; S.y = y; S.z = z; S.vx = R.sym(1.6); S.vy = R.range(0.5, 2); S.vz = R.sym(1.6);
-    S.drag = 3; S.life = R.range(0.35, 0.55); S.size1 = R.range(0.14, 0.22); S.curve = Curve.Pop;
-    S.shape = Shape.Puff; S.param = 0.2; S.rot = R.sym(3); color(S, C.stuffing);
+    S.shape = Shape.Tuft; S.rot = R.sym(Math.PI); S.spin = R.sym(10); S.param = 0;
+    color(S, i % 3 === 2 ? fur2 : fur, FUR_NIGHT);
     p.solid.spawn(S);
   }
   resetSpec(S);
   S.x = x; S.y = y; S.z = z; S.vx = R.sym(2); S.vy = R.range(2, 4); S.vz = R.sym(2); S.gravity = 9; S.life = 0.6;
-  S.size0 = 0.07; S.size1 = 0.05; S.shape = Shape.Chunk; S.spin = R.sym(12); S.param = 0.3; color(S, teamC);
+  S.size0 = 0.07; S.size1 = 0.05; S.shape = Shape.Chunk; S.spin = R.sym(12); S.param = 0; color(S, teamC, FUR_NIGHT);
   p.solid.spawn(S);
-  // Impact flash (small, glowing) so the hit reads at a distance.
+  // Impact flash: a small soft glow (no spikes) so the hit reads at a distance.
   resetSpec(S);
-  S.x = x; S.y = y; S.z = z; S.life = 0.08; S.size0 = crit ? 0.42 : 0.26; S.size1 = 0.1; S.shape = Shape.Burst; S.fade = Fade.Fade;
-  S.rot = R.sym(3); colorHex(S, crit ? PALETTE.accentHot : 0xfff2d6, crit ? 3 : 1.8);
+  S.x = x; S.y = y; S.z = z; S.life = 0.08; S.size0 = crit ? 0.42 : 0.26; S.size1 = 0.1; S.shape = Shape.Glow; S.fade = Fade.Fade;
+  S.param = 0; colorHex(S, crit ? PALETTE.accentHot : 0xfff2d6, crit ? 3 : 1.8);
   p.glow.spawn(S);
-  if (crit) {
-    for (let i = 0; i < 4; i++) {
-      resetSpec(S);
-      const a = R.range(0, Math.PI * 2);
-      S.x = x; S.y = y + 0.1; S.z = z; S.vx = Math.cos(a) * 2.5; S.vz = Math.sin(a) * 2.5; S.vy = R.range(1.5, 3);
-      S.gravity = 3; S.drag = 2; S.life = 0.55; S.size1 = 0.13; S.curve = Curve.Pop; S.shape = Shape.Star; S.spin = R.sym(6);
-      colorHex(S, PALETTE.accentHot, 2.2);
-      p.glow.spawn(S);
-    }
-  }
 }
 
 /** World hit: dirt clods that bounce, grass bits, a dust puff. */
@@ -310,17 +306,28 @@ export function explosion(p: FxPools, x: number, y: number, z: number, r: number
   }
 }
 
-/** Death: a cartoon "poof" cloud ring, fur tufts, and dizzy stars. */
-export function deathPoof(p: FxPools, x: number, y: number, z: number, cat: boolean): void {
+/**
+ * Takedown (W15, docs/design/LOOK.md: stylised-realistic, no comic): a short, muted burst of wet-night dust and smoke
+ * that billows and settles, a few dark grit chunks kicked up and falling back, and fur tufts. No pop, no stars, no glow,
+ * no white, no ink rim (param 0), no halftone (opaque, it shrinks out).
+ */
+export function takedownDust(p: FxPools, x: number, y: number, z: number, cat: boolean): void {
   const R = p.rng;
-  const count = n(p, 10);
-  for (let i = 0; i < count; i++) {
+  for (let i = 0, c = n(p, 8); i < c; i++) {
     resetSpec(S);
-    const a = (i / count) * Math.PI * 2;
-    S.x = x + Math.cos(a) * 0.3; S.y = y + 0.6 + R.sym(0.3); S.z = z + Math.sin(a) * 0.3;
-    S.vx = Math.cos(a) * R.range(1.5, 2.6); S.vz = Math.sin(a) * R.range(1.5, 2.6); S.vy = R.range(0.2, 1.4);
-    S.drag = 3.2; S.life = R.range(0.55, 0.8); S.size1 = R.range(0.35, 0.5); S.curve = Curve.Pop;
-    S.shape = Shape.Puff; S.rot = R.sym(3); S.spin = R.sym(1.5); S.param = 0.12; color(S, i % 3 ? C.white : C.smokeLight);
+    const a = R.range(0, Math.PI * 2), sp = R.range(0.6, 1.4);
+    S.x = x + R.sym(0.25); S.y = y + R.range(0.15, 0.6); S.z = z + R.sym(0.25);
+    S.vx = Math.cos(a) * sp; S.vz = Math.sin(a) * sp; S.vy = R.range(0.3, 0.9); S.drag = 2.6; S.gravity = -0.15;
+    S.life = R.range(0.45, 0.7); S.size0 = R.range(0.12, 0.2); S.size1 = R.range(0.32, 0.5); S.curve = Curve.HoldShrink;
+    S.shape = Shape.Puff; S.rot = R.sym(3); S.spin = R.sym(0.8); S.param = 0; color(S, i % 2 ? C.smokeNight : C.smokeNightLight);
+    p.solid.spawn(S);
+  }
+  for (let i = 0, c = n(p, 6); i < c; i++) {
+    resetSpec(S);
+    const a = R.range(0, Math.PI * 2), sp = R.range(1.2, 3);
+    S.x = x; S.y = y + 0.25; S.z = z; S.vx = Math.cos(a) * sp; S.vz = Math.sin(a) * sp; S.vy = R.range(1.5, 3.5);
+    S.gravity = 14; S.life = R.range(0.45, 0.7); S.size0 = R.range(0.03, 0.06); S.size1 = 0.02; S.curve = Curve.HoldShrink;
+    S.shape = Shape.Chunk; S.rot = R.sym(3); S.spin = R.sym(10); S.param = 0; S.floorY = y; S.bounce = 0.2; color(S, C.grit);
     p.solid.spawn(S);
   }
   const fur = cat ? C.catFur : C.corgiFur;
@@ -328,16 +335,8 @@ export function deathPoof(p: FxPools, x: number, y: number, z: number, cat: bool
     resetSpec(S);
     S.x = x; S.y = y + 0.7; S.z = z; S.vx = R.sym(3); S.vy = R.range(2, 5); S.vz = R.sym(3);
     S.gravity = 6; S.drag = 2; S.life = R.range(0.7, 1.1); S.size0 = 0.1; S.size1 = 0.06; S.curve = Curve.HoldShrink;
-    S.shape = Shape.Tuft; S.rot = R.sym(3); S.spin = R.sym(8); S.param = 0.3; color(S, fur);
+    S.shape = Shape.Tuft; S.rot = R.sym(3); S.spin = R.sym(8); S.param = 0; color(S, fur, FUR_NIGHT);
     p.solid.spawn(S);
-  }
-  for (let i = 0; i < 3; i++) {
-    resetSpec(S);
-    const a = (i / 3) * Math.PI * 2;
-    S.x = x + Math.cos(a) * 0.35; S.y = y + 1.3; S.z = z + Math.sin(a) * 0.35; S.vy = 0.5;
-    S.vx = -Math.sin(a) * 1.2; S.vz = Math.cos(a) * 1.2; S.life = 0.9; S.size1 = 0.14; S.curve = Curve.Pop; S.shape = Shape.Star;
-    S.spin = 5; colorHex(S, PALETTE.accentHot, 2);
-    p.glow.spawn(S);
   }
 }
 

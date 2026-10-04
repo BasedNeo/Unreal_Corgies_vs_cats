@@ -298,17 +298,12 @@ export function createFx(scene: THREE.Scene, camera: THREE.Camera, views: Muzzle
           let dx = 0, dz = 0;
           if (src) { dx = ev.x - src.x; dz = ev.z - src.z; const l = Math.sqrt(dx * dx + dz * dz) || 1; dx /= l; dz /= l; }
           P.furHit(pools, ev.x, ev.y, ev.z, victim?.species === Species.Cat, victim?.team ?? 0, ev.crit, dx, dz);
-          // the comic splat pops on the viewer's side of the pet
-          let cx = camPos.x - ev.x, cy = camPos.y - ev.y, cz = camPos.z - ev.z;
-          const cl = Math.sqrt(cx * cx + cy * cy + cz * cz) || 1;
-          cx /= cl; cy /= cl; cz /= cl;
-          if (victim && victim.kind !== EntityKind.Vehicle && victim.kind !== EntityKind.Destructible) W.comicSplat(pools, ev.x, ev.y, ev.z, cx, cy, cz, ev.crit);
           break;
         }
         case 'death': {
           const s = states.get(ev.id);
           if (!s || !near(s.x, s.y, s.z)) break;
-          P.deathPoof(pools, s.x, s.y, s.z, s.species === Species.Cat);
+          P.takedownDust(pools, s.x, s.y, s.z, s.species === Species.Cat);
           break;
         }
         case 'spawn': {

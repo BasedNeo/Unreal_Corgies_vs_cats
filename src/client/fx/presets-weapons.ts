@@ -1,8 +1,9 @@
 // OWNER: X3 (weapons + combat feedback). Weapon effect recipes on the L5 particle pools: muzzle flashes by weight
 // class (forward flame tongue, brake petals, a hot core, sparks, smoke wisps), amber tracers with a white-hot core,
 // ejected brass that bounces and shrinks away, impacts by surface (dirt, grass, sand, stone, metal sparks, wood
-// splinters, water splashes, soft fibres), the comic pet hit (fur tufts + a small red comic splat, never real blood)
-// and the bigger explosion (fireball, smoke column, embers, dirt spray).
+// splinters, water splashes, soft fibres) and the bigger explosion (fireball, smoke column, embers, dirt spray). The
+// pet hit is L5's furHit: fur tufts, one team chunk and a soft glow; no ink, no Pop, no stars (W15: the comic splat is
+// retired, never real blood).
 // Theme data: colours come from the style palette only. No allocations: numbers in, one module-level spec reused.
 import { PALETTE } from '../style/style-tokens.js';
 import { Curve, Fade, Mode, Shape, makeSpec, resetSpec, type ParticleSpec } from './particle-pool';
@@ -34,7 +35,6 @@ const C = {
   sawdust: mixRgb(PALETTE.hullLight, PALETTE.fenceWood, 0.3, 0.9),
   water: rgb(PALETTE.water), waterLight: mixRgb(PALETTE.water, PALETTE.catWhite, 0.65, 0.85),
   fibre: mixRgb(PALETTE.grassDry, PALETTE.hull, 0.4),
-  splat: rgb(PALETTE.danger), splatHi: mixRgb(PALETTE.danger, PALETTE.catWhite, 0.3),
   fire: rgb(0xff5a14), fireHot: rgb(0xffa412), fireCore: rgb(PALETTE.accentHot),
 };
 
@@ -346,27 +346,6 @@ function puff(p: FxPools, c: readonly number[], x: number, y: number, z: number,
   S.life = R.range(0.5, 0.75); S.size0 = size * 0.4; S.size1 = size; S.curve = Curve.Linear; S.shape = Shape.Puff;
   S.param = 0.1; S.rot = R.sym(3); S.fade = Fade.Soft; S.alpha = alpha; color(S, c);
   p.solid.spawn(S);
-}
-
-/**
- * The comic pet hit (on top of L5's fur tufts): a small red comic splat that pops and shrinks in 0.25 s, drawn a
- * little toward the camera (never a pool, never on the ground: rated for everyone). Crits splat bigger.
- */
-export function comicSplat(p: FxPools, x: number, y: number, z: number, towardX: number, towardY: number, towardZ: number, crit: boolean): void {
-  const R = p.rng;
-  resetSpec(S);
-  S.x = x + towardX * 0.12; S.y = y + towardY * 0.12; S.z = z + towardZ * 0.12;
-  S.life = crit ? 0.3 : 0.24; S.size0 = 0.04; S.size1 = crit ? 0.24 : 0.17; S.curve = Curve.Pop;
-  S.shape = Shape.Splat; S.rot = R.sym(Math.PI); S.param = 0.16; color(S, crit ? C.splatHi : C.splat);
-  p.solid.spawn(S);
-  // two droplets flicked off the splat
-  for (let i = 0; i < (crit ? 3 : 2); i++) {
-    resetSpec(S);
-    S.x = x + towardX * 0.12; S.y = y + towardY * 0.12; S.z = z + towardZ * 0.12;
-    S.vx = R.sym(2.2); S.vy = R.range(1, 2.6); S.vz = R.sym(2.2); S.gravity = 9; S.life = R.range(0.25, 0.4);
-    S.size0 = 0.035; S.size1 = 0.02; S.curve = Curve.HoldShrink; S.shape = Shape.Puff; S.param = 0.3; color(S, C.splat);
-    p.solid.spawn(S);
-  }
 }
 
 /** Claw swipe: three quick pale slash streaks at the victim (kittens' melee). */

@@ -47,7 +47,7 @@ This file overrides MASTER_PLAN §3 where they differ. Numbers live in `src/clie
   - fire: muzzle flash with a light pulse; tracers; ejected casings.
   - impacts by surface: dirt puffs, sparks on metal, wood splinters, water splashes.
   - persistent bullet holes and scorch decals with a pooled cap.
-  - comic "gore": fur tufts and a red comic splat, never realistic blood. Keep it rated for everyone.
+  - hits on pets: fur tufts and a soft team-colour chunk, never blood and no comic splat (W15: no ink, no Pop, no stars; docs/design/LOOK.md). Keep it rated for everyone.
   - hit confirmation: hitmarker, a thud and a small camera punch. Everything has a budget.
 
 ## Budgets (unchanged; MASTER_PLAN §8.7)

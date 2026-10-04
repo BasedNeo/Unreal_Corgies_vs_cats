@@ -123,3 +123,28 @@ Tests: `tests/unit/slab-mode.test.ts` is now 19/19.
   every cross-team pair within 0.3 s; a respawned bot of each team reaches the slab (deterministic).
 - The downed test checks Godot's farthest-from-enemy point. The rematch test checks the start slot.
 - Mutation-checked: start slots off, or respawn points off, each fails tests.
+
+## Wave 15: The Lot's Cat slots as data (Godot CAT_SLOTS)
+`src/sim/match/slab.ts` now mirrors Godot `match.gd` (`CAT_SLOTS`, `CAT_OFFSET`, `CORGI_TRIPS`, `_cat_slots()`,
+`start_slots()`, `_pick_respawn_slots()`). `docs/qa/w15/bot-route.md` explains why.
+- **Data:** `SLAB_CAT_SLOTS`, verbatim from Godot.
+  - Start: spawns["1"][2] (56, 117), then [6] (62, 117).
+  - Respawn: [2] (56, 117), [6] (62, 117), [10] (68, 117).
+  - Each entry carries its measured lone-bot trip. `SLAB_CAT_OFFSET` (0.6) and `SLAB_CORGI_TRIPS` are copied as the
+    data's reference.
+- **Guard:** `slabCatSlots()` returns the data only when every entry's spawn exists at that index in the Cats' spawn
+  list and lies within 0.01 m of its x, z. Otherwise it returns `[]`, and the W14 straight-line rule picks (another
+  map, or a moved spawn).
+- **Starts:** the data slots come first, then the W14 order of the remaining spawns (Godot `fixed + out.filter(...)`).
+- **Respawns:** the data points replace the W14 band for the Cats. `best_spawn` picking is unchanged.
+- **Unchanged:** the Corgi slots and points.
+- **Layout type:** `slabSlots`, `slabRespawnPoints`, `slabCatSlots` and `slabConfig` take a `SlabLayout`:
+  `{ worldData: { spawns, height }, state? }`. A `Sim` is one, and so is a client layout, with no cast.
+- **Respawn zone (BACK AT):** the Cats' respawn centroid is (62, 117), 132.4 m from the slab centre: **132 m**, equal to
+  Godot `respawn_zone(1)` computed from `match.gd` and `the_lot.json`. It was 130 m under W14. The Corgis' stays 142 m.
+- **Tests:** `tests/unit/slab-mode.test.ts` is 22/22.
+  - The data is parsed from `match.gd` and checked against `the_lot.json`.
+  - The exact start and respawn indices are asserted.
+  - The guard and fallback are checked on the West Yard and on The Lot with a moved spawn, against an independent
+    W14 implementation.
+  - The zone is 132 m, matching Godot's.

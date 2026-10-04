@@ -40,7 +40,10 @@ export { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type WaveDef, type 
 export const MODES = ['yard-skirmish', 'team-deathmatch', 'core-rush', 'base-assault', 'slab'] as const;
 export { coreRushPads, corePadSpots, type CorePadInfo } from './core-rush';
 export { baseAssaultBalls, baseAssaultSpots, baseAssaultState, checkBallInvariants, type BallInfo, type BaseSpot } from './base-assault';
-export { applySlabKit, hasSlabKit, slabConfig, slabRespawnPoint, slabRespawnPoints, slabSlotOf, slabSlots, slabSprintTime, slabZone, type SlabInfo, type SlabSlot } from './slab';
+export {
+  applySlabKit, hasSlabKit, slabCatSlots, slabConfig, slabRespawnPoint, slabRespawnPoints, slabSlotOf, slabSlots, slabSprintTime, slabZone,
+  SLAB_CAT_OFFSET, SLAB_CAT_SLOTS, SLAB_CORGI_TRIPS, type SlabCatSlot, type SlabInfo, type SlabLayout, type SlabSlot,
+} from './slab';
 
 /** Match runtime bookkeeping (plain data in sim.state.matchRt). */
 interface MatchRuntime {

@@ -4,7 +4,7 @@
 //
 // Two flavors (both non-toon, so toonOutlinePass never gives them a hull — the ink is drawn in-shader):
 //  - 'solid': opaque cutout shapes, flat 2-tone fill + warm-black ink rim. Colors stay ≤ ~0.85 luminance so
-//    bloom never catches them (STYLE_GUIDE: only emissives glow). Fur tufts, stuffing, dust, debris, smoke.
+//    bloom never catches them (STYLE_GUIDE: only emissives glow). Fur tufts, dust, debris, smoke.
 //  - 'glow':  additive, unlit, colors multiplied > 1 so the bloom pass picks them up — the same contract as
 //    style-webgpu glow(). Muzzle flashes, tracers, lasers, sparks, explosion flash.
 import * as THREE from 'three/webgpu';
@@ -94,9 +94,9 @@ export function createParticleMesh(capacity: number, flavor: ParticleFlavor): Pa
     const spikes = float(0.58).add(pow(abs(cos(ang.mul(4))), 3).mul(0.4));
     const burst = r.sub(spikes);
     const streak = r.sub(0.95);
-    // X3 shapes. Shard: thin diamond sliver (splinters, metal chips). Splat: comic blob with lobes (hit splat,
-    // never blood-real). Casing: rounded capsule 1:2.5 (brass, shells). Petal: flame tongue, wide at −y, point at +y
-    // (muzzle-flash petals and fire, stretched along their axis).
+    // X3 shapes. Shard: thin diamond sliver (splinters, metal chips). Splat: a blob with lobes (the hairball's
+    // goo and stains; W15 retired the comic hit splat). Casing: rounded capsule 1:2.5 (brass, shells). Petal: flame
+    // tongue, wide at −y, point at +y (muzzle-flash petals and fire, stretched along their axis).
     const shard = abs(p.x).mul(3.2).add(abs(p.y)).sub(0.95);
     const lobes = float(0.62).add(sin(ang.mul(5).add(aMisc.x.mul(2))).mul(0.16)).add(sin(ang.mul(9).sub(aMisc.x)).mul(0.08));
     const splat = r.sub(lobes);

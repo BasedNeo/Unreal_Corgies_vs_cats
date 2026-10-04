@@ -1,0 +1,63 @@
+# W15 A-HOOK: web twin SFX log (src/client/audio/slab-cues.ts), browser console lines with ?sfxlog
+# Tree: HEAD ace71ca (base 9139c7a) plus the working tree, in a private copy. Dev server: vite on port 5187, killed by PID.
+# Headless Chromium (SwiftShader), driven by a private probe: open the page, one click at 12 s (the first gesture unlocks
+# Web Audio), then read every console line that starts with SFX. Format: [seconds since the page opened] SFX <cue>.
+# A cue that is picked but cannot play would read 'SFX <cue> silent (<why>)': none did.
+# The page runs far below real time here, so snapshots, and their cues, arrive in bursts.
+
+## Run 1: you plus two Corgi bots against one Cat bot (&bots=3,1), slab spectator camera, first to 8
+# http://localhost:5187/?mode=slab&webgl&autoplay&sfxlog&bots=3,1&cam=slab&slabWin=8
+[20.4s] SFX rifle_shot
+[20.4s] SFX rifle_shot
+[20.5s] SFX rifle_shot
+[20.6s] SFX rifle_shot
+[20.9s] SFX rifle_shot
+[21.0s] SFX rifle_shot
+[21.1s] SFX rifle_shot
+[21.1s] SFX rifle_shot
+[21.2s] SFX rifle_shot
+[21.3s] SFX rifle_shot
+[21.5s] SFX rifle_shot
+[21.6s] SFX rifle_shot
+[21.6s] SFX rifle_shot
+[21.7s] SFX rifle_shot
+[21.7s] SFX rifle_shot
+[21.7s] SFX rifle_shot
+[21.8s] SFX rifle_shot
+[21.8s] SFX rifle_shot
+[21.9s] SFX rifle_shot
+[21.9s] SFX rifle_shot
+[22.0s] SFX rifle_shot
+[22.0s] SFX rifle_shot
+[22.1s] SFX rifle_shot
+[22.2s] SFX rifle_shot
+[22.4s] SFX rifle_shot
+[22.4s] SFX rifle_shot
+[22.5s] SFX rifle_shot
+[22.5s] SFX rifle_shot
+[22.6s] SFX rifle_shot
+[22.6s] SFX rifle_shot
+[22.7s] SFX rifle_shot
+[22.7s] SFX rifle_shot
+[30.3s] SFX slab_tick
+[30.3s] SFX slab_tick
+[30.3s] SFX slab_tick
+[30.3s] SFX slab_tick
+[30.3s] SFX slab_tick
+[30.3s] SFX slab_tick
+[33.7s] SFX slab_tick
+[33.7s] SFX slab_tick
+[33.7s] SFX match_end_win
+# match: {"phase":"ended","score":[8,0],"timeLeft":155.1666666666469,"objective":"CORGI COMPANY WINS"}
+# counts:  1 SFX match_end_win; 32 SFX rifle_shot; 8 SFX slab_tick;
+
+## Run 2: the default 1 v 1 (you and one Cat bot; you stay at your spawn), slab spectator camera, first to 5
+# http://localhost:5187/?mode=slab&webgl&autoplay&sfxlog&cam=slab&slabWin=5
+[24.5s] SFX slab_tick_enemy
+[24.5s] SFX slab_tick_enemy
+[24.5s] SFX slab_tick_enemy
+[26.5s] SFX slab_tick_enemy
+[26.5s] SFX slab_tick_enemy
+[26.5s] SFX match_end_lose
+# match: {"phase":"ended","score":[0,5],"timeLeft":159.38333333331693,"objective":"CAT CADRE WINS"}
+# counts:  1 SFX match_end_lose; 5 SFX slab_tick_enemy;

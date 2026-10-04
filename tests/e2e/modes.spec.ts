@@ -66,7 +66,7 @@ test('MATCH: ADVENTURE → The Tall Grass from the menu starts chapter 2', async
 // W13 TW-VIEW: SLAB from the menu reloads into the Godot game's match on The Lot (?mode=slab): the page builds The Lot
 // with its six shared kit GLBs, the slab is the one EntityKind.Zone (8) in the snapshot, and the slab HUD shows both
 // scores racing to 60, the clock, the slab line, hit points and ammo, in hud.gd's plain style, in place of the general
-// HUD's comic match bar and health / ability / ammo panels.
+// HUD's comic match bar and health / ability / ammo panels. W15: plus the slab marker and the YOU line.
 test('MATCH: SLAB from the menu starts the slab match on The Lot with its HUD and kit', async ({ page }) => {
   test.setTimeout(300_000);
   const errors: string[] = [];
@@ -99,6 +99,15 @@ test('MATCH: SLAB from the menu starts the slab match on The Lot with its HUD an
   for (const sel of ['.mb', '.hp', '.am']) await expect(page.locator(`#cvc-hud ${sel}`)).toBeHidden(); // no comic panels, no Q ring
   await expect(page.locator('#cvc-hud .dbg')).toHaveText(''); // no fps / rtt line (Godot has none) without ?debug
   await expect(slab.locator('[data-slab-win]')).toBeHidden();
+  // W15 (docs/qa/w15/HUD_CONTRACT.md §1, §4): the slab marker's two lines over a shape that carries the state, and the
+  // YOU line over the HP bar
+  const marker = slab.locator('[data-slab-marker]'); // a 0 x 0 anchor: its lines and shape carry the size
+  await expect(marker.locator('[data-slab-marker-l1]')).toBeVisible();
+  await expect(marker.locator('svg')).toBeVisible();
+  await expect(marker.locator('[data-slab-marker-l1]')).toHaveText(/^SLAB\s+\d+ m$/);
+  await expect(marker.locator('[data-slab-marker-l2]')).toHaveText(/^(NEUTRAL|CORGI COMPANY|CAT CADRE|CONTESTED)$/);
+  await expect(marker).toHaveAttribute('data-shape', /^(hollow|filled|split)$/);
+  await expect(slab.locator('[data-slab-you]')).toHaveText(/^YOU: (CORGI COMPANY|CAT CADRE)$/);
   // you plus one Cat bot, and the six Lot kit pieces drawn from their shared GLBs
   expect(await page.evaluate(() => ((globalThis as any).__cvc.net.entities as number[][]).filter((e) => e[1] <= 1).length)).toBe(2);
   await page.waitForFunction(() => (globalThis as any).__cvc.twin?.kits === 6, null, { timeout: 90_000, polling: 1000 });

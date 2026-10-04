@@ -8,6 +8,8 @@
 // Reads the slab from the snapshot (match mode 'slab'; contract in src/shared/content/modes.ts): the one EntityKind.Zone
 // entity (seed SLAB_ZONE_SEED = 0) at the slab centre, team = holder (Team.Neutral = 2: nobody), flags & Busy = contested. main.ts passes the
 // states only while MatchState.mode is 'slab' (a core-rush pad is a seed-0 Zone too). Idle and invisible otherwise.
+// W15: the reading also lists the living pets (players and bots) of the frame: the HUD keeps its slab marker off them
+// and aims its received-hit wedges at them (slab-hud.ts), with no extra wiring.
 // Materials only through the style factory: glow() for the frame, toon() for the fill. Two draws in all.
 import * as THREE from 'three/webgpu';
 import type { EntityState } from '../../shared/protocol';
@@ -15,6 +17,9 @@ import { EFlag, EntityKind } from '../../shared/types';
 import { SLAB_ZONE_SEED } from '../../shared/content/modes';
 import { glow, toon } from '../style/style-webgpu.js';
 import { PALETTE } from '../style/style-tokens.js';
+
+/** A living pet of the frame (feet position). */
+export interface SlabPet { id: number; team: number; species: number; x: number; y: number; z: number }
 
 /** The slab in one snapshot. */
 export interface SlabReading {
@@ -25,17 +30,24 @@ export interface SlabReading {
   holder: -1 | 0 | 1;
   /** Both teams on the slab: nobody scores. */
   contested: boolean;
+  /** W15: every living player and bot of the frame (the HUD's marker dodges them; its wedges point at them). */
+  pets: SlabPet[];
 }
 
 /** The slab of this snapshot: the EntityKind.Zone entity with seed SLAB_ZONE_SEED, or null (no slab match running). */
 export function readSlab(states: ReadonlyMap<number, EntityState>): SlabReading | null {
+  let zone: EntityState | null = null;
+  const pets: SlabPet[] = [];
   for (const s of states.values()) {
-    if (s.kind !== EntityKind.Zone || s.seed !== SLAB_ZONE_SEED) continue;
-    const contested = (s.flags & EFlag.Busy) !== 0;
-    const holder = !contested && (s.team === 0 || s.team === 1) ? s.team : -1;
-    return { id: s.id, x: s.x, y: s.y, z: s.z, holder, contested };
+    if (s.kind === EntityKind.Zone && s.seed === SLAB_ZONE_SEED) zone ??= s;
+    else if ((s.kind === EntityKind.Player || s.kind === EntityKind.Bot) && (s.flags & EFlag.Dead) === 0) {
+      pets.push({ id: s.id, team: s.team, species: s.species, x: s.x, y: s.y, z: s.z });
+    }
   }
-  return null;
+  if (!zone) return null;
+  const contested = (zone.flags & EFlag.Busy) !== 0;
+  const holder = !contested && (zone.team === 0 || zone.team === 1) ? zone.team : -1;
+  return { id: zone.id, x: zone.x, y: zone.y, z: zone.z, holder, contested, pets };
 }
 
 // slab.gd's colours: NEUTRAL Color(0.8, 0.82, 0.86), CONTESTED Color(1.0, 0.62, 0.12), a held slab

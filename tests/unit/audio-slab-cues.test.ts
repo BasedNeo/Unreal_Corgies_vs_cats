@@ -225,4 +225,48 @@ describe('slab cues through createAudio', () => {
       'SFX match_end_win', 'SFX slab_tick_enemy', 'SFX match_end_lose']);
     audio.dispose();
   });
+
+  it('your side is the local pet\'s team: a Cat player hears the flipped ticks and wins with the Cats', async () => {
+    const lines = sfxLines();
+    const { audio } = await rig();
+    const listener = { matrixWorld: { elements: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1.5, 0, 1] } } as never;
+    audio.update(listener, byId([pet(1, 1), pet(2, 0, 3, -4)]), 1, 1 / 60); // you are pet 1, a Cat
+    bus.emit('match', ms({ score: [0, 0] }));
+    await settle(); await settle();
+    bus.emit('match', ms({ score: [0, 1] })); // a Cat point: yours
+    bus.emit('match', ms({ score: [1, 1] })); // a Corgi point: theirs
+    audio.update(listener, byId([pet(2, 0, 3, -4)]), 1, 1 / 60); // your pet missing from one frame: still a Cat
+    bus.emit('match', ms({ score: [1, 2] }));
+    bus.emit('match', ms({ score: [1, 3], phase: 'ended', winner: 1 }));
+    expect(lines).toEqual(['SFX slab_tick', 'SFX slab_tick_enemy', 'SFX slab_tick', 'SFX slab_tick', 'SFX match_end_win']);
+    audio.dispose();
+  });
+
+  it('with no local pet (as Godot\'s --bots-only) your side is Corgi Company', async () => {
+    const lines = sfxLines();
+    const { audio } = await rig();
+    const listener = { matrixWorld: { elements: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1.5, 0, 1] } } as never;
+    audio.update(listener, byId([pet(1, 1), pet(2, 0, 3, -4)]), -1, 1 / 60); // nobody is you
+    bus.emit('match', ms({ score: [0, 0] }));
+    await settle(); await settle();
+    audio.onGameEvent(fire(2)); // a bot's shot, at its muzzle
+    audio.onGameEvent(hit(2, 1)); // a bot's hit: no confirm without you
+    bus.emit('match', ms({ score: [1, 0] }));
+    bus.emit('match', ms({ score: [1, 1] }));
+    bus.emit('match', ms({ score: [1, 2], phase: 'ended', winner: 1 }));
+    bus.emit('match', ms({ score: [0, 0] }));
+    bus.emit('match', ms({ score: [1, 0], phase: 'ended', winner: 0 }));
+    expect(lines).toEqual(['SFX rifle_shot', 'SFX slab_tick', 'SFX slab_tick_enemy', 'SFX slab_tick_enemy', 'SFX match_end_lose',
+      'SFX slab_tick', 'SFX match_end_win']);
+    audio.dispose();
+  });
 });
+
+/** Turns on ?sfxlog for the next createAudio and collects its `SFX ...` console lines. */
+function sfxLines(): string[] {
+  g.location = { search: '?mode=slab&sfxlog' };
+  const lines: string[] = [];
+  const real = console.log.bind(console);
+  vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { if (String(a[0]).startsWith('SFX ')) lines.push(String(a[0])); else real(...a); });
+  return lines;
+}

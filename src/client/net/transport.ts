@@ -10,7 +10,8 @@ import type { SlabOverrides, WorkerBootConfig } from '../../host/worker-host';
  * W13: an offline slab match shortened from the page URL, for tests and proofs: &slabWin=3 (first to 3),
  * &slabTime=20 (20 s of regulation), &slabOvertime=5 (at most 5 s of overtime). Clamped; empty or non-numeric values
  * are ignored; undefined when none is set. main.ts passes it to the worker only (WorkerBootConfig.slab); online
- * rooms never see it.
+ * rooms never see it. W15: &slabHurt (no value needed) sets `hurt`: the offline worker's scheduled hits and knockout
+ * on the human for reproducible HUD shots (worker-host.ts slabHurtOn / SLAB_HURT).
  */
 export function slabOverridesFromSearch(search: string): SlabOverrides | undefined {
   const p = new URLSearchParams(search);
@@ -24,6 +25,7 @@ export function slabOverridesFromSearch(search: string): SlabOverrides | undefin
   if (win !== undefined) o.winScore = Math.round(win);
   if (time !== undefined) o.timeLimit = time;
   if (ot !== undefined) o.overtimeMax = ot;
+  if (p.has('slabHurt')) o.hurt = true;
   return Object.keys(o).length ? o : undefined;
 }
 

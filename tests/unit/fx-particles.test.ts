@@ -1,5 +1,6 @@
 // L5: pooled particles — slot reuse, bounded capacity, zero allocations per spawn/update/write after warm-up.
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import v8 from 'node:v8';
 import vm from 'node:vm';
 import { Curve, Fade, FxRng, Mode, ParticlePool, Shape, createInstanceArrays, makeSpec, resetSpec, sizeAt } from '../../src/client/fx/particle-pool';
@@ -128,7 +129,7 @@ describe('ParticlePool', () => {
     expect(grown).toBeLessThan(96 * 1024);
   });
 
-  it('effect recipes (muzzle flash, tracer, hits, explosion, poof) spawn without allocating', () => {
+  it('effect recipes (muzzle flash, tracer, hits, explosion, takedown) spawn without allocating', () => {
     const pools: P.FxPools = { solid: new ParticlePool(1400), glow: new ParticlePool(700), rng: new FxRng(3), density: 1 };
     const out = createInstanceArrays(1400);
     const burst = () => {
@@ -138,7 +139,7 @@ describe('ParticlePool', () => {
       P.furHit(pools, 3, 1, -12, true, 1, true, 0, -1);
       P.worldHit(pools, 1, 0, -6, 0);
       P.explosion(pools, 4, 0, -10, 3.5, 0);
-      P.deathPoof(pools, 3, 0, -12, false);
+      P.takedownDust(pools, 3, 0, -12, false);
       P.landDust(pools, 0, 0, 0, 15);
       P.sprintPuff(pools, 0, 0, 0, 6, 6);
       pools.solid.update(1 / 60); pools.glow.update(1 / 60);
@@ -153,5 +154,74 @@ describe('ParticlePool', () => {
     expect(pools.glow.count).toBeLessThanOrEqual(700);
     // 1 byte per spawn would already be ~600 KB.
     expect(grown).toBeLessThan(128 * 1024);
+  });
+});
+
+describe('hit + takedown FX (W15: stylised-realistic, no comic)', () => {
+  it('the killing hit and the takedown in one fresh pool: no Star/Burst/Splat, no ink, no Pop, coats under the night cap', () => {
+    // A rifle takedown emits 'hit' then 'death' in the same tick (src/sim/combat/damage.ts), so both recipes land
+    // together. The pool's SoA store is private: read its curve field by index, proven first on two known spawns.
+    const CURVE = 10;
+    const fieldsOf = (pool: ParticlePool) => (pool as unknown as { f: Float32Array[] }).f;
+    const probe = new ParticlePool(2), spec = makeSpec();
+    spec.curve = Curve.Pop; probe.spawn(spec);
+    spec.curve = Curve.HoldShrink; probe.spawn(spec);
+    expect([fieldsOf(probe)[CURVE][0], fieldsOf(probe)[CURVE][1]]).toEqual([Curve.Pop, Curve.HoldShrink]);
+    // Brightest coat channel × the night scale (0.35), per species, plus a hair: full-strength coats fail.
+    const TUFT_CAP = { cat: 0.21, corgi: 0.32 };
+    const BANNED = new Set<number>([Shape.Star, Shape.Burst, Shape.Splat]);
+    for (const [cat, crit, density, seed] of [[true, true, 1, 1], [true, false, 1, 2], [false, true, 1, 3], [false, false, 0.35, 4]] as const) {
+      const pools: P.FxPools = { solid: new ParticlePool(256), glow: new ParticlePool(64), rng: new FxRng(seed), density };
+      P.furHit(pools, 3, 1.1, -12, cat, cat ? 1 : 0, crit, 0, -1);
+      P.takedownDust(pools, 3, 0, -12, cat);
+      for (const [name, pool] of [['solid', pools.solid], ['glow', pools.glow]] as const) {
+        const out = createInstanceArrays(pool.capacity);
+        const n = pool.write(out), curve = fieldsOf(pool)[CURVE];
+        expect(n, name).toBeGreaterThan(0);
+        for (let i = 0; i < n; i++) {
+          const o = i * 4, shape = out.col[o + 3], hi = Math.max(out.col[o], out.col[o + 1], out.col[o + 2]);
+          const what = `${name} #${i} shape ${shape} (cat ${cat}, crit ${crit})`;
+          expect(BANNED.has(shape), `${what}: no Star, Burst or Splat`).toBe(false);
+          expect(out.misc[o + 2], `${what}: no ink`).toBe(0);
+          expect(curve[i], `${what}: no Pop`).not.toBe(Curve.Pop);
+          if (name === 'glow') { expect(shape, `${what}: the only glow is the soft impact glow`).toBe(Shape.Glow); continue; }
+          expect(out.axis[o + 3], `${what}: opaque, no halftone`).toBe(1);
+          expect(hi, `${what}: under the night cap`).toBeLessThanOrEqual(shape === Shape.Tuft ? TUFT_CAP[cat ? 'cat' : 'corgi'] : 0.3);
+        }
+      }
+      expect(pools.glow.count, 'one soft glow per hit, nothing from the takedown').toBe(1);
+    }
+  });
+
+  const SRC = readFileSync(new URL('../../src/client/fx/presets.ts', import.meta.url), 'utf8');
+  it('is a muted wet-night dust and grit burst plus fur tufts: no stars, no glow, no white pop, no ink rim', () => {
+    expect('deathPoof' in P).toBe(false);
+    for (const [seed, density, cat] of [[1, 1, false], [7, 1, true], [3, 0.35, true]] as const) {
+      const pools: P.FxPools = { solid: new ParticlePool(256), glow: new ParticlePool(64), rng: new FxRng(seed), density };
+      P.takedownDust(pools, 3, 0, -12, cat);
+      expect(pools.glow.count, 'no glow particles (the dizzy stars were additive)').toBe(0);
+      const out = createInstanceArrays(256);
+      const n = pools.solid.write(out);
+      expect(n).toBeGreaterThan(0);
+      const shapes = new Set<number>();
+      for (let i = 0; i < n; i++) {
+        const o = i * 4, r = out.col[o], g = out.col[o + 1], b = out.col[o + 2], shape = out.col[o + 3];
+        shapes.add(shape);
+        expect([Shape.Puff, Shape.Chunk, Shape.Tuft]).toContain(shape);
+        expect(out.misc[o + 2], 'no ink rim').toBe(0);
+        expect(out.axis[o + 3], 'opaque: no halftone screen-door').toBe(1);
+        if (shape !== Shape.Tuft) {
+          // dust and grit: dark, near-neutral greys under the night exposure (the old pop was 0xfff4dc × 0.84 white)
+          expect(Math.max(r, g, b)).toBeLessThan(0.12);
+          expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThan(0.02);
+        }
+      }
+      expect(shapes.has(Shape.Star)).toBe(false);
+      expect(shapes.has(Shape.Puff) && shapes.has(Shape.Chunk) && shapes.has(Shape.Tuft)).toBe(true);
+    }
+    // and the recipe itself never reaches for the cartoon pieces
+    const body = SRC.slice(SRC.indexOf('export function takedownDust'), SRC.indexOf('\n}\n', SRC.indexOf('export function takedownDust')));
+    expect(body.length).toBeGreaterThan(100);
+    for (const banned of ['Shape.Star', 'Curve.Pop', 'p.glow', 'C.white', 'Fade.Soft']) expect(body, banned).not.toContain(banned);
   });
 });
