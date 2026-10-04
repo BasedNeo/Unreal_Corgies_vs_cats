@@ -7,18 +7,25 @@ extends RefCounted
 ## 2. Placement (pure, place_marker / behind_point; contract revision 3 "Placement, in this order"): a pet under the
 ##    marker lifts it clear, a stack of pets lifts it over all of them; the lift never takes the box above the safe top
 ##    (y 110: the scores, timer and slab line stay clear), and a pet it cannot clear upward sends it just below that
-##    pet; with no room either way it keeps the lifted place (by the cap at most); off screen and behind the camera the
-##    whole box (both lines and the shape) clamps inside the screen's safe area, toward the slab's side.
+##    pet, and below every pet it then meets in turn (a file of pets, A then B), 2 px under each, while it stays above
+##    the safe bottom (revision 4); with no room either way it keeps the lifted place (by the cap at most); off screen
+##    and behind the camera the whole box (both lines and the shape) clamps inside the screen's safe area, toward the
+##    slab's side, and still dodges a pet on screen there.
 ## 3. A 2v2 match, every Corgi and Cat spawn and respawn point (the data's), the play camera there facing the slab at
 ##    the respawn pitch and aimed at the slab, the three bots placed on the slab six ways (a row across the view, a file
 ##    along it, the Cats alone, the Corgi alone, two pets at the top of a jump, nobody): the marker is on screen, hangs at
 ##    the slab's centre + 4.5 m (or above it, lifted), reads `SLAB  <N> m` (the camera's ground distance) and the state
 ##    word, never covers a living pet's box on screen, nor the scores, the timer or the slab line, and lifts at most
 ##    MARKER_MAX_LIFT px; some views need the lift.
-## 3b. Close and pitched down (revision 3; Sprint B found the box lifted over the timer at 14 m): the play camera 9 m and
-##    14 m from the slab's centre on eight bearings, cam_pitch -0.6, the six arrangements: the box stays below the safe
-##    top, off the scores, the timer and the slab line, and covers a pet only when the HUD reports step 4 ("blocked":
-##    counted, not independently re-checked).
+## 3b. Close and pitched down (revision 3; Sprint B found the box lifted over the timer at 14 m): the play camera 4.5,
+##    6, 8, 9 and 14 m from the slab's centre on eight bearings, cam_pitch -0.3, -0.45 and -0.6, the six arrangements.
+##    Standing on the slab hides the marker; otherwise the box stays below the safe top, off the scores, the timer and
+##    the slab line, and covers no pet. A view labelled "blocked" is checked independently: the test scans every
+##    place the rules allow (the lift range and everything below to the safe bottom) and fails if one clears.
+## 3c. The player's own pet is never a pet to dodge: with the slab behind, the bottom-edge marker sits over the
+##    player's own pet and stays there (and marker_frame lists every other pet's box, not the player's).
+## 0. The contract's numbers, written out here (not only through hud.gd's own symbols): the lift is at most 120 px,
+##    the clearance 2 px, and the safe area 16, 110, 16 and 112 px off the left, top, right and bottom.
 ## 4. It hides while the player stands on the slab and shows again off it; it hides while the player is down and shows
 ##    after the respawn; once the match is over the marker and the slab line hide, and the rematch brings them back.
 const Kit := preload("res://game/testkit.gd")
@@ -34,6 +41,7 @@ const STATES := [
 
 func run(tree: SceneTree) -> Array:
 	var errs: Array = []
+	errs.append_array(_contract_numbers())
 	errs.append_array(_words_and_shapes())
 	errs.append_array(_placement())
 	var log := Kit.watch()
@@ -44,10 +52,25 @@ func run(tree: SceneTree) -> Array:
 	else:
 		errs.append_array(await _from_the_bases(tree, game))
 		errs.append_array(await _close_views(tree, game))
+		errs.append_array(await _own_pet(tree, game))
 		errs.append_array(await _hides(tree, game))
 	errs.append_array(Kit.unwatch(log))
 	await Kit.dispose(tree, main)
 	return errs
+
+## Contract §1 "Placement, in this order", as literals: a regression that moves a number together with every test that
+## reads it through the symbol is still caught here.
+func _contract_numbers() -> Array:
+	var e: Array = []
+	if Hud.MARKER_MAX_LIFT != 120.0:
+		e.append("the marker lifts at most %.1f px, the contract says 120" % Hud.MARKER_MAX_LIFT)
+	if Hud.MARKER_CLEAR != 2.0:
+		e.append("the marker keeps %.1f px of clearance, the contract says 2" % Hud.MARKER_CLEAR)
+	if Hud.MARKER_SAFE != [16.0, 110.0, 16.0, 112.0]:
+		e.append("the safe area is %s (left, top, right, bottom), the contract says [16, 110, 16, 112]" % str(Hud.MARKER_SAFE))
+	if Hud.MARKER_LIFT != 4.5:
+		e.append("the marker hangs %.2f m over the slab's centre, the contract says 4.5" % Hud.MARKER_LIFT)
+	return e
 
 ## Primitive counts of a shape (marker_shapes / hit_cue): its fills' vertex counts, outlines, lines and rings.
 static func signature(pr: Dictionary) -> String:
@@ -160,6 +183,28 @@ func _placement() -> Array:
 		var b2 := Rect2(r2.pos + off.position, off.size)
 		if b2.position.y < safe.position.y - 0.01 or (r2.dodge != "blocked" and b2.intersects(pt)):
 			e.append("anchor %s, pet %s: box %s (%s) leaves the safe top or covers the pet" % [str(top), str(pt), str(b2), r2.dodge])
+	# step 3 scans down a file of pets (revision 4). A is too tall to lift over; under A the box meets B, under B it
+	# meets C, and it settles 2 px under C. A/B: one more pet only. A chain past the safe bottom: blocked, lifted.
+	var big := Rect2(620, 120, 40, 190)
+	for row in [["a file A, B, C", [big, Rect2(630, 370, 30, 40), Rect2(610, 470, 40, 20)], "below", 492.0],
+			["A then B", [big, Rect2(600, 330, 80, 20)], "below", 352.0],
+			["A then B down to the safe bottom", [big, Rect2(600, 360, 80, 240)], "blocked", 246.0 - Hud.MARKER_MAX_LIFT]]:
+		var at: Dictionary = Hud.place_marker(a, off, row[1], safe, screen)
+		var bx := Rect2(at.pos + off.position, off.size)
+		if at.dodge != row[2] or absf(bx.position.y - float(row[3])) > 0.01:
+			e.append("%s: box top %.1f (%s), want %.1f (%s)" % [row[0], bx.position.y, at.dodge, row[3], row[2]])
+		if row[2] == "below":
+			for q in row[1]:
+				if bx.intersects(q):
+					e.append("%s: the box %s still covers %s" % [row[0], str(bx), str(q)])
+	# behind the camera the same steps run against the pets on screen: a pet on the bottom edge lifts the marker
+	var cam0 := Transform3D(Basis(), Vector3(0, 2, 0))
+	var held: Vector2 = Hud.behind_point(cam0, Vector3(0, 4.5, 40), screen)
+	var low_pet := Rect2(600, 570, 80, 40)
+	var bp: Dictionary = Hud.place_marker(held, off, [low_pet], safe, screen)
+	var bb := Rect2(bp.pos + off.position, off.size)
+	if bp.dodge != "lift" or bb.intersects(low_pet) or bb.position.y < safe.position.y:
+		e.append("slab behind, a pet on the bottom edge: box %s (%s) does not lift clear of %s" % [str(bb), bp.dodge, str(low_pet)])
 	# off screen to the left, to the right and above: the whole box clamps inside the safe area, both lines kept
 	for far in [Vector2(-900, 300), Vector2(2400, 500), Vector2(640, -700)]:
 		var at: Dictionary = Hud.place_marker(far, off, [], safe, screen)
@@ -264,40 +309,117 @@ func _close_views(tree: SceneTree, game: Node) -> Array:
 	var space: PhysicsDirectSpaceState3D = me.get_world_3d().direct_space_state
 	var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(c + Vector3(0, 5, 0), c - Vector3(0, 5, 0), T.L_WORLD))
 	var floor_y: float = hit.position.y if not hit.is_empty() else c.y
-	var tally := {"views": 0, "none": 0, "lift": 0, "below": 0, "blocked": 0}
-	for dist in [9.0, 14.0]:
+	var tally := {"views": 0, "none": 0, "lift": 0, "below": 0, "blocked": 0, "on the slab": 0}
+	for view_at in [[4.5, -0.3], [4.5, -0.45], [4.5, -0.6], [6.0, -0.3], [6.0, -0.45], [6.0, -0.6], [8.0, -0.3],
+			[8.0, -0.45], [8.0, -0.6], [9.0, -0.3], [9.0, -0.45], [9.0, -0.6], [14.0, -0.3], [14.0, -0.45], [14.0, -0.6]]:
+		var dist: float = view_at[0]
+		var pitch: float = view_at[1]
 		for k in 8:
 			var d := Vector3(sin(TAU * k / 8.0), 0.0, cos(TAU * k / 8.0))
-			var at: Vector3 = c + d * float(dist)
+			var at: Vector3 = c + d * dist
 			var g := space.intersect_ray(PhysicsRayQueryParameters3D.create(at + Vector3(0, 20, 0), at - Vector3(0, 20, 0), T.L_WORLD))
 			var spot: Vector3 = (g.position if not g.is_empty() else at) + Vector3(0, 0.05, 0)
 			var view := -d
 			var across := Vector3(-view.z, 0.0, view.x)
 			me.respawn(spot, atan2(-view.x, -view.z))
-			me.cam_pitch = -0.6
+			me.cam_pitch = pitch
 			await Kit.physics(tree, 3)
 			var cam: Camera3D = me.camera
+			var on_slab: bool = game.slab.contains(me.global_position)
 			for arr in _arrangements(c, floor_y, view, across, corgi, cats):
 				for p in arr.at:
 					p.global_position = arr.at[p]
 				game.step_score(0.0)
 				var mk: Dictionary = hud.marker_frame(cam)
-				var tag := "%.0f m bearing %d deg, pitch -0.6, %s" % [dist, k * 45, arr.name]
+				var tag := "%.1f m bearing %d deg, pitch %.2f, %s" % [dist, k * 45, pitch, arr.name]
 				tally.views += 1
+				if on_slab:
+					tally["on the slab"] += 1
+					if mk.get("visible", false):
+						e.append("%s: the player stands on the slab but the marker shows" % tag)
+					continue
 				if not mk.get("visible", false):
 					e.append("%s: the marker is hidden (player at %s)" % [tag, str(me.global_position)])
 					continue
 				tally[mk.dodge] += 1
 				e.append_array(_clear_of_top(hud, mk, tag))
-				var mr: Rect2 = mk.rect
+				var boxes: Array = []
 				for p in game.pets:
-					if p == me or not p.alive:
-						continue
-					var box := _screen_box(p, cam)
-					if box.has_area() and mr.intersects(box) and mk.dodge != "blocked":
-						e.append("%s: the marker %s (%s) covers %s at %s" % [tag, str(mr), mk.dodge, p.display_name, str(box)])
-	print("  marker close and pitched down: %d views; placed as anchored %d, lifted %d, below a pet %d, blocked %d" % [
-		tally.views, tally.none, tally.lift, tally.below, tally.blocked])
+					if p != me and p.alive:
+						var box := _screen_box(p, cam)
+						if box.has_area():
+							boxes.append(box)
+				var mr: Rect2 = mk.rect
+				if mk.dodge == "blocked":
+					var spot_y := _clear_spot(mk, boxes)
+					if not is_nan(spot_y):
+						e.append("%s: labelled blocked, but a box top at y %.1f clears every pet" % [tag, spot_y])
+				else:
+					for box in boxes:
+						if mr.intersects(box):
+							e.append("%s: the marker %s (%s) covers a pet at %s" % [tag, str(mr), mk.dodge, str(box)])
+	print("  marker close and pitched down: %d views; on the slab (hidden) %d; anchored %d, lifted %d, below a pet %d, blocked %d" % [
+		tally.views, tally["on the slab"], tally.none, tally.lift, tally.below, tally.blocked])
+	return e
+
+## Independently of the HUD's label: the top of a box (the marker's size, at its x) that the placement rules allow and
+## that clears every pet box by MARKER_CLEAR, or NAN when there is none. Allowed: lifted from the clamped place by at
+## most MARKER_MAX_LIFT and not above the safe top, or anywhere below it down to the safe bottom. Scanned every 0.5 px.
+static func _clear_spot(mk: Dictionary, boxes: Array) -> float:
+	var raw: Rect2 = mk.raw
+	var top := maxf(Hud.MARKER_SAFE[1], raw.position.y - Hud.MARKER_MAX_LIFT)
+	var bottom := 720.0 - Hud.MARKER_SAFE[3] - raw.size.y
+	var y := top
+	while y <= bottom + 0.001:
+		var probe := Rect2(raw.position.x, y - (Hud.MARKER_CLEAR - 0.1), raw.size.x, raw.size.y + 2.0 * (Hud.MARKER_CLEAR - 0.1))
+		var clear := true
+		for b in boxes:
+			if probe.intersects(b):
+				clear = false
+				break
+		if clear:
+			return y
+		y += 0.5
+	return NAN
+
+## 3c. The player's own pet: with the slab behind (and a little to the side), the marker clamps to the bottom edge over
+## the player's own pet. It must not dodge it, and marker_frame must not list it among the pets.
+func _own_pet(tree: SceneTree, game: Node) -> Array:
+	var e: Array = []
+	var hud: Node = game.hud
+	var me: Node = game.player
+	var c: Vector3 = game.slab.center
+	for p in game.pets:
+		if p != me:
+			p.global_position = c + Vector3(0, 0.05, 0)  # on the slab, behind the camera: no box on screen
+	var spot: Vector3 = c + Vector3(-10.0, 0, -16.0)
+	var space: PhysicsDirectSpaceState3D = me.get_world_3d().direct_space_state
+	var g := space.intersect_ray(PhysicsRayQueryParameters3D.create(spot + Vector3(0, 20, 0), spot - Vector3(0, 20, 0), T.L_WORLD))
+	spot = (g.position if not g.is_empty() else spot) + Vector3(0, 0.05, 0)
+	var away := atan2(-(spot.x - c.x), -(spot.z - c.z))  # facing straight away from the slab
+	var best := {}
+	for deg in [-14.0, -10.0, -6.0, 6.0, 10.0, 14.0]:  # turn until the bottom-edge marker sits over the own pet
+		me.respawn(spot, away + deg_to_rad(deg))
+		await Kit.physics(tree, 3)
+		var mk: Dictionary = hud.marker_frame(me.camera)
+		var own := _screen_box(me, me.camera)
+		var raw: Rect2 = mk.get("raw", Rect2())
+		if mk.get("visible", false) and not mk.onscreen and raw.intersects(own):
+			best = {"mk": mk, "own": own, "deg": deg}
+			break
+	if best.is_empty():
+		return ["could not stage the bottom-edge marker over the player's own pet"]
+	var m: Dictionary = best.mk
+	var own: Rect2 = best.own
+	var mrect: Rect2 = m.rect
+	var mraw: Rect2 = m.raw
+	if m.dodge != "none" or mrect != mraw:
+		e.append("slab behind (turned %.0f deg): the marker dodged the player's own pet %s (%s, lift %.1f)" % [best.deg,
+			str(own), m.dodge, m.lift])
+	for r in m.pets:
+		var q: Rect2 = r
+		if q.position.distance_to(own.position) < 0.5 and q.size.distance_to(own.size) < 0.5:
+			e.append("marker_frame lists the player's own pet %s among the pets to dodge" % str(own))
 	return e
 
 ## The marker's box stays at or below the safe top and off the scores, the timer and the slab line (their own rects).

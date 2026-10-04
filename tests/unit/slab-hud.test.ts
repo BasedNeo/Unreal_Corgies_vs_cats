@@ -12,7 +12,8 @@ import { SLAB, SLAB_TEXT } from '../../src/shared/content/modes';
 import { PALETTE } from '../../src/client/style/style-tokens.js';
 import { lighten, type SlabPet, type SlabReading } from '../../src/client/modes/slab-view';
 import {
-  SLAB_BASE_NAMES, SLAB_DEATH_BACKING, SLAB_HIT, SLAB_HIT_LIFE, SLAB_MARKER_CLEAR, SLAB_MARKER_LIFT, SLAB_MARKER_MAX_DODGE, SLAB_SAFE, SLAB_WEDGE,
+  SLAB_BASE_NAMES, SLAB_DEATH_BACKING, SLAB_HIT, SLAB_HIT_LIFE, SLAB_MARKER_CLEAR, SLAB_MARKER_DIM, SLAB_MARKER_GEOM, SLAB_MARKER_LIFT, SLAB_MARKER_MAX_DODGE,
+  SLAB_SAFE, SLAB_WEDGE, SLAB_WEDGE_COLOR, SLAB_WEDGE_PATH, slabHudReset, slabWedgeBox,
   SlabHitCues, SlabHpChip, slabDeathPanel, slabHitSvg, slabHudEvent, slabHudFrame, slabHudState, slabLineFor, slabMarker, slabMarkerPlace,
   slabMarkerShown, slabMarkerSvg, slabPetBoxes, slabPetHeight, slabRespawnZone, slabTeamGlyph, slabTeamGlyphSvg, slabWedgeAngle, slabYouText,
   type ScreenBox, type SlabHudFrame,
@@ -23,7 +24,7 @@ const deg = (r: number) => Math.round((r * 180) / Math.PI);
 
 describe('§1 the slab marker', () => {
   it('two lines, "SLAB  <N> m" (whole metres) and the state word, over a shape that carries the state', () => {
-    expect(slabMarker(null, 142.4)).toEqual({ lines: ['SLAB  142 m', 'NEUTRAL'], shape: 'hollow', color: 0xffffff });
+    expect(slabMarker(null, 142.4)).toEqual({ lines: ['SLAB  142 m', 'NEUTRAL'], shape: 'hollow', color: 0xe6ebf2 }); // hud.gd NEUTRAL_COLOR
     expect(slabMarker({ holder: -1, contested: false }, 9.5)).toMatchObject({ lines: ['SLAB  10 m', 'NEUTRAL'], shape: 'hollow' });
     expect(slabMarker({ holder: 0, contested: false }, 30)).toEqual({ lines: ['SLAB  30 m', 'CORGI COMPANY'], shape: 'filled', color: lighten(PALETTE.teamCorgis, 0.35) });
     expect(slabMarker({ holder: 1, contested: false }, 30)).toEqual({ lines: ['SLAB  30 m', 'CAT CADRE'], shape: 'filled', color: lighten(PALETTE.teamCats, 0.35) });
@@ -31,14 +32,15 @@ describe('§1 the slab marker', () => {
     expect(SLAB_MARKER_LIFT).toBe(4.5); // Godot: slab.center + 4.5 m, clear of the pets on it
   });
 
-  it('the three shapes differ in geometry: an outline, a solid diamond, an outline cut by a bar', () => {
+  it('the three shapes differ in geometry (hud.gd marker_shapes, r 10): an outline, a solid diamond, two halves and a bar', () => {
     const hollow = slabMarkerSvg('hollow'), filled = slabMarkerSvg('filled'), split = slabMarkerSvg('split');
-    expect(hollow).toMatch(/fill="none"/);
-    expect(hollow).not.toMatch(/<rect/);
-    expect(filled).toMatch(/fill="currentColor"/);
-    expect(filled).not.toMatch(/stroke=/);
-    expect(split).toMatch(/fill="none"/);
-    expect(split).toMatch(/<rect x="-12" y="-2" width="24" height="4"/); // the bar, wider than the 18 px diamond
+    expect(SLAB_MARKER_GEOM).toEqual({ r: 10, px: [14, 15], gap: 3, splitGap: 3, splitBar: 2, splitReach: 5 });
+    expect(hollow).toMatch(/d="M0 -10L10 0L0 10L-10 0Z" fill="none" stroke="currentColor" stroke-width="2.5"/);
+    expect(hollow).not.toMatch(/fill="currentColor"/);
+    expect(filled).toMatch(/d="M0 -10L10 0L0 10L-10 0Z" fill="currentColor"/);
+    // split: the top half to 3 px over the centre, the bottom half from 3 px under it, both filled, and a 2 px bar
+    // in the gap reaching 5 px past the side tips (x ±15)
+    expect(split).toMatch(/d="M0 -10L7 -3L-7 -3ZM-7 3L7 3L0 10ZM-15 -1L15 -1L15 1L-15 1Z" fill="currentColor"/);
     expect(new Set([hollow, filled, split]).size).toBe(3);
   });
 
@@ -175,9 +177,10 @@ describe('§2 the death panel', () => {
 });
 
 describe('§3 hits', () => {
-  it('confirm shapes differ in geometry: X; X + centre diamond; a larger X + an 18 px ring', () => {
-    expect(SLAB_HIT.body).toMatchObject({ r0: 5, r1: 10, diamond: 0, ring: 0 });
-    expect(SLAB_HIT.head).toMatchObject({ r0: 5, r1: 10 });
+  it('confirm shapes differ in geometry (hud.gd hit_cue): X 5-10; X + a 4.5 px diamond; X 6-15, 3 wide + an 18 px ring', () => {
+    expect(SLAB_HIT.body).toMatchObject({ r0: 5, r1: 10, width: 2.5, diamond: 0, ring: 0 });
+    expect(SLAB_HIT.head).toMatchObject({ r0: 5, r1: 10, width: 2.5, diamond: 4.5, ring: 0 });
+    expect(SLAB_HIT.kill).toMatchObject({ r0: 6, r1: 15, width: 3, diamond: 0, ring: 9 });
     expect(SLAB_HIT.head.diamond).toBeGreaterThan(0);
     expect(SLAB_HIT.head.ring).toBe(0);
     expect(SLAB_HIT.kill.r1).toBeGreaterThan(SLAB_HIT.body.r1);
@@ -235,6 +238,9 @@ describe('§3 hits', () => {
     expect(c.wedgesAt(21.2).map((w) => w.src)).toEqual([8]);
     expect(c.flashAt(21.2)).toBeGreaterThan(0);
     expect(SLAB_WEDGE.ring).toBe(110);
+    // hud.gd's arrowhead (tip 14 out, base 10 in, 16 wide) in CUE_COLORS.received
+    expect(SLAB_WEDGE_PATH).toBe('M0 -14L8 10L-8 10Z');
+    expect(SLAB_WEDGE_COLOR).toBe(0xff735c);
     // the flash: hud.gd's _dmg_t * 0.5, peaking at 0.175 and gone 0.35 s after the last hit
     const f = new SlabHitCues();
     f.onEvent({ e: 'hit', src: 8, dst: 3, dmg: 15, x: 0, y: 0, z: 0, crit: false }, 3, 20, { x: 1, z: 1 });
@@ -417,5 +423,163 @@ describe('slabHudFrame: what the DOM writes, decided headless', () => {
     const back = slabHudFrame(frame({ local: me(), slab }), s, 1.1);
     expect(back.confirm).toBeNull();
     expect(back.wedges).toEqual([]);
+  });
+});
+
+// ------------------------------------------------------------------------------------------------ Sprint C (contract rev. 4)
+
+describe('§1 rev. 4: placement below stacked pets, at any scale, behind the camera', () => {
+  const lines = ['SLAB  142 m', 'CORGI COMPANY'] as const;
+  const hits = (a: ScreenBox, b: ScreenBox) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+  const at = (x: number, y: number, pets: ScreenBox[], w = 1280, h = 720, u = 1, behind = false) => slabMarkerPlace({ x, y, behind, w, h, u, lines, pets });
+
+  it('step 3 goes on down past a second pet stacked under the first, while the box stays in the safe area', () => {
+    const a: ScreenBox = { x0: 600, y0: 150, x1: 680, y1: 250 }, b: ScreenBox = { x0: 600, y0: 260, x1: 680, y1: 330 };
+    const p = at(640, 160, [a, b]);
+    expect(p.dodge).toBe('below');
+    expect(p.box.y0).toBeCloseTo(b.y1 + SLAB_MARKER_CLEAR, 6); // under the second pet, 2 clear
+    expect(hits(p.box, a) || hits(p.box, b)).toBe(false);
+    // a stack down to the bottom edge: nothing clears, so it stays where step 2 left it (inside the safe area)
+    const wall = [a, b, { x0: 600, y0: 335, x1: 680, y1: 470 }, { x0: 600, y0: 475, x1: 680, y1: 700 }];
+    const q = at(640, 160, wall);
+    expect(q.dodge).toBe('blocked');
+    expect(q.box.y0).toBeCloseTo(SLAB_SAFE.top, 6);
+  });
+
+  it('u = 1.5 (1920 x 1080): the cap, the clearance and the safe area all scale with the screen', () => {
+    const W = 1920, H = 1080, U = 1.5;
+    // the 120 cap is 180 px
+    expect(at(960, 600, [{ x0: 900, y0: 0, x1: 1020, y1: 1050 }], W, H, U)).toMatchObject({ lift: 180, dodge: 'blocked' });
+    // the 2 px clearance is 3 px
+    const pet: ScreenBox = { x0: 940, y0: 500, x1: 980, y1: 560 };
+    const p = at(960, 540, [pet], W, H, U);
+    expect(p.dodge).toBe('lift');
+    expect(p.box.y1).toBeCloseTo(pet.y0 - 3, 6);
+    // the safe area: 165 from the top, 24 from the sides, 168 from the bottom
+    expect(at(960, -500, [], W, H, U).box.y0).toBeCloseTo(165, 6);
+    expect(at(5000, 540, [], W, H, U).box.x1).toBeCloseTo(W - 24, 6);
+    expect(at(-5000, 540, [], W, H, U).box.x0).toBeCloseTo(24, 6);
+    expect(at(960, 5000, [], W, H, U).box.y1).toBeCloseTo(H - 168, 6);
+  });
+
+  it('behind the camera it sits on the bottom edge toward the slab and still keeps off a pet there', () => {
+    const cam = camAt(0, 3, 30, 0, 3, 40); // facing +z: the slab (at the origin) is behind
+    const local = me({ x: 4, z: 26 });
+    const ahead = pet(2, 1, 0, 0, 36);
+    const alone = slabHudFrame(frame({ camera: cam, local, slab: reading([]) }), slabHudState(), 0).marker!;
+    expect(alone.dodge).toBe('none');
+    expect(alone.box.y1).toBeCloseTo(H - SLAB_SAFE.bottom, 6); // on the bottom edge of the safe area
+    const box = slabPetBoxes([ahead], 1, cam, W, H)[0];
+    expect(hits(alone.box, box)).toBe(true); // the pet stands where the marker would go
+    const m = slabHudFrame(frame({ camera: cam, local, slab: reading([ahead]) }), slabHudState(), 0).marker!;
+    expect(m.dodge).not.toBe('none');
+    expect(hits(m.box, box)).toBe(false);
+  });
+});
+
+describe('§3 rev. 4: the marker dims while a wedge overlaps it', () => {
+  const hits = (a: ScreenBox, b: ScreenBox) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+  it('a wedge box is its arrowhead on the 110 px ring, turned with it', () => {
+    expect(slabWedgeBox(640, 360, 0, 1)).toEqual({ x0: 632, y0: 360 - 124, x1: 648, y1: 360 - 100 });
+    const r = slabWedgeBox(640, 360, Math.PI / 2, 1);
+    expect(r.x0).toBeCloseTo(740, 6); expect(r.x1).toBeCloseTo(764, 6); expect(r.y0).toBeCloseTo(352, 6); expect(r.y1).toBeCloseTo(368, 6);
+    expect(slabWedgeBox(960, 540, 0, 1.5)).toEqual({ x0: 948, y0: 540 - 186, x1: 972, y1: 540 - 150 });
+  });
+
+  it('a hit from the slab straight ahead puts the wedge on the marker: the marker draws at 0.35; from the side it does not', () => {
+    // the anchor sits about 110 px over the crosshair, as from the Corgi spawn with the slab ahead
+    const top = SLAB.center.y + SLAB_MARKER_LIFT;
+    const cam = camAt(0, top, 40, 0, top - 40 * Math.tan((10 * Math.PI) / 180), 0);
+    const local = me({ x: 0, z: 36 });
+    const run = (fromX: number, fromZ: number) => {
+      const s = slabHudState();
+      const slab = reading([pet(7, 1, fromX, 0, fromZ)]);
+      slabHudFrame(frame({ camera: cam, local, slab }), s, 0);
+      slabHudEvent(s, hitOn(7, 1), 0.01);
+      return slabHudFrame(frame({ camera: cam, local, slab }), s, 0.05);
+    };
+    const ahead = run(0, 0);
+    expect(ahead.wedges).toHaveLength(1);
+    expect(hits(slabWedgeBox(W / 2, H / 2, ahead.wedges[0].angle, 1), ahead.marker!.box)).toBe(true);
+    expect(ahead.marker!.alpha).toBe(SLAB_MARKER_DIM);
+    expect(SLAB_MARKER_DIM).toBe(0.35);
+    const side = run(40, 36);
+    expect(side.wedges).toHaveLength(1);
+    expect(side.marker!.alpha).toBe(1);
+    // the wedge fades out: the marker comes back
+    const s = slabHudState();
+    const slab = reading([pet(7, 1, 0, 0, 0)]);
+    slabHudFrame(frame({ camera: cam, local, slab }), s, 0);
+    slabHudEvent(s, hitOn(7, 1), 0.01);
+    expect(slabHudFrame(frame({ camera: cam, local, slab }), s, 0.01 + SLAB_WEDGE.life + 0.01).marker!.alpha).toBe(1);
+  });
+});
+
+describe('§2: the death panel survives a late first dead frame', () => {
+  it('the knockout event 2 s before the first frame showing you down still names the killer and counts from the event', () => {
+    const s = slabHudState();
+    const slab = reading([pet(7, 1, 0, 0, -20)]);
+    const roster_ = [roster(7, 'Whiskers', 1)];
+    slabHudFrame(frame({ local: me(), slab, roster: roster_ }), s, 5); // up
+    slabHudEvent(s, { e: 'death', id: 1, by: 7 }, 10); // the knockout
+    const o = slabHudFrame(frame({ local: me({ hp: 0, flags: EFlag.Dead }), slab, roster: roster_ }), s, 12); // 2 s later
+    expect(o.death!.lines[0]).toBe('TAKEN DOWN BY Whiskers  ·  CAT CADRE');
+    expect(o.death!.lines[3]).toBe('BACK IN 1.0');
+    // an older knockout's record (before you were last up) is not this one's: THE LOT, counted from the frame
+    const t = slabHudState();
+    slabHudEvent(t, { e: 'death', id: 1, by: 7 }, 1);
+    slabHudFrame(frame({ local: me(), slab, roster: roster_ }), t, 5); // up again since
+    const p = slabHudFrame(frame({ local: me({ hp: 0, flags: EFlag.Dead }), slab, roster: roster_ }), t, 9);
+    expect(p.death!.lines[0]).toBe('TAKEN DOWN BY THE LOT');
+    expect(p.death!.lines[3]).toBe('BACK IN 3.0');
+  });
+});
+
+describe('§5 the rematch clears every HUD cue', () => {
+  const ended = ms({ phase: 'ended', winner: 1, score: [12, 60], objective: SLAB_TEXT.win[1] });
+  const fresh = ms({ score: [0, 0] });
+  const slab = reading([pet(1, 0, 0, 0, 25), pet(7, 1, 0, 0, -20)]);
+  const none = (o: ReturnType<typeof slabHudFrame>, hp: number) => {
+    expect(o.confirm).toBeNull();
+    expect(o.wedges).toEqual([]);
+    expect(o.flash).toBe(0);
+    expect(o.chipTop).toBe(hp);
+    expect(o.death).toBeNull();
+  };
+
+  it('mid-cue: a kill confirm, a wedge, the flash and the chip all showing when the match ends and restarts', () => {
+    const s = slabHudState();
+    slabHudFrame(frame({ local: me(), slab }), s, 1);
+    slabHudEvent(s, { e: 'death', id: 7, by: 1 }, 1); // your knockout of the Cat: a kill confirm, 0.35 s
+    slabHudEvent(s, hitOn(7, 1), 1); // and its last hit on you: a wedge, the flash
+    const live = slabHudFrame(frame({ local: me({ hp: 95 }), slab }), s, 1.02);
+    expect(live.confirm).toMatchObject({ kind: 'kill' });
+    expect(live.wedges).toHaveLength(1);
+    expect(live.flash).toBeGreaterThan(0);
+    expect(live.chipTop).toBe(120);
+    slabHudFrame(frame({ match: ended, local: me({ hp: 95 }), slab }), s, 1.04); // the winner screen
+    const after = slabHudFrame(frame({ match: fresh, local: me({ hp: 95 }), slab }), s, 1.06); // rematched within 0.04 s
+    none(after, 95);
+    expect(s.hits.wedges.size).toBe(0);
+  });
+
+  it('mid-death: the panel and its countdown, then the reset event with a stale dead frame, then up: no leftovers', () => {
+    const s = slabHudState();
+    const roster_ = [roster(7, 'Whiskers', 1)];
+    slabHudFrame(frame({ local: me(), slab, roster: roster_ }), s, 1);
+    slabHudEvent(s, hitOn(7, 1), 1.0);
+    slabHudEvent(s, { e: 'death', id: 1, by: 7 }, 1.0);
+    const down = slabHudFrame(frame({ local: me({ hp: 0, flags: EFlag.Dead }), slab, roster: roster_ }), s, 1.1);
+    expect(down.death!.lines[0]).toBe('TAKEN DOWN BY Whiskers  ·  CAT CADRE');
+    expect(down.chipTop).toBe(120); // the chip of the lost 120
+    slabHudEvent(s, { e: 'score', team: 0, pts: 0, reason: 'reset' }, 1.15); // the rematch (match.ts restart)
+    slabHudEvent(s, { e: 'score', team: 1, pts: 0, reason: 'reset' }, 1.15);
+    // the next frame still interpolates the old dead state: no panel, no countdown
+    none(slabHudFrame(frame({ match: fresh, local: me({ hp: 0, flags: EFlag.Dead }), slab, roster: roster_ }), s, 1.16), 0);
+    none(slabHudFrame(frame({ match: fresh, local: me(), slab, roster: roster_ }), s, 1.2), 120);
+    expect(s.deaths.size).toBe(0);
+    // and the HUD works on: the next knockout shows its panel
+    slabHudEvent(s, { e: 'death', id: 1, by: 7 }, 5);
+    expect(slabHudFrame(frame({ match: fresh, local: me({ hp: 0, flags: EFlag.Dead }), slab, roster: roster_ }), s, 5.1).death!.lines[3]).toBe('BACK IN 2.9');
   });
 });

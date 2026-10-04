@@ -66,7 +66,8 @@ export function reactionFor(ev: GameEvent, c: ReactionContext, out: FxReaction =
       break;
     case 'death':
       if (ev.id === me) out.shake = REACT.deathSelfShake;
-      else if (ev.by === me) { out.shake = REACT.killDealtShake; out.hitStopFrames = REACT.killDealtStop; out.fovPunch = REACT.killPunch; }
+      // a fall (by -1) is nobody's kill: with no local pet (me -1) it must not read as yours
+      else if (ev.by >= 0 && ev.by === me) { out.shake = REACT.killDealtShake; out.hitStopFrames = REACT.killDealtStop; out.fovPunch = REACT.killPunch; }
       break;
     case 'explode':
       if (c.hasLocal) {

@@ -172,10 +172,10 @@ describe('slab HUD model', () => {
     expect(slabWinner(ms({}))).toBeNull();
     const me = { kills: 3, deaths: 2 };
     expect(slabWinner(ms({ phase: 'ended', winner: 1, score: [41, 60], objective: SLAB_TEXT.win[1] }), me)).toEqual({
-      title: 'CAT CADRE WINS', team: 1, score: '41  –  60', you: 'You: 3 takedowns · 2 knockouts', prompt: 'R / Enter: rematch',
+      title: 'CAT CADRE WINS', team: 1, score: '41  –  60', you: 'You: 3 takedowns · 2 knockouts', prompt: 'R / Enter / Start: rematch',
     });
     expect(slabWinner(ms({ phase: 'ended', winner: 0, score: [60, 12] }))!.title).toBe(`${SLAB_TEAM_NAMES[0]} WINS`);
     expect(slabWinner(ms({ phase: 'ended', winner: -1, score: [7, 7], objective: SLAB_TEXT.draw }))).toMatchObject({ title: 'DRAW', team: -1, you: '' });
-    expect(SLAB_REMATCH).toBe('R / Enter: rematch');
+    expect(SLAB_REMATCH).toBe('R / Enter / Start: rematch');
   });
 });

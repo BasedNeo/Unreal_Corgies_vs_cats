@@ -148,3 +148,52 @@ Tests: `tests/unit/slab-mode.test.ts` is now 19/19.
   - The guard and fallback are checked on the West Yard and on The Lot with a moved spawn, against an independent
     W14 implementation.
   - The zone is 132 m, matching Godot's.
+
+## Wave 15 Sprint C: a fall is a takedown (Godot match.gd `y < _ground_y - 40` → `die(null)`)
+In slab mode only, a living pet whose feet drop below the slab centre's y − 40 (`SLAB_FALL_DEPTH`) is taken down by
+nobody.
+- **The plane:** Godot's own, −40.06 m on The Lot. It lies below the map's `killY` (−20), so a pet between the two keeps
+  falling, as in Godot.
+- **Death event:** `{ e: 'death', id, by: -1 }`, with no weapon. The HUD's `slabKillerOf` returns null on `by < 0`,
+  so it reads TAKEN DOWN BY THE LOT.
+- **No credit:** a recent attacker gets none. `kill(sim, e, null)` is the new no-killer form (`killerTeam` −1). Every
+  other caller is unchanged.
+- **Respawn:** the ordinary slab path, `SLAB.respawn` s later on a slab respawn point with the 1 s shield.
+- **Score:** none of its own. A downed pet just stops counting.
+- **Code:**
+  - `match/slab.ts`: `slabFallSystem` at order 650, registered in `matchSystems()`.
+  - `systems/core.ts`: `killPlaneSystem` stands aside in slab mode.
+  - `world/systems.ts`: `worldEffectsSystem` no longer teleports a slab pet that falls. It still teleports one that
+    leaves the map's sides.
+- **Other modes:** their teleports are unchanged.
+- **Tests:** `tests/unit/slab-mode.test.ts` is 24/24 (25/25 with the addendum).
+  - The fall test checks: no teleport and no death between −20 and −40; a death with `by` −1 although a cat had hit
+    the pet 0.5 s earlier; no spawn event; the score unchanged; the respawn 180 ticks later on a Corgi respawn point,
+    shielded.
+  - TDM still teleports to a spawn with no death.
+  - Mutants: putting either teleport back in slab, or killing with the self/last-attacker credit, fails the test.
+- **Closed (addendum):** `Room.stepExtra` (catch-up inputs) now asks the same rule as the tick,
+  `outOfBoundsTeleports(sim, e)` in `world/systems.ts`: in slab mode only leaving the map's sides teleports. A lagging
+  human who falls is downed by the regular tick's `slabFallSystem` (`by` −1). Test: a human's inputs starve 20 ticks
+  while it hangs 2 m above the plane; the late inputs replay through catch-up (`net.catchups` > 0) and it is downed
+  with `by` −1, with no spawn event. With the old teleport back in `stepExtra`, it is never downed and the test
+  fails.
+
+## Wave 15 Sprint C fix: a rematch resets the bots (contract §5, card item 9)
+Defect: `restart()` respawned every pet but left `e.ai` as it was. The brain only cleared its target, mode and nav on
+its own `wasDead` path. After a rematch, living bots kept 'engage' on targets about 276 m away and walked stale paths,
+and their odometer jumped 80-145 m. Godot resets every bot (`bot.gd respawn()`, `tests/test_bot_roles.gd`).
+- **Fix:**
+  - `ai/brain.ts resetBrain(e)` gives the bot a fresh brain, as `applyArchetype` builds it: target, visibility, mode,
+    nav (links, plans, path), perch, tactics and the ordnance planner.
+  - The new brain starts at the bot's current spot and facing.
+  - It keeps the archetype, the external flag and the input sequence.
+  - `match/index.ts updateSlab` calls it for every bot after the slab respawns have placed everyone on their start
+    slots, on a rematch and at the first match start.
+- **Tests:** `tests/unit/slab-mode.test.ts` is 27/27.
+  - A bots-only 2v2 plays 30 s to the horn and restarts. Every bot's AI and tactics state then equals a fresh brain's,
+    each stands on its start slot facing the slab, and its odometer is under 1 m one tick later. Before the restart
+    each had a slab goal and some had fought or walked a path.
+  - Mutant: without the call after the rematch, the test fails.
+- **X2:** Reload pressed mid-match (live) is not a rematch request. The phase stays live, the score keeps counting,
+  there is no reset event, and the clock runs on.

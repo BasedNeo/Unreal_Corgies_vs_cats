@@ -23,7 +23,7 @@ import { Btn } from '../../shared/input';
 import { pressed } from '../entity';
 import { combatBus, ensureCombat, ticksOf, type MatchRules, type KillRecord } from '../combat/state';
 import { respawnNow } from '../combat/damage';
-import { applyArchetype, simNavGrid } from '../ai';
+import { applyArchetype, resetBrain, simNavGrid } from '../ai';
 import { ARCHETYPES, type ArchetypeId } from '../ai/archetypes';
 import { nearestWalkable, cellX, cellZ } from '../ai/nav';
 import { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type MatchConfigOverrides } from './config';
@@ -32,7 +32,7 @@ import { objectiveState, takeObjectiveScore, foldObjectiveText } from '../intera
 import { coreRushConfig, setupCorePads, stepCorePads } from './core-rush';
 import { BA_REASON, CORE_PAD_LABELS, SLAB_TEXT } from '../../shared/content/modes';
 import { baseAssaultConfig, resetBaseAssault, setupBaseAssault, stepBaseAssault } from './base-assault';
-import { assignSlabSlots, evaluateSlab, resetSlab, setupSlab, slabConfig, slabKitSystem, slabRespawnDelay, slabRespawns } from './slab';
+import { assignSlabSlots, evaluateSlab, resetSlab, setupSlab, slabConfig, slabFallSystem, slabKitSystem, slabRespawnDelay, slabRespawns } from './slab';
 import { clearVehicles } from '../vehicles';
 
 export { SKIRMISH, TDM, type SkirmishConfig, type TdmConfig, type WaveDef, type MatchConfigOverrides } from './config';
@@ -42,7 +42,7 @@ export { coreRushPads, corePadSpots, type CorePadInfo } from './core-rush';
 export { baseAssaultBalls, baseAssaultSpots, baseAssaultState, checkBallInvariants, type BallInfo, type BaseSpot } from './base-assault';
 export {
   applySlabKit, hasSlabKit, slabCatSlots, slabConfig, slabRespawnPoint, slabRespawnPoints, slabSlotOf, slabSlots, slabSprintTime, slabZone,
-  SLAB_CAT_OFFSET, SLAB_CAT_SLOTS, SLAB_CORGI_TRIPS, type SlabCatSlot, type SlabInfo, type SlabLayout, type SlabSlot,
+  SLAB_CAT_OFFSET, SLAB_CAT_SLOTS, SLAB_CORGI_TRIPS, SLAB_FALL_DEPTH, type SlabCatSlot, type SlabInfo, type SlabLayout, type SlabSlot,
 } from './slab';
 
 /** Match runtime bookkeeping (plain data in sim.state.matchRt). */
@@ -313,6 +313,7 @@ function updateSlab(sim: Sim, rt: MatchRuntime, dt: number, kills: KillRecord[])
       start = true;
     }
     slabRespawns(sim, cfg, start);
+    if (start) slabFreshBrains(sim);
     return;
   }
   rulesOf(sim).combatLive = true;
@@ -343,6 +344,13 @@ function updateSlab(sim: Sim, rt: MatchRuntime, dt: number, kills: KillRecord[])
     rt.endedTick = sim.tick;
   }
   slabRespawns(sim, cfg, start);
+  if (start) slabFreshBrains(sim);
+}
+
+/** A match start or rematch (W15, Godot): every bot, now on its start slot, gets a fresh brain (no stale target, mode,
+ *  path, perch or tactics from the last match; the odometer starts at the slot). */
+function slabFreshBrains(sim: Sim): void {
+  for (const e of characters(sim)) if (e.ai) resetBrain(e);
 }
 
 // ------------------------------------------------------------------ yard skirmish
@@ -532,5 +540,5 @@ export const matchSystem: SimSystem = {
 };
 
 export function matchSystems(): SimSystem[] {
-  return [slabKitSystem, matchSystem];
+  return [slabKitSystem, slabFallSystem, matchSystem];
 }

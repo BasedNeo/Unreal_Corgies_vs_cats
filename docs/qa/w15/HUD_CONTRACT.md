@@ -4,6 +4,9 @@ Revision 2 (lead): adds G-HUD's five decisions (the marker hides while down, the
 the attacker's position at the hit, a 0.35 s kill confirm, the death panel's backing).
 Revision 3 (lead, after the Sprint B check): the marker's placement order and its safe top (§1); display names are per
 build (§2); OVERTIME is a tie, not a contest (§4).
+Revision 4 (lead, Sprint C): step 3 scans below stacked pets; behind the camera the marker still dodges pets (§1); a
+received wedge over the marker dims the marker (§3); the twin hides its nameplates and shows the PLACEHOLDER PETS tag,
+and the Godot hint names X for reload (§4); the rematch resets every HUD cue (§5).
 
 The lead owns this file. Both builds show the same words for the same state. Godot wins any clash: the web copies
 Godot's strings. Change a string here first, then in both builds. `PARITY.md` (Sprint C) cites one test or shot per
@@ -17,8 +20,8 @@ row.
      timer and slab line), 112 from the bottom.
   2. **No pet covered.** If the marker's box overlaps any other living pet's screen box (not the player's own pet),
      move it up until it clears with 2 of clearance, by at most 120, and never above the safe top.
-  3. If that cannot clear the pet, put the box just below the lowest overlapping pet's box (2 of clearance), clamped to
-     the safe bottom.
+  3. If that cannot clear the pet, put the box just below the lowest overlapping pet's box (2 of clearance). If it
+     then overlaps another pet, go just below that one too, and so on down, while the box stays above the safe bottom.
   4. If neither clears, keep the position step 2 reached (lifted at most 120, never above the safe top).
   Nothing clamps after the dodge. The marker never covers the scores, the timer or the slab line.
 - **Words.** Line 1: `SLAB  <N> m`, the camera's ground distance to the slab centre, whole metres. Line 2: the state
@@ -30,7 +33,8 @@ row.
   | Nobody on it | `NEUTRAL` | hollow diamond | white |
   | One team alone on it | `CORGI COMPANY` / `CAT CADRE` | filled diamond | that team's colour, lightened |
   | Both teams on it | `CONTESTED` | diamond split by a bar | amber |
-- **Off screen.** The marker clamps to the screen edge and keeps both lines.
+- **Off screen.** The marker clamps to the screen edge and keeps both lines. Behind the camera it sits on the bottom
+  edge toward the slab's side, and the same placement steps run against the pets on screen.
 - **On the slab, or down.** When the player stands on the slab, the marker hides; the top slab line says the state.
   It also hides while the player is down: the death panel gives the distance from the respawn, so the screen never
   shows two distances at once.
@@ -75,6 +79,8 @@ BACK IN <s.s>
   - The HP bar shows the lost HP as a white chip segment that drains over 0.4 s. The chip follows the hit points, not
     only the damage event, so a takedown with no hit before it (a fall) leaves no stuck chip.
   - A full-screen red flash may stay, at alpha 0.25 or less, but it is never the only cue.
+  - While a wedge's box overlaps the marker's box, the marker draws at alpha 0.35, so the wedge never reads as part
+    of the marker (or as Cat Cadre's triangle glyph).
 - **Sound.** All six cues must play (`--sfx-log` on Godot, the web cue log). The own and enemy slab ticks must differ
   in length or pitch; the numbers go in `docs/qa/w15/LISTEN.md`. There is no music, and nobody claims the cues sound
   good.
@@ -92,3 +98,11 @@ BACK IN <s.s>
 | Win sub | `<a>  –  <b>`, then `You: <k> takedowns · <d> knockouts`, then the rematch line |
 | Rematch line | Godot: `R / Enter / Start: rematch   ·   F2 / Back: switch 1v1 / 2v2`. Web: the same where those controls exist there, else drop only the missing parts |
 | fps | Godot: none. Web: only with `?debug` |
+| Hint (Godot) | names X with R for reload (both are bound) |
+| Nameplates | none in either build during a slab match (the twin hides its own) |
+| PLACEHOLDER PETS tag | both builds, while the pets are placeholders |
+
+## 5. Rematch (R, Enter, pad Start)
+Score 0 - 0, the clock back to 3:00, every pet at its start slot, the bots' state reset (target, path, role, timers),
+and no HUD leftovers: no hit confirm, no wedge, no chip, no red flash, no death panel or countdown, no win screen. Kill
+feed cleared. Both builds; each has a test that rematches mid-death and mid-cue.

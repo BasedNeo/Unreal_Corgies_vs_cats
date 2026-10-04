@@ -492,11 +492,13 @@ func _match(game: Node, s: int) -> Dictionary:
 		"inner": [0.0, 0.0], "lip_fight": [0.0, 0.0], "exits": [0, 0], "jump_bins": [[0, 0, 0, 0], [0, 0, 0, 0]],
 		"jump_fight": [0, 0], "air": [0.0, 0.0], "air_near": [0.0, 0.0], "sh_air": [0, 0], "hit_air": [0, 0],
 		"sh_gnd": [0, 0], "hit_gnd": [0, 0], "death_bins": [[0, 0, 0, 0], [0, 0, 0, 0]], "death_air": [0, 0],
-		"band": [], "band_contact": 0.0, "stall_bins": [[0, 0, 0, 0], [0, 0, 0, 0]]}
+		"band": [], "band_contact": 0.0, "stall_bins": [[0, 0, 0, 0], [0, 0, 0, 0]], "roles": {}}
 	var life := {}
 	for p in game.pets:
 		life[p] = {"t0": 0.0, "reached": false, "alive": true, "on": false, "j": int(p.get("jumps")) if p.get("jumps") != null else 0,
-			"b_in": -1.0, "b_out": -1.0, "stall": 0.0}
+			"b_in": -1.0, "b_out": -1.0, "stall": 0.0, "role": p.get("role")}
+		if p.get("role") != null:
+			_rstat(r, p.team, int(p.get("role"))).lives += 1
 	var cons: Array = []
 	var on_down := func(pet: Node, killer: Node) -> void:
 		var t: float = game.elapsed
@@ -516,6 +518,10 @@ func _match(game: Node, s: int) -> Dictionary:
 			r.death_air[pet.team] += 1
 		if not life[pet].reached:
 			r.died_en_route[pet.team] += 1
+		if life[pet].role != null:
+			_rstat(r, pet.team, int(life[pet].role)).deaths += 1
+		if killer != null and killer != pet and life.has(killer) and life[killer].role != null:
+			_rstat(r, killer.team, int(life[killer].role)).kills += 1
 	game.pet_down.connect(on_down)
 	cons.append([game.pet_down, on_down])
 	for p in game.pets:
@@ -568,6 +574,9 @@ func _match(game: Node, s: int) -> Dictionary:
 				l.reached = false
 				l.b_in = -1.0
 				l.b_out = -1.0
+				l.role = p.get("role")
+				if l.role != null:
+					_rstat(r, p.team, int(l.role)).lives += 1
 			if trace and p.alive:
 				var hs := Vector2(p.velocity.x, p.velocity.z).length()
 				if hs < 0.6 and not game.slab.contains(p.global_position):
@@ -593,6 +602,19 @@ func _match(game: Node, s: int) -> Dictionary:
 			if p.alive and not l.reached and game.slab.contains(p.global_position):
 				l.reached = true
 				r.route[p.team].append(game.elapsed - l.t0)
+				if l.role != null:
+					var rs: Dictionary = _rstat(r, p.team, int(l.role))
+					rs.reached += 1
+					rs.tts.append(game.elapsed - l.t0)
+			if p.alive and l.role != null:
+				var rs2: Dictionary = _rstat(r, p.team, int(l.role))
+				rs2.alive += dt
+				if game.slab.contains(p.global_position):
+					rs2.on += dt
+					rs2.stood = true
+				var pp = p.get("push_point")
+				if pp is Vector3 and pp != Vector3.INF and Vector2(pp.x - p.global_position.x, pp.z - p.global_position.z).length() < 3.0:
+					rs2.post += dt
 			var on: bool = p.alive and game.slab.contains(p.global_position)
 			if on:
 				r.pet_on[p.team] += dt
@@ -629,6 +651,8 @@ func _match(game: Node, s: int) -> Dictionary:
 			str(r.death_bins[0]), str(r.death_bins[1]), r.death_air[0], r.death_air[1]])
 		print("  trace band (Corgi lives crossing %.0f-%.0f m of the slab path) n %d mean %s s · with a teammate within 1.5 m %.1f s · stalls by distance %s | %s" % [
 			PATH_S.x, PATH_S.y, r.band.size(), _mean_s(r.band), r.band_contact, str(r.stall_bins[0]), str(r.stall_bins[1])])
+	if r.roles.has("0:1") or r.roles.has("1:1"):
+		print("  roles · " + _role_line(r.roles, 1))
 	if events:
 		for e in r.log:
 			print("  ", e)
@@ -643,6 +667,30 @@ const PATH_S := Vector2(26.0, 64.0)
 static func _path_s(p: Vector3) -> float:
 	var d := (PATH_B - PATH_A).normalized()
 	return (Vector2(p.x, p.z) - PATH_A).dot(d)
+
+## Per team and bot role (bot.gd role: 0 HOLD, 1 APPROACH): lives, lives that reached the slab and their
+## spawn-to-slab times, seconds on the slab, whether it stood on the slab this match, seconds at its post, kills, deaths.
+static func _rstat(r: Dictionary, team: int, role: int) -> Dictionary:
+	var k := "%d:%d" % [team, role]
+	if not r.roles.has(k):
+		r.roles[k] = {"lives": 0, "reached": 0, "tts": [], "on": 0.0, "stood": false, "post": 0.0, "kills": 0, "deaths": 0,
+			"alive": 0.0}
+	return r.roles[k]
+
+const ROLE_NAMES := ["HOLD", "APPROACH"]
+
+static func _role_line(roles: Dictionary, n: int) -> String:
+	var out: Array = []
+	for k in ["0:0", "0:1", "1:0", "1:1"]:
+		if not roles.has(k):
+			continue
+		var v: Dictionary = roles[k]
+		var t := int(k.split(":")[0])
+		var ro := int(k.split(":")[1])
+		out.append("%s %s: time to slab %s s (%d of %d lives) · on the slab %.0f s%s · stood on it in %d/%d matches · at the post %.0f s (%s of its alive time) · kills %d · deaths %d" % [
+			SIDE[t], ROLE_NAMES[ro], _mean_s(v.tts), v.reached, v.lives, v.on, "" if n == 1 else " (%.1f per match)" % (v.on / n),
+			int(v.stood_n) if v.has("stood_n") else (1 if v.stood else 0), n, v.post, _pct_f(v.post, v.alive), v.kills, v.deaths])
+	return " | ".join(out)
 
 static func _flat_d(game: Node, p: Vector3) -> float:
 	return Vector2(p.x - game.slab.center.x, p.z - game.slab.center.z).length()
@@ -715,6 +763,20 @@ func _summary(rows: Array, real_s: float) -> void:
 			tt.air_near[1], _pct(tt.hit_air[0], tt.sh_air[0]), tt.sh_air[0], _pct(tt.hit_air[1], tt.sh_air[1]), tt.sh_air[1],
 			_pct(tt.hit_gnd[0], tt.sh_gnd[0]), tt.sh_gnd[0], _pct(tt.hit_gnd[1], tt.sh_gnd[1]), tt.sh_gnd[1],
 			str(td[0]), str(td[1]), tt.death_air[0], tt.death_air[1]])
+	var rt := {}
+	for r in rows:
+		for k in r.roles:
+			var v: Dictionary = r.roles[k]
+			if not rt.has(k):
+				rt[k] = {"lives": 0, "reached": 0, "tts": [], "on": 0.0, "stood": false, "stood_n": 0, "post": 0.0, "kills": 0,
+					"deaths": 0, "alive": 0.0}
+			for f in ["lives", "reached", "on", "post", "kills", "deaths", "alive"]:
+				rt[k][f] += v[f]
+			rt[k].tts.append_array(v.tts)
+			if v.stood:
+				rt[k].stood_n += 1
+	if rt.has("0:1") or rt.has("1:1"):
+		print("SUMMARY %s roles · %s" % [fmt, _role_line(rt, rows.size())])
 	print("SUMMARY %s %.0f s of game time in %.0f s real (x%.1f)" % [fmt, game_s, real_s, game_s / maxf(0.001, real_s)])
 
 ## In the slab's score volume (slab.gd contains()) and at least `margin` m inside every edge of its square.

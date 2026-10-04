@@ -1,6 +1,15 @@
 extends RefCounted
 ## G-GAME: the winner screen, then the rematch action resets the score, the timer and every pet. The same action
 ## during play does nothing. First to 60 ends the match.
+## W15 G-HUD (contract §5, Rematch): the real R key, then the real Enter key (key events through Input, as the
+## InputMap binds them), each pressed on the winner screen of a match that ended mid-cue and mid-death:
+## - R: the player had just downed the Cat bot (a kill confirm) and taken a hit (a wedge, the red flash, the HP chip);
+## - Enter: the Cat bot had just taken the player down (the death panel and its countdown were up), with the kill
+##   confirm and the killing hit's wedge, flash and chip still running.
+## After the rematch: score 0 - 0, no respawn countdown left (respawn_left 0), the clock at 3:00, every pet at its start
+## slot, and nothing left on the HUD: no
+## confirm, wedge, chip, red flash, death panel or winner screen, and an empty takedown feed. (The bots' own state is
+## g-bot's, tests/test_bot_roles.gd; this checks only what the player sees.)
 const Kit := preload("res://game/testkit.gd")
 const T := preload("res://game/tuning.gd")
 
@@ -67,6 +76,85 @@ func run(tree: SceneTree) -> Array:
 	await Kit.physics(tree, 2)
 	if not game.overtime or not game.playing():
 		errs.append("a tie at 0:00 did not go to overtime")
+	game.rematch()
+	errs.append_array(await _rematch_clears(tree, game, KEY_R, false))
+	errs.append_array(await _rematch_clears(tree, game, KEY_ENTER, true))
 	errs.append_array(Kit.unwatch(log))
 	await Kit.dispose(tree, main)
 	return errs
+
+## A real key event (physical keycode), down or up, through Input: what a keyboard sends.
+static func key(k: Key, down: bool) -> void:
+	var e := InputEventKey.new()
+	e.physical_keycode = k
+	e.keycode = k
+	e.pressed = down
+	Input.parse_input_event(e)
+
+## §5: end a match mid-cue (and, with `dead`, mid-death), press `k` on the winner screen, and check that the new match
+## starts clean.
+func _rematch_clears(tree: SceneTree, game: Node, k: Key, dead: bool) -> Array:
+	var e: Array = []
+	var tag := "%s rematch%s" % [OS.get_keycode_string(k), " mid-death" if dead else " mid-cue"]
+	var hud: Node = game.hud
+	var me: Node = game.player
+	var cat: Node = game.pets.filter(func(p): return p != me)[0]
+	cat.set_physics_process(false)
+	await Kit.physics(tree, 3)
+	cat.global_position = me.global_position + Vector3(6, 0, 0)
+	me.shield = 0.0
+	if dead:
+		me.take_damage(float(T.MAX_HP) + 10.0, cat)  # the killing hit: wedge, flash, chip, then the death panel
+	else:
+		me.take_damage(15.0, cat)  # a wedge, the flash, the chip
+		cat.die(me)  # the player's takedown: in the feed
+	me.hit_confirmed.emit({"kill": true, "head": false, "hit": true, "target": cat, "pos": cat.global_position, "damage": 15.0})
+	await tree.process_frame
+	await tree.process_frame
+	# the cues are up (the precondition: otherwise this test proves nothing)
+	var up := {"confirm": hud.hit_t > 0.0, "wedge": hud.wedges.size() == 1, "flash": hud._flash.color.a > 0.0,
+		"chip": hud._chip.visible, "feed": not game.feed.is_empty()}
+	if dead:
+		up["death panel"] = hud._death.visible and hud.death_text.size() == 4 and hud.death_text[3].begins_with("BACK IN ")
+	for cue in up:
+		if not up[cue]:
+			e.append("%s: setup, the %s is not up before the match ends" % [tag, cue])
+	game.score = [12, T.WIN_SCORE]
+	game.end_match(1)
+	await tree.process_frame
+	await tree.process_frame
+	if not hud._winner.visible:
+		e.append("%s: setup, the winner screen is not up" % tag)
+	key(k, true)
+	await tree.process_frame  # the rematch runs in this frame's _process, the HUD after it
+	await tree.process_frame
+	key(k, false)
+	if not game.playing():
+		e.append("%s: the match did not restart" % tag)
+		return e
+	if game.score != [0, 0]:
+		e.append("%s: score %s, want [0, 0]" % [tag, str(game.score)])
+	if game.respawn_left(me) != 0.0:
+		e.append("%s: the player's respawn countdown is still %.2f s after the rematch, want 0" % [tag, game.respawn_left(me)])
+	if game.time_left < T.MATCH_TIME - 0.2 or hud._timer.text != "3:00":
+		e.append("%s: the clock reads %s (%.2f s left), want 3:00" % [tag, hud._timer.text, game.time_left])
+	var used := [0, 0]
+	var slots := [game.start_slots(0), game.start_slots(1)]
+	for p in game.pets:
+		var list: Array = slots[p.team]
+		var sp: Vector3 = list[used[p.team] % list.size()] + Vector3(1.2 * floorf(float(used[p.team]) / list.size()), 0, 0)
+		used[p.team] += 1
+		var at: Vector3 = p.global_position
+		if Vector2(at.x - sp.x, at.z - sp.z).length() > 0.3 or absf(at.y - sp.y) > 0.6 or not p.alive:
+			e.append("%s: %s is at %s (alive %s), not at its start slot %s" % [tag, p.display_name, str(at), p.alive, str(sp)])
+	var left := {"confirm": hud.hit_t > 0.0, "wedge": not hud.wedges.is_empty(), "red flash": hud._flash.color.a > 0.0,
+		"HP chip": hud._chip.visible, "death panel": hud._death.visible or not hud.death_text.is_empty(),
+		"remembered killer": not hud.down_by.is_empty(), "winner screen": hud._winner.visible,
+		"takedown feed": not game.feed.is_empty() or hud._feed.text != ""}
+	var drawn: Array = hud.overlay_prims().map(func(it): return it.what)
+	left["drawn confirm"] = drawn.has("confirm")
+	left["drawn wedge"] = drawn.has("wedge")
+	for cue in left:
+		if left[cue]:
+			e.append("%s: the %s is still there after the rematch" % [tag, cue])
+	return e

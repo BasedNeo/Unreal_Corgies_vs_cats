@@ -311,7 +311,7 @@ export function createAudio(opts: { maxVoices?: number; autoUnlock?: boolean; mu
           const cat = speciesOf(ev.id) === Species.Cat;
           engine.play(S.poof, at(ev.id, { priority: 2, category: 'impact' }));
           engine.play(cat ? S.meow : S.yelp, at(ev.id, { k: 2, gain: 0.7, priority: 1, category: 'voice' }));
-          if (ev.by === localId && ev.id !== localId) {
+          if (ev.by >= 0 && ev.by === localId && ev.id !== localId) { // a fall (by -1) is nobody's kill, also with no local pet
             engine.play(S.hitThud, { bus: 'ui', k: 2, gain: 0.8, priority: 3, category: 'ui' }); // X3: the kill thump
             engine.play(S.sting, { bus: 'ui', k: 0, priority: 3, category: 'ui' });
           }

@@ -44,6 +44,8 @@ const HIT_RING := 110.0
 const WEDGE_FADE := 0.6
 const CHIP_DRAIN := 0.4
 const FLASH_MAX := 0.25
+## While a received wedge's box overlaps the marker's box, the marker draws at this alpha (contract §3, revision 4).
+const MARKER_DIM := 0.35
 const CUE_COLORS := {"body": Color(1, 1, 1), "head": Color(1.0, 0.85, 0.2), "kill": Color(1.0, 0.25, 0.2),
 	"received": Color(1.0, 0.45, 0.36)}
 const HP_W := 240.0
@@ -109,6 +111,8 @@ class Glyph extends Control:
 
 func _ready() -> void:
 	layer = 10
+	if game != null and game.has_signal("match_started"):
+		game.match_started.connect(_reset_cues)
 	var root := Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -210,7 +214,7 @@ func _ready() -> void:
 	_center.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root.add_child(_center)
 	_build_death(root)
-	_hint = _label("WASD / stick move · mouse / stick look · Space / A jump · LMB / RT fire · RMB / LT aim · Shift sprint · R reload\n"
+	_hint = _label("WASD / stick move · mouse / stick look · Space / A jump · LMB / RT fire · RMB / LT aim · Shift sprint · R / X reload\n"
 		+ "Hold the slab alone to score · Esc frees the mouse · F2 / Back: 1v1 or 2v2", 14, Color(1, 1, 1, 0.85))
 	_hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	_hint.position = Vector2(-500, -120)
@@ -357,8 +361,9 @@ static func marker_box(l1: Vector2, l2: Vector2) -> Rect2:
 ## 1. the anchor `a` is clamped so the box `off` (around the shape) stays inside `safe`;
 ## 2. while the box covers a rect in `pets` (the other living pets' boxes), it moves up until clear with MARKER_CLEAR
 ##    to spare, by at most MARKER_MAX_LIFT in all and never above the safe top (the scores, timer and slab line);
-## 3. if that cannot clear them, the box goes just below the lowest pet box it still covers (MARKER_CLEAR under it),
-##    kept inside the safe bottom, provided it clears every pet there;
+## 3. if that cannot clear them, the box goes just below the lowest pet box it still covers (MARKER_CLEAR under it);
+##    if it then covers another pet, just below that one too, and so on down while the box stays above the safe
+##    bottom (revision 4);
 ## 4. if neither clears, it keeps the lifted position of step 2.
 ## Nothing clamps after the dodge. Returns {pos, raw (after step 1), lift (px up; negative when it went below), dodge:
 ## "none", "lift", "below" or "blocked"}. `screen` is unused since revision 3 and kept for callers.
@@ -375,19 +380,23 @@ static func place_marker(a: Vector2, off: Rect2, pets: Array, safe: Rect2, _scre
 			break
 		p.y -= step
 		dodge = "lift"
-	var box := Rect2(p + off.position, off.size)
-	if _overlap_need(box, pets) > 0.0:
-		var low := -INF  # the lowest bottom of the pet boxes it still covers
-		for b in pets:
-			var pr: Rect2 = b
-			if box.intersects(pr):
-				low = maxf(low, pr.end.y)
-		var under := Vector2(p.x, minf(low + MARKER_CLEAR - off.position.y, safe.end.y - off.end.y))
-		if _overlap_need(Rect2(under + off.position, off.size), pets) <= 0.0:
-			p = under
-			dodge = "below"
-		else:
-			dodge = "blocked"
+	if _overlap_need(Rect2(p + off.position, off.size), pets) > 0.0:
+		dodge = "blocked"
+		var q := p
+		for _i in pets.size() + 1:  # each step passes at least one pet box
+			var low := -INF  # the lowest bottom of the pet boxes the box covers here
+			var box := Rect2(q + off.position, off.size)
+			for b in pets:
+				var pr: Rect2 = b
+				if box.intersects(pr):
+					low = maxf(low, pr.end.y)
+			if low == -INF:
+				p = q
+				dodge = "below"
+				break
+			q.y = low + MARKER_CLEAR - off.position.y
+			if q.y + off.end.y > safe.end.y:
+				break  # past the safe bottom: nothing clears below
 	return {"pos": p, "raw": raw, "lift": raw.y - p.y, "dodge": dodge}
 
 ## How far `box` must move up to clear every rect in `pets` it covers (MARKER_CLEAR to spare); 0 when it covers none.
@@ -553,18 +562,37 @@ func _hook_player() -> void:
 	if p == _hooked:
 		return
 	_hooked = p
-	wedges.clear()
-	down_by = {}
-	chip_top = 0.0
-	_hp_seen = 0.0
+	_reset_cues()
 	if p != null:
 		p.hit_confirmed.connect(_on_hit_confirmed)
 		p.damaged.connect(_on_damaged)
 		p.died.connect(_on_player_died)
 
+## A confirm of the player's hit. A kill runs its whole KILL_SHOW: a body or head hit inside it does not cut it short.
 func _on_hit_confirmed(res: Dictionary) -> void:
-	hit_kind = "kill" if bool(res.get("kill", false)) else ("head" if bool(res.get("head", false)) else "body")
-	hit_t = KILL_SHOW if hit_kind == "kill" else HIT_SHOW
+	var kind := "kill" if bool(res.get("kill", false)) else ("head" if bool(res.get("head", false)) else "body")
+	if hit_kind == "kill" and hit_t > 0.0 and kind != "kill":
+		return
+	hit_kind = kind
+	hit_t = KILL_SHOW if kind == "kill" else HIT_SHOW
+
+## §5 Rematch (and a new player after F2): no HUD leftovers from before. No confirm, wedge, chip, red flash or death
+## panel, and no remembered killer. Runs on match.gd match_started and from _hook_player.
+func _reset_cues() -> void:
+	hit_t = 0.0
+	_dmg_t = 0.0
+	wedges.clear()
+	chip_top = 0.0
+	_chip_rate = 0.0
+	_hp_seen = 0.0
+	down_by = {}
+	death_text = PackedStringArray()
+	if _flash != null:
+		_flash.color.a = 0.0
+	if _chip != null:
+		_chip.visible = false
+	if _death != null:
+		_death.visible = false
 
 ## A hit on the local player (pet.gd damaged): the red flash and a wedge toward the attacker. The HP chip follows the
 ## hit points themselves (_process), so a takedown without a hit (a fall) drains it too.
@@ -727,45 +755,114 @@ static func draw_prims(ci: CanvasItem, pr: Dictionary, col: Color) -> void:
 		ci.draw_arc(r[0], r[1], 0.0, TAU, 40, dark, w + 2.0, true)
 		ci.draw_arc(r[0], r[1], 0.0, TAU, 40, col, w, true)
 
-func draw_overlay(ci: Control) -> void:
-	if game == null:
-		return
-	if marker.get("visible", false):
-		_draw_marker(ci, marker)
-	var p: Node = game.player
-	if p == null or not p.alive:
-		return
-	var c := ci.size * 0.5
-	var spread: float = p.current_spread() + p.rifle.bloom
-	var gap := 5.0 + spread * 420.0
-	var w := Color(1, 1, 1, 0.92)
-	for d in [Vector2.RIGHT, Vector2.LEFT, Vector2.UP, Vector2.DOWN]:
-		ci.draw_line(c + d * gap, c + d * (gap + 9.0), Color(0, 0, 0, 0.6), 4.0)
-		ci.draw_line(c + d * gap, c + d * (gap + 9.0), w, 2.0)
-	ci.draw_circle(c, 1.6, w)
-	if hit_t > 0.0:
-		var a := clampf(hit_t / (KILL_SHOW if hit_kind == "kill" else HIT_SHOW), 0.0, 1.0)
-		draw_prims(ci, hit_cue(hit_kind, c), Color(CUE_COLORS[hit_kind], a))
+## The overlay's state this frame, for build_overlay: the canvas size, the font, the marker (marker_frame), whether the
+## match is over, whether the player is up, the crosshair's spread (rad), the confirm on show, and each wedge's screen
+## direction and life left.
+func overlay_state() -> Dictionary:
+	var p: Node = game.player if game != null else null
+	var up: bool = p != null and p.alive
+	var ws: Array = []
 	for wd in wedges:
-		var a := clampf(float(wd.t) / WEDGE_FADE, 0.0, 1.0)
-		draw_prims(ci, hit_cue("received", c, wedge_screen_dir(wd)), Color(CUE_COLORS.received, a))
+		ws.append({"dir": wedge_screen_dir(wd), "t": float(wd.t)})
+	return {"size": _cross.size, "font": _font(), "marker": marker, "over": game != null and game.over(), "alive": up,
+		"spread": (p.current_spread() + p.rifle.bloom) if up else 0.0, "hit_kind": hit_kind, "hit_t": hit_t, "wedges": ws}
 
-func _draw_marker(ci: CanvasItem, mk: Dictionary) -> void:
-	var font := _font()
-	var col: Color = mk.spec.color
-	var pos: Vector2 = mk.pos
-	var box: Rect2 = mk.rect
-	var y := box.position.y
-	for i in 2:
-		var px: int = MARKER_PX[i]
-		var s: String = mk.lines[i]
-		var at := Vector2(pos.x - font.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, px).x * 0.5, y + font.get_ascent(px))
-		ci.draw_string_outline(font, at, s, HORIZONTAL_ALIGNMENT_LEFT, -1, px, 4, Color(0, 0, 0, 0.85))
-		ci.draw_string(font, at, s, HORIZONTAL_ALIGNMENT_LEFT, -1, px, Color(1, 1, 1, 0.92) if i == 0 else col)
-		y += font.get_height(px)
-	draw_prims(ci, marker_shapes(mk.spec.shape, pos), col)
+## Everything the overlay draws this frame, as build_overlay(overlay_state()) gives it. draw_overlay only iterates it.
+func overlay_prims() -> Array:
+	return build_overlay(overlay_state()) if game != null else []
+
+## The overlay as draw items, in drawing order (pure). Each item is {what, color, ...}:
+## - "marker_text": the marker's line `line` (0 `SLAB  <N> m`, 1 the state word), at baseline `pos`, `px` font size,
+##   between `top` and `bottom`;
+## - "marker_shape": the state's `shape` as `prims` (marker_shapes);
+## - "crosshair": its arms at `gap` px from `center` (the gap opens with the spread);
+## - "confirm": the hit confirm `kind` as `prims` (hit_cue), fading over its show time;
+## - "wedge": a received wedge as `prims`, fading over WEDGE_FADE, and its box `rect`.
+## The marker draws at MARKER_DIM alpha while a wedge's box overlaps its box. Nothing but the marker (hidden too, by
+## marker_frame) draws once the match is over or while the player is down: no crosshair or cues over the win screen.
+static func build_overlay(st: Dictionary) -> Array:
+	var out: Array = []
+	var c: Vector2 = st.size * 0.5
+	var live: bool = st.alive and not st.over
+	var wedge_items: Array = []
+	if live:
+		for w in st.wedges:
+			var pr := hit_cue("received", c, w.dir)
+			wedge_items.append({"what": "wedge", "prims": pr, "rect": prims_rect(pr),
+				"color": Color(CUE_COLORS.received, clampf(float(w.t) / WEDGE_FADE, 0.0, 1.0))})
+	var mk: Dictionary = st.marker
+	if mk.get("visible", false):
+		var box: Rect2 = mk.rect
+		var a := 1.0
+		for w in wedge_items:
+			if box.intersects(w.rect):
+				a = MARKER_DIM
+		var font: Font = st.font
+		var col: Color = mk.spec.color
+		var y := box.position.y
+		for i in 2:
+			var px: int = MARKER_PX[i]
+			var s: String = mk.lines[i]
+			var at := Vector2(mk.pos.x - font.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, px).x * 0.5, y + font.get_ascent(px))
+			var tc := Color(1, 1, 1, 0.92) if i == 0 else col
+			out.append({"what": "marker_text", "line": i, "text": s, "pos": at, "px": px, "top": y,
+				"bottom": y + font.get_height(px), "color": Color(tc, tc.a * a)})
+			y += font.get_height(px)
+		out.append({"what": "marker_shape", "shape": mk.spec.shape, "prims": marker_shapes(mk.spec.shape, mk.pos),
+			"color": Color(col, a)})
+	if not live:
+		return out
+	out.append({"what": "crosshair", "center": c, "gap": 5.0 + float(st.spread) * 420.0, "color": Color(1, 1, 1, 0.92)})
+	if float(st.hit_t) > 0.0:
+		var k: String = st.hit_kind
+		out.append({"what": "confirm", "kind": k, "prims": hit_cue(k, c),
+			"color": Color(CUE_COLORS[k], clampf(float(st.hit_t) / (KILL_SHOW if k == "kill" else HIT_SHOW), 0.0, 1.0))})
+	out.append_array(wedge_items)
+	return out
+
+## The box round every point of prims (rings by their radius), grown by the 2 px dark rim draw_prims puts round them.
+static func prims_rect(pr: Dictionary) -> Rect2:
+	var pts := PackedVector2Array()
+	for l in pr.lines:
+		pts.append_array([l[0], l[1]])
+	for f in pr.fills + pr.outlines:
+		pts.append_array(f)
+	for r in pr.rings:
+		pts.append_array([r[0] - Vector2(r[1], r[1]), r[0] + Vector2(r[1], r[1])])
+	if pts.is_empty():
+		return Rect2()
+	var box := Rect2(pts[0], Vector2.ZERO)
+	for q in pts:
+		box = box.expand(q)
+	return box.grow(2.0)
+
+func draw_overlay(ci: Control) -> void:
+	for it in overlay_prims():
+		_draw_item(ci, it)
+
+func _draw_item(ci: CanvasItem, it: Dictionary) -> void:
+	var col: Color = it.color
+	match it.what:
+		"marker_text":
+			var font := _font()
+			ci.draw_string_outline(font, it.pos, it.text, HORIZONTAL_ALIGNMENT_LEFT, -1, it.px, 4, Color(0, 0, 0, 0.85 * col.a))
+			ci.draw_string(font, it.pos, it.text, HORIZONTAL_ALIGNMENT_LEFT, -1, it.px, col)
+		"crosshair":
+			var c: Vector2 = it.center
+			var gap: float = it.gap
+			for d in [Vector2.RIGHT, Vector2.LEFT, Vector2.UP, Vector2.DOWN]:
+				ci.draw_line(c + d * gap, c + d * (gap + 9.0), Color(0, 0, 0, 0.6), 4.0)
+				ci.draw_line(c + d * gap, c + d * (gap + 9.0), col, 2.0)
+			ci.draw_circle(c, 1.6, col)
+		_:
+			draw_prims(ci, it.prims, col)
+
+## The killer team's glyph in a `size` box (pure): its shape (team_glyph) and colour, the team colour lightened 0.3.
+static func glyph_prims(team: int, size: Vector2) -> Dictionary:
+	var pr := _prims()
+	pr.fills.append(team_glyph(team, size * 0.5, minf(size.x, size.y) * 0.5 - 1.5))
+	return {"prims": pr, "color": T.TEAM_COLORS[team].lightened(0.3)}
 
 func draw_glyph(ci: Control, team: int) -> void:
-	var pr := _prims()
-	pr.fills.append(team_glyph(team, ci.size * 0.5, minf(ci.size.x, ci.size.y) * 0.5 - 1.5))
-	draw_prims(ci, pr, T.TEAM_COLORS[team].lightened(0.3))
+	var g := glyph_prims(team, ci.size)
+	draw_prims(ci, g.prims, g.color)

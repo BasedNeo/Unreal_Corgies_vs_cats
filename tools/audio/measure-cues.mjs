@@ -6,11 +6,14 @@
 //   peakDb       the largest sample (dBFS)
 //   rmsDb        RMS over the whole file (dBFS)
 //   rms50Db      RMS over the loudest 50 ms window (dBFS)
-//   attackMs     from the first 1 ms RMS window within -20 dB of the loudest window, to that window
-//   audibleMs    until the 1 ms RMS envelope last sits above -40 dB of its loudest window
-//   centroidHz   spectral centroid: magnitude-weighted mean frequency, whole file, Hann window, 20 Hz - 20 kHz
+//   attackMs     from the onset (the first 1 ms RMS window within -20 dB of the loudest window) to that window
+//   audibleMs    from the onset to the last 1 ms window above -40 dB of the loudest window
+//   centroidHz   spectral centroid: power-weighted (|X|^2) mean frequency, whole file, Hann window, 20 Hz - 20 kHz
 //   dominantHz   the largest FFT bin over the same range
-// tests/unit/audio-cue-measure.test.ts imports these functions (the own / enemy slab tick must stay apart).
+// W15 C: the centroid is weighted by power, not magnitude (magnitude weighting let the noise floor pull it up), and
+// the audible length starts at the onset, not at the file's first sample.
+// tests/unit/audio-cue-measure.test.ts imports these functions: the own and enemy slab ticks must differ in pitch or
+// in length (HUD_CONTRACT §3).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -96,8 +99,9 @@ export function measure(samples, rate) {
     const f = (k * rate) / n;
     if (f < 20 || f > 20000) continue;
     if (kTop < 0 || mag[k] > mag[kTop]) kTop = k;
-    num += f * mag[k];
-    den += mag[k];
+    const pw = mag[k] * mag[k];
+    num += f * pw;
+    den += pw;
   }
   return {
     durationMs: (samples.length / rate) * 1000,
@@ -105,7 +109,7 @@ export function measure(samples, rate) {
     rmsDb: db(Math.sqrt(sum / Math.max(1, samples.length))),
     rms50Db: db(Math.sqrt(best / Math.max(1, w50))),
     attackMs: (top - onset) * (win / rate) * 1000,
-    audibleMs: (last + 1) * (win / rate) * 1000,
+    audibleMs: (last + 1 - Math.max(0, onset)) * (win / rate) * 1000,
     centroidHz: den > 0 ? num / den : 0,
     dominantHz: kTop >= 0 ? (kTop * rate) / n : 0,
   };

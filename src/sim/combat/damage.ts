@@ -43,8 +43,11 @@ export function applyDamage(sim: Sim, dst: SimEntity, amount: number, src: Damag
   return dmg;
 }
 
-/** Kill a character now (hp -> 0). Credits the source, or the last attacker within 5 s on a self-kill. */
-export function kill(sim: Sim, e: SimEntity, src: DamageSource): void {
+/**
+ * Kill a character now (hp -> 0). Credits the source, or the last attacker within 5 s on a self-kill. `src` null: nobody
+ * took it down (W15 slab fall, Godot pet.gd die(null)): no killer and no credit (death `by` -1, killerTeam -1).
+ */
+export function kill(sim: Sim, e: SimEntity, src: DamageSource | null): void {
   if (e.dead) return;
   ensureCombat(e);
   const h = e.health;
@@ -52,9 +55,10 @@ export function kill(sim: Sim, e: SimEntity, src: DamageSource): void {
   e.dead = true;
   e.anim = Anim.Dead;
   e.flags = (e.flags & ~DEATH_CLEAR) | EFlag.Dead;
-  let killer = src.id;
-  let killerTeam: TeamId | -1 = src.team;
-  if (src.id === e.id && h && h.lastAttacker >= 0 && sim.tick - h.lastDamageTick <= ticksOf(5)) {
+  let killer: EntityId = src ? src.id : -1;
+  let killerTeam: TeamId | -1 = src ? src.team : -1;
+  const weapon = src ? src.weapon : -1;
+  if (src && src.id === e.id && h && h.lastAttacker >= 0 && sim.tick - h.lastDamageTick <= ticksOf(5)) {
     const la = sim.entities.get(h.lastAttacker);
     if (la) { killer = la.id; killerTeam = la.team; }
   }
@@ -67,8 +71,8 @@ export function kill(sim: Sim, e: SimEntity, src: DamageSource): void {
   if (e.wpn) { e.wpn.charge = 0; e.wpn.charging = false; e.wpn.reload = 0; }
   if (meta.pve) { meta.removeTick = sim.tick + ticksOf(COMBAT_RULES.pveCorpseTime); e.respawnTick = 0; }
   else e.respawnTick = sim.tick + ticksOf(COMBAT_RULES.respawnDelay);
-  sim.emit(src.weapon >= 0 ? { e: 'death', id: e.id, by: killer, wpn: src.weapon } : { e: 'death', id: e.id, by: killer }); // W10 C10: the kill feed's glyph
-  combatBus(sim).kills.push({ victim: e.id, killer, victimTeam: e.team, killerTeam, tick: sim.tick, weapon: src.weapon });
+  sim.emit(weapon >= 0 ? { e: 'death', id: e.id, by: killer, wpn: weapon } : { e: 'death', id: e.id, by: killer }); // W10 C10: the kill feed's glyph
+  combatBus(sim).kills.push({ victim: e.id, killer, victimTeam: e.team, killerTeam, tick: sim.tick, weapon });
 }
 
 /**

@@ -12,7 +12,7 @@ extends RefCounted
 ## 4. Fields: `YOU: CORGI COMPANY` over the HP bar; no fps line anywhere; the strings at the match's start
 ##    (`CORGI COMPANY  0`, `0  CAT CADRE`, `SLAB  NEUTRAL`, `30 / 30`, `120`, the hint, the tag, the timer as m:ss) and
 ##    on the win screen (`CORGI COMPANY WINS`, the sub's first line and the rematch line). The other states' strings
-##    (timer red, OVERTIME, HOLDING, CONTESTED, RELOADING, DRAW, the full win sub) are not tested here (Sprint C).
+##    (timer red, OVERTIME, HOLDING, CONTESTED, RELOADING, DRAW, the full win sub) are in test_hud_clauses.gd.
 const Kit := preload("res://game/testkit.gd")
 const T := preload("res://game/tuning.gd")
 const Hud := preload("res://game/hud.gd")
@@ -144,7 +144,7 @@ func _fields(tree: SceneTree, game: Node) -> Array:
 		if (l as Label).text.to_lower().contains("fps"):
 			e.append("an fps line: %s" % (l as Label).text)
 	var want := ["CORGI COMPANY  0", "0  CAT CADRE", "SLAB  NEUTRAL", "30 / 30", "PLACEHOLDER PETS", "120",
-		"WASD / stick move · mouse / stick look · Space / A jump · LMB / RT fire · RMB / LT aim · Shift sprint · R reload\n"
+		"WASD / stick move · mouse / stick look · Space / A jump · LMB / RT fire · RMB / LT aim · Shift sprint · R / X reload\n"
 		+ "Hold the slab alone to score · Esc frees the mouse · F2 / Back: 1v1 or 2v2"]
 	for w in want:
 		if not texts.has(w):

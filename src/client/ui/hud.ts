@@ -712,6 +712,7 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
           if (ev.id === localId) hud.notice(`Picked up ${ev.item.replace(/_/g, ' ')}`);
           break;
         case 'score':
+          if (ev.reason === 'reset' && plainFeed) feed.clear(); // W15 slab §5: a rematch clears the kill feed (as hud.gd)
           // 0-point events (win, reset) are bookkeeping, not rewards: no "+0" toast
           if (ev.reason && ev.reason !== 'kill' && ev.pts > 0) hud.notice(`+${ev.pts} ${ev.team === 0 || ev.team === 1 ? TEAM_NAMES[ev.team] : ''} · ${ev.reason.replace(/_/g, ' ')}`);
           break;

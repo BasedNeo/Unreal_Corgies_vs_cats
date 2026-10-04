@@ -7,18 +7,20 @@ import { describe, it, expect } from 'vitest';
 import { Sim } from '../../src/sim/sim';
 import type { SimEntity } from '../../src/sim/entity';
 import { Room } from '../../src/host/room';
-import { Btn } from '../../src/shared/input';
+import { Btn, emptyInput } from '../../src/shared/input';
 import { CLASS_IDS, EFlag, EntityKind, Species, Team, type EntityKindId, type TeamId } from '../../src/shared/types';
 import type { GameEvent, MatchState, ServerMsg } from '../../src/shared/protocol';
 import { PROTOCOL_VERSION } from '../../src/shared/constants';
 import { SLAB, SLAB_TEXT, SLAB_ZONE_SEED, onSlab, type SlabConfig } from '../../src/shared/content/modes';
 import { weaponIndex } from '../../src/shared/content/weapons';
 import {
-  MODES, SLAB_CAT_OFFSET, SLAB_CAT_SLOTS, SLAB_CORGI_TRIPS, slabCatSlots, slabRespawnPoints, slabSlotOf, slabSlots, slabZone, type SlabLayout,
+  MODES, SLAB_CAT_OFFSET, SLAB_CAT_SLOTS, SLAB_CORGI_TRIPS, SLAB_FALL_DEPTH, slabCatSlots, slabRespawnPoints, slabSlotOf, slabSlots, slabZone, type SlabLayout,
 } from '../../src/sim/match';
 import { createWorldData } from '../../src/shared/world/world-data';
 import type { SpawnPoint } from '../../src/shared/world/world-types';
 import { applyDamage, isInvulnerable, kill, respawnNow } from '../../src/sim/combat';
+import { createBrain } from '../../src/sim/ai';
+import { createOrdnanceBot } from '../../src/sim/ai/ordnance-ai';
 import { WebSocket as WsClient } from 'ws';
 import { startGameServer } from '../../server/app';
 import { botsForMode, loadConfig } from '../../server/config';
@@ -212,6 +214,84 @@ describe('slab mode: scoring', () => {
   });
 });
 
+describe('slab mode: the fall (W15, Godot match.gd: y < slab y - 40 -> die(null))', () => {
+  it('a fall takes the pet down by nobody (THE LOT: death by -1, no credit to its last attacker), then the slab respawn', async () => {
+    const sim = await slabSim();
+    const c = pet(sim, Team.Corgis);
+    const k = pet(sim, Team.Cats, 30, 0); // off the slab
+    run(sim, 30);
+    expect(applyDamage(sim, c, 30, src(k), c.pos.x, c.pos.y + 0.5, c.pos.z, false)).toBe(30); // k hit it 0.5 s ago
+    run(sim, 30);
+    const held = [...match(sim).score]; // (c held the slab alone for that second: [1, 0])
+    const below = SLAB.center.y - SLAB_FALL_DEPTH;
+    // between the map's killY (-20) and Godot's plane (slab y - 40) nothing happens yet: no teleport, no death
+    sim.placeCharacter(c, c.pos.x, below + 15, c.pos.z);
+    expect(run(sim, 1).some((ev) => ev.e === 'death' || (ev.e === 'spawn' && ev.id === c.id))).toBe(false);
+    expect(c.dead).toBe(false);
+    expect(c.pos.y).toBeLessThan(sim.worldData.killY);
+    // below the plane: down, with no killer
+    sim.placeCharacter(c, c.pos.x, below - 0.5, c.pos.z);
+    const evs = run(sim, 1);
+    expect(c.dead).toBe(true);
+    expect(evs.filter((ev) => ev.e === 'death')).toEqual([{ e: 'death', id: c.id, by: -1 }]);
+    expect(evs.some((ev) => ev.e === 'spawn')).toBe(false); // not teleported to a spawn
+    expect(c.pos.y).toBeLessThan(below);
+    expect(match(sim).score).toEqual(held); // no score of its own
+    // back after SLAB.respawn s (the fall happened inside a tick: 180 ticks later), on a Corgi respawn point
+    let steps = 0;
+    run(sim, 400, () => (steps++, !c.dead));
+    expect(steps).toBe(SLAB.respawn * 60);
+    const pts = slabRespawnPoints(sim, Team.Corgis);
+    expect(pts.some((p) => p.x === c.pos.x && p.z === c.pos.z && p.yaw === c.yaw)).toBe(true);
+    expect(isInvulnerable(sim, c)).toBe(true);
+    expect(match(sim).score).toEqual(held); // nobody held the slab meanwhile (k stands 30 m off it)
+  });
+
+  it('a lagging human (Room catch-up inputs) who falls is downed with by -1, not teleported by the catch-up step', async () => {
+    const sim = await Sim.create({ seed: SEED, map: 'the_lot' });
+    const room = new Room(sim, { mode: 'slab', botsPerTeam: [0, 0] });
+    const evs: GameEvent[] = [];
+    const drain = sim.drainEvents.bind(sim);
+    sim.drainEvents = () => { const ev = drain(); evs.push(...ev); return ev; };
+    room.join({ id: 'h', send: () => {} }, { t: 'hello', v: PROTOCOL_VERSION, name: 'Ann', team: 0, cls: 'assault' });
+    const slot = room.players.get('h')!;
+    const e = sim.entities.get(slot.entity)!;
+    let seq = 0;
+    const send = (n: number) => {
+      const cmds = Array.from({ length: n }, () => ({ ...emptyInput(++seq), yaw: e.yaw }));
+      for (let i = 0; i < cmds.length; i += 32) room.handle('h', { t: 'input', cmds: cmds.slice(i, i + 32) });
+    };
+    for (let i = 0; i < 10; i++) { send(1); room.tick(); } // live, inputs flowing
+    // over the slab, 2 m above Godot's plane (and below the map's killY + 2, the catch-up step's out-of-bounds line)
+    sim.placeCharacter(e, SLAB.center.x, SLAB.center.y - SLAB_FALL_DEPTH + 2, SLAB.center.z);
+    for (let i = 0; i < 20; i++) room.tick(); // its inputs are late: frozen in the air, owed 20 ticks
+    expect(e.dead).toBe(false);
+    evs.length = 0;
+    send(20);
+    let t = 0;
+    while (!e.dead && t < 60) { room.tick(); t++; }
+    expect(slot.net.catchups).toBeGreaterThan(0); // the fall ran through the Room's catch-up steps
+    expect(e.dead).toBe(true);
+    expect(evs.filter((ev) => ev.e === 'death')).toEqual([{ e: 'death', id: e.id, by: -1 }]);
+    expect(evs.some((ev) => ev.e === 'spawn' && ev.id === e.id)).toBe(false);
+    expect(e.pos.y).toBeLessThan(SLAB.center.y - SLAB_FALL_DEPTH);
+    room.dispose();
+  });
+
+  it('in team-deathmatch the kill plane still teleports a faller to a spawn (no death)', async () => {
+    const sim = await Sim.create({ seed: SEED, map: 'the_lot' });
+    sim.state.room = { mode: 'team-deathmatch' };
+    sim.step();
+    sim.drainEvents();
+    const c = pet(sim, Team.Corgis);
+    sim.placeCharacter(c, c.pos.x, sim.worldData.killY - 1, c.pos.z);
+    const evs = run(sim, 1);
+    expect(c.dead).toBe(false);
+    expect(evs.some((ev) => ev.e === 'death')).toBe(false);
+    expect(Math.min(...sim.worldData.spawns.filter((s) => s.team === Team.Corgis).map((s) => Math.hypot(s.x - c.pos.x, s.z - c.pos.z)))).toBeLessThan(1);
+  });
+});
+
 describe('slab mode: the end', () => {
   it('first to 60 wins (the real numbers): ended, the winner, its line, the clock frozen', async () => {
     const sim = await slabSim();
@@ -331,6 +411,53 @@ describe('slab mode: kit, rematch, bots', () => {
     run(sim, 60);
     expect(isInvulnerable(sim, c)).toBe(false);
   });
+
+  it('X2: Reload mid-match (live) is not a rematch request', async () => {
+    const sim = await slabSim();
+    const c = pet(sim, Team.Corgis);
+    run(sim, 120);
+    const before = { score: [...match(sim).score], timeLeft: match(sim).timeLeft };
+    expect(before.score).toEqual([2, 0]);
+    const evs: GameEvent[] = [];
+    for (let i = 0; i < 4; i++) { // two presses (edges)
+      sim.setInput(c.id, { ...c.input, seq: c.input.seq + 1, buttons: i % 2 ? 0 : Btn.Reload });
+      evs.push(...run(sim, 30));
+    }
+    expect(match(sim).phase).toBe('live');
+    expect(evs.some((ev) => ev.e === 'score' && ev.reason === 'reset')).toBe(false);
+    expect(match(sim).score).toEqual([4, 0]); // still counting, never back to 0-0
+    expect(match(sim).timeLeft).toBeCloseTo(before.timeLeft - 2, 3); // the clock ran on, never back to 3:00
+  });
+
+  it('W15: a rematch gives every bot a fresh brain on its start slot (Godot test_bot_roles.gd)', async () => {
+    const sim = await Sim.create({ seed: SEED, map: 'the_lot' });
+    sim.state.matchConfig = { slab: { timeLimit: 30, overtimeMax: 0.1, endedHold: 0.5 } }; // 30 s of play, then a quick result
+    const room = new Room(sim, { mode: 'slab', botsPerTeam: [2, 2] });
+    const bots = () => [...sim.entities.values()].filter((e) => e.char && e.kind === EntityKind.Bot);
+    let t = 0;
+    while (match(sim)?.phase !== 'ended' && t < 40 * 60) { room.tick(); t++; }
+    expect(match(sim).phase).toBe('ended');
+    expect(t).toBeGreaterThanOrEqual(30 * 60);
+    // the last match left its mark: every bot has a slab goal, and some fought or walked a path
+    expect(bots().every((b) => b.ai!.tac.goal === 'step')).toBe(true);
+    expect(bots().some((b) => b.ai!.mode !== 'patrol' || b.ai!.target >= 0 || b.ai!.path.length > 0)).toBe(true);
+    while (match(sim).phase === 'ended' && t < 50 * 60) { room.tick(); t++; }
+    expect(match(sim)).toMatchObject({ phase: 'live', score: [0, 0] }); // the restart tick
+    expect(bots().length).toBe(4);
+    for (const b of bots()) {
+      const fresh = createBrain(b.ai!.arch, b.yaw);
+      fresh.ord = createOrdnanceBot(b.id);
+      fresh.lastX = b.pos.x; fresh.lastZ = b.pos.z;
+      fresh.external = b.ai!.external;
+      fresh.seq = b.ai!.seq;
+      expect(b.ai).toEqual(fresh);
+      const slot = slabSlotOf(sim, b)!;
+      expect([b.pos.x, b.pos.z, b.yaw]).toEqual([slot.x, slot.z, slot.yaw]);
+    }
+    room.tick();
+    for (const b of bots()) expect(b.ai!.odo).toBeLessThan(1); // no jump from where it stood before the rematch
+    room.dispose();
+  }, 120_000);
 
   it('a bots-only room restarts by itself after endedHold', async () => {
     const sim = await slabSim({ winScore: 1, endedHold: 2 });

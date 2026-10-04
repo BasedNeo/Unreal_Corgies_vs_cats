@@ -108,6 +108,10 @@ test('MATCH: SLAB from the menu starts the slab match on The Lot with its HUD an
   await expect(marker.locator('[data-slab-marker-l2]')).toHaveText(/^(NEUTRAL|CORGI COMPANY|CAT CADRE|CONTESTED)$/);
   await expect(marker).toHaveAttribute('data-shape', /^(hollow|filled|split)$/);
   await expect(slab.locator('[data-slab-you]')).toHaveText(/^YOU: (CORGI COMPANY|CAT CADRE)$/);
+  // §4 rev. 4: hud.gd's PLACEHOLDER PETS tag, and no nameplates in a slab match
+  await expect(slab.locator('[data-slab-tag]')).toHaveText('PLACEHOLDER PETS');
+  await expect(slab.locator('[data-slab-tag]')).toBeVisible();
+  await expect(page.locator('#nameplates')).toBeHidden();
   // you plus one Cat bot, and the six Lot kit pieces drawn from their shared GLBs
   expect(await page.evaluate(() => ((globalThis as any).__cvc.net.entities as number[][]).filter((e) => e[1] <= 1).length)).toBe(2);
   await page.waitForFunction(() => (globalThis as any).__cvc.twin?.kits === 6, null, { timeout: 90_000, polling: 1000 });
@@ -118,11 +122,28 @@ test('MATCH: SLAB from the menu starts the slab match on The Lot with its HUD an
 // W13 TW-VIEW: the end of a slab match and the rematch. &slabTime / &slabOvertime shorten the offline match (they reach
 // the worker's sim.state.matchConfig.slab through WorkerBootConfig; online rooms never see them): 8 s of regulation and
 // 4 s of overtime end it (a draw, unless the Cat bot already holds the slab) and the result holds. R rematches to 0-0,
-// and at the next end Enter does too (the authority takes a Reload edge 1 s or more after the end).
+// and at the next end Enter does too (the authority takes a Reload edge 1 s or more after the end). W15 §5: after each
+// rematch the HUD shows 0 - 0 and no leftovers: no death panel, no hit confirm, no wedge, no red flash, and the kill
+// feed is empty. This is a smoke check of the real build: the cue resets are proven in tests/unit/slab-hud.test.ts
+// (§5), since no cue can honestly be up at a rematch here (a production build has no &slabHurt, and the winner screen
+// hides the panel and the cues). The kill feed can be: a takedown of the Cat bot rides the next snapshot from the
+// offline worker (a test-only Worker wrapper adds the event to it), so its line is up when R / Enter rematch.
 test('SLAB: the match ends on the winner screen; R, then Enter, rematch to 0-0', async ({ page }) => {
   test.setTimeout(300_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
+  await page.addInitScript(() => {
+    const W = window.Worker;
+    (window as any).Worker = class extends W {
+      constructor(...a: ConstructorParameters<typeof Worker>) {
+        super(...a);
+        this.addEventListener('message', (e: MessageEvent) => {
+          const m = e.data, add = (window as any).__e2eAddEvent;
+          if (add && m && m.t === 'snap' && Array.isArray(m.ev)) { m.ev.push(add); (window as any).__e2eAddEvent = null; }
+        });
+      }
+    };
+  });
   await page.goto('/?mode=slab&webgl&quality=low&autoplay&slabTime=8&slabOvertime=4');
   await page.waitForFunction(() => (globalThis as any).__cvc?.ready === true, null, { timeout: 200_000, polling: 1000 });
   const win = page.locator('#cvc-slab [data-slab-win]');
@@ -130,15 +151,35 @@ test('SLAB: the match ends on the winner screen; R, then Enter, rematch to 0-0',
   for (const key of ['KeyR', 'Enter']) {
     await expect(win).toBeVisible({ timeout: 90_000 });
     await expect(win).toContainText(/CORGI COMPANY WINS|CAT CADRE WINS|DRAW/);
-    await expect(win).toContainText('R / Enter: rematch');
+    await expect(win).toContainText('R / Enter / Start: rematch');
     await expect(page.locator('#cvc-hud .bn')).toBeHidden(); // no comic "WIN!" burst over it
     await expect(page.locator('#cvc-slab [data-slab-state]')).toBeHidden(); // over: the slab claims no holder
     const before = (await twin()).restarts;
+    // a takedown in the kill feed (you over the Cat bot): it would stay 9 s, well past the rematch, unless cleared
+    await page.evaluate(() => {
+      const cvc = (globalThis as any).__cvc, me = cvc.localEntity;
+      const cat = (cvc.net.entities as number[][]).find((e) => e[1] <= 1 && e[0] !== me)!;
+      (window as any).__e2eAddEvent = { e: 'death', id: cat[0], by: me };
+    });
+    const feed = page.locator('#cvc-hud .kf .kf-e');
+    await expect(feed).toHaveCount(1, { timeout: 10_000 });
     await page.waitForTimeout(1500); // SLAB.rematchDelay (1 s) after the end
     await page.keyboard.press(key);
     await page.waitForFunction((n) => (globalThis as any).__cvc.twin.restarts > n, before, { timeout: 60_000, polling: 100 });
     expect((await twin()).restartScore).toEqual([0, 0]);
+    await expect(feed).toHaveCount(0, { timeout: 2_000 }); // §5: the rematch cleared it (its 9 s are not up)
     await expect(win).toBeHidden({ timeout: 30_000 });
+    await expect(page.locator('#cvc-slab [data-slab-s0]')).toHaveText('0');
+    await expect(page.locator('#cvc-slab [data-slab-s1]')).toHaveText('0');
+    await expect(page.locator('#cvc-slab [data-slab-death]')).toBeHidden();
+    const cues = await page.evaluate(() => ({
+      hit: (document.querySelector('#cvc-slab [data-slab-hit]') as SVGElement).style.opacity,
+      wedges: [...document.querySelectorAll('#cvc-slab [data-slab-wedges] svg')].map((w) => (w as SVGElement).style.opacity),
+      flash: (document.querySelector('#cvc-slab [data-slab-flash]') as HTMLElement).style.opacity,
+    }));
+    expect(cues.hit).toBe('0');
+    expect(cues.wedges.every((o) => o === '0')).toBe(true);
+    expect(Number(cues.flash || 0)).toBe(0);
   }
   expect(errors).toEqual([]);
 });

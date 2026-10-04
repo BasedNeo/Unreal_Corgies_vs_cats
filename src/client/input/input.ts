@@ -21,7 +21,7 @@ export class InputState {
   locked = false;
   /** W13 slab: while true, Enter latches the reload bit (R / pad X already do) and opens nothing else: the slab
    *  authority rematches on that bit while the match is over. main.ts sets it per frame (winner screen up, no menu or
-   *  chat), so Enter keeps opening chat everywhere else. */
+   *  chat), so Enter keeps opening chat everywhere else. W15: pad Start (button 9) sends it too, only then. */
   enterReloads = false;
   private lastLook = 0;
   private suspendedFlag = false;
@@ -111,6 +111,7 @@ export class InputState {
       if (bt(7)) buttons |= Btn.Fire;
       if (bt(6)) buttons |= Btn.Aim;
       if (bt(2)) buttons |= Btn.Reload;
+      if (bt(9) && this.enterReloads) buttons |= Btn.Reload; // W15 slab: pad Start rematches like R / Enter (hud.gd)
       if (bt(1)) buttons |= Btn.Crouch;
       if (bt(3)) buttons |= Btn.Interact;
       if (bt(5)) buttons |= Btn.Ability;

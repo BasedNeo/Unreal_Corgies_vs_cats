@@ -7,7 +7,7 @@ import { think, ensureBrain, isAiControlled, type AiContext } from './brain';
 import { navFixtureVersion, navGridFor, pathStats } from './nav';
 import { noteBodies } from './ordnance-ai';
 
-export { applyArchetype, createBrain, think, type AiState, type AiMode } from './brain';
+export { applyArchetype, createBrain, resetBrain, think, type AiState, type AiMode } from './brain';
 export { ARCHETYPES, archetypeForClass, type Archetype, type ArchetypeId } from './archetypes';
 export { navGridFor, buildNavGrid, findPath, lineWalkable, isWalkable, nearestWalkable, cellX, cellZ, type NavGrid } from './nav';
 export { holdPerch, type PerchGoal } from './brain';

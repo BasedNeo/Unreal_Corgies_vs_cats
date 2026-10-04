@@ -14,7 +14,7 @@
 // authority used for that input — so slippery ground and sprinkler shoves predict exactly with no
 // extra wiring. Bots (rt = 0) always use the sim tick. Room.stepExtra (extra inputs between ticks)
 // passes no clock either: it falls back to the tick stamped on the entity by the regular system.
-import type { SimSystem } from '../sim';
+import type { Sim, SimSystem } from '../sim';
 import type { SimEntity } from '../entity';
 import type { GameEvent } from '../../shared/protocol';
 import type { WorldData } from '../../shared/world/world-data';
@@ -164,6 +164,17 @@ export function stepWorldEffects(data: WorldData, e: SimEntity, dt: number, emit
   return r;
 }
 
+/**
+ * Should an out-of-bounds character (stepWorldEffects' outOfBounds) be sent back to a spawn? Yes, except a fall in slab
+ * mode (W15, Godot match.gd): below the slab's plane it takes the pet down instead (match/slab.ts slabFallSystem); only
+ * leaving the map's sides still teleports there. The authority's tick and the Room's catch-up steps both ask this.
+ */
+export function outOfBoundsTeleports(sim: Pick<Sim, 'state' | 'worldData'>, e: SimEntity): boolean {
+  if ((sim.state.room as { mode?: string } | undefined)?.mode !== 'slab') return true;
+  const b = sim.worldData.bounds;
+  return !!b && (e.pos.x < b.minX || e.pos.x > b.maxX || e.pos.z < b.minZ || e.pos.z > b.maxZ);
+}
+
 export const worldEffectsSystem: SimSystem = {
   name: 'world-effects',
   order: 250,
@@ -174,7 +185,7 @@ export const worldEffectsSystem: SimSystem = {
       if (e.dead || !e.char || e.moveFrozen) continue; // frozen (late inputs): map effects replay with its movement
       e.data.worldTick = sim.tick;
       const res = stepWorldEffects(data, e, dt, emit, sim.tick);
-      if (res.outOfBounds) {
+      if (res.outOfBounds && outOfBoundsTeleports(sim, e)) {
         const s = sim.pickSpawn(e.team);
         sim.placeCharacter(e, s.x, s.y, s.z);
       }

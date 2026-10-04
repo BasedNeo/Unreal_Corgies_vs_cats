@@ -8,6 +8,10 @@ extends RefCounted
 ## - Bots only (no human; "your side" is Corgi Company): bot play beside the slab at 4x speed (both bots' shots), a
 ##   point for each side, then the clock ends a win, a loss and a draw (the draw plays the lose sting).
 ## - A missing folder: one warning, every cue silent, no error, no crash.
+## W15 C: a count by name cannot see a cue that plays the wrong file or plays muted, so each section also checks the
+## wiring: every cue's stream holds its own file (synth_<cue>.wav, read here), each 2D player and every shot voice
+## plays that cue's stream at sfx.gd's VOLUME_DB and never under AUDIBLE_FLOOR_DB, the two ticks are not the same
+## data, and right after a slab point the player of that side's tick is the one playing.
 ## Run with `-- --sfx-log` to print `SFX <cue> <seconds>` for every play.
 const Kit := preload("res://game/testkit.gd")
 const Sfx := preload("res://game/sfx.gd")
@@ -15,6 +19,8 @@ const T := preload("res://game/tuning.gd")
 ## Bots-only play runs at SPEED x for PLAY s of game time.
 const SPEED := 4.0
 const PLAY := 16.0
+## No cue is set quieter than this (the quietest, the ticks, are -14 dB): a mute fails here even if VOLUME_DB says so.
+const AUDIBLE_FLOOR_DB := -20.0
 
 ## Counts the warnings Sfx pushes (Kit's logger drops warnings).
 class WarnLog extends Logger:
@@ -88,6 +94,42 @@ static func _files(sfx: Node) -> Array:
 			errs.append("cue %s: not 16-bit mono 44.1 kHz (format %d, stereo %s, %d Hz)" % [cue, s.format, s.stereo, s.mix_rate])
 	return errs
 
+## The wiring behind the counts: which data each cue's stream holds, which stream each player plays, and how loud.
+static func _wiring(sfx: Node, label: String) -> Array:
+	var errs: Array = []
+	for cue in Sfx.CUES:
+		var file: String = sfx.audio_dir.path_join("synth_%s.wav" % cue)
+		var want: AudioStreamWAV = AudioStreamWAV.load_from_file(file) if FileAccess.file_exists(file) else null
+		var s: AudioStreamWAV = sfx.streams.get(cue)
+		if want == null or s == null or s.data != want.data:
+			errs.append("%s: the %s stream does not hold %s" % [label, cue, file.get_file()])
+		var db: float = Sfx.VOLUME_DB[cue]
+		if db < AUDIBLE_FLOOR_DB:
+			errs.append("%s: %s is set to %.1f dB, under the %.0f dB floor" % [label, cue, db, AUDIBLE_FLOOR_DB])
+		if cue == "rifle_shot":
+			continue
+		var p: AudioStreamPlayer = sfx._ui.get(cue)
+		if p == null or p.stream != sfx.streams.get(cue):
+			errs.append("%s: the %s player does not play the %s stream" % [label, cue, cue])
+		elif not is_equal_approx(p.volume_db, db):
+			errs.append("%s: the %s player is at %.1f dB, VOLUME_DB says %.1f" % [label, cue, p.volume_db, db])
+	for i in sfx._shots.size():
+		var v: AudioStreamPlayer3D = sfx._shots[i]
+		if v.stream != sfx.streams.get("rifle_shot"):
+			errs.append("%s: shot voice %d does not play the rifle_shot stream" % [label, i])
+		if not is_equal_approx(v.volume_db, Sfx.VOLUME_DB.rifle_shot):
+			errs.append("%s: shot voice %d is at %.1f dB, VOLUME_DB says %.1f" % [label, i, v.volume_db, Sfx.VOLUME_DB.rifle_shot])
+	var own: AudioStreamWAV = sfx.streams.get("slab_tick")
+	var foe: AudioStreamWAV = sfx.streams.get("slab_tick_enemy")
+	if own != null and foe != null and own.data == foe.data:
+		errs.append("%s: slab_tick and slab_tick_enemy are the same data" % label)
+	return errs
+
+## Right after a point for one side, that side's tick player is playing (the other may still ring from before).
+static func _ticking(sfx: Node, cue: String, label: String) -> Array:
+	var p: AudioStreamPlayer = sfx._ui.get(cue)
+	return [] if p != null and p.playing else ["%s: no %s player playing right after the point" % [label, cue]]
+
 ## Holds the match until it is over (the game's own tick: slab points, the clock), at most `frames` physics frames.
 static func _until_over(tree: SceneTree, game: Node, frames: int) -> void:
 	for i in frames:
@@ -105,6 +147,7 @@ func _human(tree: SceneTree) -> Array:
 		await Kit.dispose(tree, main)
 		return errs
 	errs.append_array(_files(sfx))
+	errs.append_array(_wiring(sfx, "human, at boot"))
 	if not errs.is_empty():
 		await Kit.dispose(tree, main)
 		return errs
@@ -151,9 +194,11 @@ func _human(tree: SceneTree) -> Array:
 	player.global_position = c
 	bot.global_position = far
 	game.step_score(1.0)
+	errs.append_array(_ticking(sfx, "slab_tick", "human, own point"))
 	player.global_position = far
 	bot.global_position = c
 	game.step_score(1.0)
+	errs.append_array(_ticking(sfx, "slab_tick_enemy", "human, enemy point"))
 	# 4. the win: one point short, the human holds the slab until the match is over
 	player.global_position = c
 	bot.global_position = far
@@ -170,6 +215,7 @@ func _human(tree: SceneTree) -> Array:
 	if not game.over() or game.winner != 1:
 		errs.append("the Cat holding the slab at 0-%d did not win (score %s)" % [T.WIN_SCORE - 1, str(game.score)])
 	errs.append_array(rec.check(sfx, "human", Sfx.CUES.keys()))
+	errs.append_array(_wiring(sfx, "human, after play"))
 	print("  sfx counts: %s" % str(sfx.counts))
 	await Kit.dispose(tree, main)
 	return errs
@@ -216,9 +262,11 @@ func _bots_only(tree: SceneTree) -> Array:
 		corgi.global_position = c
 		cat.global_position = far
 		game.step_score(1.0)
+		errs.append_array(_ticking(sfx, "slab_tick", "bots only, Corgi point"))
 		corgi.global_position = far
 		cat.global_position = c
 		game.step_score(1.0)
+		errs.append_array(_ticking(sfx, "slab_tick_enemy", "bots only, Cat point"))
 	# 3. the clock ends a win, a loss and a draw (nobody on the slab, so the score stays put)
 	for e in [[[10, 5], 0], [[5, 10], 1], [[7, 7], -1]]:
 		if not game.playing():
@@ -235,6 +283,7 @@ func _bots_only(tree: SceneTree) -> Array:
 			errs.append("bots only: the clock at %s did not end the match for %d (winner %d)" % [str(e[0]), e[1], game.winner])
 		game.rematch()
 	errs.append_array(rec.check(sfx, "bots only", ["rifle_shot", "slab_tick", "slab_tick_enemy", "match_end_win", "match_end_lose"]))
+	errs.append_array(_wiring(sfx, "bots only, after play"))
 	if int(rec.n.match_end_lose) != 2:
 		errs.append("bots only: %d lose stings for a loss and a draw (want 2)" % rec.n.match_end_lose)
 	await Kit.dispose(tree, main)

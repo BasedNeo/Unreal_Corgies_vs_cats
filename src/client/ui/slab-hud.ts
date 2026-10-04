@@ -7,11 +7,13 @@
 //             the overtime down)
 //   slab line SLAB  NEUTRAL · SLAB  <TEAM> HOLDING  +1/s · SLAB  CONTESTED, in the slab's read-out colour; hidden
 //             once the match is over
-//   marker    §1: over the slab centre + 4.5 m, two lines ("SLAB  <N> m", the camera's ground distance; the state word)
-//             above a diamond whose shape carries the state (hollow neutral, filled held, split by a bar contested).
-//             Placed in the contract's order (rev. 3): clamped into the safe area (16 px in from the sides, 110 from
-//             the top, 112 from the bottom), then up off any other pet (at most 120 px, never over the safe top), else
-//             just under the lowest pet it covers; nothing clamps after. It hides while you stand on the slab or are down
+//   marker    §1: over the slab centre + 4.5 m, two lines ("SLAB  <N> m" white at 14 px, the camera's ground distance;
+//             the state word at 15 px in the state colour) above a diamond whose shape carries the state (hollow
+//             neutral, filled held, two filled halves split by a bar contested). Placed in the contract's order
+//             (rev. 4): clamped into the safe area (16 px in from the sides, 110 from the top, 112 from the bottom),
+//             then up off any other pet (at most 120 px, never over the safe top), else down past the pets it covers
+//             while it stays in the safe area; nothing clamps after; behind the camera too. Drawn at alpha 0.35 while
+//             a wedge overlaps it. It hides while you stand on the slab or are down
 //   you       §4: "YOU: <TEAM>" over the hit points (number + bar, red at 40 or less, with §3's white chip of the HP just
 //             lost, draining over 0.4 s), "30 / 30" or RELOADING bottom right, the controls hint for the first 14 s
 //   down      §2: the death panel, four lines centred on the screen on a dim rounded backing: who took you down (a square /
@@ -21,8 +23,10 @@
 //             X + a ring, red: 0.35 s), a wedge on a 110 px ring toward where whoever hit you stood at its last hit
 //             (turning with the camera, fading over 0.6 s), a red flash at alpha 0.175 or less (hud.gd: _dmg_t * 0.5);
 //             while you are down: no confirm and no wedges (your knockout clears them)
-//   winner    <TEAM> WINS or DRAW, the score, your takedowns / knockouts, "R / Enter: rematch" (the authority restarts
-//             when a human sends the reload bit while the match is ended; main.ts maps Enter to it then)
+//   winner    <TEAM> WINS or DRAW, the score, your takedowns / knockouts, "R / Enter / Start: rematch" (the authority
+//             restarts when a human sends the reload bit while the match is ended; main.ts maps Enter, input.ts pad
+//             Start to it then). §5: the rematch clears every cue (slabHudReset)
+//   tag       PLACEHOLDER PETS top left (hud.gd), while the pets are placeholders; the twin's nameplates are hidden
 // While active it takes over from the general HUD (a class on the HUD parent hides its comic match bar, health and
 // ability panel, ammo panel, knocked-out screen, damage arcs and vignettes, the X3 hitmarker and, once the match is
 // over, its banner burst, crosshair and click-to-play overlay (hud.gd shows "Click to play" only while the match runs;
@@ -52,8 +56,11 @@ import { lighten, type SlabPet, type SlabReading } from '../modes/slab-view';
 
 /** tuning.gd TEAM_NAMES: the slab match names the teams as the Godot game does (SLAB_TEXT.win says "<name> WINS"). */
 export const SLAB_TEAM_NAMES = ['CORGI COMPANY', 'CAT CADRE'] as const;
-/** The rematch prompt on the winner screen. */
-export const SLAB_REMATCH = 'R / Enter: rematch';
+/** The rematch prompt on the winner screen: hud.gd's "R / Enter / Start: rematch   ·   F2 / Back: switch 1v1 / 2v2"
+ *  less the switch, which the web does not have (its 2 v 2 is the &2v2 page flag). Pad Start is input.ts's. */
+export const SLAB_REMATCH = 'R / Enter / Start: rematch';
+/** hud.gd's tag at the top left while the pets are placeholders (12 px, Color(1.0, 0.78, 0.3, 0.85)). */
+export const SLAB_PLACEHOLDER_TAG = 'PLACEHOLDER PETS';
 const TEAM = [PALETTE.teamCorgis, PALETTE.teamCats] as const;
 
 /** m:ss of whole seconds, rounded up (hud.gd: int(ceil(time_left))). */
@@ -173,22 +180,34 @@ export interface SlabMarker {
   color: number;
 }
 
-/** §1: the marker's words, shape and colour for the slab state and the camera's ground distance (m) to its centre. */
+/** §1: the marker's words, shape and colour for the slab state and the camera's ground distance (m) to its centre.
+ *  The colour is hud.gd marker_spec's (slabHudColor): neutral e6ebf2, a holder its team colour lightened 0.35, amber. */
 export function slabMarker(r: Pick<SlabReading, 'holder' | 'contested'> | null, groundDist: number): SlabMarker {
   const lines = (word: string): [string, string] => [`SLAB  ${Math.max(0, Math.round(groundDist))} m`, word];
-  if (r?.contested) return { lines: lines('CONTESTED'), shape: 'split', color: 0xffa633 };
-  if (r && r.holder !== -1) return { lines: lines(SLAB_TEAM_NAMES[r.holder]), shape: 'filled', color: lighten(TEAM[r.holder], 0.35) };
-  return { lines: lines('NEUTRAL'), shape: 'hollow', color: 0xffffff };
+  const color = slabHudColor(r);
+  if (r?.contested) return { lines: lines('CONTESTED'), shape: 'split', color };
+  if (r && r.holder !== -1) return { lines: lines(SLAB_TEAM_NAMES[r.holder]), shape: 'filled', color };
+  return { lines: lines('NEUTRAL'), shape: 'hollow', color };
 }
 
-const DIAMOND = 'M0 -9L9 0L0 9L-9 0Z';
-/** The marker's diamond (18 px; viewBox -12..12). Hollow: an outline; filled: solid; split: an outline cut through by a
- *  solid bar wider than the diamond. The geometry differs per state, not only the colour. */
+/** hud.gd's marker geometry (px at 720p): MARKER_R from the centre to a tip, the lines' sizes (line 1, line 2), the gap
+ *  over the top tip, and the split shape's gap, bar and reach past the side tips. */
+export const SLAB_MARKER_GEOM = { r: 10, px: [14, 15], gap: 3, splitGap: 3, splitBar: 2, splitReach: 5 } as const;
+const MG = SLAB_MARKER_GEOM;
+const diamond = (r: number) => `M0 ${-r}L${r} 0L0 ${r}L${-r} 0Z`;
+/** The marker's shape (viewBox -16..16, hud.gd marker_shapes). Hollow: the diamond's outline; filled: the solid diamond;
+ *  split: its top and bottom halves 3 px apart, filled, with a 2 px bar in the gap reaching 5 px past both side tips.
+ *  The geometry differs per state, not only the colour. */
 export function slabMarkerSvg(shape: SlabMarkerShape): string {
-  const outline = `<path d="${DIAMOND}" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/>`;
-  if (shape === 'filled') return `<path d="${DIAMOND}" fill="currentColor"/>`;
-  if (shape === 'split') return `${outline}<rect x="-12" y="-2" width="24" height="4" fill="currentColor"/>`;
-  return outline;
+  const r = MG.r;
+  if (shape === 'filled') return `<path d="${diamond(r)}" fill="currentColor" stroke="rgba(0,0,0,.8)" stroke-width="4" stroke-linejoin="round" paint-order="stroke"/>`;
+  if (shape === 'split') {
+    const g = MG.splitGap, w = r - g, x = r + MG.splitReach, b = MG.splitBar / 2;
+    const top = `M0 ${-r}L${w} ${-g}L${-w} ${-g}Z`, bottom = `M${-w} ${g}L${w} ${g}L0 ${r}Z`, bar = `M${-x} ${-b}L${x} ${-b}L${x} ${b}L${-x} ${b}Z`;
+    return `<path d="${top}${bottom}${bar}" fill="currentColor" stroke="rgba(0,0,0,.8)" stroke-width="4" stroke-linejoin="round" paint-order="stroke"/>`;
+  }
+  return `<path d="${diamond(r)}" fill="none" stroke="rgba(0,0,0,.8)" stroke-width="5" stroke-linejoin="round"/>`
+    + `<path d="${diamond(r)}" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>`;
 }
 
 /** A screen rectangle (px; y down). */
@@ -216,18 +235,26 @@ export interface SlabMarkerPlaceIn { x: number; y: number; behind: boolean; w: n
 
 export type SlabMarkerDodge = 'none' | 'lift' | 'below' | 'blocked';
 
+/** The marker's box around its shape's centre (px; hud.gd marker_box): as wide as the wider line (about 0.62 em a
+ *  character) or the split shape's bar; the two lines (14 and 15 px, 1.2 em each) stacked MARKER_GAP over the top tip;
+ *  MARKER_R + 1 under the centre. */
+export function slabMarkerBox(lines: readonly [string, string], u: number): { half: number; above: number; below: number } {
+  const w = Math.max(lines[0].length * MG.px[0] * 0.62, lines[1].length * MG.px[1] * 0.62, 2 * (MG.r + MG.splitReach) + 2);
+  return { half: (w / 2) * u, above: (MG.r + MG.gap + (MG.px[0] + MG.px[1]) * 1.2) * u, below: (MG.r + 1) * u };
+}
+
 /**
- * §1 placement, in the contract's order (rev. 3; Godot hud.gd place_marker). The box: the 24 px shape on the anchor
- * and the two 13 px lines over it (from 13 px above the anchor, about 0.62 em a character).
+ * §1 placement, in the contract's order (rev. 4; Godot hud.gd place_marker), in px with every 720p length scaled by u:
  *  1. Clamp the anchor into the safe area (behind the camera: mirrored, on the bottom edge).
  *  2. Move up off any pet it covers, 2 of clearance, by at most 120 and never above the safe top.
- *  3. If that cannot clear it: just below the lowest pet it still covers (2 of clearance), clamped to the safe bottom.
- *  4. If neither clears: stay where step 2 left it. Nothing clamps after the dodge.
+ *  3. If that cannot clear it: just below the lowest pet it still covers (2 of clearance); if it then covers another
+ *     pet, just below that one too, and so on down while the box stays above the safe bottom.
+ *  4. If none of that clears: stay where step 2 left it. Nothing clamps after the dodge.
  */
 export function slabMarkerPlace(p: SlabMarkerPlaceIn): { x: number; y: number; lift: number; dodge: SlabMarkerDodge; box: ScreenBox } {
   const u = p.u;
-  const half = Math.max(12, (Math.max(p.lines[0].length, p.lines[1].length) * 13 * 0.62) / 2) * u;
-  const above = (13 + 2 * 13 * 1.2) * u, below = 12 * u, clear = SLAB_MARKER_CLEAR * u;
+  const { half, above, below } = slabMarkerBox(p.lines, u);
+  const clear = SLAB_MARKER_CLEAR * u;
   const minX = SLAB_SAFE.side * u + half, maxX = p.w - SLAB_SAFE.side * u - half;
   const minY = SLAB_SAFE.top * u + above, maxY = Math.max(minY, p.h - SLAB_SAFE.bottom * u - below);
   const x = Math.max(minX, Math.min(maxX, p.behind ? p.w - p.x : p.x));
@@ -243,11 +270,17 @@ export function slabMarkerPlace(p: SlabMarkerPlaceIn): { x: number; y: number; l
     dodge = 'lift';
   }
   if (need(boxAt(y)) > 0) {
-    const b = boxAt(y);
-    let low = -Infinity; // the lowest bottom of the pet boxes it still covers
-    for (const q of p.pets) if (overlaps(b, q)) low = Math.max(low, q.y1);
-    const under = Math.min(low + clear + above, maxY);
-    if (need(boxAt(under)) <= 0) { y = under; dodge = 'below'; } else dodge = 'blocked';
+    let under = y; // step 3: down past each pet it still covers, the lowest first
+    for (let i = 0; i <= p.pets.length; i++) {
+      const b = boxAt(under);
+      let low = -Infinity;
+      for (const q of p.pets) if (overlaps(b, q)) low = Math.max(low, q.y1);
+      if (low === -Infinity) break;
+      const next = low + clear + above;
+      if (next > maxY + 1e-9) break; // past the safe bottom: nothing clears below (hud.gd: no clamp here)
+      under = next;
+    }
+    if (under !== y && need(boxAt(under)) <= 0) { y = under; dodge = 'below'; } else dodge = 'blocked';
   }
   return { x, y, lift: raw - y, dodge, box: boxAt(y) };
 }
@@ -352,13 +385,13 @@ export type SlabHitKind = 'body' | 'head' | 'kill';
  *  filled centre diamond (half-size) and an optional outline ring (radius). */
 export interface SlabHitGeometry { r0: number; r1: number; width: number; diamond: number; ring: number; color: number }
 
-/** §3: body = an X, white; head = the X plus a small filled diamond (11 px across, inside the X's 5 px inner gap and
- *  plainly larger than the crosshair's 4 px dot it sits on), yellow; kill = a larger, heavier X plus a ring about 18 px across, red (hud.gd: lines from 5 px to
- *  10, 14 for a kill). */
+/** §3, hud.gd hit_cue: body = an X of four lines from 5 to 10 px out, white; head = the same X plus a filled diamond
+ *  4.5 px to a tip (9 px across, inside the X's 5 px inner gap), yellow; kill = a larger X from 6 to 15 px, 3 px wide,
+ *  plus a ring 9 px in radius (18 px across), red. Lines 2.5 px wide otherwise. */
 export const SLAB_HIT: Record<SlabHitKind, SlabHitGeometry> = {
   body: { r0: 5, r1: 10, width: 2.5, diamond: 0, ring: 0, color: 0xffffff },
-  head: { r0: 5, r1: 10, width: 2.5, diamond: 5.5, ring: 0, color: 0xffd933 },
-  kill: { r0: 6, r1: 14, width: 3, diamond: 0, ring: 9, color: 0xff4033 },
+  head: { r0: 5, r1: 10, width: 2.5, diamond: 4.5, ring: 0, color: 0xffd933 },
+  kill: { r0: 6, r1: 15, width: 3, diamond: 0, ring: 9, color: 0xff4033 },
 };
 /** How long a confirm shows, fading (contract rev. 2): body and head 0.18 s (hud.gd hit_t), a kill 0.35 s. */
 export const SLAB_HIT_LIFE: Record<SlabHitKind, number> = { body: 0.18, head: 0.18, kill: 0.35 };
@@ -391,8 +424,26 @@ export function slabWedgeAngle(fwd: { x: number; z: number }, from: { x: number;
   return Math.atan2(dx * -fz + dz * fx, dx * fx + dz * fz); // (right, ahead): right = (-fz, fx)
 }
 
-/** The wedge: a filled triangle centred on the ring, its tip outward (viewBox -12..12 around the ring point). */
-export const SLAB_WEDGE_SVG = '<path d="M0 -11L10 7L-10 7Z" fill="currentColor" stroke="rgba(0,0,0,.7)" stroke-width="1.5" stroke-linejoin="round"/>';
+/** The wedge (hud.gd hit_cue "received"): an arrowhead around the ring point, its tip 14 px out, its base 10 px in and
+ *  16 px wide (viewBox -16..16 around the ring point), over hud.gd's dark 2 px rim. */
+export const SLAB_WEDGE_PATH = 'M0 -14L8 10L-8 10Z';
+export const SLAB_WEDGE_SVG = `<path d="${SLAB_WEDGE_PATH}" fill="currentColor" stroke="rgba(0,0,0,.8)" stroke-width="4" stroke-linejoin="round" paint-order="stroke"/>`;
+/** The wedge's colour (hud.gd CUE_COLORS.received, Color(1.0, 0.45, 0.36)). */
+export const SLAB_WEDGE_COLOR = 0xff735c;
+/** The marker's alpha while a wedge's box overlaps its box (contract §3 rev. 4): the wedge never reads as part of it. */
+export const SLAB_MARKER_DIM = 0.35;
+
+/** A wedge's screen box (px): its arrowhead on the ring around the crosshair (cx, cy), turned by `angle` (0 = up,
+ *  clockwise), at the HUD unit u. */
+export function slabWedgeBox(cx: number, cy: number, angle: number, u: number): ScreenBox {
+  const dx = Math.sin(angle), dy = -Math.cos(angle), nx = -dy, ny = dx;
+  const R = SLAB_WEDGE.ring * u;
+  const pts = [[0, -14], [8, 10], [-8, 10]].map(([px, py]) => {
+    const out = R - py * u, side = px * u; // py < 0 is outward
+    return [cx + dx * out + nx * side, cy + dy * out + ny * side];
+  });
+  return { x0: Math.min(...pts.map((q) => q[0])), y0: Math.min(...pts.map((q) => q[1])), x1: Math.max(...pts.map((q) => q[0])), y1: Math.max(...pts.map((q) => q[1])) };
+}
 
 /** §3's pure model: your confirms, the wedges toward whoever hit you, and the red flash. Feed every game event. */
 export class SlabHitCues {
@@ -456,6 +507,9 @@ export class SlabHpChip {
   private from = 0;
   private t0 = -10;
 
+  /** No chip until the next HP is fed (a rematch: contract §5). */
+  reset(): void { this.last = -1; this.from = 0; this.t0 = -10; }
+
   /** Feed the current HP each frame; returns the chip's top (≥ hp; = hp when there is no chip). */
   update(hp: number, now: number): number {
     if (this.last < 0 || hp > this.last) { this.last = hp; this.from = hp; this.t0 = -10; return hp; } // spawn, heal
@@ -495,16 +549,39 @@ export interface SlabHudState {
   readonly deaths: Map<number, { by: number; t: number }>;
   readonly lastPos: Map<number, { x: number; z: number }>;
   localId: number;
+  /** When the first frame showing the player down came (-1: up). */
   downSince: number;
+  /** When the player was last seen coming back up (the first alive frame after a knockout, or ever): a knockout record
+   *  from this time on is the current knockout's, however late its first dead frame is. */
+  upSince: number;
+  /** After a rematch: no death panel until the player has been seen up (a stale dead frame shows nothing). */
+  needUp: boolean;
+  /** The last frame's match phase (a rematch is 'ended' → anything else). */
+  phase: string;
 }
 
-export const slabHudState = (): SlabHudState => ({ hits: new SlabHitCues(), chip: new SlabHpChip(), deaths: new Map(), lastPos: new Map(), localId: -1, downSince: -1 });
+export const slabHudState = (): SlabHudState => ({
+  hits: new SlabHitCues(), chip: new SlabHpChip(), deaths: new Map(), lastPos: new Map(), localId: -1, downSince: -1, upSince: -Infinity, needUp: false, phase: '',
+});
+
+/** §5 rematch: no HUD leftovers. No confirm, wedge, flash or chip; no death panel or countdown until the player is up;
+ *  the knockout records cleared. (The win screen follows the match phase, the kill feed is hud.ts's.) */
+export function slabHudReset(s: SlabHudState): void {
+  s.hits.reset();
+  s.chip.reset();
+  s.deaths.clear();
+  s.downSince = -1;
+  s.upSince = -Infinity;
+  s.needUp = true;
+}
 
 const DEATH_KEEP = 64;
 
 /** A game event into the state. A hit on you stores where its attacker stood at the last frame (the wedge's point, which
- *  never moves after); a knockout records its killer; your own knockout clears the wedges (SlabHitCues). */
+ *  never moves after); a knockout records its killer; your own knockout clears the wedges (SlabHitCues); the match's
+ *  'reset' score (a rematch) clears every cue (slabHudReset). */
 export function slabHudEvent(s: SlabHudState, ev: GameEvent, now: number): void {
+  if (ev.e === 'score' && ev.reason === 'reset') { slabHudReset(s); return; }
   s.hits.onEvent(ev, s.localId, now, ev.e === 'hit' ? s.lastPos.get(ev.src) : null);
   if (ev.e === 'death') {
     if (s.deaths.size >= DEATH_KEEP && !s.deaths.has(ev.id)) s.deaths.clear();
@@ -525,8 +602,9 @@ export function slabKillerOf(f: Pick<SlabHudFrame, 'localId' | 'roster' | 'slab'
 
 /** Everything the slab HUD's §1-§3 draws this frame. */
 export interface SlabHudOut {
-  /** §1, null while hidden: words, shape, colour, the camera's ground distance (m), the anchor (px) and the box. */
-  marker: (SlabMarker & { dist: number; x: number; y: number; box: ScreenBox; dodge: SlabMarkerDodge }) | null;
+  /** §1, null while hidden: words, shape, colour, the camera's ground distance (m), the anchor (px), the box, and its
+   *  alpha (SLAB_MARKER_DIM while a wedge's box overlaps it, else 1). */
+  marker: (SlabMarker & { dist: number; x: number; y: number; box: ScreenBox; dodge: SlabMarkerDodge; alpha: number }) | null;
   /** §2, null unless you are down while the match runs. */
   death: SlabDeathPanel | null;
   /** §3 your confirm (null while you are down). */
@@ -548,14 +626,20 @@ const FV = new Vector3(), FWD = new Vector3();
  *  - §2 the death panel while you are down and the match runs: the killer from the knockout record, your team, your
  *    team's respawn zone, the countdown from when you went down;
  *  - §3 while you are down: no confirm and no wedges. Otherwise each wedge points at where its attacker stood AT ITS HIT
- *    (stored by slabHudEvent), from you, relative to the camera's facing; the chip follows your HP.
+ *    (stored by slabHudEvent), from you, relative to the camera's facing; the chip follows your HP. While a wedge's box
+ *    overlaps the marker's box the marker draws at SLAB_MARKER_DIM;
+ *  - §5 a rematch (the match leaves 'ended', or the 'reset' score event) clears every cue (slabHudReset).
  */
 export function slabHudFrame(f: SlabHudFrame & SlabHudView, s: SlabHudState, now: number): SlabHudOut {
   s.localId = f.localId;
-  const ended = f.match?.phase === 'ended', live = f.match?.phase === 'live';
+  const phase = f.match?.phase ?? '';
+  if (s.phase === 'ended' && phase !== 'ended') slabHudReset(s); // §5 rematch
+  s.phase = phase;
+  const ended = phase === 'ended', live = phase === 'live';
   const L = f.local;
   const dead = !!L && (L.flags & EFlag.Dead) !== 0;
   if (f.slab) for (const p of f.slab.pets) s.lastPos.set(p.id, { x: p.x, z: p.z });
+  const u = Math.max(0.6, Math.min(f.w / 1280, f.h / 720));
 
   let marker: SlabHudOut['marker'] = null;
   if (f.slab && slabMarkerShown(L, ended)) {
@@ -564,20 +648,23 @@ export function slabHudFrame(f: SlabHudFrame & SlabHudView, s: SlabHudState, now
     const m = slabMarker(f.slab, dist);
     FV.set(f.slab.x, f.slab.y + SLAB_MARKER_LIFT, f.slab.z).project(f.camera);
     const behind = FV.z > 1;
-    const u = Math.max(0.6, Math.min(f.w / 1280, f.h / 720));
-    const pets = behind ? [] : slabPetBoxes(f.slab.pets, f.localId, f.camera, f.w, f.h);
+    const pets = slabPetBoxes(f.slab.pets, f.localId, f.camera, f.w, f.h); // behind the camera too (contract §1 rev. 4)
     const at = slabMarkerPlace({ x: (FV.x * 0.5 + 0.5) * f.w, y: (-FV.y * 0.5 + 0.5) * f.h, behind, w: f.w, h: f.h, u, lines: m.lines, pets });
-    marker = { ...m, dist, x: at.x, y: at.y, box: at.box, dodge: at.dodge };
+    marker = { ...m, dist, x: at.x, y: at.y, box: at.box, dodge: at.dodge, alpha: 1 };
   }
 
   const chipTop = L ? s.chip.update(Math.max(0, L.hp), now) : null;
 
   if (dead && s.downSince < 0) s.downSince = now;
-  if (!dead) s.downSince = -1;
+  if (L && !dead) {
+    if (s.downSince >= 0 || s.upSince === -Infinity || s.needUp) s.upSince = now; // up again (or first seen up)
+    s.downSince = -1;
+    s.needUp = false;
+  }
   let death: SlabDeathPanel | null = null;
-  if (dead && live && L) {
+  if (dead && live && L && !s.needUp) {
     const rec = s.deaths.get(f.localId);
-    const fresh = rec && rec.t >= s.downSince - 1.5 ? rec : null; // this knockout's record, not an old one
+    const fresh = rec && rec.t >= s.upSince ? rec : null; // this knockout's record (since the player was last up)
     const t0 = fresh ? Math.min(fresh.t, s.downSince) : s.downSince;
     const team = L.team === 1 ? 1 : 0;
     death = slabDeathPanel(slabKillerOf(f, fresh), team, slabRespawnZone(team), SLAB.respawn - (now - t0));
@@ -589,6 +676,7 @@ export function slabHudFrame(f: SlabHudFrame & SlabHudView, s: SlabHudState, now
     f.camera.getWorldDirection(FWD);
     for (const w of s.hits.wedgesAt(now)) wedges.push({ src: w.src, angle: slabWedgeAngle(FWD, L, w), alpha: w.alpha });
   }
+  if (marker) for (const w of wedges) if (overlaps(slabWedgeBox(f.w / 2, f.h / 2, w.angle, u), marker.box)) { marker.alpha = SLAB_MARKER_DIM; break; }
   return { marker, death, confirm, wedges, chipTop, flash: s.hits.flashAt(now) };
 }
 
@@ -601,7 +689,7 @@ const SHADOW = `0 0 ${u(3)} rgba(0,0,0,.85),0 ${u(1)} ${u(2)} rgba(0,0,0,.9)`;
 const CSS = `
 .cvc-slab #cvc-hud .mb,.cvc-slab #cvc-hud .mb-wave,.cvc-slab #cvc-hud .hp,.cvc-slab #cvc-hud .am,.cvc-slab #cvc-hud .ds,
 .cvc-slab #cvc-hud .dd,.cvc-slab #cvc-hud .vig,.cvc-slab #cvc-hud .vig-low,.cvc-slab #cvc-hud .hm,.cvc-slab .cvc-hf,
-.cvc-slab #cvc-hud .lk [data-k="Q"],.cvc-slab-end #cvc-hud .bn,.cvc-slab-end #cvc-hud .lk,.cvc-slab-end #cvc-hud .xh{display:none!important}
+.cvc-slab #cvc-hud .lk [data-k="Q"],.cvc-slab #nameplates,.cvc-slab-end #cvc-hud .bn,.cvc-slab-end #cvc-hud .lk,.cvc-slab-end #cvc-hud .xh{display:none!important}
 .cvc-slab #cvc-hud .kf{gap:${u(2)}}
 .cvc-slab #cvc-hud .kf-e.kf-plain{background:none;border:0;box-shadow:none;padding:0;animation:none;white-space:pre;
   font:500 ${u(15)}/1.25 ${FONT_BODY};color:rgba(255,255,255,.9);text-shadow:${SHADOW}}
@@ -625,11 +713,13 @@ const CSS = `
 #cvc-slab .bar i{position:absolute;top:0;bottom:0;width:0;transition:width .25s}
 #cvc-slab .t0 .bar i{right:0} #cvc-slab .t1 .bar i{left:0}
 #cvc-slab .clk{width:${u(110)};text-align:center;font-size:${u(30)};font-weight:600;line-height:1.05;white-space:nowrap}
-#cvc-slab .clk.ot{font-size:${u(24)};line-height:${u(32)}}
+#cvc-slab .clk.ot{width:auto;min-width:${u(110)}} /* OVERTIME at the clock's 30 (hud.gd), widening the row */
 #cvc-slab .st{position:absolute;left:50%;top:${u(76)};transform:translateX(-50%);font-size:${u(18)};font-weight:600;letter-spacing:.06em;white-space:pre}
 #cvc-slab .mk{position:absolute;left:0;top:0;width:0;height:0;will-change:transform}
-#cvc-slab .mk svg{position:absolute;left:${u(-12)};top:${u(-12)};width:${u(24)};height:${u(24)};overflow:visible;filter:drop-shadow(0 0 ${u(2)} rgba(0,0,0,.85))}
-#cvc-slab .mkt{position:absolute;left:0;bottom:${u(13)};transform:translateX(-50%);text-align:center;font-size:${u(13)};font-weight:600;line-height:1.2;white-space:pre}
+#cvc-slab .mk svg{position:absolute;left:${u(-16)};top:${u(-16)};width:${u(32)};height:${u(32)};overflow:visible}
+#cvc-slab .mkt{position:absolute;left:0;bottom:${u(SLAB_MARKER_GEOM.r + SLAB_MARKER_GEOM.gap)};transform:translateX(-50%);text-align:center;font-weight:600;line-height:1.2;white-space:pre}
+#cvc-slab .mkt .l1{font-size:${u(SLAB_MARKER_GEOM.px[0])};color:rgba(255,255,255,.92)} #cvc-slab .mkt .l2{font-size:${u(SLAB_MARKER_GEOM.px[1])}}
+#cvc-slab .tag{position:absolute;left:${u(14)};top:${u(10)};font-size:${u(12)};font-weight:600;color:rgba(255,199,77,.85)}
 #cvc-slab .you{position:absolute;left:${u(24)};bottom:${u(80)};font-size:${u(16)};font-weight:600;letter-spacing:.04em;white-space:pre}
 #cvc-slab .hpn{position:absolute;left:${u(24)};bottom:${u(52)};font-size:${u(22)};font-weight:600}
 #cvc-slab .hpb{position:absolute;left:${u(24)};bottom:${u(32)};width:${u(240)};height:${u(14)};background:rgba(0,0,0,.55)}
@@ -637,16 +727,17 @@ const CSS = `
 #cvc-slab .hpb .chip{background:#fff;width:0}
 #cvc-slab .hpb .fill{box-shadow:${u(2)} 0 0 rgba(0,0,0,.75)} /* the dark seam where the fill meets the chip (as hud.gd) */
 #cvc-slab .amm{position:absolute;right:${u(24)};bottom:${u(28)};font-size:${u(26)};font-weight:600;text-align:right;white-space:nowrap}
-#cvc-slab .dp{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:${u(6)};text-align:center;white-space:pre;
-  background:${SLAB_DEATH_BACKING};border-radius:${u(10)};padding:${u(12)} ${u(22)} ${u(14)}}
-#cvc-slab .dp .d1{font-size:${u(24)};font-weight:700;display:flex;align-items:center}
-#cvc-slab .dp .d1 svg{width:${u(15)};height:${u(15)};margin-right:${u(7)};overflow:visible;filter:drop-shadow(0 0 ${u(2)} rgba(0,0,0,.85))}
-#cvc-slab .dp .d2,#cvc-slab .dp .d3{font-size:${u(18)};font-weight:600}
-#cvc-slab .dp .d4{font-size:${u(26)};font-weight:700;margin-top:${u(4)}}
+#cvc-slab .dp{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:${u(2)};text-align:center;white-space:pre;
+  background:${SLAB_DEATH_BACKING};border-radius:${u(6)};padding:${u(8)} ${u(28)} ${u(10)}}
+#cvc-slab .dp .d1{font-size:${u(26)};font-weight:700;display:flex;align-items:center}
+#cvc-slab .dp .d1 svg{width:${u(15)};height:${u(15)};margin:0 ${u(9)};overflow:visible}
+#cvc-slab .dp .d2{font-size:${u(18)};font-weight:600}
+#cvc-slab .dp .d3{font-size:${u(20)};font-weight:600}
+#cvc-slab .dp .d4{font-size:${u(24)};font-weight:700}
 #cvc-slab .hc{position:absolute;left:50%;top:50%;width:${u(40)};height:${u(40)};margin:${u(-20)} 0 0 ${u(-20)};overflow:visible;opacity:0;filter:drop-shadow(0 0 ${u(1.5)} rgba(0,0,0,.9))}
 #cvc-slab .wg{position:absolute;left:50%;top:50%;width:0;height:0}
-#cvc-slab .wg svg{position:absolute;left:${u(-12)};top:${u(-12 - 110)};width:${u(24)};height:${u(24)};overflow:visible;transform-origin:${u(12)} ${u(12 + 110)};
-  color:#ff5a4d;opacity:0;filter:drop-shadow(0 0 ${u(2)} rgba(0,0,0,.9))}
+#cvc-slab .wg svg{position:absolute;left:${u(-16)};top:${u(-16 - 110)};width:${u(32)};height:${u(32)};overflow:visible;transform-origin:${u(16)} ${u(16 + 110)};
+  color:${hex(SLAB_WEDGE_COLOR)};opacity:0}
 #cvc-slab .hint{position:absolute;left:50%;bottom:${u(76)};transform:translateX(-50%);width:${u(1000)};text-align:center;font-size:${u(14)};opacity:.85;white-space:pre-line}
 #cvc-slab .win{position:absolute;inset:0;background:rgba(5,5,10,.62);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:${u(10)};text-align:center}
 #cvc-slab .wt{font-size:${u(58)};font-weight:700;letter-spacing:.02em;white-space:nowrap}
@@ -690,7 +781,8 @@ export function createSlabHud(ui: HTMLElement, opts: SlabHudOptions): SlabHud {
       <div class="tm t1"><div class="row" data-slab-s1-row><span data-slab-s1>0</span>  ${SLAB_TEAM_NAMES[1]}</div><div class="bar"><i></i></div></div>
     </div>
     <div class="st" data-slab-state>SLAB  NEUTRAL</div>
-    <div class="mk" data-slab-marker><div class="mkt"><div data-slab-marker-l1></div><div data-slab-marker-l2></div></div><svg viewBox="-12 -12 24 24" aria-hidden="true"></svg></div>
+    <div class="tag" data-slab-tag>${SLAB_PLACEHOLDER_TAG}</div>
+    <div class="mk" data-slab-marker><div class="mkt"><div class="l1" data-slab-marker-l1></div><div class="l2" data-slab-marker-l2></div></div><svg viewBox="-16 -16 32 32" aria-hidden="true"></svg></div>
     <div class="you" data-slab-you></div>
     <div class="hpn" data-slab-hp>120</div><div class="hpb"><i class="chip"></i><i class="fill"></i></div>
     <div class="amm" data-slab-ammo>30 / 30</div>
@@ -716,11 +808,21 @@ export function createSlabHud(ui: HTMLElement, opts: SlabHudOptions): SlabHud {
     rows[t].style.color = hex(lighten(TEAM[t], 0.45));
     fills[t].style.background = hex(lighten(TEAM[t], 0.15));
   }
-  const cache = new Map<Element, string>();
-  const text = (e: Element, t: string) => { if (cache.get(e) !== t) { cache.set(e, t); e.textContent = t; } };
-  const html = (e: Element, t: string) => { if (cache.get(e) !== t) { cache.set(e, t); e.innerHTML = t; } };
-  const disp = (e: HTMLElement | SVGElement, on: boolean) => { const v = on ? '' : 'none'; if (e.style.display !== v) e.style.display = v; };
-  const style = (e: HTMLElement | SVGElement, k: string, v: string) => { if (e.style.getPropertyValue(k) !== v) e.style.setProperty(k, v); };
+  // Every DOM write goes through a cache of the last value written (per element and text / html / property /
+  // attribute), so a frame that changes nothing writes nothing and reads nothing back from the DOM.
+  const written = new Map<Element, Map<string, string>>();
+  const changed = (e: Element, k: string, v: string): boolean => {
+    let m = written.get(e);
+    if (!m) written.set(e, (m = new Map()));
+    if (m.get(k) === v) return false;
+    m.set(k, v);
+    return true;
+  };
+  const text = (e: Element, t: string) => { if (changed(e, '#text', t)) e.textContent = t; };
+  const html = (e: Element, t: string) => { if (changed(e, '#html', t)) e.innerHTML = t; };
+  const style = (e: HTMLElement | SVGElement, k: string, v: string) => { if (changed(e, k, v)) e.style.setProperty(k, v); };
+  const disp = (e: HTMLElement | SVGElement, on: boolean) => style(e, 'display', on ? '' : 'none');
+  const attr = (e: Element, k: string, v: string) => { if (changed(e, `@${k}`, v)) e.setAttribute(k, v); };
   let active = false, winnerUp = false, overtime = false;
   let hintLeft = HINT_SECS;
   const st = slabHudState();
@@ -734,8 +836,8 @@ export function createSlabHud(ui: HTMLElement, opts: SlabHudOptions): SlabHud {
     active = on;
     winnerUp = on && ended;
     disp(root, on);
-    ui.classList.toggle('cvc-slab', on);
-    ui.classList.toggle('cvc-slab-end', on && ended);
+    if (changed(ui, '@class:cvc-slab', String(on))) ui.classList.toggle('cvc-slab', on);
+    if (changed(ui, '@class:cvc-slab-end', String(on && ended))) ui.classList.toggle('cvc-slab-end', on && ended);
   };
 
   return {
@@ -760,7 +862,7 @@ export function createSlabHud(ui: HTMLElement, opts: SlabHudOptions): SlabHud {
       if (M.phase === 'live') overtime = slabOvertime(M);
       const c = slabClock(M, overtime);
       text(clock, c.text);
-      clock.className = c.tone === 'ot' ? 'clk ot' : 'clk';
+      attr(clock, 'class', c.tone === 'ot' ? 'clk ot' : 'clk');
       style(clock, 'color', hex(SLAB_CLOCK_COLOR[c.tone]));
       const line = slabLineFor(M, f.slab);
       disp(state, line !== null);
@@ -775,10 +877,11 @@ export function createSlabHud(ui: HTMLElement, opts: SlabHudOptions): SlabHud {
         text(mkLine1, m.lines[0]);
         text(mkLine2, m.lines[1]);
         html(mkSvg, slabMarkerSvg(m.shape));
-        mk.dataset.shape = m.shape;
-        mk.dataset.dodge = m.dodge;
+        attr(mk, 'data-shape', m.shape);
+        attr(mk, 'data-dodge', m.dodge);
         style(mk, 'color', hex(m.color));
-        mk.style.transform = `translate(${m.x.toFixed(1)}px, ${m.y.toFixed(1)}px)`;
+        style(mk, 'opacity', m.alpha === 1 ? '1' : m.alpha.toFixed(2)); // dimmed under a wedge (§3 rev. 4)
+        style(mk, 'transform', `translate(${m.x.toFixed(1)}px, ${m.y.toFixed(1)}px)`);
       }
 
       // §4 you: your team, hit points with the §3 chip, ammo, the controls hint
@@ -803,23 +906,26 @@ export function createSlabHud(ui: HTMLElement, opts: SlabHudOptions): SlabHud {
       if (panel) {
         const [l1, l2, l3, l4] = panel.lines;
         if (panel.glyph) {
-          const split = l1.lastIndexOf('  ·  ') + 5;
-          html(dLines[0], `${esc(l1.slice(0, split))}<svg viewBox="-8 -8 16 16" aria-hidden="true" style="color:${hex(lighten(TEAM[panel.glyph.team], 0.35))}" data-glyph="${panel.glyph.shape}">${slabTeamGlyphSvg(panel.glyph.team)}</svg>${esc(l1.slice(split))}`);
+          // hud.gd: "TAKEN DOWN BY <name>  ·", the glyph (team colour lightened 0.3), the team name (lightened 0.45)
+          const dot = l1.lastIndexOf('  ·  '), kt = panel.glyph.team;
+          html(dLines[0], `${esc(l1.slice(0, dot + 3))}<svg viewBox="-8 -8 16 16" aria-hidden="true" style="color:${hex(lighten(TEAM[kt], 0.3))}" data-glyph="${panel.glyph.shape}">${slabTeamGlyphSvg(kt)}</svg>`
+            + `<span data-team style="color:${hex(lighten(TEAM[kt], 0.45))}">${esc(l1.slice(dot + 5))}</span>`);
         } else html(dLines[0], esc(l1));
         text(dLines[1], l2); text(dLines[2], l3); text(dLines[3], l4);
+        style(dLines[1], 'color', hex(lighten(TEAM[L && L.team === 1 ? 1 : 0], 0.45)));
       }
 
       // §3 hits: your confirm at the crosshair, the wedges toward where whoever hit you stood, the red flash
       const conf = o.confirm;
       if (conf) {
         html(hc, slabHitSvg(conf.kind));
-        hc.dataset.kind = conf.kind;
+        attr(hc, 'data-kind', conf.kind);
         style(hc, 'color', hex(SLAB_HIT[conf.kind].color));
       }
       style(hc, 'opacity', conf ? conf.alpha.toFixed(2) : '0');
       while (wedgeEls.length < o.wedges.length) {
         const el = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        el.setAttribute('viewBox', '-12 -12 24 24');
+        el.setAttribute('viewBox', '-16 -16 32 32');
         el.innerHTML = SLAB_WEDGE_SVG;
         wg.appendChild(el);
         wedgeEls.push(el);
@@ -848,7 +954,7 @@ export function createSlabHud(ui: HTMLElement, opts: SlabHudOptions): SlabHud {
       offGame();
       ui.classList.remove('cvc-slab', 'cvc-slab-end');
       root.remove();
-      cache.clear();
+      written.clear();
       st.hits.reset();
       st.deaths.clear();
       st.lastPos.clear();

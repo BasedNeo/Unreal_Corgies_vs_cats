@@ -15,7 +15,7 @@
 import type { Sim } from '../sim/sim';
 import type { SimEntity } from '../sim/entity';
 import { stepCharacter, type MoveContext } from '../sim/systems/movement';
-import { stepWorldEffects } from '../sim/world/systems';
+import { outOfBoundsTeleports, stepWorldEffects } from '../sim/world/systems';
 import type { ClientMsg, MatchState, RosterEntry, ServerMsg, GameEvent } from '../shared/protocol';
 import { packEntity } from '../shared/protocol';
 import { Btn, sanitizeInput, emptyInput, type InputCmd } from '../shared/input';
@@ -391,8 +391,9 @@ export class Room {
     this.sim.setInput(e.id, cmd);
     if (e.flags & EFlag.Mounted) return; // riders are moved by their vehicle during regular ticks
     stepCharacter(this.moveCtx, e, TICK_DT);
-    // Map effects run right after movement in a regular tick (order 250); mirror that here.
-    if (stepWorldEffects(this.sim.worldData, e, TICK_DT, this.moveCtx.emit).outOfBounds) {
+    // Map effects run right after movement in a regular tick (order 250); mirror that here (W15: a slab fall is not
+    // teleported: the regular tick's slabFallSystem takes the pet down).
+    if (stepWorldEffects(this.sim.worldData, e, TICK_DT, this.moveCtx.emit).outOfBounds && outOfBoundsTeleports(this.sim, e)) {
       const s = this.sim.pickSpawn(e.team);
       this.sim.placeCharacter(e, s.x, s.y, s.z);
     }

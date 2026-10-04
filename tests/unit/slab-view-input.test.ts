@@ -66,6 +66,25 @@ describe('slab rematch input', () => {
   });
 });
 
+describe('pad Start rematches (W15 §5, hud.gd R / Enter / Start)', () => {
+  it('pad Start (button 9) sends the reload bit only while enterReloads is set (the slab winner screen)', () => {
+    const { input } = rig();
+    const had = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    const buttons = Array.from({ length: 17 }, () => ({ pressed: false }));
+    Object.defineProperty(globalThis, 'navigator', { value: { getGamepads: () => [{ connected: true, axes: [0, 0, 0, 0], buttons }] }, configurable: true });
+    try {
+      buttons[9].pressed = true;
+      expect(input.sample(1, 1 / 60).buttons & Btn.Reload).toBe(0); // a running match: Start does nothing here
+      input.enterReloads = true;
+      expect(input.sample(2, 1 / 60).buttons & Btn.Reload).toBe(Btn.Reload);
+      buttons[9].pressed = false;
+      expect(input.sample(3, 1 / 60).buttons & Btn.Reload).toBe(0);
+    } finally {
+      if (had) Object.defineProperty(globalThis, 'navigator', had); else delete (globalThis as { navigator?: unknown }).navigator;
+    }
+  });
+});
+
 describe('slab test overrides (offline only: WorkerBootConfig.slab)', () => {
   it('reads &slabWin, &slabTime and &slabOvertime, clamped; ignores the rest', () => {
     expect(slabOverridesFromSearch('?mode=slab')).toBeUndefined();

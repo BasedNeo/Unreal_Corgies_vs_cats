@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SLAB_CUES, SLAB_CUE_DB, SLAB_CUE_FILE, SLAB_SHOT_MAX, SLAB_SHOT_REF, SlabMatchCues, SlabSamples, slabEventCue, type SlabCue } from '../../src/client/audio/slab-cues';
 import type { GameEvent, MatchState } from '../../src/shared/protocol';
-import { createAudio } from '../../src/client/audio';
+import { createAudio, type GameAudio } from '../../src/client/audio';
 import * as S from '../../src/client/audio/presets';
 import { Music } from '../../src/client/audio/music';
 import { bus } from '../../src/client/core/events';
@@ -79,7 +79,14 @@ describe('slab cues: which cue for which event', () => {
 
 const g = globalThis as unknown as { AudioContext?: unknown; window?: unknown; fetch?: unknown; location?: unknown };
 const saved = { AudioContext: g.AudioContext, window: g.window, fetch: g.fetch, location: g.location };
-afterEach(() => { g.AudioContext = saved.AudioContext; g.window = saved.window; g.fetch = saved.fetch; g.location = saved.location; vi.restoreAllMocks(); });
+/** Every createAudio a test makes, disposed after the test even when an expect throws, so no bus listener outlives it. */
+const live = new Set<GameAudio>();
+const dispose = (a: GameAudio) => { if (live.delete(a)) a.dispose(); };
+afterEach(() => {
+  for (const a of [...live]) dispose(a);
+  g.AudioContext = saved.AudioContext; g.window = saved.window; g.fetch = saved.fetch; g.location = saved.location;
+  vi.restoreAllMocks();
+});
 
 const pet = (id: number, team: 0 | 1, x = 0, z = 0): EntityState => ({ id, kind: EntityKind.Player, team, species: team, cls: 0, seed: id, x, y: 0, z, yaw: 0, pitch: 0, vx: 0, vy: 0, vz: 0, hp: 120, maxHp: 120, anim: 0, flags: 1, weapon: 0, ammo: 30 });
 
@@ -96,6 +103,7 @@ async function rig(missing: SlabCue[] = [], o: { music?: boolean; before?: () =>
     return { ok, status: ok ? 200 : 404, arrayBuffer: async () => new TextEncoder().encode(u.split('/').pop()!).buffer };
   };
   const audio = createAudio({ autoUnlock: false, music: o.music ?? false });
+  live.add(audio);
   o.before?.();
   expect(await audio.unlock()).toBe(true);
   const plays: { r: S.Recipe; o: Record<string, unknown> }[] = [];
@@ -120,7 +128,6 @@ describe('slab cues through createAudio', () => {
     audio.onGameEvent(fire(2));
     expect(plays[0].r).toBe(S.rifleShot);
     expect(urls).toEqual([]);
-    audio.dispose();
   });
 
   it('in slab mode the shot, the hit confirm, the ticks and the end play the shared files', async () => {
@@ -153,7 +160,6 @@ describe('slab cues through createAudio', () => {
     audio.onGameEvent({ e: 'score', team: 0, pts: 0, reason: 'win' }); // the generic team sting stays out of it
     expect(plays.some((p) => p.r === S.sting)).toBe(false);
     expect(f.nodes.slice(n).filter((x) => x.kind === 'src').map((x) => (x.buffer as { tag: string }).tag)).toEqual(['synth_slab_tick.wav', 'synth_match_end_win.wav']);
-    audio.dispose();
   });
 
   it('a missing file: one warning, that cue silent (the shot falls back to the synth), the rest still play', async () => {
@@ -170,7 +176,6 @@ describe('slab cues through createAudio', () => {
     expect(fileOf(f, n)).toBe('');
     bus.emit('match', ms({ score: [1, 1] }));
     expect(fileOf(f, n)).toBe('synth_slab_tick_enemy.wav');
-    audio.dispose();
   });
 
   it('loads the files once per page, not per snapshot', async () => {
@@ -178,7 +183,6 @@ describe('slab cues through createAudio', () => {
     for (let i = 0; i < 5; i++) bus.emit('match', ms({}));
     await settle();
     expect(urls.length).toBe(SLAB_CUES.length);
-    audio.dispose();
     const s = new SlabSamples('/x/', async () => ({ ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) }));
     expect(s.get('rifle_shot')).toBeUndefined();
   });
@@ -191,7 +195,7 @@ describe('slab cues through createAudio', () => {
     expect(start).not.toHaveBeenCalled();
     bus.emit('match', ms({ mode: 'team-deathmatch' }));
     expect(start).toHaveBeenCalledTimes(1);
-    a.audio.dispose();
+    dispose(a.audio);
     start.mockClear(); stop.mockClear();
     // another mode first (the music plays), then a slab match
     const b = await rig([], { music: true, before: () => bus.emit('match', ms({ mode: 'team-deathmatch' })) });
@@ -201,7 +205,6 @@ describe('slab cues through createAudio', () => {
     for (let i = 0; i < 3; i++) bus.emit('match', ms({ score: [i, 0] }));
     expect(start).toHaveBeenCalledTimes(1); // not restarted per snapshot
     expect(stop).toHaveBeenCalledTimes(1);
-    b.audio.dispose();
   });
 
   it('?sfxlog: one `SFX <cue>` console line per play, all six cues (W14 LISTEN evidence)', async () => {
@@ -223,7 +226,6 @@ describe('slab cues through createAudio', () => {
     real(lines.join('\n'));
     expect(lines).toEqual(['SFX rifle_shot', 'SFX rifle_shot', 'SFX hit_confirm', 'SFX slab_tick', 'SFX slab_tick_enemy', 'SFX slab_tick',
       'SFX match_end_win', 'SFX slab_tick_enemy', 'SFX match_end_lose']);
-    audio.dispose();
   });
 
   it('your side is the local pet\'s team: a Cat player hears the flipped ticks and wins with the Cats', async () => {
@@ -239,16 +241,16 @@ describe('slab cues through createAudio', () => {
     bus.emit('match', ms({ score: [1, 2] }));
     bus.emit('match', ms({ score: [1, 3], phase: 'ended', winner: 1 }));
     expect(lines).toEqual(['SFX slab_tick', 'SFX slab_tick_enemy', 'SFX slab_tick', 'SFX slab_tick', 'SFX match_end_win']);
-    audio.dispose();
   });
 
-  it('with no local pet (as Godot\'s --bots-only) your side is Corgi Company', async () => {
+  it('with no local pet (as Godot\'s --bots-only) your side is Corgi Company, even after you were a Cat', async () => {
     const lines = sfxLines();
     const { audio } = await rig();
     const listener = { matrixWorld: { elements: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1.5, 0, 1] } } as never;
-    audio.update(listener, byId([pet(1, 1), pet(2, 0, 3, -4)]), -1, 1 / 60); // nobody is you
-    bus.emit('match', ms({ score: [0, 0] }));
+    audio.update(listener, byId([pet(1, 1), pet(2, 0, 3, -4)]), 1, 1 / 60); // first you are pet 1, a Cat
+    bus.emit('match', ms({ score: [0, 0] })); // a snapshot while you are a Cat: your side is the Cats
     await settle(); await settle();
+    audio.update(listener, byId([pet(1, 1), pet(2, 0, 3, -4)]), -1, 1 / 60); // then nobody is you
     audio.onGameEvent(fire(2)); // a bot's shot, at its muzzle
     audio.onGameEvent(hit(2, 1)); // a bot's hit: no confirm without you
     bus.emit('match', ms({ score: [1, 0] }));
@@ -258,7 +260,6 @@ describe('slab cues through createAudio', () => {
     bus.emit('match', ms({ score: [1, 0], phase: 'ended', winner: 0 }));
     expect(lines).toEqual(['SFX rifle_shot', 'SFX slab_tick', 'SFX slab_tick_enemy', 'SFX slab_tick_enemy', 'SFX match_end_lose',
       'SFX slab_tick', 'SFX match_end_win']);
-    audio.dispose();
   });
 });
 

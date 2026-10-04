@@ -188,6 +188,23 @@ export function applyArchetype(e: SimEntity, id: ArchetypeId, opts: { external?:
   e.ai.external = !!opts.external;
 }
 
+/**
+ * A bot's brain back to a fresh one (W15: what applyArchetype builds) for a match start or a rematch: target,
+ * visibility, mode, nav (links, plans, path), perch, tactics and the ordnance planner, at the bot's current spot and
+ * facing (so the stuck odometer starts there). Keeps the archetype, the external flag and the input sequence (monotonic).
+ * Godot resets every bot on a rematch (bot.gd respawn(), tests/test_bot_roles.gd).
+ */
+export function resetBrain(e: SimEntity): void {
+  const old = e.ai;
+  if (!old) return;
+  const ai = createBrain(old.arch, e.yaw);
+  ai.ord = createOrdnanceBot(e.id);
+  ai.lastX = e.pos.x; ai.lastZ = e.pos.z;
+  ai.external = old.external;
+  ai.seq = old.seq;
+  e.ai = ai;
+}
+
 function rand(sim: Sim, a: number, b: number): number {
   return a + (b - a) * sim.rng();
 }

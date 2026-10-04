@@ -1,10 +1,11 @@
-# LISTEN: the six cues, measured and logged (W15 Sprint B, lane A-HOOK)
+# LISTEN: the six cues, measured and logged (W15 Sprints B and C, lane A-HOOK)
 
 **Nobody has listened to these cues.** No machine used so far has an audio device. This page holds numbers and
 play logs only. It makes no claim that any cue sounds good. The human ear step at the end is **NOT DONE**.
 
 Base: `9139c7a` plus the working tree, in a private copy. The patch round's web runs used HEAD `ace71ca`, which is
-`9139c7a` plus a test-only commit. No cue file was changed.
+`9139c7a` plus a test-only commit. Sprint C (the sound tests hardened, §1 re-measured) ran on HEAD `816489c` plus the
+working tree. No cue file was changed.
 
 ## 1. The files
 
@@ -13,40 +14,57 @@ Base: `9139c7a` plus the working tree, in a private copy. The patch round's web 
 
 | Cue | File | Duration | Peak | RMS (file) | RMS (loudest 50 ms) | Attack | Audible (to -40 dB) | Centroid | Dominant |
 |---|---|---|---|---|---|---|---|---|---|
-| rifle_shot | `synth_rifle_shot.wav` | 240 ms | -3.0 dBFS | -21.6 dBFS | -14.9 dBFS | 5 ms | 108 ms | 1510 Hz | 97 Hz |
-| hit_confirm | `synth_hit_confirm.wav` | 100 ms | -3.0 dBFS | -23.4 dBFS | -20.4 dBFS | 1 ms | 25 ms | 2036 Hz | 3149 Hz |
-| slab_tick | `synth_slab_tick.wav` | 130 ms | -3.0 dBFS | -17.8 dBFS | -13.6 dBFS | 4 ms | 65 ms | 1132 Hz | 883 Hz |
-| slab_tick_enemy | `synth_slab_tick_enemy.wav` | 130 ms | -3.0 dBFS | -19.4 dBFS | -15.2 dBFS | 6 ms | 60 ms | 620 Hz | 587 Hz |
-| match_end_win | `synth_match_end_win.wav` | 1500 ms | -3.0 dBFS | -19.0 dBFS | -10.7 dBFS | 374 ms | 1142 ms | 5937 Hz | 698 Hz |
-| match_end_lose | `synth_match_end_lose.wav` | 1300 ms | -3.0 dBFS | -19.2 dBFS | -10.8 dBFS | 18 ms | 851 ms | 265 Hz | 87 Hz |
+| rifle_shot | `synth_rifle_shot.wav` | 240 ms | -3.0 dBFS | -21.6 dBFS | -14.9 dBFS | 5 ms | 108 ms | 220 Hz | 97 Hz |
+| hit_confirm | `synth_hit_confirm.wav` | 100 ms | -3.0 dBFS | -23.4 dBFS | -20.4 dBFS | 1 ms | 25 ms | 1688 Hz | 3149 Hz |
+| slab_tick | `synth_slab_tick.wav` | 130 ms | -3.0 dBFS | -17.8 dBFS | -13.6 dBFS | 4 ms | 65 ms | 906 Hz | 883 Hz |
+| slab_tick_enemy | `synth_slab_tick_enemy.wav` | 130 ms | -3.0 dBFS | -19.4 dBFS | -15.2 dBFS | 6 ms | 59 ms | 585 Hz | 587 Hz |
+| match_end_win | `synth_match_end_win.wav` | 1500 ms | -3.0 dBFS | -19.0 dBFS | -10.7 dBFS | 374 ms | 1094 ms | 687 Hz | 698 Hz |
+| match_end_lose | `synth_match_end_lose.wav` | 1300 ms | -3.0 dBFS | -19.2 dBFS | -10.8 dBFS | 18 ms | 851 ms | 195 Hz | 87 Hz |
 
 How the columns are measured:
-- **Centroid:** the magnitude-weighted mean frequency of the whole file (Hann window, 20 Hz to 20 kHz).
+- **Centroid:** the **power-weighted** (|X|²) mean frequency of the whole file (Hann window, 20 Hz to 20 kHz).
 - **Dominant:** the largest FFT bin over the same range.
-- **Attack:** from the first 1 ms RMS window within -20 dB of the loudest window, to that window.
-- **Audible:** until the 1 ms envelope last sits above -40 dB of its loudest window.
+- **Onset:** the first 1 ms RMS window within -20 dB of the loudest window.
+- **Attack:** from the onset to the loudest window.
+- **Audible:** from the onset to the last 1 ms window above -40 dB of the loudest window.
 - **Win sting:** its 374 ms "attack" is the snare pickup before the chord.
 
-**Correction to the brief.** It quoted the W14 ticks with the two columns swapped. The own tick's **centroid** is
-1132 Hz and its **dominant** is 883 Hz. The enemy tick's centroid is 620 Hz and its dominant 587 Hz. That is what
-W14's table says too.
+**What Sprint C changed.** Sprint B weighted the centroid by magnitude and counted the audible length from the file's
+first sample. Its table read 1510 / 2036 / 1132 / 620 / 5937 / 265 Hz, and the win sting 1142 ms.
+- Magnitude weighting is pulled far up by a noise floor. Own-tick samples plus -70 dBFS noise moved a
+  magnitude-weighted centroid by 1248 Hz; weighted by power the same copy moves by less than 5 Hz.
+- The length now starts at the onset. 50 ms of silence before a signal changes its duration, not its audible length.
+
+**Correction to the Sprint B brief (kept for the record).** It quoted the W14 ticks with the two columns swapped. Then,
+weighted by magnitude, the own tick's centroid was 1132 Hz and its dominant 883 Hz.
 
 ### Your tick and the enemy's
 
 | | Own `slab_tick` | Enemy `slab_tick_enemy` | Gap | Guard |
 |---|---|---|---|---|
-| Centroid | 1132 Hz | 620 Hz | **512 Hz** | at least 150 Hz |
+| Centroid (power-weighted) | 906 Hz | 585 Hz | **321 Hz** | at least 150 Hz, or the length gap below |
 | Dominant | 883 Hz | 587 Hz | 296 Hz | (reported only) |
 | File length | 130 ms | 130 ms | 0 ms | (reported only) |
-| Audible length | 65 ms | 60 ms | 5 ms | at least 20 ms |
+| Audible length (onset to -40 dB) | 65 ms | 59 ms | 6 ms | at least 20 ms, or the centroid gap above |
 
 - The two ticks differ in **pitch**, not in length.
-- `tests/unit/audio-cue-measure.test.ts` fails when the centroid gap is under 150 Hz **and** the audible-length gap
-  is under 20 ms.
-- **Mutation check:** with the own tick copied over the enemy's file (private copy only), the test failed:
-  `centroid gap 0 Hz (min 150), length gap 0 ms (min 20): expected false to be true`.
-- The test also checks the measures on synthetic tones (1 kHz and 500 Hz, centroid within 20 Hz) and the guard's
-  edges (149 Hz and 19 ms: alike; 150 Hz or 20 ms: different).
+- **The guard.** HUD_CONTRACT §3 asks for a difference "in length or pitch". `tests/unit/audio-cue-measure.test.ts`
+  fails when the centroid gap is under 150 Hz **and** the audible-length gap is under 20 ms; either gap alone
+  passes.
+  - Sprint B's extra centroid pin is gone. The test header and this page now say the same thing.
+- **Checks on the measures.**
+  - Synthetic 1 kHz and 500 Hz tones: centroid within 5 Hz, dominant within 3 Hz.
+  - 50 ms of leading silence: duration +50 ms, audible length within 1.5 ms.
+  - The guard's edges: 149 Hz and 19 ms read as alike; 150 Hz or 20 ms alone read as different.
+  - A **near copy** (the own tick plus seeded -70 dBFS noise) reads as alike: centroid within 5 Hz, length within
+    2 ms.
+- **Mutants**, each in a private copy, restored after; "B" is the Sprint B test, "C" the Sprint C test:
+
+  | Mutant | B | C, with its message |
+  |---|---|---|
+  | The centroid weighted by \|X\| again | pass | **fail**: `expected 1248.2114167916718 to be less than 5` (near copy) |
+  | The length counted from the file's first sample | pass | **fail**: `expected 49.88662131519273 to be less than 1.5` (leading silence) |
+  | The enemy tick file replaced by a near copy of the own tick | fail | **fail**: `slab_tick 906 Hz / 65 ms vs slab_tick_enemy 907 Hz / 65 ms: centroid gap 1 Hz (min 150), length gap 0 ms (min 20)` |
 
 ### Playback gain
 
@@ -91,10 +109,19 @@ In the logs below, each line is `SFX <cue> <seconds since start>`.
 
 ### Godot cue test: event counts equal play counts
 
-`godot --headless --path engines/godot --script res://tests/run.gd -- --only sfx --sfx-log` passes (12 s).
+`godot --headless --path engines/godot --script res://tests/run.gd -- --only sfx --sfx-log` passes (13 s on Sprint C).
 
 The test records the game's own events (every rifle's `fired`, the human's `hit_confirmed`, `slab_point` and
 `match_over`). Each cue's play count must equal its event count.
+
+**Sprint C wiring checks.** A count by name could not see a cue that plays the wrong file, or plays muted. Each section
+now also checks the wiring, at boot and again after play:
+- every cue's stream holds its own file, `synth_<cue>.wav`, which the test reads itself;
+- every 2D player plays its own cue's stream at sfx.gd's `VOLUME_DB`;
+- all 12 shot voices play `streams.rifle_shot` at `VOLUME_DB.rifle_shot`;
+- no `VOLUME_DB` entry is under -20 dB;
+- `streams.slab_tick.data != streams.slab_tick_enemy.data`;
+- right after a slab point, that side's tick player is the one playing.
 
 **With the human** (1 v 1):
 - The human fires through the `fire` input until the Cat is down: every shot landed, the kill included.
@@ -117,8 +144,17 @@ The test records the game's own events (every rifle's `fired`, the human's `hit_
 |---|---|---|---|---|---|---|
 | Events (= plays) | 47 | 0 | 8 | 5 | 1 | 2 |
 
-**Mutation check:** a `sfx.gd` that plays `slab_tick` for every point fails the test four times, for example
-`human: slab_tick played 4 times for 2 events` and `bots only: slab_tick_enemy played 0 times for 5 events`.
+**Mutants**, each a one-line edit to `sfx.gd` in a private copy, restored after (`cmp` with the real tree: same).
+"B" is the Sprint B test (HEAD `816489c`), "C" the Sprint C test:
+
+| Mutant | B | C, first message |
+|---|---|---|
+| Every point plays `slab_tick` (Sprint B's mutant) | fail | **fail**: `human, enemy point: no slab_tick_enemy player playing right after the point`, then `human: slab_tick played 4 times for 2 events` |
+| `swap_player`: the enemy tick's player gets the own-tick stream | PASS | **fail**: `human, at boot: the slab_tick_enemy player does not play the slab_tick_enemy stream` |
+| `swap_file`: `CUES` maps the enemy tick to `synth_slab_tick.wav` | PASS | **fail**: `the slab_tick_enemy stream does not hold synth_slab_tick_enemy.wav`, `slab_tick and slab_tick_enemy are the same data` |
+| `mute_player`: the enemy tick's player at -80 dB | PASS | **fail**: `the slab_tick_enemy player is at -80.0 dB, VOLUME_DB says -14.0` |
+| `mute_const`: `VOLUME_DB.slab_tick_enemy` = -80 | PASS | **fail**: `slab_tick_enemy is set to -80.0 dB, under the -20 dB floor`; the web parity test fails as well |
+| `mute_shots`: every shot voice at -80 dB | PASS | **fail**: `shot voice 0 is at -80.0 dB, VOLUME_DB says 0.0` (and voices 1 to 11) |
 
 ### Godot real launches
 
@@ -135,8 +171,9 @@ The test records the game's own events (every rifle's `fired`, the human's `hit_
 
 ### Web
 
-**Unit tests.** `npx vitest run tests/unit/audio-slab-cues.test.ts tests/unit/audio-cue-measure.test.ts
-tests/unit/audio-weapons.test.ts` passes 20 of 20. `tsc --noEmit` reports 0 errors; boundaries PASS.
+**Unit tests.** On Sprint C, `npx vitest run tests/unit/audio-slab-cues.test.ts tests/unit/audio-cue-measure.test.ts
+tests/unit/audio-weapons.test.ts tests/unit/audio-cues.test.ts` passes 29 of 29. `tsc --noEmit` reports 0 errors;
+boundaries PASS.
 
 Through `createAudio` with `?sfxlog`, the first case prints:
 
@@ -146,8 +183,15 @@ Through `createAudio` with `?sfxlog`, the first case prints:
 The new cases:
 - A Cat player hears the ticks flipped and wins with the Cats.
 - With no local pet, as Godot's `--bots-only`, your side is Corgi Company. A bot's hit plays no confirm.
+  - **Sprint C:** the test now plays one snapshot as a Cat first (local pet 1, team 1), then goes to no local pet, and
+    still expects Corgi-side ticks.
+  - The mutant `idx_nobranch` (drop `else if (localId < 0) slabTeam = 0` in `index.ts`) passes the Sprint B test
+    (12/12) and fails the Sprint C one: `with no local pet … your side is Corgi Company, even after you were a Cat:
+    expected [ 'SFX rifle_shot', …(6) ] to deeply equal [ 'SFX rifle_shot', …(6) ]`.
 - A local pet missing from one frame's states keeps your side. Before W15 the web fell back to Corgi Company there;
   `index.ts` now keeps the last known team.
+- **Sprint C:** every `createAudio` a test makes is disposed in `afterEach`, even when an expect throws. No bus
+  listener outlives its test.
 
 **Browser.** A private probe ran `?mode=slab&webgl&autoplay&sfxlog`. A stand-in gamepad (`navigator.getGamepads`,
 RT and LT held) fires through the game's own pad path after one click. It logged:

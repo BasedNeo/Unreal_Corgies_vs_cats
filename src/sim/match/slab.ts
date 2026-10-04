@@ -11,6 +11,7 @@ import { SLAB, SLAB_ZONE_SEED, onSlab, type SlabConfig } from '../../shared/cont
 import { CLASSES, moveStatsFor } from '../../shared/content/classes';
 import { COMBAT_RULES } from '../../shared/content/weapons';
 import { ensureCombat, equipWeapon, ticksOf } from '../combat/state';
+import { kill } from '../combat/damage';
 import type { SpawnPoint } from '../../shared/world/world-types';
 
 /** The slab's state (plain data on the Zone entity: `e.slab`). */
@@ -149,6 +150,27 @@ export const slabKitSystem: SimSystem = {
     if (!isSlabMode(sim)) return;
     const cfg = slabConfig(sim);
     for (const e of sim.entities.values()) if (e.char) applySlabKit(e, cfg);
+  },
+};
+
+// ------------------------------------------------------------------ the fall (W15)
+
+/** Godot match.gd: a living pet whose feet are below the slab's centre minus this (m) is taken down (`_ground_y - 40`). */
+export const SLAB_FALL_DEPTH = 40;
+
+/**
+ * Order 650 (the kill plane's slot; killPlaneSystem stands aside in slab mode). Godot `_physics_process`: a living pet
+ * with y < slab centre y - 40 calls die(null): taken down by nobody (death `by` -1, so the HUD reads THE LOT; no credit
+ * to a recent attacker), then the ordinary slab respawn: after `respawn` s on a respawn point (slabRespawnDelay,
+ * slabRespawns). No score of its own: a downed pet just stops counting on the slab.
+ */
+export const slabFallSystem: SimSystem = {
+  name: 'slab-fall',
+  order: 650,
+  update(sim) {
+    if (!isSlabMode(sim)) return;
+    const below = slabConfig(sim).center.y - SLAB_FALL_DEPTH;
+    for (const e of sim.entities.values()) if (e.char && !e.dead && e.pos.y < below) kill(sim, e, null);
   },
 };
 

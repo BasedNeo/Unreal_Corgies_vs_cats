@@ -23,12 +23,28 @@ const SPRINT_MIN := 12.0
 const LEDGE_JUMP := 0.45
 ## Holding and contesting (W14 G-BOT CONTEST): only a pet inside the score volume (slab.gd contains(): the 8 x 8 m
 ## square and its y window) holds or contests. On the slab a bot stands and strafes at least SLAB_MARGIN m inside every
-## edge: its wish may not carry it past that inner square (it looks EDGE_LOOK m ahead), and from outside it the wish
-## turns back in. Within CONTEST_ZONE m of the square a bot with an enemy in sight keeps stepping in instead of backing
-## off to the rifle's minimum range, which left it circling a holder at 7 m and clipping the corners (W13 READ check).
+## edge: its wish may not carry it past that inner square (it looks EDGE_LOOK m ahead: 1.2 m since W15, was 0.8, for
+## more room under tests/test_bot_contest.gd's 5 % edge-band cap; docs/qa/w15/bot-roles.md), and from outside it the
+## wish turns back in. Within CONTEST_ZONE m of the square a bot with an enemy in sight keeps stepping in instead of
+## backing off to the rifle's minimum range, which left it circling a holder at 7 m and clipping the corners (W13 READ).
 const SLAB_MARGIN := 1.0
-const EDGE_LOOK := 0.8
+const EDGE_LOOK := 1.2
 const CONTEST_ZONE := 6.0
+## 2v2 roles (W15 G-BOT ROLES). When a team has two bots, the one in the even start slot (match.gd sets the pet meta
+## "slot" before each start) APPROACHES and the other HOLDS; a team's single bot (1v1, or your ally in 2v2) holds.
+## - HOLD: as before, sprint to the slab and hold it.
+## - APPROACH: no class, no other weapon; only where it goes. It takes post PUSH_DIST m out from the slab's centre on
+##   the enemy's way in (the nav path from the enemy's first respawn point to the slab), faces down that path and
+##   fights whoever comes along it. It steps onto the slab, and stays at least STEP_ON_MIN s, when no teammate is
+##   alive to hold it or an enemy stands on it (a contester). Measured (docs/qa/w15/bot-roles.md, "Roles are
+##   nominal"): it is at its post under 1 % of its alive time (0.8 s / 0.1 s per match; the checker measured 0-2.4 %),
+##   so in play the roles are nominal (Sprint C item 8: NOT MET). The cause is a trap, not the step-on rule: _steer()
+##   counts any bot inside the slab as on it, and _hold_inside() then clamps its wish to the inner margin, so an
+##   APPROACH bot whose post lies past the slab is held on the slab and never walks off to its post. Fixing the trap
+##   is a separate card with its own measurement.
+enum { ROLE_HOLD, ROLE_APPROACH }
+const PUSH_DIST := 16.0
+const STEP_ON_MIN := 3.0
 
 var think := true  # false = a frozen dummy (tests)
 var ledge_jump := LEDGE_JUMP  # tests/balance.gd --jump-up overrides it for an A/B
@@ -52,6 +68,12 @@ var _want_jump := false
 var _heard: Node = null
 var _heard_t := 0.0
 var _nav_ok := false
+var role := ROLE_HOLD
+## APPROACH: the post on the enemy's way in, and the way it faces there (INF until the nav map serves the path).
+var push_point := Vector3.INF
+var push_look := Vector3.ZERO
+var _step_on_t := 0.0  # APPROACH: seconds it keeps stepping on after the reason has gone
+var _stepping_on := false
 
 func _ready() -> void:
 	super._ready()
@@ -67,13 +89,38 @@ func _ready() -> void:
 	_think_t = rng.randf() * THINK_DT
 	react = rng.randf_range(REACT.x, REACT.y)
 
+## A new life, and every start and rematch (match.gd start_match respawns every pet): the role from the slot, and every
+## piece of think state back to its start value (target, timers, the step-on latch, the post and the goal and path).
 func respawn(pos: Vector3, face_yaw: float) -> void:
 	super.respawn(pos, face_yaw)
 	aim_dir = Vector3(-sin(face_yaw), 0.0, -cos(face_yaw))
 	target = null
 	target_visible = false
 	seen = 0.0
+	lost = 0.0
+	_heard = null
+	_heard_t = 0.0
+	_stuck_t = 0.0
+	_pause = 0.0
+	_burst = 6
+	_strafe = 1.0
+	_strafe_t = 0.0
+	_want_jump = false
+	role = _role_from_slot()
+	push_point = Vector3.INF
+	push_look = Vector3.ZERO
+	_step_on_t = 0.0
+	_stepping_on = role != ROLE_APPROACH
 	_pick_goal()
+
+## APPROACH for the bot in an even start slot of a team that has two or more bots, else HOLD.
+func _role_from_slot() -> int:
+	if game == null:
+		return ROLE_HOLD
+	var bots: int = game.pets.filter(func(p): return p.team == team and p.get("think") != null).size()
+	if bots < 2:
+		return ROLE_HOLD
+	return ROLE_APPROACH if int(get_meta("slot", 1)) % 2 == 0 else ROLE_HOLD
 
 func hear(src: Node) -> void:
 	_heard = src
@@ -101,6 +148,8 @@ func _physics_process(delta: float) -> void:
 		var hv := Vector3(velocity.x, 0.0, velocity.z)
 		if hv.length() > 0.8:
 			want = hv.normalized()
+		elif _pushing() and push_look != Vector3.ZERO:
+			want = push_look  # at the post: watch the enemy's way in
 	aim_dir = _turn(aim_dir, want, TURN_RATE * delta)
 	set_facing(atan2(-aim_dir.x, -aim_dir.z), asin(clampf(aim_dir.y, -1.0, 1.0)))
 	_shoot(delta)
@@ -165,11 +214,66 @@ func _think(dt: float) -> void:
 	if _strafe_t <= 0.0:
 		_strafe = -_strafe if rng.randf() < 0.7 else _strafe
 		_strafe_t = rng.randf_range(0.5, 1.3)
-	if game.slab.contains(global_position):
+	if role == ROLE_APPROACH:
+		if push_point == Vector3.INF and _nav_ok:
+			_find_post()
+			if not _stepping_on:
+				_pick_goal()
+		var reason: bool = _holder_down() or game.slab_state.counts[1 - team] > 0
+		_step_on_t = STEP_ON_MIN if reason else maxf(0.0, _step_on_t - dt)
+		var on := _step_on_t > 0.0
+		if on != _stepping_on:
+			_stepping_on = on
+			_pick_goal()
+	if _pushing():
+		pass  # holding the post
+	elif game.slab.contains(global_position):
 		if global_position.distance_to(goal) < 1.0:
 			_pick_goal()
 	elif agent.is_navigation_finished() or not game.slab.contains(goal):
 		_pick_goal()
+
+## APPROACH, away from the slab: going to or holding the post.
+func _pushing() -> bool:
+	return role == ROLE_APPROACH and not _stepping_on
+
+## No other pet of this team is alive to hold the slab.
+func _holder_down() -> bool:
+	for p in game.pets:
+		if p != self and p.team == team and p.alive:
+			return false
+	return true
+
+## The post: the point PUSH_DIST m (flat) from the slab's centre on the nav path from the enemy's first respawn point
+## (match.gd respawn_slots, else its spawns) to the slab, and the way back along that path. Left at INF while the map
+## serves no path.
+func _find_post() -> void:
+	var foe := 1 - team
+	var from: Vector3 = Vector3.INF
+	var rs = game.get("respawn_slots")
+	if rs is Array and rs.size() > foe and not rs[foe].is_empty():
+		from = rs[foe][0]
+	elif game.spawns.size() > foe and not game.spawns[foe].is_empty():
+		from = game.spawns[foe][0]
+	if from == Vector3.INF:
+		return
+	var c: Vector3 = game.slab.center
+	var path := NavigationServer3D.map_get_path(agent.get_navigation_map(), from, c, true)
+	if path.size() < 2:
+		return
+	for i in range(path.size() - 1, 0, -1):
+		var a := path[i - 1]
+		var b := path[i]
+		var da := Vector2(a.x - c.x, a.z - c.z).length()
+		var db := Vector2(b.x - c.x, b.z - c.z).length()
+		if db <= PUSH_DIST and da > PUSH_DIST:
+			var k := (PUSH_DIST - db) / maxf(da - db, 1e-3)
+			push_point = b.lerp(a, k)
+			var away := Vector3(a.x - push_point.x, 0.0, a.z - push_point.z)
+			if away.length() < 0.1:
+				away = Vector3(push_point.x - c.x, 0.0, push_point.z - c.z)
+			push_look = away.normalized()
+			return
 
 func _los(p: Node) -> bool:
 	var q := PhysicsRayQueryParameters3D.create(eye(), p.chest(), T.L_WORLD)
@@ -264,6 +368,10 @@ func _hold_inside(dir: Vector3, pos: Vector3) -> Vector3:
 
 func _pick_goal() -> void:
 	if game == null or game.slab == null:
+		return
+	if _pushing() and push_point != Vector3.INF:
+		goal = push_point + Vector3(rng.randf_range(-1.0, 1.0), 0.0, rng.randf_range(-1.0, 1.0))
+		agent.target_position = goal
 		return
 	var s: Vector2 = game.slab.size
 	var c: Vector3 = game.slab.center

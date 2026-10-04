@@ -317,6 +317,39 @@ trench notches. None happens in a fight: 4 of about 110,000 shots were at an air
   of 60 winners).
 - **Not applied:** with the fix, seeds 101-160 measure 63 % Cat. bot.gd is unchanged.
 
+## 11e. Wave 15 Sprint C: contest guard, 2v2 roles, rematch reset
+`docs/qa/w15/bot-roles.md` has the numbers.
+- **Contest guard.** `tests/test_bot_contest.gd` puts four unhurt bots on the slab for 20 s and fails over 5 % of
+  their slab time in the 1 m edge band. Shipped: 0.2-0.9 % over 10 runs. Both mutations fail 10/10: no
+  `_hold_inside()` gives 16.5-31.6 %, and `SLAB_MARGIN` 0 gives 10.4-18.4 %. `EDGE_LOOK` went from 0.8 to 1.2 m for
+  more room under the cap; 0.8 m also passes (the checker measured 2.3 %), so the guard does not pin it.
+  - **On-slab floor:** the test now also fails under 76 of the 80 pet-s on the slab (the old floor was 20). Mutant
+    (APPROACH leaves a contested slab for its post): 41.7 pet-s, band 4.2 %: FAIL on the floor alone.
+  - **Real play is higher:** in the 2v2 balance runs (n 120) bots spend 3-4 % of their slab time in the edge band
+    (1v1 1-2 %). The 17 % and 1 % in section 11 are the `--holder` scenario; the test header now says so.
+- **Roles.** In a team with two bots, the even start slot APPROACHES: a post 16 m out on the enemy's nav path in,
+  stepping on when no teammate holds or an enemy is on the slab. The other bot HOLDS. A lone bot holds.
+  - **Item 8: NOT MET (roles nominal in play).** APPROACH is at its post under 1 % of its alive time (0.8 s /
+    0.1 s per match; the checker measured 0-2.4 %).
+  - **The roles code stays (lead ruling):** by measurement it changes nothing (Fisher p 1.0 against the build without
+    roles), it carries the tested rematch reset, and the trap card builds on it. Report it as NOT MET, never as done.
+  - **Why: the trap, a bot.gd defect.** `_hold_inside()` clamps an APPROACH bot whose post lies past the slab onto
+    the slab. It is held there 20 % of its alive time; the step-on rule is not the cause. The bot.gd roles comment
+    now says so (comment only, lead ruling).
+  - **The shipped bar holds:** 2v2 pooled 51-69 (Cat 58 %, 49-66 %, n 120; seeds 101-160 alone are 60 %), 1v1 42-38
+    (48 %, n 80, unchanged), and both roles stood on the slab in 120/120 matches.
+  - **The lead's stricter step-on rule, plus a fix for the trap, tried once in scratch:** 2v2 36-84 (Cat 70 %,
+    61-77 %), post share 6-9 %. It fails two bars and is not applied. Sprint C stops there: no trap fix this sprint.
+  - **NEXT card:** fix the trap alone, then try the two options (drop the roles, or a post inside the 6 m contest
+    zone). Each gets its own 2v2 n 120 / 1v1 n 80 measurement.
+- **Rematch.** `respawn()` resets the role, target, timers, latches, post, post facing and goal.
+  `tests/test_bot_roles.gd` asserts the roles per format and that a mid-match rematch gives the start-of-match state;
+  the mutation fails it for all 4 bots.
+  - Each team's HOLD bot is killed at 28 s, so both APPROACH bots are stepping on when the rematch runs. A respawn
+    that skips the step-on reset fails for both bots every run (`_step_on_t` mutant: FAIL, both bots).
+  - `push_look` is now asserted; the checker's mutant that skipped its reset had passed the old test.
+  - It checks intent (role, post, goal), not arrival: it does not show APPROACH reaching its post.
+
 ## 12. Commands
 ```
 G=<Godot 4.7.2>

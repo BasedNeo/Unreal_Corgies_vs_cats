@@ -4,8 +4,108 @@
 TW-SIM's `slab` authority (contract: the slab section of `src/shared/content/modes.ts`). Godot is the main build: the
 read-out, HUD text and colours copy `engines/godot/game/slab.gd`, `hud.gd` and `tuning.gd`.
 
-## W15: the HUD contract (docs/qa/w15/HUD_CONTRACT.md, revision 3)
-**Status: done for integration; nothing committed or staged.** Base `9139c7a` (HEAD `eb0ae36` adds an alloc test and
+## W15 Sprint C: the rematch (§5) and parity with hud.gd (contract revision 4)
+**Status: done for integration; nothing committed or staged.** Base HEAD `816489c` (Sprint B landed). Godot wins: each
+number below is read from `engines/godot/game/hud.gd`.
+
+### What changed
+- **§5 Rematch.** R, Enter and now pad Start rematch. The HUD clears every cue on the rematch: `slabHudReset` empties
+  the confirm, the wedges and the flash (`SlabHitCues.reset`), the chip (`SlabHpChip.reset`) and the knockout records,
+  and holds back the death panel until the player is seen up (a stale dead frame right after the restart shows nothing).
+  Two triggers: the match's `score` event with reason `reset` (match.ts `restart`), and the match leaving `ended`. The
+  win screen follows the phase. hud.ts (slab branch) clears the kill feed on the same event.
+  **What proves it:** the cue resets are unit-proven (`tests/unit/slab-hud.test.ts` §5, mid-cue and mid-death, with
+  mutants R1–R4). The e2e rematch case on the production build is a smoke check: no cue can honestly be up at a
+  rematch there (`&slabHurt` is off in a production build, and the winner screen already hides the panel and the
+  cues), so it would also pass a reset that does nothing for them. The kill feed is the exception: the e2e puts a
+  takedown in it before each rematch and checks it is gone afterwards (mutant K1).
+- **Pad Start** (`src/client/input/input.ts`, approved this round): button 9 sends the reload bit only while
+  `enterReloads` is set (the slab winner screen, as main.ts sets it), so it rematches like R / Enter there and does
+  nothing anywhere else.
+- **§1 placement (rev. 4).**
+  - Step 3 goes on down: under the lowest pet it covers, then under the next if it covers another, while the box stays
+    in the safe area; else `blocked` at step 2's position.
+  - Behind the camera the marker still dodges the pets on screen (the `behind ? [] :` is gone).
+  - The box is hud.gd's `marker_box`: as wide as the wider line or the split bar (32), the lines 14 / 15 px stacked 3 px
+    over the 10 px shape, 11 under its centre. Every length scales by u (tested at u = 1.5).
+- **§3.** While a wedge's box overlaps the marker's box, the marker draws at alpha 0.35 (`SLAB_MARKER_DIM`,
+  `slabWedgeBox`).
+- **§2 freshness.** A knockout record counts for the current knockout when it came after the player was last seen up
+  (`upSince`), not within 1.5 s of the first dead frame. A first dead frame 2 s late keeps the killer and counts down
+  from the event.
+- **§4.** The twin's nameplates are hidden in a slab match (`.cvc-slab #nameplates`). `PLACEHOLDER PETS` sits top left
+  (12 px, rgba(255, 199, 77, 0.85), at 14, 10). The rematch line is `R / Enter / Start: rematch`; the web has no
+  F2 / Back switch (2 v 2 is the `&2v2` page flag), so that part is dropped.
+- **Cosmetics to hud.gd.**
+  | Item | Now |
+  |---|---|
+  | Hit X | body / head 5–10 px, 2.5 wide; head diamond 4.5 px to a tip; kill 6–15 px, 3 wide, ring 9 px. The misquoting comment is fixed. |
+  | Marker | line 1 white at alpha 0.92, 14 px; line 2 15 px in the state colour; neutral `#e6ebf2` (`slabHudColor`); shapes r 10 with hud.gd's dark rims; split = two filled halves 3 px apart with a 2 px bar reaching 5 px past the tips |
+  | Wedge | `#ff735c`, path `M0 -14L8 10L-8 10Z` (tip 14 out, base 10 in, 16 wide), dark rim |
+  | Death panel | lines 26 / 18 / 20 / 24 px; the killer's team name at lighten 0.45; `YOU:` line at lighten 0.45; glyph 15 px at lighten 0.3 with 9 px either side; radius 6, padding 8 / 28 / 10, line gap 2 |
+  | OVERTIME | the clock's 30 px (the row widens around it) |
+- **DOM writes.** Every text, html, style, attribute and class write goes through a cache of the last value written per
+  element and key, so an unchanged frame writes nothing and reads nothing back from the DOM.
+
+### Files (Sprint C)
+| Path | Change |
+|---|---|
+| `src/client/ui/slab-hud.ts` | All of the above. |
+| `src/client/input/input.ts` | Pad Start → reload bit while `enterReloads` (one line plus the doc comment). |
+| `src/client/ui/hud.ts` | Slab branch: the kill feed clears on the rematch's `reset` score event (one line). |
+| `tests/unit/slab-hud.test.ts` | 36 tests (8 new: stacked pets, u = 1.5, behind the camera, wedge box, marker dim, a 2 s late dead frame, the rematch mid-cue and mid-death); the pins moved to hud.gd's numbers. |
+| `tests/unit/slab-view-input.test.ts` | Plus 1: pad Start only on the winner screen. |
+| `tests/unit/slab-view.test.ts` | The rematch line. |
+| `tests/e2e/modes.spec.ts` | Menu case: the PLACEHOLDER PETS tag and no nameplates. Rematch case (a smoke check): the new line; before each rematch a takedown of the Cat bot in the kill feed (a test-only Worker wrapper adds the `death` event to the next snapshot); after it the feed empty within 2 s (the line would stay 9 s), 0 – 0, no death panel, no confirm, no wedge, no flash. |
+| `docs/qa/w15/hud-web-*.jpg` | Retaken (below). |
+
+### Proof (private copy `scratchpad/tw-c`: HEAD `816489c` plus these files only)
+- `npx tsc --noEmit`: exit 0. `node tools/check-boundaries.mjs`: `BOUNDARIES: PASS`.
+- `npx vitest run` slab-hud, slab-view, slab-view-input, slab-mode, ui-killfeed: **81/81** (36 + 10 + 7 + 22 + 6).
+- `npx playwright test tests/e2e/modes.spec.ts -g SLAB` (private config, port 4391), once: **2 passed (48.9 s)**. It ran
+  before the last edit (step 3 no longer clamps, to match hud.gd); the vitest run and mutant P1 were repeated after it.
+- Mutants, each applied to the copy alone and restored (`cmp` with the tree afterwards); all killed:
+  | Mutant | Killed by |
+  |---|---|
+  | R1 `slabHudReset` empty (no rematch reset) | both §5 tests (mid-cue, mid-death) |
+  | R2 the `reset` score event ignored | mid-death |
+  | R3 the `ended` → live phase change ignored | mid-cue |
+  | R4 a stale dead frame after the rematch shows the panel | mid-death |
+  | P1 step 3 stops after one pet (rev. 3) | stacked pets |
+  | P2 behind the camera, no pets | behind the camera |
+  | MP6 the cap not scaled by u | u = 1.5 |
+  | MP8 the clearance not scaled by u | u = 1.5 |
+  | MP9 the safe top not scaled by u | u = 1.5 |
+  | D1 no marker dimming | marker dim |
+  | F1 freshness back to `downSince - 1.5` | 2 s late dead frame |
+  | C1 kill X 6–14 · C2 head diamond 5.5 · C3 the old wedge path · C4 neutral white · C5 split as outline + bar | the hud.gd pins |
+  | S1 pad Start ungated · S2 pad Start unmapped | pad Start |
+  | K1 `feed.clear()` removed from `hud.ts` (the slab kill-feed clear on rematch) | the SLAB e2e rematch case: `toHaveCount(0)` received 1 at `modes.spec.ts:170` (run once, `-g "SLAB: the match ends"`; `hud.ts` restored and `cmp`'d) |
+- **Shots** (they replace Sprint B's files of the same names; Sprint B's captions below describe those). They came from
+  the proof copy on a private vite at port 5186, stopped by PID. Each was captured at 1280 x 720, quality high, and
+  published at 1200 x 675 (the states strip 1200 x 350, the hits strip 1092 x 364). Every one shows the
+  PLACEHOLDER PETS tag with no nameplates. The harness is Sprint B's (a Playwright init script on the page's main
+  thread, with nothing in the tree): the page clock is stepped and later snapshots are held after a target event, so
+  the ages below are page time read back from the HUD. I looked at each one.
+  | File | URL and what it shows |
+  |---|---|
+  | `hud-web-marker-foundation.jpg` | `?mode=slab&webgl&autoplay`, about 3 s after ready. `SLAB  146 m` in white (0.92) over `NEUTRAL` in `#e6ebf2`, with the hollow diamond and its dark rim. Also `SLAB  NEUTRAL`, 120 HP and the hint. |
+  | `hud-web-marker-scaffolds.jpg` | `&team=1`: `SLAB  134 m` / `CORGI COMPANY` with a filled blue diamond, and `YOU: CAT CADRE`. |
+  | `hud-web-marker-states.jpg` (+ `-gray`) | `&cam=slab` crops of three states. Hollow `NEUTRAL` early in the match; filled `CAT CADRE` once the bot holds the slab; split `CONTESTED` as two filled halves with the 2 px bar. **The CONTESTED one is staged:** the harness flags the zone entity Busy (team −1) in the delivered snapshots, because the bots did not contest in 4 min of `&2v2`. The three shapes differ in grey. |
+  | `hud-web-hits.jpg` (+ `-gray`) | Crosshair crops at 3×. **Confirm age 0.016 s** (alpha 0.91, 0.91, 0.95): the body X 5–10; the head X with its 4.5 px diamond; the kill X 6–15 with its 18 px ring. These are your confirms, so the events are **synthetic** (a hit, a head hit and a knockout of the Cat bot added to a real snapshot), with `&slabWin=999` so the match stays live. The three read apart in grey. |
+  | `hud-web-hit-received.jpg` (+ `-gray`) | `&slabHurt`: a real hit from Cat 2 (tick 3602, a cycle's second hit, HP 95 → 70). **FX age 0.116 s:** fur tufts and the blue team chunk; furHit has no dust. **Chip age 0.100 s:** the chip spans 70–88.75 with its seam. The new `#ff735c` arrowhead points up the ring at alpha 0.81 and lies over the marker, so **the marker draws at 0.35** (rev. 4 §3); in grey the wedge reads alone. The flash is 0.117. |
+  | `hud-web-death.jpg` (+ `-gray`) | `&slabHurt`: the knockout at tick 2882 at **FX age 0.600 s**. `TAKEN DOWN BY Cat 2  ·` then the pink triangle (lighten 0.3), then `CAT CADRE` (lighten 0.45), all at 26; `YOU: CORGI COMPANY` in Corgi blue (lighten 0.45) at 18; `BACK AT THE FOUNDATION  ·  142 m TO THE SLAB` at 20; **`BACK IN 2.4`** at 24. Radius 6, no marker. **Chip** 0–55 of 120. The dust has gone; tufts remain. |
+  | `hud-web-win.jpg` | `&slabTime=8&slabOvertime=4`: `DRAW`, `0  –  0`, the You line, **`R / Enter / Start: rematch`**, and the clock at `OVERTIME` in amber at the clock's 30 px (the match ended in overtime). |
+  `fx-takedown-web.jpg` is unchanged (tw-look's file this round).
+
+### Open (Sprint C)
+1. **Step 3 follows g-hud's in-progress `place_marker`** (the working tree's hud.gd, not yet in HEAD): down past each
+   pet with no clamp, and blocked once the next spot would cross the safe bottom. If Godot changes that, the web follows.
+2. **The marker box's text widths are estimates** (0.62 em a character, 1.2 em a line); hud.gd measures its font.
+3. **The HP chip follows the event by the interpolation delay** (Sprint B Open 3, net-client).
+
+## W15 Sprint B: the HUD contract (docs/qa/w15/HUD_CONTRACT.md, revision 3)
+**Status: landed in `816489c`.** Base `9139c7a` (HEAD `eb0ae36` adds an alloc test and
 art, none of these files). This is the Sprint B patch round after the independent check failed: placement in rev. 3's
 order, a pure per-frame model (`slabHudFrame`) with tests that kill the check's mutants, the dead gate, the centred
 death panel, the in-tree `&slabHurt`, the 132 m data, and new shots. The words below are copied from the contract.
@@ -115,7 +215,8 @@ files and tw-sim's (`src/sim/match/slab.ts`, `index.ts`, `slab-mode.test.ts`) an
 - `src/client/fx/presets.ts` checked before shooting: `furHit` has a tuft loop, one team chunk and one Glow; no Star
   loop, no stuffing loop.
 - **Shots**, from a copy of the tree served by a private vite on port 5187 (stopped by PID), at
-  `/?mode=slab&webgl&slabHurt&autoplay` (`autoplay` only skips the menu), 1280 x 720, quality high. I looked at each.
+  `/?mode=slab&webgl&slabHurt&autoplay` (`autoplay` only skips the menu), captured at 1280 x 720, quality high, and
+  published at 1200 x 675 (`fx-takedown-web.jpg`: an 800 x 600 crop). I looked at each.
   Headless SwiftShader draws about one frame every 1–3 s, so the private harness (a Playwright init script on the
   page's main thread only; nothing in the tree) steps the page clock: `performance.now` and `requestAnimationFrame`
   advance a set time per drawn frame, as a fast machine's would. The worker runs the sim in real time. Between shots
