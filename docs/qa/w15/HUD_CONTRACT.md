@@ -7,6 +7,8 @@ build (§2); OVERTIME is a tie, not a contest (§4).
 Revision 4 (lead, Sprint C): step 3 scans below stacked pets; behind the camera the marker still dodges pets (§1); a
 received wedge over the marker dims the marker (§3); the twin hides its nameplates and shows the PLACEHOLDER PETS tag,
 and the Godot hint names X for reload (§4); the rematch resets every HUD cue (§5).
+Revision 5 (lead, W17): `<N>` is the distance from the zone centre to the slab, and the actual respawn point's
+distance to the slab may differ from `<N>` by up to 4 m (§2, W17 PARITY K6).
 
 The lead owns this file. Both builds show the same words for the same state. Godot wins any clash: the web copies
 Godot's strings. Change a string here first, then in both builds. `PARITY.md` (Sprint C) cites one test or shot per
@@ -61,6 +63,12 @@ BACK IN <s.s>
   centre:
   - Godot: `match.gd respawn_zone(team)`, which returns `{name, pos, dist, sprint_s}`.
   - Web: the same from its respawn points.
+  - **Tolerance (rev 5).** `<N>` is measured from the zone's centre. The respawn rule, run when the countdown ends,
+    takes the point farthest from the nearest enemy, so the actual point's distance to the slab may differ from `<N>`
+    by up to 4 m (the point itself can lie farther from the zone centre: the Cats' end points are 6 m from it). W17
+    measured 1.1-3.3 m off in 80 respawns across both builds, always at the named base. That is not a 140 m
+    surprise: the base and the rough distance are right. Naming the exact point is not required, because it is
+    chosen after the card is shown.
 - **Countdown.** It is the respawn countdown in tenths: Godot `respawn_left(pet)`, web `SLAB.respawn` minus the time
   down.
 - **Backing.** A dim rounded panel (black, alpha 0.55) sits behind the four lines, so lit scenery cannot cross them.

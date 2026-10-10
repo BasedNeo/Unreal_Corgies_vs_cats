@@ -43,6 +43,11 @@ extends SceneTree
 ## Per match: format, seed, winner, score, takedowns per side, seconds with a pet of each side on the slab, seconds
 ## each side held it alone (scored), shots / hits / hit rate per side, first arrival on the slab per side, and the
 ## mean spawn-to-slab time per life.
+## 2v2 also prints a `roles ·` line per match and a `SUMMARY 2v2 roles` line (W15, W17): per team and bot role (bot.gd
+## HOLD / APPROACH), the time to the slab, seconds on it, and an APPROACH bot's alive time split four ways
+## (_role_where): at its post (within POST_R m), approaching (on its way there: not stepping on, off the slab),
+## stepping on, and on the slab while bound for its post (the W15 trap holds it there); the spawn-to-post time; and per
+## team, of the time both its bots are alive, the share with one on the slab and the other at its post or approaching.
 const T := preload("res://game/tuning.gd")
 const SIDE := ["Corgi", "Cat"]
 ## Slab position metrics (W14 CONTEST): "inside" = in slab.gd contains() at least MARGIN m from every edge (bot.gd
@@ -496,9 +501,10 @@ func _match(game: Node, s: int) -> Dictionary:
 	var life := {}
 	for p in game.pets:
 		life[p] = {"t0": 0.0, "reached": false, "alive": true, "on": false, "j": int(p.get("jumps")) if p.get("jumps") != null else 0,
-			"b_in": -1.0, "b_out": -1.0, "stall": 0.0, "role": p.get("role")}
+			"b_in": -1.0, "b_out": -1.0, "stall": 0.0, "role": p.get("role"), "at_post": false}
 		if p.get("role") != null:
 			_rstat(r, p.team, int(p.get("role"))).lives += 1
+	r["split"] = [[0.0, 0.0], [0.0, 0.0]]  # per team: [s with both of its bots alive, s of that split HOLD on / APPROACH out]
 	var cons: Array = []
 	var on_down := func(pet: Node, killer: Node) -> void:
 		var t: float = game.elapsed
@@ -572,6 +578,7 @@ func _match(game: Node, s: int) -> Dictionary:
 			if p.alive and not l.alive:
 				l.t0 = game.elapsed
 				l.reached = false
+				l.at_post = false
 				l.b_in = -1.0
 				l.b_out = -1.0
 				l.role = p.get("role")
@@ -609,12 +616,25 @@ func _match(game: Node, s: int) -> Dictionary:
 			if p.alive and l.role != null:
 				var rs2: Dictionary = _rstat(r, p.team, int(l.role))
 				rs2.alive += dt
-				if game.slab.contains(p.global_position):
+				var on_s: bool = game.slab.contains(p.global_position)
+				if on_s:
 					rs2.on += dt
 					rs2.stood = true
-				var pp = p.get("push_point")
-				if pp is Vector3 and pp != Vector3.INF and Vector2(pp.x - p.global_position.x, pp.z - p.global_position.z).length() < 3.0:
-					rs2.post += dt
+				# W17: where an APPROACH bot's alive time goes. At its post (within POST_R m of it, flat), else
+				# approaching (on its way to the post: not stepping on, off the slab), stepping on (going to or on the
+				# slab for its reason), or held on the slab while its goal is the post (the W15 trap).
+				match _role_where(game, p):
+					"post":
+						rs2.post += dt
+						if not l.at_post:
+							l.at_post = true
+							rs2.ptts.append(game.elapsed - l.t0)
+					"approach":
+						rs2.approach += dt
+					"stepon":
+						rs2.stepon += dt
+					"held":
+						rs2.held += dt
 			var on: bool = p.alive and game.slab.contains(p.global_position)
 			if on:
 				r.pet_on[p.team] += dt
@@ -628,6 +648,15 @@ func _match(game: Node, s: int) -> Dictionary:
 						and _lip(game.slab, p.global_position):
 					r.lip_fight[p.team] += dt
 			l.on = on
+		for t in 2:  # W17: a team of two bots, both alive: one holds the slab while the other is at its post or approaching
+			var mine: Array = game.pets.filter(func(q): return q.team == t and q.get("role") != null)
+			if mine.size() != 2 or not (mine[0].alive and mine[1].alive):
+				continue
+			r.split[t][0] += dt
+			var on0: bool = game.slab.contains(mine[0].global_position)
+			var on1: bool = game.slab.contains(mine[1].global_position)
+			if on0 != on1 and _role_where(game, mine[1] if on0 else mine[0]) in ["post", "approach"]:
+				r.split[t][1] += dt
 		if max_game > 0.0 and game.elapsed >= max_game:
 			break
 	for k in cons:
@@ -651,8 +680,8 @@ func _match(game: Node, s: int) -> Dictionary:
 			str(r.death_bins[0]), str(r.death_bins[1]), r.death_air[0], r.death_air[1]])
 		print("  trace band (Corgi lives crossing %.0f-%.0f m of the slab path) n %d mean %s s · with a teammate within 1.5 m %.1f s · stalls by distance %s | %s" % [
 			PATH_S.x, PATH_S.y, r.band.size(), _mean_s(r.band), r.band_contact, str(r.stall_bins[0]), str(r.stall_bins[1])])
-	if r.roles.has("0:1") or r.roles.has("1:1"):
-		print("  roles · " + _role_line(r.roles, 1))
+	if fmt == "2v2" and not r.roles.is_empty():
+		print("  roles · " + _role_line(r.roles, 1) + " · " + _split_line(r.split))
 	if events:
 		for e in r.log:
 			print("  ", e)
@@ -670,14 +699,33 @@ static func _path_s(p: Vector3) -> float:
 
 ## Per team and bot role (bot.gd role: 0 HOLD, 1 APPROACH): lives, lives that reached the slab and their
 ## spawn-to-slab times, seconds on the slab, whether it stood on the slab this match, seconds at its post, kills, deaths.
+## W17: an APPROACH bot's alive time split four ways (_role_where): at the post, approaching, stepping on, held on the
+## slab; and the spawn-to-post time of the lives that reached the post.
 static func _rstat(r: Dictionary, team: int, role: int) -> Dictionary:
 	var k := "%d:%d" % [team, role]
 	if not r.roles.has(k):
 		r.roles[k] = {"lives": 0, "reached": 0, "tts": [], "on": 0.0, "stood": false, "post": 0.0, "kills": 0, "deaths": 0,
-			"alive": 0.0}
+			"alive": 0.0, "approach": 0.0, "stepon": 0.0, "held": 0.0, "ptts": []}
 	return r.roles[k]
 
 const ROLE_NAMES := ["HOLD", "APPROACH"]
+## "At the post": within this many metres (flat) of bot.gd push_point (W15's measure).
+const POST_R := 3.0
+
+## Where a live bot is, for its role: "post" (within POST_R m of its post), "approach" (APPROACH on its way to the
+## post: not stepping on, off the slab), "stepon" (APPROACH stepping on), "held" (APPROACH whose goal is its post but
+## standing on the slab: the W15 trap), or "" (HOLD, or no role).
+static func _role_where(game: Node, p: Node) -> String:
+	if p.get("role") == null:
+		return ""
+	var pp = p.get("push_point")
+	if pp is Vector3 and pp != Vector3.INF and Vector2(pp.x - p.global_position.x, pp.z - p.global_position.z).length() < POST_R:
+		return "post"
+	if int(p.get("role")) != 1:
+		return ""
+	if bool(p.get("_stepping_on")):
+		return "stepon"
+	return "held" if game.slab.contains(p.global_position) else "approach"
 
 static func _role_line(roles: Dictionary, n: int) -> String:
 	var out: Array = []
@@ -687,10 +735,22 @@ static func _role_line(roles: Dictionary, n: int) -> String:
 		var v: Dictionary = roles[k]
 		var t := int(k.split(":")[0])
 		var ro := int(k.split(":")[1])
-		out.append("%s %s: time to slab %s s (%d of %d lives) · on the slab %.0f s%s · stood on it in %d/%d matches · at the post %.0f s (%s of its alive time) · kills %d · deaths %d" % [
+		var where := ""
+		if ro == 1:
+			where = " · approaching %s · stepping on %s · held on the slab %s · post or approaching %s · spawn-to-post %s s (%d lives)" % [
+				_pct_f(v.approach, v.alive), _pct_f(v.stepon, v.alive), _pct_f(v.held, v.alive),
+				_pct_f(v.post + v.approach, v.alive), _mean_s(v.ptts), v.ptts.size()]
+		out.append("%s %s: time to slab %s s (%d of %d lives) · on the slab %.0f s%s · stood on it in %d/%d matches · at the post %.0f s (%s of its alive time)%s · alive %.0f s · kills %d · deaths %d" % [
 			SIDE[t], ROLE_NAMES[ro], _mean_s(v.tts), v.reached, v.lives, v.on, "" if n == 1 else " (%.1f per match)" % (v.on / n),
-			int(v.stood_n) if v.has("stood_n") else (1 if v.stood else 0), n, v.post, _pct_f(v.post, v.alive), v.kills, v.deaths])
+			int(v.stood_n) if v.has("stood_n") else (1 if v.stood else 0), n, v.post, _pct_f(v.post, v.alive), where,
+			v.alive, v.kills, v.deaths])
 	return " | ".join(out)
+
+## Per team: of the time both its bots are alive, the share with one on the slab and the other at its post or
+## approaching ("one holds, one approaches").
+static func _split_line(sp: Array) -> String:
+	return "split, one on the slab and one at its post or approaching, of both-alive time: Corgi %s of %.0f s | Cat %s of %.0f s" % [
+		_pct_f(sp[0][1], sp[0][0]), sp[0][0], _pct_f(sp[1][1], sp[1][0]), sp[1][0]]
 
 static func _flat_d(game: Node, p: Vector3) -> float:
 	return Vector2(p.x - game.slab.center.x, p.z - game.slab.center.z).length()
@@ -764,19 +824,24 @@ func _summary(rows: Array, real_s: float) -> void:
 			_pct(tt.hit_gnd[0], tt.sh_gnd[0]), tt.sh_gnd[0], _pct(tt.hit_gnd[1], tt.sh_gnd[1]), tt.sh_gnd[1],
 			str(td[0]), str(td[1]), tt.death_air[0], tt.death_air[1]])
 	var rt := {}
+	var sp := [[0.0, 0.0], [0.0, 0.0]]
 	for r in rows:
+		for t in 2:
+			sp[t][0] += r.split[t][0]
+			sp[t][1] += r.split[t][1]
 		for k in r.roles:
 			var v: Dictionary = r.roles[k]
 			if not rt.has(k):
 				rt[k] = {"lives": 0, "reached": 0, "tts": [], "on": 0.0, "stood": false, "stood_n": 0, "post": 0.0, "kills": 0,
-					"deaths": 0, "alive": 0.0}
-			for f in ["lives", "reached", "on", "post", "kills", "deaths", "alive"]:
+					"deaths": 0, "alive": 0.0, "approach": 0.0, "stepon": 0.0, "held": 0.0, "ptts": []}
+			for f in ["lives", "reached", "on", "post", "kills", "deaths", "alive", "approach", "stepon", "held"]:
 				rt[k][f] += v[f]
 			rt[k].tts.append_array(v.tts)
+			rt[k].ptts.append_array(v.ptts)
 			if v.stood:
 				rt[k].stood_n += 1
-	if rt.has("0:1") or rt.has("1:1"):
-		print("SUMMARY %s roles · %s" % [fmt, _role_line(rt, rows.size())])
+	if fmt == "2v2" and not rt.is_empty():
+		print("SUMMARY %s roles · %s · %s" % [fmt, _role_line(rt, rows.size()), _split_line(sp)])
 	print("SUMMARY %s %.0f s of game time in %.0f s real (x%.1f)" % [fmt, game_s, real_s, game_s / maxf(0.001, real_s)])
 
 ## In the slab's score volume (slab.gd contains()) and at least `margin` m inside every edge of its square.

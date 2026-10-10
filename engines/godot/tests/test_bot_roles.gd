@@ -6,7 +6,10 @@ extends RefCounted
 ## 2. APPROACH goes for its post: within APPROACH_S s of the start its post is found (PUSH_DIST m from the slab's
 ##    centre, on the enemy's nav path in), its goal is there, and it is not stepping on yet.
 ##    This checks intent (role, post, goal), not arrival: it does not prove an APPROACH bot reaches or keeps its post.
-##    In play it is at its post under 1 % of its alive time (docs/qa/w15/bot-roles.md, "Roles are nominal").
+##    In play it is at its post under 1 % of its alive time (docs/qa/w15/bot-roles.md, "Roles are nominal"; W17
+##    measured 0.1-0.5 %). An arrival-and-keeping check exists for the W17 candidate whose bot.gd fixes the trap
+##    (docs/qa/w17/BOT-ROLES.md, "Arrival test"). It is not in this file because no option passed the balance bar, so
+##    the shipped bot.gd keeps the trap and would fail it.
 ## 3. Rematch: a bots-only 2v2 plays MID_S s (targets seen, shots, the APPROACH post found, maybe deaths). KILL_S s
 ##    before the rematch each team's HOLD bot is killed, so its APPROACH teammate steps on (no holder alive) and the
 ##    step-on latch is set when game.rematch() runs: a respawn that fails to reset it fails this test every run, not

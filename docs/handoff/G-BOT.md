@@ -350,6 +350,44 @@ trench notches. None happens in a fight: 4 of about 110,000 shots were at an air
   - `push_look` is now asserted; the checker's mutant that skipped its reset had passed the old test.
   - It checks intent (role, post, goal), not arrival: it does not show APPROACH reaching its post.
 
+## 11f. Wave 17: the roles trap card, and ROUTE (lane G-BOT2)
+The tables are in `docs/qa/w17/BOT-ROLES.md` and `docs/qa/w17/ROUTE.md`. The build is HEAD 7a671f1. Each build was
+run on 2v2 n 120 (seeds 1-60, 101-160) and 1v1 n 80 (1-40, 101-140), 16 blocks in all, at most 2 Godot processes.
+- **Item A, 2v2 roles: NOT MET. Neither option passes both bars, so nothing was picked.**
+  - **Trap fix alone** (`_steer()`: a bot holds only when its goal is on the slab too). The APPROACH bot reaches its
+    post (at it 13-15 % of its alive time, from 0.1-0.5 %), but 2v2 goes 24-96 (Cat 80 %, Fisher p < 0.001 against
+    the same day's 50-70).
+  - **A post 4 m off the slab's square,** inside the 6 m contest zone. At the post 15-18 %, at it or approaching
+    49-52 %, and 33-87 (Cat 72 %, p 0.03). It fails the balance bar and the roles bar: post or approaching at least
+    50 % and at the post at least 20 %, set before the n 120 runs.
+  - **Every bot HOLDS:** 43-77 (Cat 64 %). This differs from the shipped build by p 0.43 only. By construction no bot
+    approaches.
+  - **1v1** is 41-39 in every build: the roles never act in 1v1.
+  - **Shipped:** bot.gd behaves as at 7a671f1, with the trap and nominal roles. Only the roles comment changed.
+  - **Why the Cats gain.** When the APPROACH bot really leaves the slab, the Cat holder's slab time rises (51-53 s per
+    match against the Corgi holder's 42-45 s), and the Corgis die more on their way in. That is observed, not
+    isolated. The Cats' hit-rate edge (31-32 % against 29 %) is in every build.
+  - **Noise.** Five samples of the behaviour-neutral build pool to 351/600 Cat (58.5 %). One n 120 sample of it lands
+    over 60 % about 1 time in 3.
+- **Contest rule:** `test_bot_contest.gd` x5 PASS (0.4-1.4 %, 80.0 pet-s).
+  - In real play the edge band is 3-4 % shipped, and about 5 % with a role option: the bots step off the slab
+    141-198 times per side per 60 matches.
+- **Arrival test.** It is written and proven on the post-in-zone candidate, and not shipped, because the shipped
+  bot.gd keeps the trap.
+  - It has a staged part per team (arrive, keep, step on, walk back, keep) and a 150 s part from real play, with
+    floors taken from the n 120 runs.
+  - The candidate passes 3/3. The trap mutant FAILS (it does not walk back; the Cats never arrive; 0 % at the post in
+    play). The role-swap mutant FAILS (slot 2 never at a post, and the format checks fail).
+  - Files are in the lane scratchpad: `gbot2-candidate/`.
+- **ROUTE: no change.** The Corgis are first on the slab in 114-120 of 120 2v2 matches and 78 of 80 1v1 matches.
+  - Cat minus Corgi trip per life: +0.10 s shipped, +0.25 s 1v1, and -0.35 / -0.05 s in the role builds, all inside
+    0.5 s. HOLD trips are level, 16.3-16.7 s.
+  - match.gd and `CAT_SLOTS` are unchanged.
+- **Harness:** `balance.gd` prints where an APPROACH bot's alive time goes: at its post, approaching, stepping on,
+  or on the slab bound for its post. It also prints spawn-to-post per life, and per team the share of both-alive time
+  with one bot on the slab and the other out.
+- **Suite:** `tests/run.gd` 24/24 PASS on the final copy, in 3 min 38 s.
+
 ## 12. Commands
 ```
 G=<Godot 4.7.2>

@@ -40,8 +40,12 @@ const CONTEST_ZONE := 6.0
 ##   nominal"): it is at its post under 1 % of its alive time (0.8 s / 0.1 s per match; the checker measured 0-2.4 %),
 ##   so in play the roles are nominal (Sprint C item 8: NOT MET). The cause is a trap, not the step-on rule: _steer()
 ##   counts any bot inside the slab as on it, and _hold_inside() then clamps its wish to the inner margin, so an
-##   APPROACH bot whose post lies past the slab is held on the slab and never walks off to its post. Fixing the trap
-##   is a separate card with its own measurement.
+##   APPROACH bot whose post lies past the slab is held on the slab and never walks off to its post.
+##   W17 (docs/qa/w17/BOT-ROLES.md) measured the trap fix (in _steer, a bot holds only when its goal is on the slab
+##   too) and both options, 2v2 bots-only n 120 each. Trap fix alone: APPROACH at its post 13-15 % of its alive time,
+##   2v2 24-96 (Cat 80 %). Plus a post 4 m off the square (inside CONTEST_ZONE): at its post 15-18 %, 33-87 (72 %).
+##   Every bot HOLDS: 43-77 (64 %). This code, the same day: 50-70 (58 %). No option passes the 60 % bar, so the trap
+##   and the nominal roles stay as they are (item NOT MET; the lead rules on what next).
 enum { ROLE_HOLD, ROLE_APPROACH }
 const PUSH_DIST := 16.0
 const STEP_ON_MIN := 3.0
