@@ -54,6 +54,8 @@ import {
   createOrdnanceBot, keepClearOfOwnBlast, makeIntent, ordnanceBotThink, throwApproachBand, type OrdnanceBot, type OrdnanceIntent,
 } from './ordnance-ai'; // W9 X4 hook
 import { ordnanceArcWorld } from '../combat/ordnance'; // W9 X4 hook
+import { onSlab, type SlabConfig } from '../../shared/content/modes';
+import { slabConfig } from '../match/slab';
 
 export type AiMode = 'patrol' | 'alert' | 'engage' | 'cover' | 'regroup';
 
@@ -152,6 +154,17 @@ export interface AiContext {
 const PERCEIVE_EVERY = 6;
 const DEG = Math.PI / 180;
 const CLOAK_REVEAL = ABILITIES.shadow_cloak.revealRange;
+
+/**
+ * W17 slab contest, ported from Godot bot.gd (W14 G-BOT CONTEST; EDGE_LOOK 1.2 since W15). On the slab (onSlab: the
+ * square and its feet window) a bot's wish may not carry it past the inner square SLAB_MARGIN m inside every edge within
+ * EDGE_LOOK m, and from the band it turns back in (holdInside = Godot _hold_inside). Fighting off the slab within
+ * CONTEST_ZONE m of its square, a bot steps in: strafe 0.4, no back-off to the rifle's minimum range; on the slab it
+ * heads straight at its spot (0.7) with a 0.8 strafe and no back-off either (Godot _steer). docs/qa/w17/WEB-CONTEST.md.
+ */
+export const SLAB_MARGIN = 1.0;
+export const EDGE_LOOK = 1.2;
+export const CONTEST_ZONE = 6.0;
 
 export function createBrain(arch: ArchetypeId, yaw: number): AiState {
   return {
@@ -860,17 +873,31 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
         steerTo(sim, e, ai, ctx, ai.tac.gx, ai.tac.gz, true);
         mv.sprint = false;
       }
-      // W13 slab (Godot bot.gd _steer): off the slab, keep heading for it while trading shots, strafing as it goes (on it,
-      // holdZone keeps the fight inside); the band's back-off still applies inside the rifle's minimum range
-      if (ai.tac.advance && ai.tac.goal === 'step' && !perched && Math.hypot(ai.tac.cx - e.pos.x, ai.tac.cz - e.pos.z) > ai.tac.gr * 0.75) {
-        steerTo(sim, e, ai, ctx, ai.tac.gx, ai.tac.gz, true);
-        if (ai.visible) {
-          let sx = -uz * ai.strafeDir * 0.8, sz = ux * ai.strafeDir * 0.8;
-          if (!openAhead(hg, e, sx, sz)) { sx = 0; sz = 0; }
-          if (dist < minR) { sx -= ux * 0.6; sz -= uz * 0.6; }
-          mv.x += sx; mv.z += sz;
-          const l = Math.hypot(mv.x, mv.z);
-          if (l > 1e-3) { mv.x /= l; mv.z /= l; }
+      // W13 slab (Godot bot.gd _steer): keep heading for the slab spot while trading shots, strafing as it goes.
+      // W17 (Godot CONTEST), by place, as _steer. On the slab: straight at the spot (no path), 0.7 of it plus a 0.8
+      // strafe, no back-off (holdSlab then keeps it SLAB_MARGIN m inside). Off it but within CONTEST_ZONE m of the
+      // square: step in along the path, strafe 0.4, no back-off. Farther out, W13 as it was: the path, a 0.8 strafe and
+      // the back-off inside the rifle's minimum range, which holdSlab's W13 pull (holdZone: straight in, no strafe)
+      // overrides within 18 m of the slab's centre.
+      if (ai.tac.advance && ai.tac.goal === 'step' && !perched) {
+        const sc = slabConfig(sim);
+        if (onSlab(e.pos.x, e.pos.y, e.pos.z, sc)) {
+          const gx = ai.tac.gx - e.pos.x, gz = ai.tac.gz - e.pos.z, gl = Math.hypot(gx, gz);
+          mv.x = gl > 0.3 ? gx / gl : 0; mv.z = gl > 0.3 ? gz / gl : 0;
+          if (ai.visible) slabStrafe(hg, e, ai, ux, uz, 0.7, 0.8);
+        } else if (offSquare(sc, e.pos.x, e.pos.z) <= CONTEST_ZONE) {
+          steerTo(sim, e, ai, ctx, ai.tac.gx, ai.tac.gz, true);
+          if (ai.visible) slabStrafe(hg, e, ai, ux, uz, 1, 0.4);
+        } else {
+          steerTo(sim, e, ai, ctx, ai.tac.gx, ai.tac.gz, true);
+          if (ai.visible) {
+            let sx = -uz * ai.strafeDir * 0.8, sz = ux * ai.strafeDir * 0.8;
+            if (!openAhead(hg, e, sx, sz)) { sx = 0; sz = 0; }
+            if (dist < minR) { sx -= ux * 0.6; sz -= uz * 0.6; }
+            mv.x += sx; mv.z += sz;
+            const l = Math.hypot(mv.x, mv.z);
+            if (l > 1e-3) { mv.x /= l; mv.z /= l; }
+          }
         }
         mv.sprint = false;
       }
@@ -910,7 +937,10 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
   }
 
   // holding an objective zone: fight, investigate and take cover from inside it; use an interact step in reach
-  if (ai.mode !== 'patrol') holdZone(e, ai.tac);
+  // (W17: the slab keeps Godot's square instead, in every mode: holdSlab)
+  const slab = ai.tac.advance && ai.tac.goal === 'step' ? slabConfig(sim) : null;
+  if (slab) holdSlab(sim, e, ai, slab);
+  else if (ai.mode !== 'patrol') holdZone(e, ai.tac);
   buttons |= objectiveInteract(sim, e, ai.tac);
   // N1: a link in progress runs every tick whatever the mode (a hop can't pause mid-air); nothing else moves the bot
   if (ai.nav.link >= 0 && (e.flags & EFlag.Mounted)) endLink(ai);
@@ -1061,6 +1091,9 @@ export function think(sim: Sim, e: SimEntity, ai: AiState, ctx: AiContext, dt: n
     } else keepClearOfOwnBlast(ai.ord, e, sim.tick, mv);                // F2: never run into its own live grenade
   }
 
+  // W17: the slab's inner square also holds against what moved the wish since holdSlab (teammate separation, a detour)
+  if (slab && onSlab(e.pos.x, e.pos.y, e.pos.z, slab)) holdInside(sim, e, ai, slab, false);
+
   // ---- write the input (camera frame: mx right, mz forward relative to the aim yaw)
   const sy = Math.sin(ai.yaw), cy = Math.cos(ai.yaw);
   let mz = mv.x * -sy + mv.z * -cy;
@@ -1204,6 +1237,61 @@ function holdZone(e: SimEntity, t: TacticsState): void {
     const out = (mv.x * ox + mv.z * oz) / d;
     if (out > 0) { mv.x -= (ox / d) * out; mv.z -= (oz / d) * out; }
   }
+}
+
+/** W17: horizontal distance (m) from (x, z) to the slab's square, 0 inside it (Godot bot.gd _off_square). */
+function offSquare(sc: SlabConfig, x: number, z: number): number {
+  const dx = Math.max(0, Math.abs(x - sc.center.x) - sc.size.x * 0.5);
+  const dz = Math.max(0, Math.abs(z - sc.center.z) - sc.size.z * 0.5);
+  return Math.hypot(dx, dz);
+}
+
+/** W17: the fight's mix in a slab place (Godot _steer): the heading in mv times `k` plus a strafe of `s` across the line
+ *  to the target (unit ux, uz), normalised; no back-off. A strafe into a wall is dropped (the W13 advance did so). */
+function slabStrafe(g: NavGrid, e: SimEntity, ai: AiState, ux: number, uz: number, k: number, s: number): void {
+  let sx = -uz * ai.strafeDir * s, sz = ux * ai.strafeDir * s;
+  if (!openAhead(g, e, sx, sz)) { sx = 0; sz = 0; }
+  mv.x = mv.x * k + sx; mv.z = mv.z * k + sz;
+  const l = Math.hypot(mv.x, mv.z);
+  if (l > 1e-3) { mv.x /= l; mv.z /= l; }
+}
+
+/**
+ * W17: the slab's hold rule, in every mode, in place of holdZone's circle on the slab. On the slab: holdInside (and
+ * a bot that is not fighting keeps to its spot). Off it, as W13: every mode but patrol turns back in near the slab
+ * (holdZone), except a fighting bot within CONTEST_ZONE m of the square, which steps in by itself (think's engage).
+ */
+function holdSlab(sim: Sim, e: SimEntity, ai: AiState, sc: SlabConfig): void {
+  if (onSlab(e.pos.x, e.pos.y, e.pos.z, sc)) {
+    if (ai.mode !== 'patrol' && ai.mode !== 'engage') {
+      // Godot's bot on the slab always heads for its spot (it hears a shot only to look): an alerted, hurt or regrouping
+      // bot keeps its spot instead of walking to the noise, the cover or a teammate, which the inner square would stop
+      // at its line (and in the band's first millimetre)
+      const gx = ai.tac.gx - e.pos.x, gz = ai.tac.gz - e.pos.z, gl = Math.hypot(gx, gz);
+      mv.x = gl > 1.2 ? gx / gl : 0; mv.z = gl > 1.2 ? gz / gl : 0; mv.sprint = false;
+    }
+    holdInside(sim, e, ai, sc, true);
+    return;
+  }
+  if (ai.mode === 'patrol' || (ai.mode === 'engage' && offSquare(sc, e.pos.x, e.pos.z) <= CONTEST_ZONE)) return;
+  holdZone(e, ai.tac);
+}
+
+/**
+ * W17, Godot bot.gd _hold_inside: per axis, the part of the wish that would carry the bot past the inner square
+ * (SLAB_MARGIN m inside every edge) within EDGE_LOOK m is cut back to reach it, pointing in when the bot is already past
+ * it. A strafe the edge stops (the wish cut below half) turns round (`flip`).
+ */
+function holdInside(sim: Sim, e: SimEntity, ai: AiState, sc: SlabConfig, flip: boolean): void {
+  const hx = sc.size.x * 0.5 - SLAB_MARGIN, hz = sc.size.z * 0.5 - SLAB_MARGIN;
+  const rx = e.pos.x - sc.center.x, rz = e.pos.z - sc.center.z;
+  const before = Math.hypot(mv.x, mv.z);
+  let cut = false;
+  const ax = rx + mv.x * EDGE_LOOK, az = rz + mv.z * EDGE_LOOK;
+  if (Math.abs(ax) > hx) { mv.x = Math.max(-1, Math.min(1, (Math.sign(ax) * hx - rx) / EDGE_LOOK)); cut = true; }
+  if (Math.abs(az) > hz) { mv.z = Math.max(-1, Math.min(1, (Math.sign(az) * hz - rz) / EDGE_LOOK)); cut = true; }
+  if (cut) mv.sprint = false;
+  if (flip && cut && Math.hypot(mv.x, mv.z) < 0.5 * before) { ai.strafeDir = -ai.strafeDir; ai.strafeTimer = rand(sim, 0.5, 1.3); }
 }
 
 /** True for characters the AI system drives. */

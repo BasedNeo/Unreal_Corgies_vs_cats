@@ -30,12 +30,16 @@ Their cells below are re-cited at this head (a difflib map of `b222e37` to `7a67
 - **X4 (pad X rematches on the web only):** deferred and logged. It needs a protocol split of Reload from rematch; not
   this wave.
 - **B2 (2v2 roles):** NOT MET. Card G-BAL is root-causing the Cat advantage first (docs/qa/w17/BOT-ROLES.md).
+- **B1 → MATCH, G15 closed for the edge band (lane TW-SIM).** The twin now runs Godot's contest rule. B1's web proof,
+  `tests/unit/slab-contest.test.ts`, lands in the TW-SIM commit after the commit that adds this file, so its row cites a
+  file that is not at `7a671f1`. A fresh check passed it. Beyond the 6 m contest zone the twin keeps its W13 pull until
+  G-BAL lands: an allowed DIFF, logged in G15 only, so the DIFF (allowed) total stays 3.
 
 ## Totals (95 w15 rows + 18 W17 rows = 113)
 | Status | w15 rows (95) | W17 rows (18) | All |
 |---|---|---|---|
-| MATCH | 75 | 11 (K1-K6, T1-T4, N1) | 86 |
-| GODOT ONLY | 4 (D9, F12, M20, B1) | 1 (K7) | 5 |
+| MATCH | 76 | 11 (K1-K6, T1-T4, N1) | 87 |
+| GODOT ONLY | 3 (D9, F12, M20) | 1 (K7) | 4 |
 | WEB ONLY | 8 (R2, R4, R9b, R14, F13, H19, R15a, R15b) | 2 (X10, N2) | 10 |
 | DIFF (allowed) | 3 (D2, F10, H11) | 0 | 3 |
 | DEFECT | 5 (H1, H20, X3, X4, B2) | 0 | 5 |
@@ -264,7 +268,7 @@ in unit tests, the e2e (both keys) and net-slab (R on two pages).
 ### Bots
 | # | Rule | Godot proof | Web proof | Status |
 |---|---|---|---|---|
-| B1 | Bots spend at most 5 % of their slab time in the 1 m edge band | bot_contest:85-87 (this run 0.8 %), :81-84 (80.0 pet-s) | no test | GODOT ONLY (G15) |
+| B1 | Bots spend at most 5 % of their slab time in the 1 m edge band | bot_contest:85-87 (this run 0.8 %), :81-84 (80.0 pet-s) | tests/unit/slab-contest.test.ts (W17 TW-SIM: Godot's scenario, seeds 1-3, 80.0 of 80 pet-s, edge band 0.0 / 0.0 / 0.3 %; step-in case; crowded-line case; Godot's on-slab mix and the final cut pinned per tick; 7 mutants fail; docs/qa/w17/WEB-CONTEST.md) | **MATCH** (W17: the twin runs Godot's contest rule; was GODOT ONLY) |
 | B2 | 2v2 roles: one bot holds, one approaches (Sprint C card item 8) | Labels and intent only (bot_roles:115-117, :56-65); in play the roles stay nominal: the trap at bot.gd:228-229, :303-306, :338-339 is unchanged at this head (no `engines/` change since `b222e37`) | no roles | **DEFECT** (w15 NOT MET, G22, g-bot) |
 
 ## DEFECT rows: owner, file:line, repro
@@ -323,7 +327,7 @@ Carried from w15 (its numbers), each re-checked at this head, then the new ones.
 | G12 | note | F13 | Godot: no test that a slab match shows no nameplate | g-hud | open |
 | G13 | note | H19 | Godot: no "no music" test | a-hook | open |
 | G14 | note | X2 | Web: R during play | tw-sim | closed (w15); slab-mode:438-453 |
-| G15 | note | B1, B2 | The twin's bots have no roles and no edge-band test | lead | open |
+| G15 | note | B1, B2 | The twin's bots have no roles and no edge-band test | lead | edge band CLOSED (W17 TW-SIM, B1 MATCH); roles stay Godot-only (B2 NOT MET in both). Logged allowed DIFF: beyond the 6 m contest zone the twin keeps its W13 straight pull until G-BAL lands (porting Godot's far branch gave 1v1 65 % Cat at n 200) |
 | G16 | note | M2, D1, D5, D10 | Web layout clauses proven by shot only | tw-view | open (this file's web shots re-confirm them) |
 | G17 | note | shots | – | g-hud, tw-view | closed (w15) |
 | G18 | note | X8 | The e2e cannot put a cue up before the end | tw-view | settled (w15); e2e:127-136 says so at this head |
