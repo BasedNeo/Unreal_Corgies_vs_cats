@@ -11,6 +11,15 @@ const TURN_RATE := 5.0  # rad/s aim tracking
 const AIM_ERROR := 0.035  # rad (~2 deg) on top of the rifle's own spread
 const REACT := Vector2(0.4, 0.7)  # seconds before the first shot at a newly seen target
 const FIRE_CONE := 0.12  # rad: fire only when the aim is this close to the target
+## Aim-height parity (W17 G-BAL, docs/qa/w17/BOT-ROLES.md "G-BAL"): every bot looks, checks its line of sight and fires
+## from AIM_EYE m over its feet and aims AIM_CHEST m over its target's feet, whatever either species (the human fires
+## from the camera). They are the Corgi's pet.gd eye() and chest(), 0.78 and 0.55 of its 1.2 m height; part 5 of
+## tests/test_bot_roles.gd holds them there. Before, a Cat bot looked 0.32 m down to a Corgi's chest, a Corgi bot
+## 0.24 m to a Cat's. On the slab, 1-3 m apart, likely (not proven; BOT-ROLES § G-BAL (c)) the steeper line kept the
+## Cat's aim inside FIRE_CONE more often; the Cat won 58 % of standoffs and brawls there (n 700), 50 % with one aim
+## geometry. In whole 2v2 bots-only matches the change is inside the noise (106-134 without, 104-136 with, n 240).
+const AIM_EYE := 0.936
+const AIM_CHEST := 0.66
 ## Travel gait (W13 G-BOT): a bot sprints, as a player does with Shift and as the web bot does (src/sim/ai/brain.ts:
 ## sprint while more than 12 m of path is left), when it is off the slab, nobody is in sight or heard, and its goal is
 ## more than SPRINT_MIN m away; otherwise it runs. The species trade speed (tuning.gd MOVE, classes.ts BASE_MOVE): the
@@ -145,9 +154,9 @@ func _physics_process(delta: float) -> void:
 	# aim tracking at a limited turn rate
 	var want := aim_dir
 	if target != null and target.alive and target_visible:
-		want = (target.chest() - eye()).normalized()
+		want = (_aim_point(target) - _eye()).normalized()
 	elif _heard_t > 0.0 and _heard != null and _heard.alive:
-		want = (_heard.chest() - eye()).normalized()
+		want = (_aim_point(_heard) - _eye()).normalized()
 	else:
 		var hv := Vector3(velocity.x, 0.0, velocity.z)
 		if hv.length() > 0.8:
@@ -187,7 +196,7 @@ func _think(dt: float) -> void:
 	for p in game.pets:
 		if p.team == team or not p.alive:
 			continue
-		var to: Vector3 = p.chest() - eye()
+		var to: Vector3 = _aim_point(p) - _eye()
 		var d := to.length()
 		if d > VIEW_DIST:
 			continue
@@ -279,8 +288,15 @@ func _find_post() -> void:
 			push_look = away.normalized()
 			return
 
+## Where this bot looks and fires from, and where it aims on a pet (AIM_EYE, AIM_CHEST: the same for both species).
+func _eye() -> Vector3:
+	return global_position + Vector3(0, AIM_EYE, 0)
+
+static func _aim_point(p: Node) -> Vector3:
+	return p.global_position + Vector3(0, AIM_CHEST, 0)
+
 func _los(p: Node) -> bool:
-	var q := PhysicsRayQueryParameters3D.create(eye(), p.chest(), T.L_WORLD)
+	var q := PhysicsRayQueryParameters3D.create(_eye(), _aim_point(p), T.L_WORLD)
 	return get_world_3d().direct_space_state.intersect_ray(q).is_empty()
 
 func _shoot(delta: float) -> void:
@@ -289,13 +305,13 @@ func _shoot(delta: float) -> void:
 	if _pause > 0.0:
 		_pause -= delta
 		return
-	var to: Vector3 = target.chest() - eye()
+	var to: Vector3 = _aim_point(target) - _eye()
 	if aim_dir.angle_to(to) > FIRE_CONE or to.length() > float(T.RIFLE.range):
 		return
 	var r := T.RIFLE
 	var hs := Vector2(velocity.x, velocity.z).length()
 	var spread: float = float(r.spread_hip) * (1.0 + (float(r.move_mult) - 1.0) * clampf(hs / float(m.run), 0.0, 1.0))
-	var res: Dictionary = rifle.shoot(eye(), aim_dir, spread + AIM_ERROR)
+	var res: Dictionary = rifle.shoot(_eye(), aim_dir, spread + AIM_ERROR)
 	if not res.is_empty():
 		_burst -= 1
 		if _burst <= 0:

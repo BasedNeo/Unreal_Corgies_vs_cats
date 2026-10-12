@@ -31,27 +31,34 @@ Their cells below are re-cited at this head (a difflib map of `b222e37` to `7a67
   not changed: on Godot's winner screen F2 / pad Back (switch 1v1 / 2v2) still restarts at once; the web has no F2.
 - **X4 (pad X rematches on the web only):** deferred and logged. It needs a protocol split of Reload from rematch; not
   this wave.
-- **B2 (2v2 roles):** NOT MET. Card G-BAL is root-causing the Cat advantage first (docs/qa/w17/BOT-ROLES.md).
+- **B2 (2v2 roles):** NOT MET. **W17 G-BAL done:** no single cause of the Cat advantage. The one clean lab effect is
+  the aim geometry in close slab fights: standoff + brawl 57.9 % Cat, 49.9 % with one aim geometry (n 700, Fisher
+  p 0.003; a fresh check re-ran it on new seeds: 58.8 % against 47.1 %, p 0.013). Landed: aim-height parity in bot.gd
+  (AIM_EYE 0.936 m, AIM_CHEST 0.66 m, both species; humans fire from the camera; new row B3). Whole matches: no change
+  detectable at n 240 (2v2 106-134 against 104-136, Fisher p 0.93; it detects about 12 points; 1v1 44-36). It is a
+  parity and cleanliness change, adopted for the lab asymmetry. Post in zone + the fix: 62.5 % Cat and the APPROACH bot
+  at its post 16-18 % of its alive time (bar 20 %), so not adopted. B2 stays DEFECT (docs/qa/w17/BOT-ROLES.md § G-BAL).
 - **B1 → MATCH, G15 closed for the edge band (lane TW-SIM).** The twin now runs Godot's contest rule. B1's web proof,
   `tests/unit/slab-contest.test.ts`, lands in the TW-SIM commit after the commit that adds this file, so its row cites a
-  file that is not at `7a671f1`. A fresh check passed it. Beyond the 6 m contest zone the twin keeps its W13 pull until
-  G-BAL lands: an allowed DIFF, logged in G15 only, so the DIFF (allowed) total stays 3.
+  file that is not at `7a671f1`. A fresh check passed it. Beyond the 6 m contest zone the twin keeps its W13 pull: an
+  allowed DIFF, logged in G15 only, until the lead rules on porting Godot's far branch (G-BAL did not address it),
+  so the DIFF (allowed) total stays 3.
 
-## Totals (95 w15 rows + 18 W17 rows = 113)
+## Totals (95 w15 rows + 19 W17 rows = 114)
 | Status | w15 rows (95) | W17 rows (18) | All |
 |---|---|---|---|
 | MATCH | 77 | 11 (K1-K6, T1-T4, N1) | 88 |
 | GODOT ONLY | 3 (D9, F12, M20) | 1 (K7) | 4 |
 | WEB ONLY | 8 (R2, R4, R9b, R14, F13, H19, R15a, R15b) | 2 (X10, N2) | 10 |
 | DIFF (allowed) | 3 (D2, F10, H11) | 0 | 3 |
-| DEFECT | 4 (H1, H20, X4, B2) | 0 | 4 |
+| DEFECT | 4 (H1, H20, X4, B2) | 1 (B3) | 5 |
 | PENDING (lead fills in) | 0 | 2 (P1 sky source, P2 cover read) | 2 |
 | HUMAN (logged, not done) | 0 | 2 (U1 slab hold, U2 listen) | 2 |
 
-**DEFECT rows (4 now: 6 at the QA pass, 5 after the lead's rulings, then X3 closed by W17 G-REMATCH), each with its owner in the DEFECT table below.** K6
+**DEFECT rows (5 now: 6 at the QA pass, 5 after the lead's rulings, 4 after X3 closed by W17 G-REMATCH, then B3 opened by W17 G-BAL), each with its owner in the DEFECT table below.** K6
 was ruled MATCH: the card's distance is the zone centre, the measured respawn an end point 1.1-3.3 m off, within
 HUD_CONTRACT rev 5's ±4 m. The rest: H1 (crosshair gap: no test, and the builds now measurably
-differ; lead, then g-hud and tw-view), H20 (the web confirm X is 1/√2 of Godot's; tw-view), X4 (pad X rematches on the web; lead), B2 (2v2 roles NOT MET; g-bot). Since w15: H2 is now MATCH (a
+differ; lead, then g-hud and tw-view), H20 (the web confirm X is 1/√2 of Godot's; tw-view), X4 (pad X rematches on the web; lead), B2 (2v2 roles NOT MET; g-bot), B3 (bot aim geometry: the twin does not mirror G-BAL; tw-sim). Since w15: H2 is now MATCH (a
 muzzle flash shot in both builds); everything else kept its status. The card's own asks hold: the death card names
 the killer, the team, the base and a true countdown in both builds, and you come back at the base it names (measured,
 80 respawns); the hit, the confirm and a received hit read in grey in both builds; R and Enter reset everything in
@@ -270,7 +277,8 @@ in unit tests, the e2e (both keys) and net-slab (R on two pages).
 | # | Rule | Godot proof | Web proof | Status |
 |---|---|---|---|---|
 | B1 | Bots spend at most 5 % of their slab time in the 1 m edge band | bot_contest:85-87 (this run 0.8 %), :81-84 (80.0 pet-s) | tests/unit/slab-contest.test.ts (W17 TW-SIM: Godot's scenario, seeds 1-3, 80.0 of 80 pet-s, edge band 0.0 / 0.0 / 0.3 %; step-in case; crowded-line case; Godot's on-slab mix and the final cut pinned per tick; 7 mutants fail; docs/qa/w17/WEB-CONTEST.md) | **MATCH** (W17: the twin runs Godot's contest rule; was GODOT ONLY) |
-| B2 | 2v2 roles: one bot holds, one approaches (Sprint C card item 8) | Labels and intent only (bot_roles:115-117, :56-65); in play the roles stay nominal: the trap at bot.gd:228-229, :303-306, :338-339 is unchanged at this head (no `engines/` change since `b222e37`) | no roles | **DEFECT** (w15 NOT MET, G22, g-bot) |
+| B2 | 2v2 roles: one bot holds, one approaches (Sprint C card item 8) | Labels and intent only (bot_roles parts 1-3); in play the roles stay nominal: the trap in bot.gd `_steer()` is unchanged in behaviour since `7a671f1` (G-BAL changed only the aim and moved the lines; the APPROACH bot is at its post 0-1 % of its alive time, and 16-18 % with post in zone + the fix, BOT-ROLES § G-BAL) | no roles | **DEFECT** (w15 NOT MET, G22, g-bot) |
+| B3 | Bot aim geometry (W17 G-BAL): every bot looks, checks sight and fires from 0.936 m over its feet and aims 0.66 m over its target's feet, whatever either species; humans fire from the camera | At the G-BAL commit: bot.gd:21-22 (AIM_EYE, AIM_CHEST), `_eye()` / `_aim_point()`, used by the aim tracking, the view check, `_los`, the FIRE_CONE gate and the shot origin. bot_roles part 4 (`_aim_parity`: a Corgi and a Cat bot 3 m apart aim 0.0021 rad apart, max 0.008; shipped 0.0284 FAIL) and part 5 (`_aim_sites`: every site on the helpers, and the constants equal the Corgi's pet.gd 0.78 h / 0.55 h); the lead's mutants on the shot origin, `_los`, the cone, the view check and AIM_EYE each fail | species heights: eye 0.875 h (Corgi 1.050 m, Cat 1.1025 m; src/shared/content/weapons.ts:231, src/sim/combat/state.ts:153-155), aim 0.55 h (0.660 / 0.693 m) or 0.9 h on a head roll (src/sim/ai/brain.ts:243, :263, :274, :660-662); shots from eyeHeight (src/sim/combat/weapon-system.ts:119); no test | **DEFECT** (W17 G-BAL, G25, tw-sim) |
 
 ## DEFECT rows: owner, file:line, repro
 | Row | Defect | Owner | Where | Repro |
@@ -280,7 +288,8 @@ in unit tests, the e2e (both keys) and net-slab (R on two pages).
 | H20 | The web's confirm X is 1/√2 of Godot's (body and head arms reach 5-10 px against 7.07-14.1 px; kill 6-15 against 8.5-21.2 px). Unchanged since w15 (G21) | tw-view | `src/client/ui/slab-hud.ts:405-408` (unit `cos`/`sin`) against `engines/godot/game/hud.gd:446-449` ((±1, ±1)); `tests/unit/slab-hud.test.ts:180-183` pins r0/r1 under the same name with another meaning | `p17-godot-hits.jpg` (1.5x cells) against `p17-web-hits.jpg` (1x crops): `p17-confirm-size-gray.png` puts both at the same 3x scale: the web body X reaches about 0.7 of Godot's and ends inside the crosshair arms |
 | X3 | **CLOSED (W17 G-REMATCH, row X3 MATCH).** Was: the web ignores a rematch press for 1 s after the end; Godot rematched on the first press. Not in the contract (w15 G3) | lead | `src/shared/content/modes.ts:194` (`rematchDelay: 1`), applied at `src/sim/match/index.ts:307`; Godot `engines/godot/tests/test_game_rematch.gd:45-55` | Web: end a match and press R within 1 s: nothing (`tests/unit/slab-mode.test.ts:387-389`); Godot: the first R rematches |
 | X4 | Pad X rematches on the web only (w15 G4) | lead | `src/client/input/input.ts:113` (pad X sends Reload) and `src/sim/match/index.ts:281-283` (any Reload press rematches); Godot `engines/godot/game/input_setup.gd:20-21` (pad X is `reload` only, Start is `rematch`) | On the web winner screen press pad X: rematch. In Godot pad X does not |
-| B2 | Sprint C item 8 NOT MET: the 2v2 roles stay nominal in play (the APPROACH bot is at its post under 1 % of its alive time) | g-bot (the trap card) | `engines/godot/game/bot.gd:228-229`, `:303-306`, `:338-339` (unchanged at this head) | `docs/qa/w15/bot-roles.md:89-93` |
+| B2 | Sprint C item 8 NOT MET: the 2v2 roles stay nominal in play (the APPROACH bot is at its post under 1 % of its alive time) | g-bot (the trap card) | `engines/godot/game/bot.gd` `_steer()` (behaviour unchanged since 7a671f1; the lines moved with G-BAL) | `docs/qa/w15/bot-roles.md:89-93`; docs/qa/w17/BOT-ROLES.md § G-BAL role bar (post in zone + the fix: at its post 16.2 % / 17.9 %) |
+| B3 | The twin's bots aim with species eye and aim heights; Godot's use one geometry since W17 G-BAL. The twin's Cat bot looks 0.4425 m down to a Corgi's aim point and its Corgi bot 0.357 m (Godot: 0.276 m both). At 3 m their idealAim pitches differ by about 0.028 rad (Godot 0.0021) | tw-sim | `src/sim/ai/brain.ts:243`, `:263`, `:660-662`; `src/sim/combat/weapon-system.ts:119` (shared with humans: a bot-only branch on `ownerPid === null`) against `engines/godot/game/bot.gd:21-22` and its `_eye()` / `_aim_point()` | Godot: `run.gd -- --only bot_roles` parts 4-5. Web: no test; compute idealAim for a Corgi bot and a Cat bot 3 m apart on the slab |
 
 ## Shots (each opened and looked at)
 All in `docs/qa/w17/`. Godot shots are 1280 × 720 renders (gl_compatibility under Xvfb) except the hits grid (906 ×
@@ -328,16 +337,17 @@ Carried from w15 (its numbers), each re-checked at this head, then the new ones.
 | G12 | note | F13 | Godot: no test that a slab match shows no nameplate | g-hud | open |
 | G13 | note | H19 | Godot: no "no music" test | a-hook | open |
 | G14 | note | X2 | Web: R during play | tw-sim | closed (w15); slab-mode:438-453 |
-| G15 | note | B1, B2 | The twin's bots have no roles and no edge-band test | lead | edge band CLOSED (W17 TW-SIM, B1 MATCH); roles stay Godot-only (B2 NOT MET in both). Logged allowed DIFF: beyond the 6 m contest zone the twin keeps its W13 straight pull until G-BAL lands (porting Godot's far branch gave 1v1 65 % Cat at n 200) |
+| G15 | note | B1, B2 | The twin's bots have no roles and no edge-band test | lead | edge band CLOSED (W17 TW-SIM, B1 MATCH); roles stay Godot-only (B2 NOT MET in both). Logged allowed DIFF: beyond the 6 m contest zone the twin keeps its W13 straight pull until the lead rules on the far branch (G-BAL landed without it; porting it gave 1v1 65 % Cat at n 200) |
 | G16 | note | M2, D1, D5, D10 | Web layout clauses proven by shot only | tw-view | open (this file's web shots re-confirm them) |
 | G17 | note | shots | – | g-hud, tw-view | closed (w15) |
 | G18 | note | X8 | The e2e cannot put a cue up before the end | tw-view | settled (w15); e2e:127-136 says so at this head |
 | G19 | note | M20 | `LINEUP_AIM_LIFT` has no test | lead | open |
 | G20 | note | H11 | Web: no wedge for an attacker never seen in a snapshot | lead (ruling) | open |
 | G21 | minor | H20 | The web's confirm X is 1/√2 of Godot's | tw-view | open (DEFECT H20) |
-| G22 | major | B2 | Card item 8 NOT MET: the bot.gd trap | g-bot | open (DEFECT B2) |
+| G22 | major | B2 | Card item 8 NOT MET: the bot.gd trap | g-bot | open (DEFECT B2). W17 G-BAL: post in zone + aim parity is 62.5 % Cat (n 240), and the APPROACH bot is at its post 16-18 % of its alive time (bar 20 %), so still NOT MET. Closing it needs a step-on rule that keeps the APPROACH bot at its post (BOT-ROLES § G-BAL Decision) |
 | G23 | minor | K6 | The card's distance is the zone centre; the measured respawn is an end point (±1.5 m Corgis, ±3.3 m Cats) | lead | **new**, closed: ruled MATCH (HUD_CONTRACT rev 5 §2, ±4 m) |
 | G24 | note | K5, K6 | No standing test in either build checks that a base respawn lands where the card says. Godot tests it only for `--demo` (death:58-65); the web not at all. This file's two probes do it (40 respawns each) and could be adopted | g-hud, tw-view | **new**, open |
+| G25 | minor | B3 | The twin's bots do not use Godot's aim-height parity (bot.gd AIM_EYE / AIM_CHEST), and no web test pins bot aim geometry | tw-sim | **new**, open (DEFECT B3) |
 
 ## Method notes
 - **Probes.** Five files in `scratchpad/qa17-probes/`: the two death-card probes (`test_zz_qa17_card.gd`,

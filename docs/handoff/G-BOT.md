@@ -10,9 +10,10 @@ and the Corgi's faster sprint (9.6 vs 8.8 m/s) evens the trip. Separately, the b
 ## 1. Files
 | Path | What |
 |---|---|
-| `engines/godot/game/bot.gd` | W14: `_hold_inside()`, `SLAB_MARGIN`, `EDGE_LOOK`, `CONTEST_ZONE` (§11). W13: `_gait()`: sprint while off the slab, nobody seen or heard, goal more than `SPRINT_MIN` 12 m away (the web bot's 12 m, `src/sim/ai/brain.ts`); run otherwise. `LEDGE_JUMP` 0.45 (was 0.3 inline). `ledge_jump` and `jumps` vars for the harness. |
+| `engines/godot/game/bot.gd` | W14: `_hold_inside()`, `SLAB_MARGIN`, `EDGE_LOOK`, `CONTEST_ZONE` (§11). W13: `_gait()`: sprint while off the slab, nobody seen or heard, goal more than `SPRINT_MIN` 12 m away (the web bot's 12 m, `src/sim/ai/brain.ts`); run otherwise. `LEDGE_JUMP` 0.45 (was 0.3 inline). `ledge_jump` and `jumps` vars for the harness. W17 G-BAL: `AIM_EYE` / `AIM_CHEST`, `_eye()`, `_aim_point()`: one aim geometry for every bot (§11g). |
 | `engines/godot/tests/balance.gd` | The harness (`--script`, not in `tests/run.gd`). |
 | `engines/godot/tests/test_game_balance.gd` | Smoke check, about 10 s: ledge jump not below the step-up; both bots leave their spawn at their sprint speed; a bot with an enemy in sight runs; a bot on the slab is held 1 m inside its edges (W14). |
+| `engines/godot/tests/test_bot_roles.gd` | W15: roles by format, intent, the rematch reset (§11e). W17 G-BAL: part 4, aim parity (a Corgi bot and a Cat bot aim along one line); part 5, every aim site on `_eye()` / `_aim_point()` and the constants on the Corgi's pet.gd heights (§11g). |
 
 | `engines/godot/game/match.gd` | Follow-up, at the lead's request: `start_slots(team)` and `_sprint_time()`. The match-start slots are matched on straight-line sprint time to the slab (§10). Nothing else; A-HOOK's `slab_point` is kept. |
 
@@ -363,7 +364,8 @@ run on 2v2 n 120 (seeds 1-60, 101-160) and 1v1 n 80 (1-40, 101-140), 16 blocks i
   - **Every bot HOLDS:** 43-77 (Cat 64 %). This differs from the shipped build by p 0.43 only. By construction no bot
     approaches.
   - **1v1** is 41-39 in every build: the roles never act in 1v1.
-  - **Shipped:** bot.gd behaves as at 7a671f1, with the trap and nominal roles. Only the roles comment changed.
+  - **Shipped:** bot.gd behaves as at 7a671f1, with the trap and nominal roles. Only the roles comment changed
+    (until W17 G-BAL, §11g).
   - **Why the Cats gain.** When the APPROACH bot really leaves the slab, the Cat holder's slab time rises (51-53 s per
     match against the Corgi holder's 42-45 s), and the Corgis die more on their way in. That is observed, not
     isolated. The Cats' hit-rate edge (31-32 % against 29 %) is in every build.
@@ -387,6 +389,57 @@ run on 2v2 n 120 (seeds 1-60, 101-160) and 1v1 n 80 (1-40, 101-140), 16 blocks i
   or on the slab bound for its post. It also prints spawn-to-post per life, and per team the share of both-alive time
   with one bot on the slab and the other out.
 - **Suite:** `tests/run.gd` 24/24 PASS on the final copy, in 3 min 38 s.
+
+## 11g. Wave 17 G-BAL: where the Cat advantage comes from, and aim-height parity
+`docs/qa/w17/BOT-ROLES.md` § G-BAL has the tables. `tests/balance.gd` gains the lab modes `--hitrate`, `--duel2`,
+`--exposure`, `--standoff`, `--arrival` and `--brawl`, and the diagnostic `--lab-patch` / `--lab-order` (never a fix).
+- **Root cause: no single cause carries the 2v2 edge (58.5 % Cat over 600 matches, but 51-52 % of held time).**
+  - Close slab fights are decided by aim geometry. The Cat looks 0.32 m down to a Corgi's aim point; the Corgi 0.24 m
+    to a Cat's.
+    - Likely mechanism, not proven: the Cat's aim is inside FIRE_CONE in 9.7 % of its ready frames, the Corgi's in
+      8.8 %.
+    - Lab: standoffs and brawls on the slab go 58 % Cat; with one aim geometry, 50 % (n 700, p 0.003).
+  - Hurt volume: the Cat's hitbox is 7.5 % narrower, so it is 2-4 points harder to hit at 10 m, and level at 20-30 m.
+    It makes no edge in two-way duels.
+  - Route exposure: the Corgi's way in is open from 32 m out, the Cat's from 23 m. It does not convert into deaths.
+  - Processing order: the Corgis run first in the tree; it favours them, if anything.
+  - In real 2v2, only the Corgi's aim geometry, hitbox AND run, accel and decel on the Cats bring it to 50.8 %
+    (n 240). That includes a forbidden movement change, and it is not significant against shipped (p 0.31).
+- **The fix: aim-height parity, bot.gd only.** Every bot looks and fires from `AIM_EYE` 0.936 m and aims at
+  `AIM_CHEST` 0.66 m over its target's feet: the Corgi's numbers for both species. No movement, route, slot, pet.gd,
+  match.gd or tuning.gd change.
+  - **2v2 n 240** (seeds 1-120, 101-220): shipped 106-134 (55.8 %; seeds 101-220 at 61 %); with the fix 104-136
+    (56.7 %; 54 / 59 % per block). Fisher p 0.93; paired McNemar p 0.67 / 0.88.
+  - **1v1 n 80:** 44-36 (45 %).
+  - It passes the bar in every block, but its effect on whole matches is inside the noise.
+    - The 101-220 block is 71 of 120 (59.2 %), one match under the bar.
+    - Shipped's 61 % block (73 of 120) is noise of the same size, and seeds do not replay across processes
+      (balance.gd header).
+    - The reason to adopt is the lab asymmetry, not the blocks.
+- **Post in zone + fix: 90-150 (62.5 %), from 72.5 % without the fix (p 0.06).** It fails the bar, and at its post
+  16-18 % against the 20 % bar (post or approaching 50-53 %). Not adopted; nothing new in `gbot2-candidate/`.
+- **Test: `test_bot_roles.gd` parts 4 and 5 pin all six aim sites.**
+  - Part 4 pins the aim tracking (bot.gd:157). A Corgi and a Cat bot 3 m apart aim 0.0021 rad apart. The shipped
+    bot.gd and an aim-tracking revert both give 0.0284 apart (max 0.008): FAIL.
+  - Part 5 checks that `AIM_EYE` / `AIM_CHEST` equal the Corgi's pet.gd eye and chest, and checks the helpers for
+    both species.
+  - Part 5 then uses a spy bot with its `_eye()` lifted to pin the view check (:199), `_los` (:299), the FIRE_CONE
+    `to` (:308) and the shot origin (:314).
+  - Mutants M1 (origin), M4 (`_los`), M5 (cone), M6 (view check) and M7 (`AIM_EYE` drifted to 0.95) each FAIL it.
+- **Lab tool:** LabBot overrides both height pairs (pet.gd `eye()` / `chest()` and bot.gd `_eye()` / `_aim_point()`),
+  and every lab statistic reads the bot's own helpers.
+  - `--lab-patch eye|eyeonly|chestonly` are no-ops on the fixed bot.gd, which already aims with the Corgi's heights.
+  - `--lab-patch own` restores the pre-fix aim: standoff n 40 Cat 94 of 160, against 82 of 160 with no patch.
+- **Suite:** 24/24 PASS on the private copy; 25/25 PASS on the shared tree's `engines/godot` with these files (its
+  G-REMATCH and look changes included). `test_bot_contest` x5 PASS, 0.4-1.1 %.
+  - Patch round, on HEAD 36df32f plus these files: `test_bot_roles` PASS (parts 4 and 5); `test_bot_contest` x2
+    PASS (edge band 2.5 % and 1.0 %); the full suite 24/24 PASS.
+- **NEXT (tw-sim, PARITY B3 / G25):** mirror aim-height parity in the twin's bots.
+  - They still aim from `eyeHeight` (0.875 h: Corgi 1.050 m, Cat 1.1025 m) at 0.55 h or 0.9 h
+    (src/sim/ai/brain.ts:243, :263, :660-662).
+  - The shot origin is src/sim/combat/weapon-system.ts:119, shared with humans.
+  - The fire gate is a yaw/pitch window (brain.ts:1058-1059), not FIRE_CONE, so re-measure with
+    `tools/slab-balance.ts --compare`.
 
 ## 12. Commands
 ```

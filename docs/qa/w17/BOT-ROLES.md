@@ -9,6 +9,8 @@
 - **The 7a671f1 code, measured the same day:** 50-70 (Cat 58 %).
 - **What ships:** bot.gd behaves as it did at 7a671f1. The trap stays and the roles stay nominal. Only the roles
   comment changed, to point here. The lead rules on what comes next (see Decision).
+  - Superseded by § G-BAL: bot.gd now ships aim-height parity (`AIM_EYE` / `AIM_CHEST`); the trap and the nominal
+    roles are unchanged.
 - **Contest rule:** `test_bot_contest.gd` 5/5 PASS, edge band 0.4-1.4 %.
 - **1v1:** 41-39 in every build.
 
@@ -56,7 +58,9 @@ no teammate is alive or an enemy stands on the slab.
 - **on the slab bound for the post:** the W15 trap holds it there. With the fix this is only the walk across.
 
 ## Balance (bots-only; the table format of docs/qa/w15/bot-route.md)
-- Held = seconds alone on the slab (scored).
+- Held = seconds alone on the slab (scored): the sum of the per-match MATCH lines. The block's SUMMARY line prints
+  the unrounded total, which can differ by a few seconds (shipped 2v2 seeds 1-60: 3254-3363 here, 3251-3366 in the
+  SUMMARY).
 - First = matches in which that side reached the slab first, Corgi / Cat / tie. A tie is within 0.1 s, or neither
   side reaching it.
 - Trip = mean spawn-to-slab time per life that reached the slab (all roles).
@@ -213,6 +217,8 @@ The candidate files are in the lane's scratchpad: `gbot2-candidate/bot.post-in-z
   - post in zone fails the balance bar (72 %) and the roles bar;
   - no roles fails the balance bar in this sample (64 %) and cannot make "one approaches" true.
 - **Kept:** bot.gd at 7a671f1 behaviour. Its 2v2 passes the pooled bar today (58 %).
+  - Superseded by § G-BAL: bot.gd now ships aim-height parity (`AIM_EYE` / `AIM_CHEST`); the trap and the nominal
+    roles are unchanged.
 - **Changed:**
   - the bot.gd roles comment (comment only);
   - balance.gd's role metrics (harness only);
@@ -233,3 +239,349 @@ $G --headless --path engines/godot --script res://tests/run.gd -- --only bot_con
 $G --headless --path engines/godot --script res://tests/run.gd -- --only bot_roles    # with the candidate's files
 ```
 The `SUMMARY 2v2 roles` line has the role table's numbers.
+
+## G-BAL: where the Cat advantage comes from (W17, lane G-BOT2)
+**Card.** Root-cause the Cats' 2v2 edge with controlled experiments, then fix it with one allowed change. The
+allowed changes are hurt-volume parity, eye or muzzle-height parity, or a respawn-side cover or approach fix with no
+new mesh, placement or collider. A speed change is not allowed.
+
+**Short answer.**
+- **The edge is small and spread over several things.** The behaviour-neutral builds pool to a 58.5 % Cat win share
+  (351 of 600: § "How much an n 120 sample can show" above), but only 51-52 % of held time and 51 % of takedowns.
+  - Three species differences each take a little held time back from the Cats in real 2v2: the Cat's eye height
+    over its target's aim point, its narrower hitbox, and its faster run.
+  - The Cat's held share, against shipped's 51.8 %: aim parity 51.3; plus the hitbox 51.2; plus the run 50.8; all
+    three 50.5. That is under a point each, about 1.3 together.
+  - None of them alone moves the win share measurably at n 120-240.
+  - All three together (aim parity, the Corgi's hitbox and the Corgi's run, accel and decel on the Cat bots) give
+    118-122, Cat 50.8 %, held 50.5 % (n 240). That is a diagnostic, it includes a speed change, and it is not a
+    significant difference from shipped (p 0.31).
+- **The one effect that is large and clean in the lab is the aim geometry in close slab fights.** Two holders on
+  opposite edges of the slab: the Cat wins 60 % (n 400). In a 2v2 brawl on the slab: 55 % (n 300).
+  - With one aim geometry for both species, those become 51 % and 49 % (Fisher p 0.003 over the 700).
+  - That is the fix measured below. It is allowed: eye-height parity, in bot.gd only.
+- **Route exposure (b) is real but does not convert.** On the way in, the Corgi bot is in a slab holder's sight
+  1.25 s per trip at 20-40 m from the slab; the Cat bot 0.38 s. In play, though, both sides die before reaching the
+  slab equally often (282-286 in 120 matches). Kills of victims 12-20 m out are 102-106.
+
+### Builds and harness
+- `tests/balance.gd` gains the lab modes `--hitrate`, `--duel2`, `--exposure`, `--standoff`, `--arrival` and
+  `--brawl`.
+- They use one lab bot per team and species; the match's own bots are frozen and parked.
+- `--lab-patch move|hitbox|eye|eyeonly|chestonly` gives the Cats one Corgi attribute. It is a diagnostic only, never
+  a fix, and it works on lab bots and, with `--format`, on a match's Cat bots.
+  - The eye, eyeonly and chestonly rows below were measured on f1a79c5's bot.gd, which aimed with pet.gd `eye()` and
+    `chest()`.
+  - Since the fix, every bot aims with the Corgi's heights (`_eye()` / `_aim_point()`), so those three patches change
+    nothing on today's bot.gd: `--standoff --n 40 --lab-patch eyeonly` prints the same lines as no patch.
+  - `--lab-patch own` gives each lab bot its own species' pet.gd heights back, which is the aim as shipped before
+    G-BAL. On today's bot.gd it brings the Cat back to 94 of 160 standoffs (58.8 %), against 82 of 160 with no
+    patch.
+  - So the old pairs reproduce as `own` against no patch.
+  - LabBot overrides both height pairs, and every lab statistic reads the bot's own helpers.
+- `--lab-order cat` puts the Cat lab bots first in the tree. Physics runs in tree order; match.gd adds the Corgis
+  first.
+- All runs use `--speed 30`, `nice -n 10` and at most 2 Godot processes.
+- The bot.gd is f1a79c5's unless a row names the fix. The fix is G-BAL's aim parity; "post in zone" is
+  `gbot2-candidate/bot.post-in-zone.gd`.
+
+### (a) Hurt volume, eye and aim heights (pet.gd; bots fire from `eye()` at `chest()` — as shipped before G-BAL)
+| | Corgi | Cat |
+|---|---|---|
+| Height (capsule) | 1.20 m | 1.26 m |
+| Eye, `eye()` (0.78 h) | 0.936 m | 0.983 m |
+| Aim point, `chest()` (0.55 h) | 0.660 m | 0.693 m |
+| Hitbox capsule (r + 0.04, h + 0.08) | r 0.40, h 1.28 | r 0.37, h 1.34 |
+| Side-on hitbox area | 0.887 m2 | 0.874 m2 (7.5 % narrower, 4.7 % taller) |
+| Head band (hits above 0.8 h) | from 0.960 m | from 1.008 m |
+| Drop from this shooter's eye to the enemy's aim point | 0.243 m | 0.323 m |
+| Rifle muzzle | visual only: bots fire from the eye | visual only |
+
+**One-way fire, (a).** A thinking bot shoots at an unhurt bot that does not think, on level open ground found by
+the harness.
+- Every shooter species × target species pair is tested at 10, 20 and 30 m.
+- Still: both pinned. Moving: both slide sideways in a ±2.5 m lane at their species' run speed.
+- 60 trials of 6 s per cell, about 1,870 shots each.
+- "Geometry" is 20,000 rays from the shooter's eye at the target's aim point, with the bot's standing cone (rifle
+  spread 1.2° + bot.gd AIM_ERROR 2°).
+
+| Distance, stance | Corgi > Corgi | Corgi > Cat | Cat > Corgi | Cat > Cat | Target effect (Corgi target - Cat target) |
+|---|---|---|---|---|---|
+| 10 m geometry | 80.5 % | 76.7 % | 80.7 % | 76.7 % | +3.9 |
+| 10 m still | 78.2 % | 75.3 % | 80.0 % | 76.3 % | +3.3 |
+| 10 m moving | 59.0 % | 57.2 % | 60.3 % | 58.2 % | +2.0 |
+| 20 m geometry | 22.3 % | 21.9 % | 22.3 % | 22.2 % | +0.3 |
+| 20 m still | 23.3 % | 23.1 % | 22.4 % | 22.0 % | +0.3 |
+| 20 m moving | 16.6 % | 16.1 % | 16.0 % | 15.9 % | +0.3 |
+| 30 m geometry | 9.9 % | 9.5 % | 9.8 % | 9.9 % | +0.2 |
+| 30 m still | 11.0 % | 10.9 % | 10.0 % | 9.6 % | +0.3 |
+| 30 m moving | 8.2 % | 7.4 % | 6.6 % | 6.6 % | +0.4 |
+
+- **The Cat is harder to hit at 10 m,** by 2-4 points, and not at 20-30 m. Its hitbox is 7.5 % narrower, and at
+  10 m the spread cone (0.56 m) is wider than either hitbox, so width counts.
+- **The shooter species makes no consistent difference:** the Cat is +1.0 to +1.8 at 10 m and -0.8 to -1.6 at 30 m.
+
+**Two-way duels, (a).** A Corgi and a Cat, both thinking and mortal, on the same two spots, with the species swapped
+every other trial.
+
+| Distance | Free (each bot moves itself), n 200 | Still (pinned), n 100 | Moving (lanes), n 100 |
+|---|---|---|---|
+| 6 m | Corgi 100 - Cat 100 | - | - |
+| 10 m | 116 - 84 | 52 - 48 | 65 - 35 |
+| 15 m | 95 - 105 | - | - |
+| 20 m | 101 - 99 | 56 - 44 | 53 - 47 |
+| 30 m | - | 53 - 45 (2 undecided) | 41 - 34 (25 undecided) |
+
+- **On open ground the Cat has no edge in a duel.** Free duels: Corgi 412, Cat 388.
+- **With aim parity they are the same:** 416-384.
+- The "moving" 65-35 at 10 m is a harness effect. The lanes set the pets' positions each tick, and the second pet in
+  tree order (the Cat) then fires at a hitbox that the physics server has not yet moved. This is likely, not proven;
+  see the processing order below.
+
+### (b) Route exposure
+- A lone bot runs from each of its team's start slots and respawn points to the slab, 3 runs each.
+- Every tick the harness checks whether its chest is in the line of sight of an enemy holder's eye. The holder eyes
+  are five points on the slab (the centre, and 2 m in towards each corner) at the enemy species' eye height.
+
+| Runner | 60-40 m from the slab's centre | 40-20 m | 20-8 m | 8-0 m | In sight within 60 m, per trip | Last hidden |
+|---|---|---|---|---|---|---|
+| Corgi (4 points) | 0.00 of 2.09 s | **1.25 of 2.11 s (59 %)** | 1.46 of 1.46 s | 0.55 of 0.55 s | 3.26 s | 31.9 m out |
+| Cat (3 points) | 0.00 of 2.28 s | **0.38 of 2.35 s (16 %)** | 1.57 of 1.57 s | 0.40 of 0.40 s | 2.35 s | 23.2 m out |
+
+- **The Corgis' way in is open from 32 m out; the Cats' from 23 m.** Both are fully in sight over the last 20 m.
+- **It does not convert in play** (W17 shipped, 120 matches):
+  - died before reaching the slab: Corgi 282, Cat 286;
+  - victims killed 12-20 m from the slab: by Corgis 102, by Cats 106;
+  - kills from 15-25 m: 193-94 in the Corgis' favour.
+
+### (c) Holder standoff, holder against an attacker, and a 2v2 brawl
+- **Standoff.** A Corgi and a Cat stand on opposite slab edges, 1 m inside (z = -3 and +3, ground -0.047 / -0.045:
+  flat). Both are thinking and mortal. They face each other, or face away, and the sides are swapped. n 100 per
+  condition.
+- **Arrival.** One species holds in the slab's middle; the other starts 16 m out on its own way in. n 200 per role.
+- **Brawl.** Two of each species start on the slab as in test_bot_contest.gd, with no respawns. n 300.
+
+| Scenario (n) | Cat wins, as shipped | Cat wins, the Cat's aim geometry set to the Corgi's (eye 0.936, aim 0.660) |
+|---|---|---|
+| Standoff, facing each other, Corgi on its own side (100) | 58 | 47 |
+| Standoff, facing each other, sides swapped (100) | 54 | 44 |
+| Standoff, facing away, own sides (100) | 61 | 52 |
+| Standoff, facing away, sides swapped (100) | 66 | 60 |
+| **Standoff, all (400)** | **239 (59.8 %, p < 0.001 vs even)** | **203 (50.8 %)** |
+| Brawl 2v2 on the slab (300) | 166 (55.3 %) | 146 (48.7 %) |
+| **Slab fights together (700)** | **405 (57.9 %)** | **349 (49.9 %); Fisher p 0.003** |
+| Arrival, both roles (400) | 190 (47.5 %): the attacker wins 59-64 % either way | 191 (47.8 %) |
+
+**What decides the standoff:**
+- The gap shrinks to 1.7-2.3 m, and both bots hit 99-100 % of the shots they fire.
+- What differs is how often they can fire. bot.gd fires only when its aim is within FIRE_CONE (0.12 rad) of the
+  target's chest. At 2 m the aim is outside it in about 90 % of the frames the bot is otherwise ready.
+- The Cat looks 0.32 m down to a Corgi's chest; the Corgi only 0.24 m down to a Cat's. The steeper line keeps the
+  target's sideways motion a smaller angle.
+- Pooled over the four conditions, the Cat's aim is inside the cone in 9.7 % of its ready frames and the Corgi's in
+  8.8 %: about 10 % more shots.
+- With one geometry the shares are 9.3 % and 9.2 %. This mechanism is likely, not proven; the outcome numbers are
+  measured.
+
+**Diagnostics on the standoff** (n 400 each, Cat wins):
+
+| Change on the Cat bots | Cat wins |
+|---|---|
+| none | 59.8 % |
+| the Corgi's run, accel and decel | 61.5 % |
+| the Corgi's hitbox | 59.5 % |
+| the Corgi's eye only | 56.5 % |
+| the Corgi's aim point only | 56.0 % |
+| the Corgi's eye and aim point | **50.8 %** |
+| all three | 48.8 % |
+
+Each half alone removes 3.3-3.8 points; both together remove 9.0.
+
+**Processing order.**
+- With the lab Cats first in the tree, the standoff Cat share rises from 59.8 % to 65.3 %, +5.5 points, Fisher p
+  0.13.
+- So, likely: whoever runs first in a physics frame has a small edge.
+- In match.gd the Corgis are added first, so if anything this favours the Corgis. It is not the cause, and it is not
+  an allowed fix. It would be a pet.gd or match.gd matter: hitboxes follow their pets only at the transform flush
+  after all scripts ran.
+
+### Where real 2v2 kills happen (2v2 logs)
+On the slab means the victim is at most 5 m from the slab, as the log prints it. Each cell is Corgi kills - Cat
+kills.
+
+| Victim, killer-to-victim gap | W17 shipped, n 120 (gbot2-out/v0, 7a671f1) | G-BAL shipped, same seeds, n 240 (m/s) | Shipped + aim parity, n 240, 4298 kills (m/sf) |
+|---|---|---|---|
+| on the slab, under 6 m | 117-176 (Cat 60 %) | 269-337 (Cat 56 %) | 249-369 (Cat 60 %) |
+| on the slab, 6-12 m | 357-419 (Cat 54 %) | 694-885 (Cat 56 %) | 729-840 (Cat 54 %) |
+| on the slab, 12 m and more | 300-246 (Cat 45 %) | 609-451 (Cat 43 %) | 606-465 (Cat 43 %) |
+| off the slab | 276-246 (Cat 47 %) | 535-522 (Cat 49 %) | 528-512 (Cat 49 %) |
+
+- **The Cats' edge is close-range kills of pets on the slab.**
+- **Aim parity removes it in the lab scenarios, but not measurably in real matches.** On the same seeds, close slab
+  kills go from 56 % to 60 % Cat with the fix (Fisher p 0.15, noise), and the 6-12 m kills from 56 % to 54 %.
+- Real slab fights come with arrivals, crowding and reinforcements, which the standoff and brawl do not reproduce.
+
+### Real 2v2: the fix and the diagnostics (continuous measures)
+Continuous measures from the MATCH lines, mean ± standard error over matches. The diagnostic rows add Corgi attributes
+to the Cat bots on top of the fix (seeds 1-60 and 101-160 unless the row says otherwise).
+
+| Build | Cat wins | Cat share of held time | Cat share of takedowns | Margin, Corgi - Cat | Hit rate, Corgi / Cat |
+|---|---|---|---|---|---|
+| shipped (n 240, seeds 1-120 and 101-220) | 55.8 % | 51.8 ± 0.6 % | 51.2 ± 0.4 % | -3.5 ± 1.1 | 28.8 / 31.3 % |
+| shipped + aim parity, **the fix** (n 240) | 56.7 % | 51.3 ± 0.6 % | 50.9 ± 0.4 % | -2.6 ± 1.2 | 29.3 / 31.6 % |
+| + the Corgi's hitbox on the Cats (diagnostic, n 120) | 63.3 % | 51.2 ± 0.9 % | 51.2 ± 0.5 % | -2.8 ± 1.7 | 29.2 / 31.0 % |
+| + the Corgi's run, accel, decel on the Cats (diagnostic, not allowed, n 120) | 57.5 % | 50.8 ± 0.7 % | 51.0 ± 0.4 % | -1.9 ± 1.4 | 28.8 / 31.2 % |
+| + both (diagnostic, not allowed, n 240: seeds 1-60, 101-160, 201-260, 301-360) | 50.8 % | 50.5 ± 0.6 % | 50.7 ± 0.3 % | -1.2 ± 1.2 | 29.5 / 30.9 % |
+| post in zone (W17, n 120) | 72.5 % | 53.6 ± 0.8 % | 52.0 ± 0.4 % | -7.6 ± 1.5 | 28.8 / 31.9 % |
+| post in zone + aim parity (n 240) | 62.5 % | 52.2 ± 0.5 % | 51.3 ± 0.3 % | -4.8 ± 1.1 | 29.5 / 32.2 % |
+
+- **No arm differs from shipped by a significant amount.**
+  - The fix: Fisher p 0.93; paired on the same seeds, McNemar p 0.67 and 0.88.
+  - All three Corgi attributes on the Cats: wins p 0.31, held time z -1.5.
+- **Only the pair of role builds differs:** post in zone 72.5 % against 62.5 % with the fix (Fisher p 0.06; held time
+  z -1.4).
+- **The hit-rate gap (Cats about 2 points higher) survives every arm.** It is a result of where each side fights, not
+  a cause. In every build the Cats win the kills at 4-12 m (55-59 %; slot-1 bot against slot-1 bot on the slab
+  57-70 %), and the Corgis win the kills at 12 m and more (60-79 %). Hit rates are far higher at short range.
+
+### Root cause, as far as these samples reach
+1. **Close slab fights: the aim geometry.** In the lab this is large and clean: the Cat wins 58 % of standoffs and
+   brawls, 50 % with one aim geometry (n 700, p 0.003). It is the only one of the three that an allowed change
+   reaches.
+2. **The rest is the species package.** In real 2v2 the Cat's narrower hitbox (2-4 points harder to hit at 10 m) and
+   its faster run, accel and decel add up with (1). Only all three on the Corgi's numbers bring shipped 2v2 to 50.8 %
+   (held 50.5 %).
+   - That needs a movement change, which this card forbids.
+   - Even so, it is not a significant difference from shipped at n 240.
+3. **Not causes:**
+   - route exposure (it does not convert);
+   - spawn and trip timing (the Corgis are first in 229-232 of 240 matches; trips level);
+   - processing order (it favours the Corgis);
+   - which side of the slab a pet stands on (standoffs with the sides swapped).
+
+### The fix: aim-height parity (bot.gd only)
+- **What it is.** Every bot looks, checks line of sight and fires from 0.936 m over its feet (`AIM_EYE`). It aims
+  0.66 m over its target's feet (`AIM_CHEST`). Both are the Corgi's pet.gd `eye()` and `chest()`.
+- **What changes.**
+  - The Cat bots' eye drops 4.7 cm.
+  - Every bot's aim point on a Cat drops 3.3 cm.
+  - The human's own aim and shots are unchanged (player.gd:107 fires from the camera).
+  - The bots in a human match change as described: Cat bots look, check sight and fire 4.7 cm lower, and every bot
+    (your Corgi ally included) aims 3.3 cm lower on a Cat.
+  - Movement, routes, slots, pet.gd, match.gd and tuning.gd are unchanged.
+- **Where.**
+  - bot.gd:14-22: the constants and their comment.
+  - :157 and :159: aim tracking.
+  - :199: the view check in `_think`.
+  - :291-296: `_eye()` and `_aim_point()`.
+  - :299: `_los`.
+  - :308 and :314: the fire cone and the shot origin.
+- **Proof: `tests/test_bot_roles.gd` parts 4 and 5 pin all six sites.**
+- **Part 4 pins the aim tracking (bot.gd:157).** A Corgi bot and a Cat bot stand 3 m apart on the slab, each aiming
+  at the other while it stands still.
+  - The fix: -0.0907 and -0.0928 rad, 0.0021 apart (max 0.008).
+  - Mutant "bot.gd as shipped": 0.0284 apart, FAIL.
+  - Mutant "aim tracking back on `eye()` / `chest()`": 0.0284 apart, FAIL.
+- **Part 5 pins the constants, the helpers and the other four sites.**
+  - `AIM_EYE` and `AIM_CHEST` must equal the Corgi's pet.gd eye and chest (0.78 and 0.55 of `T.height(CORGI)`).
+  - For a Corgi bot and a Cat bot, `_eye()` must be `AIM_EYE` over the feet and `_aim_point()` `AIM_CHEST`.
+  - A spy bot whose `_eye()` is lifted then faces a still enemy 5 m away on the slab, three times:
+    - lifted 61 m: it must not see the enemy (the view check, :199);
+    - lifted 3 m under a test-only plate that blocks only the lifted line: it must not see it (`_los`, :299);
+    - lifted 3 m in the open: it must fire and hit (the FIRE_CONE `to`, :308, and the shot origin, :314).
+  - The fix: not seen, not seen, then 6 shots and 6 hits.
+- **Part 5 mutants, each made in a copy and restored with `cmp`:**
+  - M1, shot origin back to `eye()`: 6 shots, 0 hits, FAIL.
+  - M4, `_los` back to `eye()` / `chest()`: the spy sees through the plate, FAIL.
+  - M5, cone `to` back to `chest() - eye()`: 0 shots, FAIL.
+  - M6, view check back to `chest() - eye()`: the spy sees the enemy from 61 m up, FAIL.
+  - M7, `AIM_EYE` drifted to 0.95: part 4 still passes, and part 5 FAILS on the constant.
+- **Runs on HEAD 36df32f plus these files:** `test_bot_roles` PASS; `test_bot_contest` x2 PASS (edge band 2.5 % and
+  1.0 %); the full suite 24/24 PASS.
+
+### Measured: shipped against the fix, and post in zone with the fix (2v2 seeds 1-120 and 101-220; 1v1 seeds 1-40 and 101-140)
+| Build | Format | Seeds | n | Corgi | Cat | Draws | Cat share (95 % Wilson CI) | Margin | Held, Corgi-Cat | First, Corgi / Cat / tie | Trip, Corgi / Cat |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| shipped | 2v2 | 1-120 | 120 | 59 | 61 | 0 | 51 % (42-60 %) | -2.0 | 6497-6738 s | 113 / 5 / 2 | 16.5 / 16.6 s |
+| shipped | 2v2 | 101-220 | 120 | 47 | 73 | 0 | **61 % (52-69 %)** | -5.0 | 6247-6824 s | 116 / 4 / 0 | 16.5 / 16.6 s |
+| shipped | **2v2** | **both** | **240** | **106** | **134** | **0** | **56 % (50-62 %)** | **-3.5** | **12744-13562 s (51.6 % Cat)** | **229 / 9 / 2** | **16.50 / 16.60 s** |
+| shipped + fix | 2v2 | 1-120 | 120 | 55 | 65 | 0 | 54 % (45-63 %) | -1.0 | 6474-6606 s | 113 / 5 / 2 | 16.6 / 16.6 s |
+| shipped + fix | 2v2 | 101-220 | 120 | 49 | 71 | 0 | 59 % (50-68 %) | -4.2 | 6257-6754 s | 116 / 4 / 0 | 16.6 / 16.6 s |
+| shipped + fix | **2v2** | **both** | **240** | **104** | **136** | **0** | **57 % (50-63 %)** | **-2.6** | **12731-13360 s (51.2 % Cat)** | **229 / 9 / 2** | **16.60 / 16.60 s** |
+| post in zone + fix | 2v2 | 1-120 | 120 | 41 | 79 | 0 | **66 % (57-74 %)** | -6.6 | 6221-6981 s | 116 / 3 / 1 | 16.6 / 16.5 s |
+| post in zone + fix | 2v2 | 101-220 | 120 | 49 | 71 | 0 | 59 % (50-68 %) | -3.0 | 6416-6787 s | 116 / 1 / 3 | 16.5 / 16.5 s |
+| post in zone + fix | **2v2** | **both** | **240** | **90** | **150** | **0** | **62.5 % (56-68 %)** | **-4.8** | **12637-13768 s (52.1 % Cat)** | **232 / 4 / 4** | **16.55 / 16.50 s** |
+| shipped (W17) | 1v1 | both | 80 | 41 | 39 | 0 | 49 % (38-60 %) | +0.5 | 4507-4424 s | 78 / 0 / 2 | 16.10 / 16.35 s |
+| shipped + fix | 1v1 | 1-40 | 40 | 23 | 17 | 0 | 42 % (29-58 %) | +1.2 | 2262-2189 s | 39 / 0 / 1 | 16.1 / 16.3 s |
+| shipped + fix | 1v1 | 101-140 | 40 | 21 | 19 | 0 | 48 % (33-63 %) | +0.9 | 2251-2198 s | 39 / 0 / 1 | 16.1 / 16.3 s |
+| shipped + fix | **1v1** | **both** | **80** | **44** | **36** | **0** | **45 % (35-56 %)** | **+1.1** | **4513-4387 s (49.3 % Cat)** | **78 / 0 / 2** | **16.10 / 16.30 s** |
+| post in zone + fix | 1v1 | both | 80 | 44 | 36 | 0 | 45 % (35-56 %) | +1.1 | 4513-4387 s | 78 / 0 / 2 | 16.10 / 16.30 s |
+
+- **2v2.**
+  - Shipped against the fix: Fisher p 0.93.
+  - Paired on the same seeds: the same winner in 70 and 76 of 120; flips Corgi→Cat 27 / Cat→Corgi 23 (McNemar p
+    0.67) and 21 / 23 (p 0.88).
+  - Binomial against even: shipped p 0.08, the fix p 0.045, post in zone + fix p < 0.001.
+  - **"No measurable effect" is all this sample can say; it does not show the effect is zero.** n 240 can detect
+    about 12.7 points unpaired, or 11.3 paired.
+  - The paired difference is +0.8 points toward the Cat (95 % CI -7.1 to +8.8).
+  - Pairing is weak here because a 2v2 seed does not replay across processes (balance.gd header), so the McNemar
+    values are valid but carry little information. 1v1, the standoff and the brawl do replay exactly.
+- **Seeds 101-120 run in both blocks, as the card asks.** The same winner came out in 12 / 16 / 19 of the 20 (shipped
+  / fix / post in zone + fix). Without the second copy (n 220) the shares are 54.5 / 55.9 / 64.1 %.
+- **1v1.** The roles never act in 1v1, so the fix is the only change. Against the W17 shipped run on the same seeds:
+  65 of 80 winners the same, flips 6 / 9 (McNemar p 0.69 and 1.0).
+
+**The bar.**
+- Shipped + fix: neither side over 60 % in either format or in any seed block (2v2 54 % and 59 %; 1v1 42 % and
+  48 %).
+  - Shipped itself, this run: one block at 61 %.
+  - The difference between the two is noise.
+- Post in zone + fix fails: 62.5 % pooled, and the 1-120 block at 66 %.
+
+**The role bar** (APPROACH at its post at least 20 % of its alive time, and at its post or approaching at least
+50 %). It is unchanged since it was set before any role build's n 120 run: travel alone gives a trapped bot 27 %
+post-or-approaching, so arrival has to be measured too.
+
+| Post in zone + fix, n 240 | At its post | Post or approaching | Stepping on | Spawn-to-post | One on the slab, one out (of both-alive time) |
+|---|---|---|---|---|---|
+| Corgi APPROACH (seeds 1-120 / 101-220) | 16.2 % / 16.2 % | 50 % / 51 % | 49 % / 47 % | 19.8 s (597 lives) | 30 % |
+| Cat APPROACH | 18.4 % / 17.5 % | 53 % / 52 % | 46 % / 47 % | 19.6 s (652 lives) | 31 % |
+
+- **Post or approaching passes; at the post fails** (16-18 % against 20 %), as before the fix (15-18 %).
+- Balance fixes do not move it. Stepping on, which takes half of an APPROACH bot's life, is what keeps it under 20 %.
+- In real play the edge band is 5 % with a role option (the APPROACH bots step off the slab 284-342 times per side per
+  120 matches) and 3-4 % without.
+- The arrival test passes on post in zone + fix: at its post in 16.0 / 16.8 s, kept 100 %, back at its post in
+  4.3 / 3.6 s; in play 20 % at the post, 56 % at it or approaching.
+
+### Decision
+- **The fix (aim-height parity, bot.gd) is ready to land.**
+  - **The reason to adopt is the lab asymmetry:** it removes the one clean asymmetry the lab finds (close slab
+    fights, 58 % → 50 %).
+  - It keeps both formats under 60 % in every seed block. But the 101-220 block is 71 of 120 (59.2 %), one match
+    under the bar.
+    - Shipped's 61 % block (73 of 120) is noise of the same size, and seeds do not replay across processes
+      (balance.gd header). So the blocks are not the reason to adopt.
+  - It changes no movement, route or slot.
+  - In whole shipped matches its effect is inside the noise.
+- **Post in zone is not adopted.** With the fix it still fails both bars: 2v2 62.5 %, and at its post 16-18 %.
+  Nothing new went into `gbot2-candidate/`.
+- **What would close the rest is outside this card:**
+  - the Cat's run, accel and decel (a movement change, not allowed), or a design call on the species trade;
+  - for the roles, a step-on rule that leaves the APPROACH bot at its post more than 80 % of the time it is not
+    travelling.
+
+### Commands (G-BAL)
+```
+B="$G --headless --path engines/godot --script res://tests/balance.gd --"
+$B --hitrate --n 60 --secs 6 --dists 10,20,30 --speed 30;   $B --duel2 --n 100 --dists 10,20,30 --speed 30
+$B --duel2 --stance free --dists 6,10,15,20 --n 200 --speed 30 [--lab-patch eye]
+$B --exposure --n 3 --speed 30;   $B --standoff --n 100 --speed 30 [--lab-patch move|hitbox|eye|eyeonly|chestonly] [--lab-order cat]
+$B --arrival --n 200 --speed 30 [--lab-patch eye];   $B --brawl --n 300 --speed 30 [--lab-patch eye]
+# The [--lab-patch eye|eyeonly|chestonly] rows reproduce only on f1a79c5's bot.gd. On today's bot.gd use
+# --lab-patch own (the pre-G-BAL aim) against no patch.
+$B --format 2v2 --n 120 --seed 1 --speed 30 --events --trace;   $B --format 2v2 --n 120 --seed 101 --speed 30 --events --trace
+$B --format 2v2 --n 60 --seed S --speed 30 --events --trace --lab-patch hitbox,move   # diagnostic only
+$G --headless --path engines/godot --script res://tests/run.gd -- --only bot_roles   # parts 4-5: aim parity, every aim site
+```

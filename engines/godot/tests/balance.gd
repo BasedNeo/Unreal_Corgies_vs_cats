@@ -40,6 +40,27 @@ extends SceneTree
 ##                    step-ups and the longest stall per point, and which start slot / respawn point it is. With
 ##                    --reps R every point runs R times (seeds S + i + 1000 r: a different goal on the slab each time)
 ##                    and the line gives the mean and the range
+## G-BAL lab (W17, docs/qa/w17/BOT-ROLES.md "G-BAL"): one lab bot per team and species (team = side, species = body,
+## hitbox, eye, speed); the match's own bots are frozen and parked. n trials each, seeds S + i.
+## --hitrate          one-way fire, every shooter species x target species, at --dists (default 10,20,30 m) on level open
+##                    ground, --stance still (both pinned) and moving (both in a +-2.5 m lane at their run speed), --secs
+##                    s per trial; plus the pure geometry (20000 rays at the target's aim point)
+## --duel2            two-way duels, a Corgi and a Cat, both mortal, the spots swapped every other trial; --stance also
+##                    takes "free" (each bot moves itself)
+## --exposure         a lone bot runs from each start slot and respawn point; seconds its chest is in sight of an enemy
+##                    holder's eye on the slab, by distance from the slab
+## --standoff         a Corgi and a Cat on opposite slab edges (facing each other or away, sides swapped): wins, first
+##                    sight, first shot, hit rates, how often the aim is outside bot.gd FIRE_CONE
+## --arrival          one species holds the slab's middle, the other arrives from 16 m on its own way in, then swapped
+## --brawl            two of each species on the slab, no respawns, until one side is down
+## --lab-patch a,b    DIAGNOSTIC ONLY, never a fix: the Cats (lab bots, or a match's Cat bots with --format) take a
+##                    Corgi attribute: move (run, accel, decel), hitbox, eye, eyeonly, chestonly (the last three need a
+##                    lab bot). eye / eyeonly / chestonly set a Cat's eye and the point others aim at on it to the
+##                    Corgi's pet.gd heights (0.936 / 0.660 m). Since G-BAL every bot already aims with those heights
+##                    (bot.gd AIM_EYE, AIM_CHEST), so on today's bot.gd they change nothing; their W17 numbers were
+##                    measured on f1a79c5's bot.gd. own: every lab bot looks from its own species' pet.gd eye (0.78 h)
+##                    and is aimed at its own pet.gd chest (0.55 h), the aim as shipped before G-BAL
+## --lab-order cat    the lab Cats enter the tree first (physics runs in tree order; match.gd adds the Corgis first)
 ## Per match: format, seed, winner, score, takedowns per side, seconds with a pet of each side on the slab, seconds
 ## each side held it alone (scored), shots / hits / hit rate per side, first arrival on the slab per side, and the
 ## mean spawn-to-slab time per life.
@@ -49,6 +70,7 @@ extends SceneTree
 ## stepping on, and on the slab while bound for its post (the W15 trap holds it there); the spawn-to-post time; and per
 ## team, of the time both its bots are alive, the share with one on the slab and the other at its post or approaching.
 const T := preload("res://game/tuning.gd")
+const Bot := preload("res://game/bot.gd")
 const SIDE := ["Corgi", "Cat"]
 ## Slab position metrics (W14 CONTEST): "inside" = in slab.gd contains() at least MARGIN m from every edge (bot.gd
 ## SLAB_MARGIN); "the lip" = outside the volume but within LIP m of its square.
@@ -70,6 +92,18 @@ var reps := 1
 var ttk := 0.0
 var holder := 0.0
 var duel := 0.0
+## G-BAL lab modes (see the header).
+var hitrate := false
+var duel2 := false
+var exposure := false
+var standoff := false
+var arrival := false
+var brawl := false
+var dists: Array = [10.0, 20.0, 30.0]
+var secs := 6.0
+var stances: Array = ["still", "moving"]
+var lab_rev := false  # --lab-order cat: the lab pets enter the tree Cat-side first (physics runs in tree order)
+var lab_patch: Array = []  # --lab-patch: diagnostic only, never a fix (see the header)
 
 func _init() -> void:
 	_run.call_deferred()
@@ -92,6 +126,17 @@ func _args() -> void:
 			"--ttk": ttk = float(v)
 			"--holder": holder = float(v)
 			"--duel": duel = float(v)
+			"--hitrate": hitrate = true
+			"--duel2": duel2 = true
+			"--exposure": exposure = true
+			"--standoff": standoff = true
+			"--arrival": arrival = true
+			"--brawl": brawl = true
+			"--dists": dists = Array(v.split(",")).map(func(x): return float(x))
+			"--secs": secs = float(v)
+			"--stance": stances = Array(v.split(","))
+			"--lab-order": lab_rev = v == "cat"
+			"--lab-patch": lab_patch = Array(v.split(","))
 
 func _run() -> void:
 	_args()
@@ -105,7 +150,7 @@ func _run() -> void:
 		o = {"lineup": ttk}
 	if holder > 0.0:
 		o = {"human": true, "allies": 0, "enemies": 1, "think": true}
-	if duel > 0.0:
+	if duel > 0.0 or hitrate or duel2 or exposure or standoff or arrival or brawl:
 		o = {"human": false, "allies": 0, "enemies": 1, "think": true}
 	for k in o:
 		game.opts[k] = o[k]
@@ -118,6 +163,11 @@ func _run() -> void:
 		print("BALANCE FAIL: the match did not start with a ready nav map")
 		quit(1)
 		return
+	if not lab_patch.is_empty() and not (hitrate or duel2 or exposure or standoff or arrival or brawl):
+		for p in game.pets:  # diagnostic only: the match's Cat bots take Corgi attributes (see --lab-patch)
+			if p.team == 1:
+				_patch_cat(p)
+		print("BALANCE diagnostic patch on the Cat bots: " + ", ".join(lab_patch))
 	if jump_up >= 0.0:
 		for p in game.pets:
 			p.set("ledge_jump", jump_up)
@@ -140,6 +190,10 @@ func _run() -> void:
 		return
 	if duel > 0.0:
 		await _duel(game)
+		quit(0)
+		return
+	if hitrate or duel2 or exposure or standoff or arrival or brawl:
+		await _gbal(game)
 		quit(0)
 		return
 	for i in 2:  # match.gd picks its slots by nav path on the first tick the map serves paths
@@ -881,3 +935,676 @@ static func _wilson(k: int, m: int) -> Vector2:
 	var c := (p + z * z / (2.0 * m)) / den
 	var h := z * sqrt(p * (1.0 - p) / m + z * z / (4.0 * m * m)) / den
 	return Vector2(maxf(0.0, c - h), minf(1.0, c + h))
+
+# --- G-BAL (W17): where the Cat advantage comes from ---------------------------------------------------------------
+## Lab pets: one bot per team and species (team sets the side and the rifle's ally filter; species sets the body,
+## hitbox, eye, speed). The match's own bots are frozen, parked at their bases and taken out of game.pets.
+
+const SPEC := ["Corgi", "Cat"]
+## Half-width of the strafe lane in --hitrate / --duel2 "moving" (each pet slides sideways at its species' run speed
+## and turns back every 0.5-1.0 s or at the lane's end).
+const STRAFE := 2.5
+
+func _gbal(game: Node) -> void:
+	for p in game.pets:
+		p.think = false
+		p.respawn(game.spawns[p.team][15], 0.0)
+	game.pets = []
+	var lab := {}
+	var order: Array = ["00", "01", "10", "11"]
+	if lab_rev:
+		order.reverse()
+	for key in order:
+		lab[key] = _lab_pet(game, int(key[0]), int(key[1]))
+	print("GBAL lab pets in tree (physics) order: " + ", ".join(order.map(func(x): return lab[x].display_name)) +
+		(" · diagnostic patch on the lab Cats: " + ", ".join(lab_patch) if not lab_patch.is_empty() else ""))
+	for i in 3:
+		await physics_frame
+	var parts: Array = []
+	for sp in 2:
+		var p: Node = lab["%d%d" % [sp, sp]]
+		var hc: CapsuleShape3D = (p.hitbox.get_child(0) as CollisionShape3D).shape
+		parts.append("%s height %.2f m, pet.gd eye %.3f m and chest %.3f m, the bot aims from %.3f m at %.3f m (as a lab bot, patches included), hitbox r %.2f h %.2f (side-on area %.3f m2, head band from %.3f m)" % [
+			SPEC[sp], T.height(sp), T.height(sp) * 0.78, T.height(sp) * 0.55, p._eye().y - p.global_position.y,
+			p._aim_point(p).y - p.global_position.y, hc.radius, hc.height,
+			2.0 * hc.radius * (hc.height - 2.0 * hc.radius) + PI * hc.radius * hc.radius, 0.8 * T.height(sp)])
+	print("GBAL pets · " + " · ".join(parts))
+	if hitrate:
+		await _hitrate(game, lab)
+	if duel2:
+		await _duel2(game, lab)
+	if exposure:
+		await _exposure(game, lab)
+	if standoff:
+		await _standoff(game, lab)
+	if arrival:
+		await _arrival(game, lab)
+	if brawl:
+		await _brawl(game, lab)
+
+## A bot whose eye and chest heights can be set (lab only; -1 keeps pet.gd's).
+## Both height pairs are overridden: pet.gd eye()/chest() (what bot.gd aimed with before G-BAL) and bot.gd
+## _eye()/_aim_point() (what it aims with since). _aim_point is static; GDScript dispatches it on the calling bot's
+## script, so a LabBot shooter reads the target's chest_h, and a plain bot.gd shooter keeps AIM_CHEST.
+class LabBot extends "res://game/bot.gd":
+	var eye_h := -1.0
+	var chest_h := -1.0
+	func eye() -> Vector3:
+		return super.eye() if eye_h < 0.0 else global_position + Vector3(0, eye_h, 0)
+	func chest() -> Vector3:
+		return super.chest() if chest_h < 0.0 else global_position + Vector3(0, chest_h, 0)
+	func _eye() -> Vector3:
+		return super._eye() if eye_h < 0.0 else global_position + Vector3(0, eye_h, 0)
+	static func _aim_point(p: Node) -> Vector3:
+		var h = p.get("chest_h")
+		return p.global_position + Vector3(0, float(h) if h != null and float(h) >= 0.0 else AIM_CHEST, 0)
+
+func _lab_pet(game: Node, team: int, species: int) -> Node:
+	var p = LabBot.new()
+	p.configure(team, species, "%s-side %s" % [SIDE[team], SPEC[species]], game.look)
+	p.name = "Lab%d%d" % [team, species]
+	p.game = game
+	p.think = false
+	game.add_child(p)
+	p.respawn(game.spawns[team][13 + species], 0.0)
+	if species == 1:
+		_patch_cat(p)
+	if lab_patch.has("own"):
+		p.eye_h = T.height(species) * 0.78
+		p.chest_h = T.height(species) * 0.55
+	return p
+
+## --lab-patch on one Cat (lab pet or match bot). "eye", "eyeonly", "chestonly" need a LabBot.
+func _patch_cat(p: Node) -> void:
+	if lab_patch.has("move"):
+		var mm: Dictionary = p.m.duplicate()
+		for key in ["run", "accel", "decel"]:
+			mm[key] = T.MOVE[0][key]
+		p.m = mm
+	if lab_patch.has("hitbox"):
+		var hs: CollisionShape3D = p.hitbox.get_child(0)
+		var cap := CapsuleShape3D.new()
+		cap.radius = float(T.MOVE[0].radius) + 0.04
+		cap.height = T.height(0) + 0.08
+		hs.shape = cap
+		hs.position.y = T.height(0) * 0.5
+	if (lab_patch.has("eye") or lab_patch.has("eyeonly")) and p.get("eye_h") != null:
+		p.eye_h = T.height(0) * 0.78
+	if (lab_patch.has("eye") or lab_patch.has("chestonly")) and p.get("chest_h") != null:
+		p.chest_h = T.height(0) * 0.55
+
+## Every lab pet but `keep` back to its parking spot at its base, still (an idle one must never share a spot with
+## the pair in use: its hitbox would soak their shots).
+func _park(game: Node, lab: Dictionary, keep: Array) -> void:
+	for p in lab.values():
+		if not keep.has(p):
+			p.think = false
+			p.respawn(game.spawns[p.team][13 + p.species], 0.0)
+
+func _lab_reseed(p: Node, s: int) -> void:
+	p.rng.seed = hash("%d/%s" % [s, p.name])
+	p.rifle.rng.seed = hash("rifle %d/%s" % [s, p.name])
+	p.react = p.rng.randf_range(0.4, 0.7)
+	p._think_t = p.rng.randf() * 0.1
+
+## Puts a pet's feet on the ground at `at` (x, z) with velocity `vel` (the bot's spread reads its speed).
+func _place(game: Node, p: Node, at: Vector3, vel: Vector3) -> void:
+	var hit: Dictionary = game._ground_hit(at)
+	p.global_position = Vector3(at.x, (hit.position.y if not hit.is_empty() else at.y) + 0.02, at.z)
+	p.velocity = vel
+
+static func _hold(game: Node) -> void:
+	game.score = [0, 0]
+	game.time_left = T.MATCH_TIME
+
+## Two spots `d` m apart on level, open ground at least 10 m from the slab's centre: every ray between both species'
+## eyes and feet / chest / top, from the spots and from STRAFE m to either side, is clear. [P, Q, side] or [].
+func _find_line(game: Node, d: float) -> Array:
+	var c: Vector3 = game.slab.center
+	for r in [20.0, 28.0, 36.0, 44.0, 52.0]:
+		for k in 24:
+			var a := TAU * k / 24.0
+			var mid: Vector3 = c + Vector3(cos(a), 0.0, sin(a)) * float(r)
+			for k2 in 12:
+				var b := PI * k2 / 12.0
+				var dir := Vector3(cos(b), 0.0, sin(b))
+				var got := _flat_line(game, mid - dir * d * 0.5, mid + dir * d * 0.5, Vector3(-dir.z, 0.0, dir.x))
+				if not got.is_empty():
+					return got
+	return []
+
+func _flat_line(game: Node, p: Vector3, q: Vector3, side: Vector3) -> Array:
+	var c: Vector3 = game.slab.center
+	var g0: Dictionary = game._ground_hit(p)
+	if g0.is_empty():
+		return []
+	var y0: float = g0.position.y
+	var n := int(ceil(p.distance_to(q)))
+	for o in [-STRAFE, 0.0, STRAFE]:
+		for i in n + 1:
+			var x: Vector3 = p.lerp(q, float(i) / n) + side * o
+			if Vector2(x.x - c.x, x.z - c.z).length() < 10.0:
+				return []
+			var g: Dictionary = game._ground_hit(x)
+			if g.is_empty() or g.normal.y < 0.97 or absf(g.position.y - y0) > 0.3:
+				return []
+	var space: PhysicsDirectSpaceState3D = game.get_viewport().get_world_3d().direct_space_state
+	var gp: Vector3 = g0.position
+	var gq: Vector3 = game._ground_hit(q).position
+	for op in [-STRAFE, 0.0, STRAFE]:
+		for oq in [-STRAFE, 0.0, STRAFE]:
+			for e in [T.height(0) * 0.78, T.height(1) * 0.78]:
+				for h in [0.15, T.height(0) * 0.55, T.height(1) * 0.55, 1.2]:
+					for pair in [[gp + side * op, gq + side * oq], [gq + side * oq, gp + side * op]]:
+						var from: Vector3 = pair[0] + Vector3(0, e, 0)
+						var to: Vector3 = pair[1] + Vector3(0, h, 0)
+						if not space.intersect_ray(PhysicsRayQueryParameters3D.create(from, to, T.L_WORLD)).is_empty():
+							return []
+	return [gp, gq, side]
+
+## A strafe lane state per pet: [offset, direction, time to the next turn].
+func _strafe_step(st: Array, run: float, rng: RandomNumberGenerator, dt: float) -> void:
+	st[2] -= dt
+	if st[2] <= 0.0 or absf(st[0] + st[1] * run * dt) > STRAFE:
+		st[1] = -st[1]
+		st[2] = rng.randf_range(0.5, 1.0)
+	st[0] += st[1] * run * dt
+
+## (a) One-way fire. The shooter (team Corgi, either species) is a thinking bot; the target (team Cat, either species)
+## stands or strafes, unhurt, and does not think. Per distance: first the pure geometry (20000 rays from the shooter's
+## eye at the target's chest with the bot's standing spread: rifle spread_hip + bot.gd AIM_ERROR, no bloom), then the
+## real bot over n trials of `secs` s, still and moving.
+func _hitrate(game: Node, lab: Dictionary) -> void:
+	var rng := RandomNumberGenerator.new()
+	for d in dists:
+		var line := _find_line(game, d)
+		if line.is_empty():
+			print("HITRATE %.0f m: no level, open line found" % d)
+			continue
+		var P: Vector3 = line[0]
+		var Q: Vector3 = line[1]
+		var side: Vector3 = line[2]
+		print("HITRATE line %.0f m: P (%.1f, %.1f) y %.2f, Q (%.1f, %.1f) y %.2f" % [d, P.x, P.z, P.y, Q.x, Q.z, Q.y])
+		for ss in 2:
+			for ts in 2:
+				var sh: Node = lab["0%d" % ss]
+				var tg: Node = lab["1%d" % ts]
+				game.pets = [sh, tg]
+				_park(game, lab, [sh, tg])
+				sh.respawn(P, game._yaw_to(P, Q))
+				tg.respawn(Q, game._yaw_to(Q, P))
+				for i in 3:
+					_hold(game)
+					_place(game, sh, P, Vector3.ZERO)
+					_place(game, tg, Q, Vector3.ZERO)
+					await physics_frame
+				sh.rifle.rng.seed = 7 + ss * 2 + ts
+				var eye: Vector3 = sh._eye()  # the bot's own helpers: what it aims and fires with
+				var aim: Vector3 = (sh._aim_point(tg) - eye).normalized()
+				var spread: float = float(T.RIFLE.spread_hip) + Bot.AIM_ERROR
+				var hits := 0
+				var heads := 0
+				var rays := 20000
+				for i in rays:
+					var res: Dictionary = sh.rifle.trace(eye, sh.rifle.spread_dir(aim, spread))
+					if res.target == tg:
+						hits += 1
+						if res.head:
+							heads += 1
+				print("HITRATE geometry %.0f m · %s shooter (eye %.2f m) > %s target: hit %.1f %% · head %.1f %% (%d rays, cone %.2f deg)" % [
+					d, SPEC[ss], eye.y - sh.global_position.y, SPEC[ts], 100.0 * hits / rays, 100.0 * heads / rays, rays,
+					rad_to_deg(spread)])
+		for stance in stances:
+			for ss in 2:
+				for ts in 2:
+					var sh: Node = lab["0%d" % ss]
+					var tg: Node = lab["1%d" % ts]
+					game.pets = [sh, tg]
+					_park(game, lab, [sh, tg])
+					var acc := {"shots": 0, "hits": 0, "heads": 0, "first": []}
+					var t_fire := [-1.0]
+					var on_fire := func(res: Dictionary) -> void:
+						acc.shots += 1
+						if t_fire[0] < 0.0:
+							t_fire[0] = 0.0
+						if res.get("target") == tg:
+							acc.hits += 1
+							if res.get("head", false):
+								acc.heads += 1
+					sh.rifle.fired.connect(on_fire)
+					for i in n:
+						seed(seed0 + i)
+						rng.seed = seed0 + i
+						_lab_reseed(sh, seed0 + i)
+						_lab_reseed(tg, seed0 + i)
+						sh.respawn(P, game._yaw_to(P, Q))
+						tg.respawn(Q, game._yaw_to(Q, P))
+						sh.think = true
+						tg.think = false
+						var lane := [[0.0, 1.0, rng.randf_range(0.5, 1.0)], [0.0, -1.0, rng.randf_range(0.5, 1.0)]]
+						var t := 0.0
+						var shots0: int = acc.shots
+						while t < secs:
+							_hold(game)
+							tg.shield = 1.0
+							if stance == "moving":
+								_strafe_step(lane[0], float(sh.m.run), rng, 1.0 / 60.0)
+								_strafe_step(lane[1], float(tg.m.run), rng, 1.0 / 60.0)
+								_place(game, sh, P + side * lane[0][0], side * lane[0][1] * float(sh.m.run))
+								_place(game, tg, Q + side * lane[1][0], side * lane[1][1] * float(tg.m.run))
+							else:
+								_place(game, sh, P, Vector3.ZERO)
+								_place(game, tg, Q, Vector3.ZERO)
+							await physics_frame
+							t += 1.0 / 60.0
+							if acc.shots > shots0 and t_fire[0] == 0.0:
+								t_fire[0] = t
+						if t_fire[0] > 0.0:
+							acc.first.append(t_fire[0])
+						t_fire[0] = -1.0
+						sh.think = false
+					sh.rifle.fired.disconnect(on_fire)
+					print("HITRATE bot %.0f m %s · %s shooter > %s target: hit %s (%d/%d) · head hits %d · first shot %s s · %d trials of %.0f s" % [
+						d, stance, SPEC[ss], SPEC[ts], _pct1(acc.hits, acc.shots), acc.hits, acc.shots, acc.heads,
+						_mean_s(acc.first), n, secs])
+		for p in lab.values():
+			p.think = false
+
+static func _pct1(a: int, b: int) -> String:
+	return "%.1f%%" % (100.0 * a / b) if b > 0 else "-"
+
+## (a) Two-way duels: a Corgi-side Corgi and a Cat-side Cat, both thinking and mortal, on the same two spots, the
+## species swapped every other trial. Per distance and stance: wins, time to kill, hit rates, first shots.
+func _duel2(game: Node, lab: Dictionary) -> void:
+	var rng := RandomNumberGenerator.new()
+	var c: Node = lab["00"]
+	var k: Node = lab["11"]
+	_park(game, lab, [c, k])
+	for d in dists:
+		var line := _find_line(game, d)
+		if line.is_empty():
+			print("DUEL2 %.0f m: no level, open line found" % d)
+			continue
+		var P: Vector3 = line[0]
+		var Q: Vector3 = line[1]
+		var side: Vector3 = line[2]
+		for stance in stances:
+			var wins := [0, 0]
+			var wins_at := [[0, 0], [0, 0]]  # [species][spot: 0 = P, 1 = Q]
+			var ttk := [[], []]
+			var acc := [[0, 0, 0], [0, 0, 0]]  # per shooter species: shots, hits, heads
+			var first := [[], []]
+			var undecided := 0
+			var cons: Array = []
+			for pair in [[c, 0], [k, 1]]:
+				var sp: int = pair[1]
+				var me: Node = pair[0]
+				var other: Node = k if me == c else c
+				var f := func(res: Dictionary) -> void:
+					acc[sp][0] += 1
+					if res.get("target") == other:
+						acc[sp][1] += 1
+						if res.get("head", false):
+							acc[sp][2] += 1
+				me.rifle.fired.connect(f)
+				cons.append([me, f])
+			for i in n:
+				var swap := i % 2 == 1
+				var pc: Vector3 = Q if swap else P
+				var pk: Vector3 = P if swap else Q
+				game.pets = [c, k]
+				seed(seed0 + i)
+				rng.seed = seed0 + i
+				_lab_reseed(c, seed0 + i)
+				_lab_reseed(k, seed0 + i)
+				c.respawn(pc, game._yaw_to(pc, pk))
+				k.respawn(pk, game._yaw_to(pk, pc))
+				c.shield = 0.0
+				k.shield = 0.0
+				c.think = true
+				k.think = true
+				var lane := [[0.0, 1.0, rng.randf_range(0.5, 1.0)], [0.0, -1.0, rng.randf_range(0.5, 1.0)]]
+				var s0 := [acc[0][0], acc[1][0]]
+				var t1 := [-1.0, -1.0]
+				var t := 0.0
+				while t < 20.0 and c.alive and k.alive:
+					_hold(game)
+					if stance == "free":
+						pass  # both move on their own (bot.gd steering: to the slab, strafing, backing off under 7 m)
+					elif stance == "moving":
+						_strafe_step(lane[0], float(c.m.run), rng, 1.0 / 60.0)
+						_strafe_step(lane[1], float(k.m.run), rng, 1.0 / 60.0)
+						_place(game, c, pc + side * lane[0][0], side * lane[0][1] * float(c.m.run))
+						_place(game, k, pk + side * lane[1][0], side * lane[1][1] * float(k.m.run))
+					else:
+						_place(game, c, pc, Vector3.ZERO)
+						_place(game, k, pk, Vector3.ZERO)
+					await physics_frame
+					t += 1.0 / 60.0
+					for s in 2:
+						if t1[s] < 0.0 and acc[s][0] > s0[s]:
+							t1[s] = t
+				for s in 2:
+					if t1[s] >= 0.0:
+						first[s].append(t1[s])
+				if c.alive == k.alive:
+					undecided += 1
+				else:
+					var w := 0 if c.alive else 1
+					wins[w] += 1
+					wins_at[w][(1 if swap else 0) if w == 0 else (0 if swap else 1)] += 1
+					ttk[w].append(t)
+				c.think = false
+				k.think = false
+			for e in cons:
+				e[0].rifle.fired.disconnect(e[1])
+			print("DUEL2 %.0f m %s · Corgi wins %d (at P %d, at Q %d) · Cat wins %d (at P %d, at Q %d) · undecided %d · time to kill Corgi %s s, Cat %s s · hit rate Corgi %s (%d/%d, %d head), Cat %s (%d/%d, %d head) · first shot Corgi %s s, Cat %s s" % [
+				d, stance, wins[0], wins_at[0][0], wins_at[0][1], wins[1], wins_at[1][0], wins_at[1][1], undecided,
+				_mean_s(ttk[0]), _mean_s(ttk[1]), _pct1(acc[0][1], acc[0][0]), acc[0][1], acc[0][0], acc[0][2],
+				_pct1(acc[1][1], acc[1][0]), acc[1][1], acc[1][0], acc[1][2], _mean_s(first[0]), _mean_s(first[1])])
+
+## (b) Route exposure. A lone bot of each team runs from each of its start slots and respawn points to the slab (n
+## runs per point, each with its own goal on the slab). Every tick: is its chest in sight of an enemy holder's eye
+## (the enemy species' eye height over five slab points: the centre and 2 m in from it towards each corner), within
+## bot.gd VIEW_DIST? Seconds by flat distance from the slab's centre, and where it was last hidden.
+func _exposure(game: Node, lab: Dictionary) -> void:
+	var c: Vector3 = game.slab.center
+	var space: PhysicsDirectSpaceState3D = game.get_viewport().get_world_3d().direct_space_state
+	var bands := [60.0, 40.0, 20.0, 8.0, 0.0]
+	for team in 2:
+		var runner: Node = lab["%d%d" % [team, team]]
+		game.pets = [runner]
+		_park(game, lab, [runner])
+		var holder: Node = lab["%d%d" % [1 - team, 1 - team]]  # its eye height and aim point: the bot's own helpers
+		var holder_eye: float = holder._eye().y - holder.global_position.y
+		var eyes: Array = []
+		for o in [Vector2(0, 0), Vector2(2, 2), Vector2(-2, 2), Vector2(2, -2), Vector2(-2, -2)]:
+			var g: Dictionary = game._ground_hit(c + Vector3(o.x, 0.0, o.y))
+			eyes.append((g.position if not g.is_empty() else c) + Vector3(0, holder_eye, 0))
+		var pts: Array = []
+		for sp in game.start_slots(team).slice(0, 2) + game.respawn_slots[team]:
+			if not pts.any(func(x): return (x as Vector3).distance_to(sp) < 0.3):
+				pts.append(sp)
+		var tot := [0.0, 0.0, 0.0, 0.0]
+		var seen := [0.0, 0.0, 0.0, 0.0]
+		var last_hidden: Array = []
+		var trips: Array = []
+		var runs := 0
+		for sp in pts:
+			for r in n:
+				_lab_reseed(runner, seed0 + r)
+				runner.respawn(sp, game._yaw_to(sp, c))
+				runner.think = true
+				var t := 0.0
+				var lh := -1.0
+				while t < 60.0:
+					_hold(game)
+					await physics_frame
+					t += 1.0 / 60.0
+					var p: Vector3 = runner.global_position
+					if game.slab.contains(p):
+						break
+					var dd := Vector2(p.x - c.x, p.z - c.z).length()
+					if dd >= bands[0]:
+						continue
+					var b := 0
+					while b < 3 and dd < bands[b + 1]:
+						b += 1
+					tot[b] += 1.0 / 60.0
+					var vis := false
+					for e in eyes:
+						if space.intersect_ray(PhysicsRayQueryParameters3D.create(e, holder._aim_point(runner), T.L_WORLD)).is_empty():
+							vis = true
+							break
+					if vis:
+						seen[b] += 1.0 / 60.0
+					else:
+						lh = dd
+				runner.think = false
+				runs += 1
+				trips.append(t)
+				last_hidden.append(lh)
+		var parts: Array = []
+		for b in 4:
+			parts.append("%.0f-%.0f m: in sight %.2f of %.2f s (%s)" % [bands[b], bands[b + 1], seen[b] / runs, tot[b] / runs,
+				_pct_f(seen[b], tot[b])])
+		print("EXPOSURE %s runner (eye %.2f m) vs %s holder eyes (%.2f m over the slab), %d points x %d runs, per trip: %s · in sight within 60 m %.2f s · last hidden %s m from the centre · trip %s s" % [
+			SPEC[team], runner._eye().y - runner.global_position.y, SPEC[1 - team], holder_eye, pts.size(), n, " · ".join(parts),
+			(seen[0] + seen[1] + seen[2] + seen[3]) / runs, _mean_s(last_hidden.filter(func(x): return x >= 0.0)), _mean_s(trips)])
+
+## (c) Holder standoff: a Corgi-side Corgi and a Cat-side Cat stand on opposite edges of the slab, 1 m inside (on
+## the Corgis' side, -Z, and the Cats', +Z), both thinking and mortal, then the sides swapped. Facing each other, or
+## facing away. Who wins, who sees the other first, who fires first.
+func _standoff(game: Node, lab: Dictionary) -> void:
+	var c0: Vector3 = game.slab.center
+	var hz: float = game.slab.size.y * 0.5 - 1.0
+	var south: Vector3 = game._ground_hit(c0 + Vector3(0, 0, -hz)).position
+	var north: Vector3 = game._ground_hit(c0 + Vector3(0, 0, hz)).position
+	var c: Node = lab["00"]
+	var k: Node = lab["11"]
+	print("STANDOFF spots: Corgi side (%.1f, %.1f) ground %.3f, Cat side (%.1f, %.1f) ground %.3f; the bots aim from Corgi %.3f, Cat %.3f m over the feet, at Corgi %.3f, Cat %.3f m" % [
+		south.x, south.z, south.y, north.x, north.z, north.y, c._eye().y - c.global_position.y,
+		k._eye().y - k.global_position.y, c._aim_point(c).y - c.global_position.y, k._aim_point(k).y - k.global_position.y])
+	_park(game, lab, [c, k])
+	for facing in ["each other", "away"]:
+		for swap in [false, true]:
+			var wins := [0, 0]
+			var undecided := 0
+			var sight := [[], []]
+			var sight_first := [0, 0, 0]  # Corgi first, Cat first, same tick
+			var fire_first := [0, 0, 0]
+			var acc := [[0, 0, 0, 0.0], [0, 0, 0, 0.0]]  # per shooter: shots, hits, head hits, damage dealt
+			var cons: Array = []
+			var fired_at := [-1.0, -1.0]
+			var tnow := [0.0]
+			var to_kill := [[], []]  # per winner: seconds from its first shot to the kill
+			var ready := [0, 0]  # frames a bot had its target in sight, past its reaction, out of its pause, rifle ready
+			var gated := [0, 0]  # of those, frames its aim was off the target's chest by more than bot.gd FIRE_CONE
+			var gap := [0.0, 0]  # flat distance between them, summed over fight frames, and the frame count
+			for pair in [[c, 0], [k, 1]]:
+				var sp: int = pair[1]
+				var other: Node = k if pair[0] == c else c
+				var f := func(res: Dictionary) -> void:
+					acc[sp][0] += 1
+					if fired_at[sp] < 0.0:
+						fired_at[sp] = tnow[0]
+					if res.get("target") == other:
+						acc[sp][1] += 1
+						acc[sp][3] += float(res.get("damage", 0.0))
+						if res.get("head", false):
+							acc[sp][2] += 1
+				pair[0].rifle.fired.connect(f)
+				cons.append([pair[0], f])
+			for i in n:
+				var pc: Vector3 = north if swap else south
+				var pk: Vector3 = south if swap else north
+				game.pets = [c, k]
+				seed(seed0 + i)
+				_lab_reseed(c, seed0 + i)
+				_lab_reseed(k, seed0 + i)
+				var yc: float = game._yaw_to(pc, pk) if facing == "each other" else game._yaw_to(pk, pc)
+				var yk: float = game._yaw_to(pk, pc) if facing == "each other" else game._yaw_to(pc, pk)
+				c.respawn(pc + Vector3(0, 0.05, 0), yc)
+				k.respawn(pk + Vector3(0, 0.05, 0), yk)
+				c.shield = 0.0
+				k.shield = 0.0
+				c.think = true
+				k.think = true
+				fired_at[0] = -1.0
+				fired_at[1] = -1.0
+				var saw := [-1.0, -1.0]
+				var t := 0.0
+				while t < 20.0 and c.alive and k.alive:
+					_hold(game)
+					for s in 2:  # the state each bot shoots from this frame (sampled before the bots run)
+						var me: Node = c if s == 0 else k
+						var other: Node = k if s == 0 else c
+						if me.target == other and me.target_visible and me.seen >= me.react and me._pause <= 0.0 \
+								and me.rifle.can_fire():
+							ready[s] += 1
+							if me.aim_dir.angle_to(me._aim_point(other) - me._eye()) > Bot.FIRE_CONE:
+								gated[s] += 1
+					if saw[0] >= 0.0 or saw[1] >= 0.0:
+						gap[0] += Vector2(c.global_position.x - k.global_position.x, c.global_position.z - k.global_position.z).length()
+						gap[1] += 1
+					await physics_frame
+					t += 1.0 / 60.0
+					tnow[0] = t
+					for s in 2:
+						var me: Node = c if s == 0 else k
+						if saw[s] < 0.0 and me.target_visible and me.target == (k if s == 0 else c):
+							saw[s] = t
+				for s in 2:
+					if saw[s] >= 0.0:
+						sight[s].append(saw[s])
+				sight_first[_first_of(saw)] += 1
+				fire_first[_first_of(fired_at)] += 1
+				if c.alive == k.alive:
+					undecided += 1
+				else:
+					var w := 0 if c.alive else 1
+					wins[w] += 1
+					if fired_at[w] >= 0.0:
+						to_kill[w].append(t - fired_at[w])
+				if events:
+					print("  SO trial %d · winner %s at %.2f s · saw %.2f / %.2f · fired %.2f / %.2f · hp left %.0f / %.0f · dist %.2f m" % [
+						i, "Corgi" if c.alive and not k.alive else ("Cat" if k.alive and not c.alive else "-"), t, saw[0], saw[1],
+						fired_at[0], fired_at[1], c.hp, k.hp, Vector2(c.global_position.x - k.global_position.x,
+						c.global_position.z - k.global_position.z).length()])
+				c.think = false
+				k.think = false
+			for e in cons:
+				e[0].rifle.fired.disconnect(e[1])
+			print("STANDOFF facing %s, Corgi on the %s side · Corgi wins %d · Cat wins %d · undecided %d · first to see Corgi %d / Cat %d / same %d (mean %s / %s s) · first to fire Corgi %d / Cat %d / same %d · hit rate Corgi %s (%d), Cat %s (%d) · head hits Corgi %s of hits, Cat %s · damage per hit Corgi %.2f, Cat %.2f · winner's first shot to the kill Corgi %s s, Cat %s s" % [
+				facing, "Cat" if swap else "Corgi", wins[0], wins[1], undecided, sight_first[0], sight_first[1],
+				sight_first[2], _mean_s(sight[0]), _mean_s(sight[1]), fire_first[0], fire_first[1], fire_first[2],
+				_pct1(acc[0][1], acc[0][0]), acc[0][0], _pct1(acc[1][1], acc[1][0]), acc[1][0], _pct1(acc[0][2], acc[0][1]),
+				_pct1(acc[1][2], acc[1][1]), acc[0][3] / maxf(1.0, acc[0][1]), acc[1][3] / maxf(1.0, acc[1][1]),
+				_mean_s2(to_kill[0]), _mean_s2(to_kill[1])])
+			print("STANDOFF   aim gate: ready frames Corgi %d, Cat %d · aim off the chest by more than FIRE_CONE Corgi %s, Cat %s · mean gap while fighting %.2f m" % [
+				ready[0], ready[1], _pct1(gated[0], ready[0]), _pct1(gated[1], ready[1]), gap[0] / maxf(1.0, gap[1])])
+
+## 0 when [a, b]'s first value comes first (or only it happened), 1 for the second, 2 when both in the same tick or neither.
+static func _first_of(v: Array) -> int:
+	if v[0] < 0.0 and v[1] < 0.0:
+		return 2
+	if v[1] < 0.0 or (v[0] >= 0.0 and v[0] < v[1] - 1e-4):
+		return 0
+	if v[0] < 0.0 or v[1] < v[0] - 1e-4:
+		return 1
+	return 2
+
+static func _mean_s2(a: Array) -> String:
+	if a.is_empty():
+		return "-"
+	var s := 0.0
+	for v in a:
+		s += float(v)
+	return "%.2f" % (s / a.size())
+
+## (c2) A holder and an arriving attacker: one species stands in the slab's middle (thinking, holding), the other
+## starts ARRIVE_D m out on its own team's way in (the line from the slab's centre to its team's first respawn
+## point), facing the slab; both mortal. Then the species swap roles. Who wins, and the distance at the kill.
+const ARRIVE_D := 16.0
+
+func _arrival(game: Node, lab: Dictionary) -> void:
+	var c0: Vector3 = game.slab.center
+	var c: Node = lab["00"]
+	var k: Node = lab["11"]
+	_park(game, lab, [c, k])
+	for holder_sp in 2:
+		var h: Node = c if holder_sp == 0 else k
+		var a: Node = k if holder_sp == 0 else c
+		var home: Vector3 = game.respawn_slots[a.team][0]
+		var dir := Vector3(home.x - c0.x, 0.0, home.z - c0.z).normalized()
+		var g: Dictionary = game._ground_hit(c0 + dir * ARRIVE_D)
+		var start: Vector3 = (g.position if not g.is_empty() else c0 + dir * ARRIVE_D) + Vector3(0, 0.05, 0)
+		var mid: Vector3 = game._ground_hit(c0).position + Vector3(0, 0.05, 0)
+		var wins := [0, 0]  # holder, attacker
+		var undecided := 0
+		var kill_d := [[], []]
+		var on_slab_kill := 0
+		for i in n:
+			game.pets = [c, k]
+			seed(seed0 + i)
+			_lab_reseed(c, seed0 + i)
+			_lab_reseed(k, seed0 + i)
+			h.respawn(mid, game._yaw_to(mid, start) + PI * float(i % 2))  # half the trials facing the attacker
+			a.respawn(start, game._yaw_to(start, c0))
+			c.shield = 0.0
+			k.shield = 0.0
+			c.think = true
+			k.think = true
+			var t := 0.0
+			while t < 25.0 and c.alive and k.alive:
+				_hold(game)
+				await physics_frame
+				t += 1.0 / 60.0
+			if c.alive == k.alive:
+				undecided += 1
+			else:
+				var w := 0 if h.alive else 1
+				wins[w] += 1
+				kill_d[w].append(Vector2(c.global_position.x - k.global_position.x, c.global_position.z - k.global_position.z).length())
+				if game.slab.contains(a.global_position):
+					on_slab_kill += 1
+			c.think = false
+			k.think = false
+		print("ARRIVAL %s holds, %s arrives from %.0f m · holder wins %d · attacker wins %d · undecided %d · gap at the kill: holder wins %s m, attacker wins %s m · the attacker on the slab at the end %d" % [
+			SPEC[holder_sp], SPEC[1 - holder_sp], ARRIVE_D, wins[0], wins[1], undecided, _mean_s(kill_d[0]),
+			_mean_s(kill_d[1]), on_slab_kill])
+
+## (c3) A 2v2 brawl on the slab: two Corgi-side Corgis and two Cat-side Cats placed as in tests/test_bot_contest.gd
+## (Corgis 2.5 m to the -Z side of the centre, Cats to the +Z side, 4 m apart sideways), all thinking and mortal, no
+## respawns, until one side is down (25 s at most). The sides swap every other trial. Which species is left standing.
+func _brawl(game: Node, lab: Dictionary) -> void:
+	var c0: Vector3 = game.slab.center
+	var extra := [_lab_pet(game, 0, 0), _lab_pet(game, 1, 1)]
+	extra[0].name = "Lab00b"
+	extra[1].name = "Lab11b"
+	var corgis: Array = [lab["00"], extra[0]]
+	var cats: Array = [lab["11"], extra[1]]
+	_park(game, lab, corgis + cats)
+	var wins := [0, 0]
+	var left := [0, 0]
+	var undecided := 0
+	var first_down := [0, 0]
+	for i in n:
+		var flip := 1.0 if i % 2 == 0 else -1.0
+		game.pets = corgis + cats
+		seed(seed0 + i)
+		for p in game.pets:
+			_lab_reseed(p, seed0 + i)
+		for j in 2:
+			var pc: Vector3 = game._ground_hit(c0 + Vector3(-2.0 + 4.0 * j, 0.0, -2.5 * flip)).position + Vector3(0, 0.05, 0)
+			var pk: Vector3 = game._ground_hit(c0 + Vector3(-2.0 + 4.0 * j, 0.0, 2.5 * flip)).position + Vector3(0, 0.05, 0)
+			corgis[j].respawn(pc, game._yaw_to(pc, c0))
+			cats[j].respawn(pk, game._yaw_to(pk, c0))
+		for p in game.pets:
+			p.shield = 0.0
+			p.think = true
+		var first := -1
+		var t := 0.0
+		while t < 25.0:
+			_hold(game)
+			await physics_frame
+			t += 1.0 / 60.0
+			var up := [corgis.filter(func(p): return p.alive).size(), cats.filter(func(p): return p.alive).size()]
+			if first < 0 and (up[0] < 2 or up[1] < 2):
+				first = 0 if up[0] < 2 else 1
+			if up[0] == 0 or up[1] == 0:
+				break
+		var up2 := [corgis.filter(func(p): return p.alive).size(), cats.filter(func(p): return p.alive).size()]
+		if first >= 0:
+			first_down[first] += 1
+		if (up2[0] == 0) == (up2[1] == 0):
+			undecided += 1
+		else:
+			var w := 0 if up2[0] > 0 else 1
+			wins[w] += 1
+			left[w] += up2[w]
+		for p in game.pets:
+			p.think = false
+	print("BRAWL 2v2 on the slab · Corgis win %d (with %.2f left) · Cats win %d (with %.2f left) · undecided %d · first pet down: a Corgi %d, a Cat %d" % [
+		wins[0], float(left[0]) / maxf(1.0, wins[0]), wins[1], float(left[1]) / maxf(1.0, wins[1]), undecided, first_down[0],
+		first_down[1]])

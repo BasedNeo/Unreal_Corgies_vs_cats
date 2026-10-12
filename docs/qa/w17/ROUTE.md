@@ -47,7 +47,7 @@ Corgis dying 14 times before reaching the slab instead of 16 and the Cats 24 ins
 ## Reading
 - **First to the slab.** The Corgis are first, by 0.6 s in the shipped 2v2 and by 0.9-2.4 s in the other builds.
   - In the no-roles build both Corgi bots go straight for the slab; one starts on the faster slot, (-68, -123),
-    a measured 14.82 s.
+    a measured 14.82 s (the W15 lone-bot trip, docs/qa/w15/bot-route.md:110; not a W17 measurement).
   - In the shipped build that slot's bot is the APPROACH bot, which heads for its post first.
   - The Cats' mean first arrival in 1v1 (19.5 s) includes the matches in which the Corgi bot downed them before they
     arrived.
