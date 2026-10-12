@@ -1,7 +1,8 @@
 extends Node
 ## Game (lane G-GAME): Corgi Company vs Cat Cadre on The Lot. Hold the slab alone to score 1 point per second;
 ## contested, nobody scores. First to 60, or the most points at 3:00 (tied: overtime until someone leads, 60 s max,
-## then a draw). Down pets respawn at their team spawn after 3 s. Winner screen, then R / Enter / Start = rematch.
+## then a draw). Down pets respawn at their team spawn after 3 s. Winner screen, then R / Enter / Start = rematch
+## (a fresh press at least REMATCH_DELAY, 1 s, after the end; W17 X3, the web's rule).
 ## Talks to the world only through its contract (README): `built`, spawn_points(team), slab(), nav_region().
 ##
 ## User args (after `--`): --2v2 (you + a Corgi bot vs two Cat bots), --bots-only (a bot takes your place),
@@ -40,6 +41,12 @@ var time_left: float = T.MATCH_TIME
 var overtime := false
 var overtime_t := 0.0
 var winner := -1
+## Seconds since end_match, summed from process delta (game time: Engine.time_scale scales it, a paused tree stops it;
+## never the wall clock). 0 while a match runs; start_match and end_match reset it. The rematch press counts only once
+## it reaches T.REMATCH_DELAY.
+var since_end := 0.0
+## end_match ran since the last _process: that frame's delta is time from before the end, so it is not counted.
+var _end_fresh := false
 var elapsed := 0.0
 var hold_acc := 0.0
 var slab_state := {"holder": -1, "contested": false, "counts": [0, 0]}
@@ -268,6 +275,8 @@ func start_match() -> void:
 	overtime = false
 	overtime_t = 0.0
 	winner = -1
+	since_end = 0.0
+	_end_fresh = false
 	elapsed = 0.0
 	hold_acc = 0.0
 	_hold_team = -1
@@ -370,6 +379,8 @@ func rematch() -> void:
 func end_match(w: int) -> void:
 	state = OVER
 	winner = w
+	since_end = 0.0
+	_end_fresh = true
 	match_over.emit(w)
 
 func _physics_process(delta: float) -> void:
@@ -428,8 +439,15 @@ func _check_end() -> void:
 			end_match(-1)
 
 func _process(delta: float) -> void:
-	if state == OVER and Input.is_action_just_pressed("rematch"):
-		rematch()
+	if state == OVER:
+		# W17 X3, the web's guard (modes.ts SLAB.rematchDelay, src/sim/match/index.ts:307): the result holds until a
+		# rematch press, and only a fresh press (just pressed) at least REMATCH_DELAY after the end counts. A press
+		# inside it is dropped, not saved for later, and a key held down over the end never rematches by itself.
+		if not _end_fresh:
+			since_end += delta
+		_end_fresh = false
+		if since_end >= T.REMATCH_DELAY - 1e-6 and Input.is_action_just_pressed("rematch"):
+			rematch()
 	if state != WAITING and Input.is_action_just_pressed("toggle_mode"):
 		var duo := int(opts.enemies) < 2
 		opts.allies = 1 if duo else 0

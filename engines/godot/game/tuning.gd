@@ -39,6 +39,9 @@ const MATCH_TIME := 180.0
 const OVERTIME_MAX := 60.0
 const RESPAWN_TIME := 3.0
 const SPAWN_SHIELD := 1.0
+## W17 X3: a rematch press counts only this many seconds after the end (the web's SLAB.rematchDelay,
+## src/shared/content/modes.ts). match.gd measures it with process delta.
+const REMATCH_DELAY := 1.0
 
 ## Physics layers (README): 1 world, 2 pets, 3 hitboxes. Rifle rays hit 1 and 3.
 const L_WORLD := 1

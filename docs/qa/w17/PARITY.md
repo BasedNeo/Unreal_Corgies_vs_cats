@@ -26,7 +26,9 @@ Their cells below are re-cited at this head (a difflib map of `b222e37` to `7a67
 - **H1 (crosshair gap) and H20 (confirm X size):** the web follows Godot. Queued for tw-view. H1 also checks that the
   web sim's rifle spread matches Godot's tuning.gd (a rules check, not only the display).
 - **X3 (rematch delay):** Godot adopts the web's 1 s guard, so a reload spam at the horn cannot skip the result screen;
-  both builds then match. Queued for a Godot game lane.
+  both builds then match. Queued for a Godot game lane. **Done (W17 G-REMATCH):** `REMATCH_DELAY` 1.0 in
+  tuning.gd, the guard on the input path in match.gd; a fresh check passed it and the lead re-ran its mutants. Logged,
+  not changed: on Godot's winner screen F2 / pad Back (switch 1v1 / 2v2) still restarts at once; the web has no F2.
 - **X4 (pad X rematches on the web only):** deferred and logged. It needs a protocol split of Reload from rematch; not
   this wave.
 - **B2 (2v2 roles):** NOT MET. Card G-BAL is root-causing the Cat advantage first (docs/qa/w17/BOT-ROLES.md).
@@ -38,19 +40,18 @@ Their cells below are re-cited at this head (a difflib map of `b222e37` to `7a67
 ## Totals (95 w15 rows + 18 W17 rows = 113)
 | Status | w15 rows (95) | W17 rows (18) | All |
 |---|---|---|---|
-| MATCH | 76 | 11 (K1-K6, T1-T4, N1) | 87 |
+| MATCH | 77 | 11 (K1-K6, T1-T4, N1) | 88 |
 | GODOT ONLY | 3 (D9, F12, M20) | 1 (K7) | 4 |
 | WEB ONLY | 8 (R2, R4, R9b, R14, F13, H19, R15a, R15b) | 2 (X10, N2) | 10 |
 | DIFF (allowed) | 3 (D2, F10, H11) | 0 | 3 |
-| DEFECT | 5 (H1, H20, X3, X4, B2) | 0 | 5 |
+| DEFECT | 4 (H1, H20, X4, B2) | 0 | 4 |
 | PENDING (lead fills in) | 0 | 2 (P1 sky source, P2 cover read) | 2 |
 | HUMAN (logged, not done) | 0 | 2 (U1 slab hold, U2 listen) | 2 |
 
-**DEFECT rows (5 after the lead's rulings; 6 at the QA pass), each with its owner in the DEFECT table below.** K6
+**DEFECT rows (4 now: 6 at the QA pass, 5 after the lead's rulings, then X3 closed by W17 G-REMATCH), each with its owner in the DEFECT table below.** K6
 was ruled MATCH: the card's distance is the zone centre, the measured respawn an end point 1.1-3.3 m off, within
 HUD_CONTRACT rev 5's ±4 m. The rest: H1 (crosshair gap: no test, and the builds now measurably
-differ; lead, then g-hud and tw-view), H20 (the web confirm X is 1/√2 of Godot's; tw-view), X3 (the web's 1 s rematch
-delay; lead), X4 (pad X rematches on the web; lead), B2 (2v2 roles NOT MET; g-bot). Since w15: H2 is now MATCH (a
+differ; lead, then g-hud and tw-view), H20 (the web confirm X is 1/√2 of Godot's; tw-view), X4 (pad X rematches on the web; lead), B2 (2v2 roles NOT MET; g-bot). Since w15: H2 is now MATCH (a
 muzzle flash shot in both builds); everything else kept its status. The card's own asks hold: the death card names
 the killer, the team, the base and a true countdown in both builds, and you come back at the base it names (measured,
 80 respawns); the hit, the confirm and a received hit read in grey in both builds; R and Enter reset everything in
@@ -234,7 +235,7 @@ in unit tests, the e2e (both keys) and net-slab (R on two pages).
 |---|---|---|---|---|
 | X1 | R, Enter and pad Start rematch on the winner screen | rematch:80-81 (real R and Enter key events), :132-133; input:30-31, :39-40 | view-input:48-54; :79; slab-mode:397-399; e2e:161, :182 (real R, then real Enter; CI 156 pass); net-slab:268 (R, two pages) | MATCH |
 | X2 | No rematch during play | rematch:32-33 | view-input:45-46; slab-mode:438-453 | MATCH |
-| X3 | Rematch delay | none: the first press after the end rematches (rematch:45-55) | a press within 1 s of the end is ignored: slab-mode:387-389 (`SLAB.rematchDelay` 1, modes.ts:194); e2e:169-172 waits for the authority's tick | **DEFECT** (G3, lead) |
+| X3 | Rematch delay | W17 G-REMATCH: a press within 1 s of the end is ignored and a key held over the end never rematches (`REMATCH_DELAY` 1.0, tuning.gd:44, applied at match.gd:442-450). Tests at the X3 commit: test_game_rematch.gd `_guard` (:265-340: R at 0.02 s and Enter at 0.52 s ignored, R at 1.00 s rematches, R held 1.5 s ignored) and `_end_frame` (:234-261: the end frame's delta is skipped, so the guard is 60 frames as on the web) | a press within 1 s of the end is ignored: slab-mode:389-391 at the X3 commit (`SLAB.rematchDelay` 1, modes.ts:194); e2e:169-172 waits for the authority's tick. slab-mode:109 pins the web value to tuning.gd's `REMATCH_DELAY` | **MATCH** (W17 G-REMATCH; was DEFECT, G3) |
 | X4 | Which pad buttons rematch | Start only (input_setup.gd:20-21; input:19) | pad X sends Reload (input.ts:113) and any Reload press rematches (match/index.ts:281-284) | **DEFECT** (G4, lead) |
 | X5 | Score 0 - 0, the clock back to 3:00, no respawn countdown left | rematch:135-136, :139-140, :137-138 | slab-mode:399-400; e2e:185, :188-189 | MATCH |
 | X6 | Every pet at its start slot, alive, full HP | rematch:148-149, :62-64; bot_roles:84-92 | slab-mode:404-410; :477-478 | MATCH |
@@ -277,7 +278,7 @@ in unit tests, the e2e (both keys) and net-slab (R on two pages).
 | K6 (new; RULED MATCH, HUD_CONTRACT rev 5) | The card's `<N> m` is the distance of the centre of the base's respawn points, but nobody respawns there: the respawn rule, run 3 s later, takes the point farthest from the nearest enemy, an end point. Measured in 80 respawns (40 per build): Corgis 143.5 m (37) or 140.9 m (3) against `142 m`; Cats 135.3 m (35) or 129.7 m (5) against `132 m`. The base is always right (K5). Both builds follow HUD_CONTRACT §2 as written, so this is the contract against the W17 card's "the place you respawn must match what the card said" | lead (rule), then g-hud (Godot) and tw-view (web) | Godot `engines/godot/game/match.gd:477-491` (`respawn_zone`: the centre) against :540-559 (`best_spawn`); web `src/client/ui/slab-hud.ts:327-342` (`slabRespawnZone`: the centre) against `src/sim/match/slab.ts:319-334` (`slabRespawnPoint`) | Godot: `npm run godot`, let the Cat bot take you down while it stands on its own half: the panel reads `… 142 m TO THE SLAB`; you stand up at (-74.0, -123.0), 143.5 m from the slab centre. A Cat bot downed comes back at (68.0, 117.0), 135.3 m, against `respawn_zone(1)` 132 m. Web: `npm run twin`, add `&team=1&slabHurt`: the panel reads `BACK AT THE SCAFFOLDS  ·  132 m TO THE SLAB`; you stand up at (68, 117), 135.3 m. Probes: `scratchpad/qa17-probes/test_zz_qa17_card.gd`, `zz-qa17-card.test.ts`. Ways out: (a) the lead rules the base's spread (Corgis ±1.5 m, Cats ±3.3 m) acceptable, and this row turns MATCH; (b) choose the point at the knockout, keep it, and print its distance; (c) print the range (`130-135 m`) |
 | H1 | No test in either build that the crosshair gap opens with the spread (w15 G10). Measured now, the builds also differ: Godot 13.8 px at rest and 13.8 px while firing in place (its bloom never builds at 10 shots/s); the web 7 px at rest and 14-18.5 px while firing | lead (rule: does firing open the gap, and at what size; Godot wins), then g-hud and tw-view (tests) | `engines/godot/game/hud.gd:815`; `engines/godot/game/tuning.gd:30`; `engines/godot/game/rifle.gd:80`, `:107`; `src/client/ui/hud.ts:531-550`, `:667` | Godot: stand still and hold fire (`scratchpad/qa17-probes/qa17_shot_own.gd`): `spread 0.0209 rad (bloom 0.0000), gap 13.8 px` before and after 4 shots. Web: `?mode=slab&webgl&autoplay`, hold RT: `[data-xr]` reads `translateX(7px)` at rest and `translateX(18.5px)` the frame after your shot. Shots `p17-godot-own-shot-gray.jpg`, `p17-web-own-shot-gray.jpg` |
 | H20 | The web's confirm X is 1/√2 of Godot's (body and head arms reach 5-10 px against 7.07-14.1 px; kill 6-15 against 8.5-21.2 px). Unchanged since w15 (G21) | tw-view | `src/client/ui/slab-hud.ts:405-408` (unit `cos`/`sin`) against `engines/godot/game/hud.gd:446-449` ((±1, ±1)); `tests/unit/slab-hud.test.ts:180-183` pins r0/r1 under the same name with another meaning | `p17-godot-hits.jpg` (1.5x cells) against `p17-web-hits.jpg` (1x crops): `p17-confirm-size-gray.png` puts both at the same 3x scale: the web body X reaches about 0.7 of Godot's and ends inside the crosshair arms |
-| X3 | The web ignores a rematch press for 1 s after the end; Godot rematches on the first press. Not in the contract (w15 G3) | lead | `src/shared/content/modes.ts:194` (`rematchDelay: 1`), applied at `src/sim/match/index.ts:307`; Godot `engines/godot/tests/test_game_rematch.gd:45-55` | Web: end a match and press R within 1 s: nothing (`tests/unit/slab-mode.test.ts:387-389`); Godot: the first R rematches |
+| X3 | **CLOSED (W17 G-REMATCH, row X3 MATCH).** Was: the web ignores a rematch press for 1 s after the end; Godot rematched on the first press. Not in the contract (w15 G3) | lead | `src/shared/content/modes.ts:194` (`rematchDelay: 1`), applied at `src/sim/match/index.ts:307`; Godot `engines/godot/tests/test_game_rematch.gd:45-55` | Web: end a match and press R within 1 s: nothing (`tests/unit/slab-mode.test.ts:387-389`); Godot: the first R rematches |
 | X4 | Pad X rematches on the web only (w15 G4) | lead | `src/client/input/input.ts:113` (pad X sends Reload) and `src/sim/match/index.ts:281-283` (any Reload press rematches); Godot `engines/godot/game/input_setup.gd:20-21` (pad X is `reload` only, Start is `rematch`) | On the web winner screen press pad X: rematch. In Godot pad X does not |
 | B2 | Sprint C item 8 NOT MET: the 2v2 roles stay nominal in play (the APPROACH bot is at its post under 1 % of its alive time) | g-bot (the trap card) | `engines/godot/game/bot.gd:228-229`, `:303-306`, `:338-339` (unchanged at this head) | `docs/qa/w15/bot-roles.md:89-93` |
 
@@ -315,7 +316,7 @@ Carried from w15 (its numbers), each re-checked at this head, then the new ones.
 |---|---|---|---|---|---|
 | G1 | major | X7 | The web rematch did not reset the bots' brain | tw-sim | closed (w15); slab-mode:455-483 passes here |
 | G2 | minor | X9 | The web's kill-feed clear had no test | tw-view | closed (w15); e2e:141-186 rewritten for CI 154, passed in CI 156 |
-| G3 | minor | X3 | The web ignores a rematch press for 1 s after the end; Godot does not | lead | open (DEFECT X3) |
+| G3 | minor | X3 | The web ignores a rematch press for 1 s after the end; Godot does not | lead | closed (W17 G-REMATCH: Godot adopted the guard; X3 MATCH) |
 | G4 | minor | X4 | Pad X rematches on the web only | lead | open (DEFECT X4) |
 | G5 | minor | R15 | Godot fall-plane test | lead | closed (w15) |
 | G6 | minor | R14 | Godot: no spawn-shield test | lead | open |

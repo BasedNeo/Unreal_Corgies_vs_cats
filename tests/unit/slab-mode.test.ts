@@ -106,6 +106,7 @@ describe('slab mode: data and registry', () => {
     expect(SLAB.overtimeMax).toBe(num('OVERTIME_MAX'));
     expect(SLAB.respawn).toBe(num('RESPAWN_TIME'));
     expect(SLAB.spawnShield).toBe(num('SPAWN_SHIELD'));
+    expect(SLAB.rematchDelay).toBe(num('REMATCH_DELAY'));
     expect([SLAB.winScore, SLAB.timeLimit, SLAB.overtimeMax, SLAB.respawn, SLAB.spawnShield]).toEqual([60, 180, 60, 3, 1]);
     // slab.gd contains(): inside the square (edges included), feet strictly within center.y - 1 .. center.y + 3
     const c = SLAB.center;
