@@ -32,8 +32,9 @@
 // over, its banner burst, crosshair and click-to-play overlay (hud.gd shows "Click to play" only while the match runs;
 // R / Enter work without the pointer); main.ts holds the first-match tips and the end-of-match scoreboard). The general HUD's
 // kill feed and click-to-play overlay take hud.gd's plain look from the CSS here (hud.ts writes the feed as
-// slabFeedText lines and the title as SLAB_CLICK_TO_PLAY in slab mode). The crosshair (its gap opens with the spread),
-// chat and the Tab scoreboard stay the general HUD's.
+// slabFeedText lines and the title as SLAB_CLICK_TO_PLAY in slab mode). The crosshair (its gap opens with the spread;
+// in slab mode hud.gd's 5 + spread × 420 px from the authority's rifle spread, crosshair.ts, W17 H1), chat and the Tab
+// scoreboard stay the general HUD's.
 // Data: the frame (main.ts), the slab reading with the frame's living pets (slab-view.ts), and the client bus's game
 // events (hits, knockouts), so the death panel and the hit cues need no new snapshot field; the respawn zone comes from
 // The Lot's spawn layout through the sim's own respawn-point rule (slabRespawnPoints).
@@ -381,13 +382,15 @@ export const slabYouText = (team: 0 | 1): string => `YOU: ${SLAB_TEAM_NAMES[team
 
 export type SlabHitKind = 'body' | 'head' | 'kill';
 
-/** A confirm's geometry (px, centred on the crosshair): four diagonal lines from r0 to r1 (`width` px), an optional
+/** A confirm's geometry (px, centred on the crosshair): four lines along the (±1, ±1) diagonals from (±r0, ±r0) to
+ *  (±r1, ±r1) (`width` px; hud.gd's unnormalised diagonals, so an arm reaches r0·√2 to r1·√2 from the centre), an optional
  *  filled centre diamond (half-size) and an optional outline ring (radius). */
 export interface SlabHitGeometry { r0: number; r1: number; width: number; diamond: number; ring: number; color: number }
 
-/** §3, hud.gd hit_cue: body = an X of four lines from 5 to 10 px out, white; head = the same X plus a filled diamond
- *  4.5 px to a tip (9 px across, inside the X's 5 px inner gap), yellow; kill = a larger X from 6 to 15 px, 3 px wide,
- *  plus a ring 9 px in radius (18 px across), red. Lines 2.5 px wide otherwise. */
+/** §3, hud.gd hit_cue (W17 H20: Godot's size): body = an X of four lines from (5, 5) to (10, 10) px on each diagonal,
+ *  so 7.07 to 14.1 px from the centre, white; head = the same X plus a filled diamond 4.5 px to a tip (9 px across,
+ *  inside the X's 7.07 px inner gap), yellow; kill = a larger X from (6, 6) to (15, 15) px (8.5 to 21.2 px out), 3 px
+ *  wide, plus a ring 9 px in radius (18 px across), red. Lines 2.5 px wide otherwise. */
 export const SLAB_HIT: Record<SlabHitKind, SlabHitGeometry> = {
   body: { r0: 5, r1: 10, width: 2.5, diamond: 0, ring: 0, color: 0xffffff },
   head: { r0: 5, r1: 10, width: 2.5, diamond: 4.5, ring: 0, color: 0xffd933 },
@@ -399,20 +402,51 @@ export const SLAB_HIT_LIFE: Record<SlabHitKind, number> = { body: 0.18, head: 0.
 export const SLAB_WEDGE = { ring: 110, life: 0.6 } as const;
 const FLASH_T = 0.35;
 
-/** The confirm drawn as SVG (viewBox -20..20, px at 720p): a dark underlay (hud.gd draws its crosshair the same way:
- *  dark lines under the light ones), then the cue in its colour; shapes read in grayscale. */
+/** hud.gd hit_cue's diagonals, in its order: Vector2(1, 1), (-1, 1), (1, -1), (-1, -1), unnormalised (W17 H20). */
+const HIT_DIAGONALS = [[1, 1], [-1, 1], [1, -1], [-1, -1]] as const;
+
+/** A confirm's four arms (px from the crosshair, y down), as hud.gd hit_cue builds them: c + d × r0 to c + d × r1 for
+ *  each (±1, ±1) diagonal d. */
+export function slabHitArms(kind: SlabHitKind): Array<[[number, number], [number, number]]> {
+  const g = SLAB_HIT[kind];
+  return HIT_DIAGONALS.map(([x, y]) => [[x * g.r0, y * g.r0], [x * g.r1, y * g.r1]]);
+}
+
+/** The confirm's SVG viewBox half-size (px at 720p). It holds the kill X: butt-capped, its paint ends at the line ends,
+ *  15·√2 ≈ 21.2 px out, and the w + 2 underlay's corners reach hypot(21.2, 2.5) ≈ 21.4; the ring's underlay 11.5. The
+ *  box only sets the scale (1 viewBox unit = 1 HUD unit, `.hc` in SLAB_HUD_CSS; overflow stays visible). */
+export const SLAB_HIT_BOX = 25;
+
+/** The confirm's element: an SVG whose viewBox is ±SLAB_HIT_BOX (its CSS box, `#cvc-slab .hc`, is the same 2 × SLAB_HIT_BOX
+ *  HUD units, centred on the crosshair). */
+export const SLAB_HIT_SVG_TAG = `<svg class="hc" data-slab-hit viewBox="${-SLAB_HIT_BOX} ${-SLAB_HIT_BOX} ${2 * SLAB_HIT_BOX} ${2 * SLAB_HIT_BOX}" aria-hidden="true"></svg>`;
+
+/** The dark underlay's extra width (px) under the X's lines and the ring: hud.gd draw_prims (hud.gd:748-751, :755)
+ *  draws `draw_line(a, b, dark, w + 2.0)`, then `draw_line(a, b, col, w)`. */
+export const SLAB_HIT_UNDER = 2;
+
+/** The dark underlay's alpha: hud.gd draw_prims (hud.gd:737) paints it in `Color(0, 0, 0, 0.8 * col.a)`. The cue's own
+ *  alpha a is the `.hc` element's opacity (the fade, slabHudFrame), so the underlay paints at 0.8 · a as in hud.gd (W17
+ *  H20). The web fades the composed SVG once where Godot fades each primitive: a mid-fade difference, logged, not H20. */
+export const SLAB_HIT_DARK_ALPHA = 0.8;
+
+/** The confirm drawn as SVG (viewBox ±SLAB_HIT_BOX, px at 720p) in hud.gd draw_prims' order (hud.gd:747-756): the four
+ *  dark lines (w + 2), then the four colour lines (w), then the ring dark (w + 2) and then in colour (w). So a kill's
+ *  dark ring lies OVER the red arms where they cross it, a dark notch 10.5-11.5 px out on each arm, as in Godot. Every
+ *  line is BUTT-capped, as draw_line draws (W17 H20: a round cap would carry the paint w / 2 past each end). The head's
+ *  diamond comes last (hud.gd also rims it 4 px dark before the lines: a logged difference, not H20). Shapes read in
+ *  grayscale. */
 export function slabHitSvg(kind: SlabHitKind): string {
   const g = SLAB_HIT[kind];
-  const lines = [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4].map((a) => {
-    const c = Math.cos(a), s = Math.sin(a);
-    return `<line x1="${(c * g.r0).toFixed(2)}" y1="${(s * g.r0).toFixed(2)}" x2="${(c * g.r1).toFixed(2)}" y2="${(s * g.r1).toFixed(2)}"/>`;
-  }).join('');
+  const lines = slabHitArms(kind).map(([[x1, y1], [x2, y2]]) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`).join('');
+  const paint = (cls: 'under' | 'over', shapes: string) => `<g class="${cls}" `
+    + (cls === 'under' ? `stroke="rgba(0,0,0,${SLAB_HIT_DARK_ALPHA})" stroke-width="${g.width + SLAB_HIT_UNDER}"` : `stroke="currentColor" stroke-width="${g.width}"`)
+    + ` stroke-linecap="butt" fill="none">${shapes}</g>`;
   const ring = g.ring ? `<circle class="ring" r="${g.ring}"/>` : '';
   const dia = g.diamond
     ? `<path class="dia" d="M0 ${-g.diamond}L${g.diamond} 0L0 ${g.diamond}L${-g.diamond} 0Z" fill="currentColor" stroke="rgba(0,0,0,.75)" stroke-width="1.2" stroke-linejoin="round"/>`
     : '';
-  return `<g class="under" stroke="rgba(0,0,0,.6)" stroke-width="${g.width + 2.4}" stroke-linecap="round" fill="none">${lines}${ring}</g>`
-    + `<g class="over" stroke="currentColor" stroke-width="${g.width}" stroke-linecap="round" fill="none">${lines}${ring}</g>${dia}`;
+  return paint('under', lines) + paint('over', lines) + (ring ? paint('under', ring) + paint('over', ring) : '') + dia;
 }
 
 /** The wedge's direction (rad; 0 = ahead, up the screen; positive clockwise) from the player toward where an attacker
@@ -607,7 +641,7 @@ export interface SlabHudOut {
   marker: (SlabMarker & { dist: number; x: number; y: number; box: ScreenBox; dodge: SlabMarkerDodge; alpha: number }) | null;
   /** §2, null unless you are down while the match runs. */
   death: SlabDeathPanel | null;
-  /** §3 your confirm (null while you are down). */
+  /** §3 your confirm (null while you are down or the match is over, as hud.gd build_overlay: W17). */
   confirm: { kind: SlabHitKind; alpha: number } | null;
   /** §3 the wedges (rad, 0 = up the screen, clockwise; [] while you are down or the match is over). */
   wedges: Array<{ src: number; angle: number; alpha: number }>;
@@ -625,7 +659,8 @@ const FV = new Vector3(), FWD = new Vector3();
  *    slabMarkerPlace off the other pets (slabPetBoxes skips your own);
  *  - §2 the death panel while you are down and the match runs: the killer from the knockout record, your team, your
  *    team's respawn zone, the countdown from when you went down;
- *  - §3 while you are down: no confirm and no wedges. Otherwise each wedge points at where its attacker stood AT ITS HIT
+ *  - §3 while you are down or the match is over: no confirm and no wedges (hud.gd build_overlay draws neither over the
+ *    win screen; W17). Otherwise each wedge points at where its attacker stood AT ITS HIT
  *    (stored by slabHudEvent), from you, relative to the camera's facing; the chip follows your HP. While a wedge's box
  *    overlaps the marker's box the marker draws at SLAB_MARKER_DIM;
  *  - §5 a rematch (the match leaves 'ended', or the 'reset' score event) clears every cue (slabHudReset).
@@ -670,9 +705,12 @@ export function slabHudFrame(f: SlabHudFrame & SlabHudView, s: SlabHudState, now
     death = slabDeathPanel(slabKillerOf(f, fresh), team, slabRespawnZone(team), SLAB.respawn - (now - t0));
   }
 
-  const confirm = dead ? null : s.hits.confirmAt(now);
+  // hud.gd build_overlay draws the confirm and the wedges only while the player is up and the match runs (not over the
+  // win screen); the cue timers run on regardless
+  const up = !!L && !dead && !ended;
+  const confirm = up ? s.hits.confirmAt(now) : null;
   const wedges: SlabHudOut['wedges'] = [];
-  if (L && !dead && !ended) {
+  if (L && up) {
     f.camera.getWorldDirection(FWD);
     for (const w of s.hits.wedgesAt(now)) wedges.push({ src: w.src, angle: slabWedgeAngle(FWD, L, w), alpha: w.alpha });
   }
@@ -686,7 +724,8 @@ const hex = (n: number) => `#${n.toString(16).padStart(6, '0')}`;
 const u = (n: number) => `calc(var(--u)*${n})`;
 /** hud.gd draws its labels in white or team colours over a dark outline; the web uses a soft dark shadow instead. */
 const SHADOW = `0 0 ${u(3)} rgba(0,0,0,.85),0 ${u(1)} ${u(2)} rgba(0,0,0,.9)`;
-const CSS = `
+/** The slab HUD's stylesheet (createSlabHud puts it in the page). */
+export const SLAB_HUD_CSS = `
 .cvc-slab #cvc-hud .mb,.cvc-slab #cvc-hud .mb-wave,.cvc-slab #cvc-hud .hp,.cvc-slab #cvc-hud .am,.cvc-slab #cvc-hud .ds,
 .cvc-slab #cvc-hud .dd,.cvc-slab #cvc-hud .vig,.cvc-slab #cvc-hud .vig-low,.cvc-slab #cvc-hud .hm,.cvc-slab .cvc-hf,
 .cvc-slab #cvc-hud .lk [data-k="Q"],.cvc-slab #nameplates,.cvc-slab-end #cvc-hud .bn,.cvc-slab-end #cvc-hud .lk,.cvc-slab-end #cvc-hud .xh{display:none!important}
@@ -734,7 +773,7 @@ const CSS = `
 #cvc-slab .dp .d2{font-size:${u(18)};font-weight:600}
 #cvc-slab .dp .d3{font-size:${u(20)};font-weight:600}
 #cvc-slab .dp .d4{font-size:${u(24)};font-weight:700}
-#cvc-slab .hc{position:absolute;left:50%;top:50%;width:${u(40)};height:${u(40)};margin:${u(-20)} 0 0 ${u(-20)};overflow:visible;opacity:0;filter:drop-shadow(0 0 ${u(1.5)} rgba(0,0,0,.9))}
+#cvc-slab .hc{position:absolute;left:50%;top:50%;width:${u(2 * SLAB_HIT_BOX)};height:${u(2 * SLAB_HIT_BOX)};margin:${u(-SLAB_HIT_BOX)} 0 0 ${u(-SLAB_HIT_BOX)};overflow:visible;opacity:0;filter:drop-shadow(0 0 ${u(1.5)} rgba(0,0,0,.9))}
 #cvc-slab .wg{position:absolute;left:50%;top:50%;width:0;height:0}
 #cvc-slab .wg svg{position:absolute;left:${u(-16)};top:${u(-16 - 110)};width:${u(32)};height:${u(32)};overflow:visible;transform-origin:${u(16)} ${u(16 + 110)};
   color:${hex(SLAB_WEDGE_COLOR)};opacity:0}
@@ -773,7 +812,7 @@ export function createSlabHud(ui: HTMLElement, opts: SlabHudOptions): SlabHud {
   const clockFn = opts.clock ?? (() => performance.now() / 1000);
   const root = document.createElement('div');
   root.id = 'cvc-slab';
-  root.innerHTML = `<style>${CSS}</style>
+  root.innerHTML = `<style>${SLAB_HUD_CSS}</style>
     <div class="fl" data-slab-flash></div>
     <div class="top">
       <div class="tm t0"><div class="row" data-slab-s0-row>${SLAB_TEAM_NAMES[0]}  <span data-slab-s0>0</span></div><div class="bar"><i></i></div></div>
@@ -787,7 +826,7 @@ export function createSlabHud(ui: HTMLElement, opts: SlabHudOptions): SlabHud {
     <div class="hpn" data-slab-hp>120</div><div class="hpb"><i class="chip"></i><i class="fill"></i></div>
     <div class="amm" data-slab-ammo>30 / 30</div>
     <div class="dp" data-slab-death style="display:none"><div class="d1"></div><div class="d2"></div><div class="d3"></div><div class="d4"></div></div>
-    <svg class="hc" data-slab-hit viewBox="-20 -20 40 40" aria-hidden="true"></svg>
+    ${SLAB_HIT_SVG_TAG}
     <div class="wg" data-slab-wedges></div>
     <div class="hint" data-slab-hint style="display:none"></div>
     <div class="win" data-slab-win style="display:none"><div class="wt"></div><div class="ws"></div><div class="wy"></div><div class="wr"></div></div>`;

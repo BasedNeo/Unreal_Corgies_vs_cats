@@ -12,9 +12,10 @@ import { SLAB, SLAB_TEXT } from '../../src/shared/content/modes';
 import { PALETTE } from '../../src/client/style/style-tokens.js';
 import { lighten, type SlabPet, type SlabReading } from '../../src/client/modes/slab-view';
 import {
-  SLAB_BASE_NAMES, SLAB_DEATH_BACKING, SLAB_HIT, SLAB_HIT_LIFE, SLAB_MARKER_CLEAR, SLAB_MARKER_DIM, SLAB_MARKER_GEOM, SLAB_MARKER_LIFT, SLAB_MARKER_MAX_DODGE,
+  SLAB_BASE_NAMES, SLAB_DEATH_BACKING, SLAB_HIT, SLAB_HIT_BOX, SLAB_HIT_LIFE, SLAB_HIT_SVG_TAG, SLAB_HIT_UNDER, SLAB_HUD_CSS, SLAB_MARKER_CLEAR, SLAB_MARKER_DIM,
+  SLAB_MARKER_GEOM, SLAB_MARKER_LIFT, SLAB_MARKER_MAX_DODGE,
   SLAB_SAFE, SLAB_WEDGE, SLAB_WEDGE_COLOR, SLAB_WEDGE_PATH, slabHudReset, slabWedgeBox,
-  SlabHitCues, SlabHpChip, slabDeathPanel, slabHitSvg, slabHudEvent, slabHudFrame, slabHudState, slabLineFor, slabMarker, slabMarkerPlace,
+  SlabHitCues, SlabHpChip, slabDeathPanel, slabHitArms, slabHitSvg, slabHudEvent, slabHudFrame, slabHudState, slabLineFor, slabMarker, slabMarkerPlace,
   slabMarkerShown, slabMarkerSvg, slabPetBoxes, slabPetHeight, slabRespawnZone, slabTeamGlyph, slabTeamGlyphSvg, slabWedgeAngle, slabYouText,
   type ScreenBox, type SlabHudFrame,
 } from '../../src/client/ui/slab-hud';
@@ -177,7 +178,7 @@ describe('§2 the death panel', () => {
 });
 
 describe('§3 hits', () => {
-  it('confirm shapes differ in geometry (hud.gd hit_cue): X 5-10; X + a 4.5 px diamond; X 6-15, 3 wide + an 18 px ring', () => {
+  it('confirm shapes differ in geometry (hud.gd hit_cue): X (±5..±10); X + a 4.5 px diamond; X (±6..±15), 3 wide + an 18 px ring', () => {
     expect(SLAB_HIT.body).toMatchObject({ r0: 5, r1: 10, width: 2.5, diamond: 0, ring: 0 });
     expect(SLAB_HIT.head).toMatchObject({ r0: 5, r1: 10, width: 2.5, diamond: 4.5, ring: 0 });
     expect(SLAB_HIT.kill).toMatchObject({ r0: 6, r1: 15, width: 3, diamond: 0, ring: 9 });
@@ -199,6 +200,104 @@ describe('§3 hits', () => {
     expect(new Set([body, head, kill]).size).toBe(3);
     // colour is extra: white, yellow, red
     expect([SLAB_HIT.body.color, SLAB_HIT.head.color, SLAB_HIT.kill.color]).toEqual([0xffffff, 0xffd933, 0xff4033]);
+  });
+
+  it('W17 H20: the X is Godot\'s size: arms on the unnormalised (±1, ±1) diagonals, 7.07-14.1 px out (body, head), 8.5-21.2 (kill)', () => {
+    // hud.gd hit_cue: for d in [(1, 1), (-1, 1), (1, -1), (-1, -1)]: a line from c + d × r0 to c + d × r1
+    const want = { body: [5, 10], head: [5, 10], kill: [6, 15] } as const;
+    const reach = { body: [7.07, 14.14], head: [7.07, 14.14], kill: [8.49, 21.21] } as const; // the parity row's numbers
+    for (const kind of ['body', 'head', 'kill'] as const) {
+      const [r0, r1] = want[kind];
+      const arms = slabHitArms(kind);
+      expect(arms).toEqual([[[r0, r0], [r1, r1]], [[-r0, r0], [-r1, r1]], [[r0, -r0], [r1, -r1]], [[-r0, -r0], [-r1, -r1]]]);
+      for (const [a, b] of arms) {
+        expect(Math.hypot(...a)).toBeCloseTo(reach[kind][0], 2);
+        expect(Math.hypot(...b)).toBeCloseTo(reach[kind][1], 2);
+      }
+      // the SVG draws exactly these four arms, in the underlay and in the colour
+      const svg = slabHitSvg(kind);
+      const lines = [...svg.matchAll(/<line x1="([-\d.]+)" y1="([-\d.]+)" x2="([-\d.]+)" y2="([-\d.]+)"\/>/g)].map((m) => m.slice(1).map(Number));
+      expect(lines).toHaveLength(8);
+      expect(lines.slice(0, 4)).toEqual(lines.slice(4));
+      expect(lines.slice(0, 4)).toEqual(arms.map(([a, b]) => [...a, ...b]));
+      const ends = lines.flatMap(([x1, y1, x2, y2]) => [Math.hypot(x1, y1), Math.hypot(x2, y2)]);
+      expect(Math.min(...ends)).toBeCloseTo(r0 * Math.SQRT2, 6);
+      expect(Math.max(...ends)).toBeCloseTo(r1 * Math.SQRT2, 6);
+    }
+    // the confirm's box holds the kill X: butt-capped, its underlay's farthest corner is hypot(15·√2, (3 + 2) / 2) out
+    expect(SLAB_HIT_BOX).toBeGreaterThanOrEqual(Math.hypot(15 * Math.SQRT2, (SLAB_HIT.kill.width + SLAB_HIT_UNDER) / 2));
+    // the head diamond still sits inside the X's inner gap
+    expect(SLAB_HIT.head.diamond).toBeLessThan(5 * Math.SQRT2);
+  });
+
+  it('W17 H20: the X is painted as hud.gd draw_prims paints it: dark lines, colour lines, dark ring, colour ring; butt ends; w + 2 at 0.8 under w', () => {
+    // hud.gd draw_prims (:736-756), for the X: dark := Color(0, 0, 0, 0.8 * col.a); every line draw_line(a, b, dark, w + 2),
+    // THEN every line draw_line(a, b, col, w), then each ring draw_arc dark (w + 2) and then in colour (w). draw_line has
+    // no caps, so the paint ends at the line ends (7.07-14.14 px out, 8.49-21.21 for a kill); a round cap carries it w / 2
+    // past each end. The ring after the lines puts the kill's dark ring rim OVER the red arms (Godot's notch at 10.6 px).
+    expect(SLAB_HIT_UNDER).toBe(2);
+    const attr = (attrs: string, k: string) => new RegExp(`(?:^| )${k}="([^"]*)"`).exec(attrs)?.[1];
+    const darkAlpha = (stroke: string | undefined) => Number(/^rgba\(0,\s*0,\s*0,\s*([\d.]+)\)$/.exec(stroke ?? '')?.[1] ?? NaN);
+    for (const kind of ['body', 'head', 'kill'] as const) {
+      const svg = slabHitSvg(kind), g = SLAB_HIT[kind], w = g.width;
+      // the SVG's paint, in document (= painting) order: each group's shapes in its stroke, then the head's diamond
+      const paint: Array<{ shape: string; paint: string; width?: number; alpha?: number; cap?: string; at?: number[] }> = [];
+      for (const m of svg.matchAll(/<g ([^>]*)>(.*?)<\/g>|<path class="dia"[^>]*\/>/g)) {
+        if (!m[1]) { paint.push({ shape: 'diamond', paint: 'fill' }); continue; }
+        const cls = attr(m[1], 'class'), stroke = attr(m[1], 'stroke');
+        expect(attr(m[1], 'stroke-linecap')).toBe('butt'); // both groups: no caps
+        expect(attr(m[1], 'stroke-linejoin') ?? 'miter').toBe('miter'); // lines have no joins; nothing rounds an end
+        expect(attr(m[1], 'fill')).toBe('none');
+        expect(cls === 'under' ? stroke?.startsWith('rgba(') : stroke === 'currentColor').toBe(true);
+        for (const sh of m[2].matchAll(/<(line|circle) ([^>]*)\/>/g)) {
+          const at = sh[1] === 'line' ? ['x1', 'y1', 'x2', 'y2'].map((k) => Number(attr(sh[2], k))) : [Number(attr(sh[2], 'r'))];
+          paint.push({ shape: sh[1], paint: cls === 'under' ? 'dark' : 'colour', width: Number(attr(m[1], 'stroke-width')),
+            ...(cls === 'under' ? { alpha: darkAlpha(stroke) } : {}), at });
+        }
+      }
+      // what hud.gd paints for hit_cue(kind): its lines c + d × r0 → c + d × r1 (d in hit_cue's order), w = pr.width
+      const arms = slabHitArms(kind).map(([a, b]) => [...a, ...b]);
+      const dark = (shape: string, at: number[]) => ({ shape, paint: 'dark', width: w + 2, alpha: 0.8, at });
+      const colour = (shape: string, at: number[]) => ({ shape, paint: 'colour', width: w, at });
+      const want = [
+        ...arms.map((a) => dark('line', a)), // for l in pr.lines: draw_line(l[0], l[1], dark, w + 2.0, true)
+        ...arms.map((a) => colour('line', a)), // for l in pr.lines: draw_line(l[0], l[1], col, w, true)
+        ...(g.ring ? [dark('circle', [g.ring]), colour('circle', [g.ring])] : []), // for r in pr.rings: draw_arc dark, then col
+        ...(g.diamond ? [{ shape: 'diamond', paint: 'fill' }] : []), // the head's diamond, last (its rim: a logged difference)
+      ];
+      expect(paint, `${kind}: the paint order and strokes`).toEqual(want);
+      expect([w, w + SLAB_HIT_UNDER]).toEqual(kind === 'kill' ? [3, 5] : [2.5, 4.5]); // hit_cue's pr.width; the underlay
+      if (g.ring) {
+        // the dark ring paints after every colour line (so over the red arms), and the colour ring last of all
+        const ringDark = paint.findIndex((p) => p.shape === 'circle' && p.paint === 'dark');
+        expect(ringDark).toBeGreaterThan(paint.map((p) => p.shape === 'line' && p.paint === 'colour').lastIndexOf(true));
+      }
+      expect(svg).not.toMatch(/<line[^>]*stroke-linecap|stroke-linecap="(round|square)"/); // no line sets its own cap
+      // the paint along each arm: butt ends paint from r0·√2 to r1·√2, exactly the line ends
+      expect(g.r0 * Math.SQRT2).toBeCloseTo(kind === 'kill' ? 8.485 : 7.071, 3);
+      expect(g.r1 * Math.SQRT2).toBeCloseTo(kind === 'kill' ? 21.213 : 14.142, 3);
+    }
+  });
+
+  it('W17 H20: the confirm box draws one viewBox unit as one HUD unit (720p px), centred on the crosshair', () => {
+    // the SVG element's viewBox and its CSS box (#cvc-slab .hc) together set the X's scale: both must be 2 × SLAB_HIT_BOX
+    const vb = /viewBox="([^"]+)"/.exec(SLAB_HIT_SVG_TAG)![1].split(' ').map(Number);
+    expect(SLAB_HIT_SVG_TAG).toMatch(/^<svg class="hc" data-slab-hit /);
+    expect(vb).toEqual([-SLAB_HIT_BOX, -SLAB_HIT_BOX, 2 * SLAB_HIT_BOX, 2 * SLAB_HIT_BOX]);
+    const rules = [...SLAB_HUD_CSS.matchAll(/#cvc-slab \.hc\{([^}]*)\}/g)];
+    expect(rules).toHaveLength(1);
+    const decl = new Map(rules[0][1].split(';').map((d) => d.split(':')).map(([k, ...v]) => [k.trim(), v.join(':').trim()] as [string, string]));
+    const units = (v: string | undefined) => [...(v ?? '').matchAll(/calc\(var\(--u\)\*(-?[\d.]+)\)/g)].map((m) => Number(m[1]));
+    expect(units(decl.get('width'))).toEqual([vb[2]]); // 50 HUD units across = 50 viewBox units: scale 1
+    expect(units(decl.get('height'))).toEqual([vb[3]]);
+    expect(decl.get('margin')).toBe(`calc(var(--u)*${-SLAB_HIT_BOX}) 0 0 calc(var(--u)*${-SLAB_HIT_BOX})`); // centre on 50 %
+    expect([decl.get('left'), decl.get('top'), decl.get('position'), decl.get('overflow')]).toEqual(['50%', '50%', 'absolute', 'visible']);
+    // the HUD unit is the general HUD's uPx: min(w / 1280, h / 720), at least 0.6 px
+    expect(SLAB_HUD_CSS).toContain('--u:max(0.6px,min(calc(100vw / 1280),calc(100vh / 720)))');
+    // nothing outside the markup may repaint the X: a CSS stroke rule overrides SVG attributes, and a stroke-opacity
+    // would thin the 0.8 underlay (the H20 paint test reads the markup only)
+    expect(SLAB_HUD_CSS).not.toMatch(/(?<![-\w])stroke(-[a-z]+)?\s*:/); // SVG stroke properties (not -webkit-text-stroke)
+    for (const kind of ['body', 'head', 'kill'] as const) expect(slabHitSvg(kind)).not.toMatch(/stroke-opacity|opacity=|stroke-dasharray/);
   });
 
   it('your hits confirm (body / head), your knockouts confirm a kill that a hit landing with it does not downgrade', () => {
@@ -402,6 +501,31 @@ describe('slabHudFrame: what the DOM writes, decided headless', () => {
     expect(slabHudFrame(frame({ local: me({ hp: 95 }) }), s, 0.3)).toMatchObject({ chipTop: 107.5 });
     expect(slabHudFrame(frame({ local: me({ hp: 95 }) }), s, 0.5).chipTop).toBe(95);
     expect(slabHudFrame(frame({ local: null }), s, 0.6).chipTop).toBeNull();
+  });
+
+  it('W17: once the match is over no confirm (nor wedge) draws, as hud.gd build_overlay over the win screen; the timers run on', () => {
+    const s = slabHudState();
+    const slab = reading([pet(1, 0, 0, 0, 25), pet(7, 1, 0, 0, -20)]);
+    const over = ms({ phase: 'ended', winner: 0, objective: SLAB_TEXT.win[0], score: [60, 41] });
+    slabHudFrame(frame({ local: me(), slab }), s, 1);
+    slabHudEvent(s, hitOn(1, 7), 1); // your shot lands
+    slabHudEvent(s, hitOn(7, 1), 1); // and theirs
+    expect(slabHudFrame(frame({ local: me(), slab }), s, 1.02)).toMatchObject({ confirm: { kind: 'body' }, wedges: [{ src: 7 }] });
+    // the match ends with both showing: neither draws, though the cue is still within its time
+    const end = slabHudFrame(frame({ local: me(), slab, match: over }), s, 1.05);
+    expect(end.confirm).toBeNull();
+    expect(end.wedges).toEqual([]);
+    expect(s.hits.confirmAt(1.05)).toMatchObject({ kind: 'body' });
+    // the winning knockout lands with the end: its kill confirm does not draw over the win screen either
+    slabHudEvent(s, { e: 'death', id: 7, by: 1 }, 1.06);
+    expect(s.hits.confirmAt(1.07)).toMatchObject({ kind: 'kill' });
+    expect(slabHudFrame(frame({ local: me(), slab, match: over }), s, 1.07).confirm).toBeNull();
+    // and no confirm without a player (hud.gd build_overlay: only while the player is up)
+    const t = slabHudState();
+    slabHudFrame(frame({ local: me() }), t, 2);
+    slabHudEvent(t, hitOn(1, 7), 2);
+    expect(slabHudFrame(frame({ local: null }), t, 2.01).confirm).toBeNull();
+    expect(slabHudFrame(frame({ local: me() }), t, 2.02).confirm).toMatchObject({ kind: 'body' });
   });
 
   it('down: no confirm and no wedges; your knockout clears the wedges, so none come back with you', () => {

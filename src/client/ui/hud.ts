@@ -3,7 +3,7 @@
 // scoreboard (Tab), main menu, settings, click-to-play overlay.
 //
 // Wiring (see docs/handoff/L5.md): createHud(ui, actions) · hud.update(model) every frame ·
-// bus 'game' → hud.onGameEvent(ev) · bus 'notice' → hud.notice(text). HudModel stays backward compatible:
+// bus 'game' → hud.onGameEvent(ev, simT) (simT optional, W17 H1) · bus 'notice' → hud.notice(text). HudModel stays backward compatible:
 // every L5 addition is optional.
 // U1 (ux, docs/handoff/U1.md): text chat (Enter/T; bus 'chat' → hud.chat, bus 'notice' → hud.serverNotice,
 // actions.sendChat, actions.chatOpenChanged → input.suspended), first-match tips, the room browser in the menu and
@@ -30,6 +30,7 @@ import { bootQuality, reloadUrl } from './quality-note';
 import type { RoomPoller } from './rooms';
 import { findInteractTarget } from '../interact/targets';
 import { SLAB_CLICK_TO_PLAY, slabFeedText } from './slab-hud'; // W13: slab mode reads like Godot's hud.gd
+import { crosshairArms, crosshairFrame, crosshairPx, crosshairShot, crosshairState, crosshairWeapon } from './crosshair'; // W17 H1: slab's gap is hud.gd's
 import { serverUrlForPage } from '../net/server-url';
 
 export type { PlayOptions } from './menu';
@@ -88,8 +89,10 @@ export interface Hud {
   hitMarker(kill: boolean, crit?: boolean): void;
   /** Red edge flash, strength from damage amount. */
   damageFlash(amount: number): void;
-  /** Hit markers, damage direction, kill feed, death screen, reload/ability timers, banners. */
-  onGameEvent(ev: GameEvent): void;
+  /** Hit markers, damage direction, kill feed, death screen, reload/ability timers, banners. `simT`: the sim time (s) of
+   *  the snapshot that carried the event (main.ts serverSec()); the crosshair's bloom recovers over it between your own
+   *  shots (W17 H1). Default: the HUD clock. */
+  onGameEvent(ev: GameEvent, simT?: number): void;
   /** Toast line (bus 'notice'). */
   notice(text: string): void;
   showMenu(open: boolean, view?: 'main' | 'settings'): void;
@@ -299,8 +302,9 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
   let feedVersion = -1;
   // health
   let shownHp = -1, ghostHp = 0, ghostHold = 0, lastHpMax = -1, hpClass = '', hurtAnimAt = -1;
-  // crosshair
-  let spread = 10, kick = 0, lastSpreadPx = -1;
+  // crosshair (W17 H1: crosshair.ts; slab mode draws hud.gd's 5 + spread × 420 from the authority's rifle spread)
+  const xs = crosshairState();
+  let lastSpreadPx = -1;
   let hmAt = -10, hmKind = '', dmgFlash = 0;
   const dd: Array<{ src: number; x: number; z: number; until: number }> = Array.from({ length: DMG_SLOTS }, () => ({ src: -1, x: 0, z: 0, until: 0 }));
   let ddNext = 0;
@@ -528,26 +532,20 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
         show(am, false);
       }
 
-      // ---- crosshair: spread from movement/air/sprint/fire, tightened while aiming
+      // ---- crosshair: spread from movement/air/sprint/fire, tightened while aiming (crosshair.ts). Slab mode (W17 H1,
+      // Godot wins): hud.gd's gap, 5 + spread × 420 px at 720p, from the authority's live rifle spread; no firing term
+      // and no kick (Godot has neither): moving and the air open it through the spread.
+      const slabMode = m.match?.mode === 'slab';
       if (L && alive) {
-        const f = L.flags;
-        const sp = Math.hypot(L.vx, L.vz);
-        let target = 7 + sp * 0.9;
-        if ((f & EFlag.Grounded) === 0) target += 9;
-        if ((f & EFlag.Sprinting) !== 0) target += 8;
-        if ((f & EFlag.Firing) !== 0) target += 4;
-        target += kick;
-        if ((f & EFlag.Aiming) !== 0) target *= 0.5;
-        kick *= 0.86;
-        spread += (target - spread) * 0.3;
-        const px = Math.round(spread * uPx * 2) / 2;
+        const gap = crosshairFrame(xs, L, { slab: slabMode, def: crosshairWeapon(weapons.id(L.weapon)), now });
+        const px = crosshairPx(gap, uPx, slabMode);
         if (px !== lastSpreadPx) {
           lastSpreadPx = px;
-          const len = 9 * uPx;
-          setStyle(xt, 'transform', `translateY(${-px - len}px)`);
-          setStyle(xb, 'transform', `translateY(${px}px)`);
-          setStyle(xl, 'transform', `translateX(${-px - len}px)`);
-          setStyle(xr, 'transform', `translateX(${px}px)`);
+          const [tt, tb, tl, tr] = crosshairArms(px, uPx); // px is in screen px already
+          setStyle(xt, 'transform', tt);
+          setStyle(xb, 'transform', tb);
+          setStyle(xl, 'transform', tl);
+          setStyle(xr, 'transform', tr);
         }
       }
       // Hit marker pop: scale 1.5 → 1, fade after 120 ms (kill lingers longer).
@@ -579,7 +577,6 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
 
       // ---- kill feed
       feed.prune(now);
-      const slabMode = m.match?.mode === 'slab';
       if (slabMode !== plainFeed) { plainFeed = slabMode; feedVersion = -1; setText(lkTitle, slabMode ? SLAB_CLICK_TO_PLAY : 'CLICK TO PLAY'); }
       if (feed.version !== feedVersion) { feedVersion = feed.version; renderFeed(); }
 
@@ -659,12 +656,12 @@ export function createHud(root: HTMLElement, actions?: Partial<HudActions>, opts
 
     damageFlash(amount) { dmgFlash = Math.min(0.95, dmgFlash + 0.25 + amount / 60); },
 
-    onGameEvent(ev) {
+    onGameEvent(ev, simT) {
       const now = clock();
       switch (ev.e) {
         case 'fire':
           lastWpnBy.set(ev.id, ev.wpn);
-          if (ev.id === localId) kick = Math.min(18, kick + 3.5 + WEAPON_FX[weapons.id(ev.wpn)].kick * 30);
+          if (ev.id === localId) crosshairShot(xs, WEAPON_FX[weapons.id(ev.wpn)].kick, crosshairWeapon(weapons.id(ev.wpn)), now, simT);
           break;
         case 'hit':
           lastHitOn.set(ev.dst, { src: ev.src, crit: ev.crit, t: now });

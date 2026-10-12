@@ -358,7 +358,7 @@ async function main(): Promise<void> {
     if (r.kickPitch !== 0 || r.kickYaw !== 0) cam.kick(r.kickPitch, r.kickYaw, r.kickRecover); // X3: visual recoil (view only)
     if (r.fovPunch > 0) cam.punch(r.fovPunch); // X3: kill / crit confirm
     audio.onGameEvent(ev);
-    hud.onGameEvent(ev);
+    hud.onGameEvent(ev, serverSec()); // W17 H1: stamped with its snapshot's sim time, so own shots' bloom never stacks
     hitFx.onGameEvent(ev, net?.localEntity ?? -1); // X3: the hitmarker
     tally.onEvent(ev, net?.localEntity ?? -1); // P2
     awardsTally.onEvent(ev, serverSec()); // W10 U3
