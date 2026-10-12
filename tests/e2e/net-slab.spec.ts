@@ -16,12 +16,22 @@ import { SLAB as SLAB_CFG, onSlab } from '../../src/shared/content/modes';
 //      points or more) and at the end (the result); the HUD's clock and scores read the same within a second;
 //   3. both walk toward the slab at once and stop clearly off it, Bravo for good (the Cats never score); Alpha turns
 //      to Bravo, closes to 10 m across the slab and fires until Bravo is down. The kill feed shows "Alpha  >  Bravo"
-//      on both pages; the death panel shows only on Bravo's, naming Alpha and Corgi Company. Shots: each page once
-//      Alpha has first aimed (artifacts/net-slab-{a,b}-aim.png, both pets standing) and when Bravo's panel shows
-//      (artifacts/net-slab-{a,b}.png). The authority's match clock runs in real time (180 s, SLAB.timeLimit, from the
-//      room's first tick) while the slow pages drive the walks and the fight, so on a loaded box the horn can come
-//      first (CI 158). Then that try is over: R as in step 4, both pages live at 0 - 0 on one tick log, and the walks
-//      and the fight again in the fresh match, at most RETRIES (2) times, each logged ("[net-slab] retry N: ...");
+//      on both pages, within the feed's 6 s of the kill; the death panel shows only on Bravo's, while it is down,
+//      naming Alpha and Corgi Company. Shots: each page once Alpha has first aimed (artifacts/net-slab-{a,b}-aim.png,
+//      both pets standing) and as soon as Bravo is down, its panel up (artifacts/net-slab-{a,b}.png). These cues run
+//      on in-game timers, each page's own clock: Bravo is down (Dead flag, death panel) for the 3 s respawn
+//      (SLAB.respawn) and the feed keeps a line 6 s (hud.ts: new KillFeed(5, 6)), 9 s when it names the page's own
+//      pet (kill-feed.ts prune: 1.5 x), as the takedown line does on both pages; on a slow runner the spec's steps
+//      after the takedown (the shots, the reads) can outlast them (CI 159: the feed read [] for 30 s). So the spec
+//      never reads them live: a recorder on each page (REC_INIT, an init script) notes every kill-feed line and death
+//      panel the page shows (the DOM hud() reads) and every knockout of its own pet (its first frame down), each
+//      stamped with the page's clock on the epoch (performance.timeOrigin + now(), ms: one machine, so the two pages'
+//      stamps compare). The takedown is a knockout on Bravo's record (the 3 s down cannot slip between two looks);
+//      the panel and feed checks read the records, their timing from the stamps. The authority's match clock runs in
+//      real time (180 s, SLAB.timeLimit, from the room's first tick) while the slow pages drive the walks and the
+//      fight, so on a loaded box the horn can come first (CI 158). Then that try is over: R as in step 4, both pages
+//      live at 0 - 0 on one tick log, and the walks and the fight again in the fresh match, at most RETRIES (2)
+//      times, each logged ("[net-slab] retry N: ...");
 //   4. Alpha holds the slab until the match ends; R on Alpha's page, pressed once the authority's own clock is
 //      SLAB.rematchDelay past the end (its tick: the server drops time on overrun, so a wall-clock wait can lose the
 //      press), rematches both pages to 0 - 0 from a non-zero result. The HUD's cue resets on a rematch (no death
@@ -35,16 +45,21 @@ import { SLAB as SLAB_CFG, onSlab } from '../../src/shared/content/modes';
 // Ports (CI and agents): the authority on the first free port from NET_SLAB_PORT (default 8791) up to 8799; the pages
 // from playwright's webServer. On a failure the spec prints the server log and, per player's page (labelled by
 // player: the pages open in parallel), the reason of any bus 'disconnected' (main.ts logs "[net] disconnected:
-// <reason>" to the console), its net state, text and console tail.
+// <reason>" to the console), its net state, its HUD record's tail (REC_INIT), text and console tail.
 // NET_SLAB_DELAY_MS (test-only, default 0): wait this long before the first walks (only the first try), to reproduce
 // the horn before the takedown. How long depends on the box: with the pages quick, 120000 still left the takedown
 // 4.5 s before the horn, and 150000 sent the first try past it (retry 1, then a pass).
+// NET_SLAB_SLOW_MS (test-only, default 0): sleep this long right after the takedown is detected, before the shots and
+// the panel and feed checks, to reproduce a slow runner: 9000 outlasts Bravo's 3 s down and the takedown line's 9 s
+// (measured: both gone, the reads 11.9-14.3 s after the takedown was seen). The shots then miss the panel; the checks must
+// still pass, from the records.
 
 test.describe.configure({ mode: 'serial' });
 
 const PORT0 = Number(process.env.NET_SLAB_PORT ?? 8791);
 let PORT = PORT0;
 const DELAY_MS = Math.max(0, Number(process.env.NET_SLAB_DELAY_MS ?? 0) || 0);
+const SLOW_MS = Math.max(0, Number(process.env.NET_SLAB_SLOW_MS ?? 0) || 0);
 const RETRIES = 2; // fresh matches after the horn came before the takedown
 const VIEW = { width: 640, height: 360 };
 const SLAB = { x: SLAB_CFG.center.x, z: SLAB_CFG.center.z }; // the slab's centre on the ground
@@ -110,7 +125,10 @@ test.afterEach(async ({}, info) => {
       const d = await p.evaluate(() => {
         const text = document.body.innerText.replace(/\s+/g, ' ');
         const net = (globalThis as unknown as { __cvc?: { net?: Record<string, unknown> } }).__cvc?.net ?? {};
-        return { disconnected: /Disconnected: [^.·]*/.exec(text)?.[0] ?? 'none', net: { connected: net.connected, tick: net.tick, rttMs: net.rttMs, pending: net.pending }, text: text.slice(0, 600) };
+        // the HUD recorder (REC_INIT): the last feed lines, the knockouts, each death panel's first and last lines
+        const r = (window as unknown as { __rec?: Rec }).__rec;
+        const rec = r ? { feed: r.feed.slice(-8), downs: r.downs.slice(-4), panel: r.panel.slice(-4).map(({ frames, ...s }) => ({ ...s, frames: frames.length, first: frames[0], last: frames[frames.length - 1] })) } : 'none';
+        return { disconnected: /Disconnected: [^.·]*/.exec(text)?.[0] ?? 'none', net: { connected: net.connected, tick: net.tick, rttMs: net.rttMs, pending: net.pending }, rec, text: text.slice(0, 600) };
       }).catch((e) => ({ error: String(e) }));
       const reasons = log.filter((l) => /\[net\] disconnected:/.test(l));
       console.log(`[net-slab] ${who}'s page: disconnect reason: ${reasons.join(' | ') || 'none logged'}; ${JSON.stringify(d)}\n  ${who}'s console: ${log.slice(-30).join('\n  ')}`);
@@ -165,17 +183,90 @@ const state = (p: Page): Promise<State> => p.evaluate(() => {
   const c = (globalThis as unknown as { __cvc: { localEntity: number; local: State['local']; net?: { entities: State['ents'] }; twin: Twin } }).__cvc;
   return { me: c.localEntity, local: c.local, ents: c.net?.entities ?? [], twin: JSON.parse(JSON.stringify(c.twin)) as Twin };
 });
-const hud = (p: Page) => p.evaluate(() => {
+const DEAD = 16; // EFlag.Dead
+/** The HUD's kill-feed lines and death panel (hud() reads them now, REC_INIT on every frame), and the Dead flag. */
+const SEL = { feed: '#cvc-hud .kf .kf-e', death: '#cvc-slab [data-slab-death]', dead: DEAD };
+const hud = (p: Page) => p.evaluate((sel) => {
   const q = (s: string) => document.querySelector(s) as HTMLElement | null;
   const shown = (s: string) => { const e = q(s); return !!e && getComputedStyle(e).display !== 'none'; };
   return {
     s0: q('#cvc-slab [data-slab-s0]')?.textContent ?? '', s1: q('#cvc-slab [data-slab-s1]')?.textContent ?? '',
     clock: q('#cvc-slab [data-slab-clock]')?.textContent ?? '',
-    death: shown('#cvc-slab [data-slab-death]') ? [...document.querySelectorAll('#cvc-slab [data-slab-death] > div')].map((d) => d.textContent ?? '') : null,
-    feed: [...document.querySelectorAll('#cvc-hud .kf .kf-e')].map((e) => e.textContent ?? ''),
+    death: shown(sel.death) ? [...document.querySelectorAll(`${sel.death} > div`)].map((d) => d.textContent ?? '') : null,
+    feed: [...document.querySelectorAll(sel.feed)].map((e) => e.textContent ?? ''),
   };
-});
-const DEAD = 16; // EFlag.Dead
+}, SEL);
+/** The feed keeps a line this long (s, on the page's clock): hud.ts new KillFeed(5, 6). A line naming the page's own
+ *  pet stays 1.5 x (kill-feed.ts prune), so the takedown line stays 9 s on both pages; the check holds it to the 6 s. */
+const FEED_TTL = 6;
+
+/** What a page's recorder (REC_INIT) has seen, each stamp the page's clock on the epoch (ms). */
+interface Rec {
+  /** Every kill-feed line shown: its text, its first frame (`tick`: the page's latest snapshot then) and the first frame
+   *  without it (null: still up). */
+  feed: Array<{ text: string; at: number; tick: number; gone: number | null }>;
+  /** Every death panel shown: its first frame, the first frame without it, and its lines as they changed (a frame's
+   *  lines are kept when they differ from the last kept: the countdown, every 0.1 s). */
+  panel: Array<{ at: number; tick: number; gone: number | null; frames: string[][] }>;
+  /** Every knockout of the page's own pet: its first frame down (Dead flag; timeLeft: the match clock then) and its
+   *  first frame up again (null: still down). */
+  downs: Array<{ at: number; tick: number; timeLeft: number | null; up: number | null }>;
+}
+/** The test-only HUD recorder (init script): samples the page after every DOM change (a MutationObserver: a frame's
+ *  writes, read before they are painted) and on every animation frame, so no frame's feed line, panel or knockout goes
+ *  unnoted however late the spec looks. It only reads. */
+const REC_INIT = (sel: typeof SEL) => {
+  const R: Rec = { feed: [], panel: [], downs: [] };
+  (window as unknown as { __rec: Rec }).__rec = R;
+  const clock = () => performance.timeOrigin + performance.now();
+  let up: Rec['feed'] = []; // the feed lines up at the last sample
+  let panel: Rec['panel'][number] | null = null;
+  let down: Rec['downs'][number] | null = null;
+  const sample = () => {
+    const t = clock();
+    const c = (globalThis as unknown as { __cvc?: { local?: { flags?: number } | null; net?: { tick?: number }; twin?: { match?: { timeLeft: number } | null } } }).__cvc;
+    const tick = c?.net?.tick ?? 0;
+    // the feed: a line is its text (two alike count twice); the ones gone since the last sample, then the new ones
+    const now = [...document.querySelectorAll(sel.feed)].map((e) => e.textContent ?? '');
+    const kept: Rec['feed'] = [];
+    for (const r of up) {
+      const i = now.indexOf(r.text);
+      if (i < 0) r.gone = t;
+      else { now.splice(i, 1); kept.push(r); }
+    }
+    for (const text of now) {
+      const r = { text, at: t, tick, gone: null };
+      if (R.feed.length < 500) R.feed.push(r);
+      kept.push(r);
+    }
+    up = kept;
+    // the death panel, shown as hud() tells it
+    const dp = document.querySelector(sel.death) as HTMLElement | null;
+    if (dp && dp.style.display !== 'none' && getComputedStyle(dp).display !== 'none') {
+      const lines = [...dp.querySelectorAll(':scope > div')].map((d) => d.textContent ?? '');
+      if (!panel) {
+        panel = { at: t, tick, gone: null, frames: [] };
+        if (R.panel.length < 100) R.panel.push(panel);
+      }
+      const last = panel.frames[panel.frames.length - 1];
+      if ((!last || last.join('\n') !== lines.join('\n')) && panel.frames.length < 2000) panel.frames.push(lines);
+    } else if (panel) { panel.gone = t; panel = null; }
+    // the page's own pet: down from its first frame with the Dead flag to its first frame without
+    const L = c?.local;
+    if (L && ((L.flags ?? 0) & sel.dead) !== 0) {
+      if (!down) {
+        down = { at: t, tick, timeLeft: c?.twin?.match?.timeLeft ?? null, up: null };
+        if (R.downs.length < 100) R.downs.push(down);
+      }
+    } else if (L && down) { down.up = t; down = null; }
+  };
+  new MutationObserver(sample).observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
+  const frame = () => { sample(); requestAnimationFrame(frame); };
+  requestAnimationFrame(frame);
+};
+const rec = (p: Page): Promise<Rec> => p.evaluate(() => (window as unknown as { __rec: Rec }).__rec);
+/** The page's clock on the epoch (ms), as REC_INIT stamps. */
+const pageClock = (p: Page): Promise<number> => p.evaluate(() => performance.timeOrigin + performance.now());
 const clockSecs = (t: string) => { const m = /^(\d+):(\d\d)$/.exec(t); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 
 /** Both pages' snapshot logs agree at every tick both logged (at least 10): same timeLeft, score and phase. */
@@ -197,6 +288,7 @@ async function openPlayer(browser: Browser, url: string, who: string): Promise<{
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.addInitScript(PAD_INIT);
+  await page.addInitScript(REC_INIT, SEL);
   await page.goto(url);
   return { ctx, page, errors };
 }
@@ -330,7 +422,8 @@ test('SLAB online: two players in one room see each other, share the score and c
   // the Cats have no points and gain none (Bravo never sets foot on the slab): the fight cannot race a Cat win
   const catsNow = async () => (await state(B.page)).twin.match!.score[1];
   const pad = (p: Page, fire: boolean, aim: boolean) => p.evaluate(([f, a]) => { const q = (window as unknown as { __pad: { fire: boolean; aim: boolean } }).__pad; q.fire = f; q.aim = a; }, [fire, aim]);
-  const down = async () => { const b = await state(B.page); return !!b.local && (b.local.flags & DEAD) !== 0; };
+  /** Bravo's knockouts on its page's record (REC_INIT notes its first frame down, however briefly the test looks). */
+  const knocks = () => B.page.evaluate(() => (window as unknown as { __rec: Rec }).__rec.downs.length);
   /** R on Alpha's page once the authority's clock is SLAB.rematchDelay past its end tick (the latest snapshot's tick is
    *  at or past it): both pages restart at 0 - 0 and the result goes. */
   const rematch = async () => {
@@ -374,7 +467,12 @@ test('SLAB online: two players in one room see each other, share the score and c
     expect(await catsNow()).toBe(0);
     step = 'the fight';
     const alphaOnSlab = ((l) => onSlab(l.x, l.y, l.z))((await state(A.page)).local!); // logged
-    const fightT0 = Date.now();
+    // the page clocks now (a feed line or panel from here on is this fight's) and Bravo's knockouts so far: it is down
+    // once its page has recorded one more. (A look at its Dead flag could miss the 3 s down on a slow runner: a turn in
+    // between, with the trigger still held from the burst before, can outlast it.)
+    const fightAt = await Promise.all([pageClock(A.page), pageClock(B.page)]);
+    const knocks0 = await knocks();
+    const down = async () => (await knocks()) > knocks0;
     const deadline = Date.now() + 240_000;
     let aimShots = false;
     while (!(await down())) {
@@ -398,7 +496,7 @@ test('SLAB online: two players in one room see each other, share the score and c
       while (Date.now() < until && !(await down())) await A.page.waitForTimeout(150);
     }
     await pad(A.page, false, false);
-    return { bravoAt, alphaEdge, alphaOnSlab, fightT0 };
+    return { bravoAt, alphaEdge, alphaOnSlab, fightAt, knocks0 };
   };
   let got: Awaited<ReturnType<typeof tryTakedown>> = null;
   let retries = 0;
@@ -426,24 +524,54 @@ test('SLAB online: two players in one room see each other, share the score and c
     expect(fresh.last.slice(2)).toEqual([0, 0, 'live']);
     console.log(`[net-slab] retry ${retries}: both pages live at 0 - 0, ${fresh.common} common ticks agree (latest ${JSON.stringify(fresh.last)})`);
   }
-  const { bravoAt, alphaEdge, alphaOnSlab, fightT0 } = got;
-  // Bravo is down: its death panel shows on its next frames and holds for the 3 s respawn; read it then
-  let panel: string[] | null = null;
-  await expect.poll(async () => (panel = (await hud(B.page)).death), { timeout: 15_000, intervals: [100] }).not.toBeNull();
-  const panelOnA = (await hud(A.page)).death;
+  const { bravoAt, alphaEdge, alphaOnSlab, fightAt, knocks0 } = got;
   const downAt = Date.now();
-  const fightSecs = (downAt - fightT0) / 1000;
+  if (SLOW_MS > 0) { // a slow runner: Bravo's 3 s down and the feed's 6 s line are over before the spec looks
+    console.log(`[net-slab] NET_SLAB_SLOW_MS: waiting ${SLOW_MS / 1000} s after the takedown, before the shots and the checks`);
+    await A.page.waitForTimeout(SLOW_MS);
+  }
   await Promise.all([A.page.screenshot({ path: 'artifacts/net-slab-a.png' }), B.page.screenshot({ path: 'artifacts/net-slab-b.png' })]);
-  // line 1 is "TAKEN DOWN BY Alpha  ·", the triangle glyph (no text), then the team: its text runs together
-  expect(panel).toEqual(['TAKEN DOWN BY Alpha  ·CORGI COMPANY', 'YOU: CAT CADRE', 'BACK AT THE SCAFFOLDS  ·  132 m TO THE SLAB', expect.stringMatching(/^BACK IN [0-3]\.\d$/)]);
-  expect(panelOnA).toBeNull(); // the killer's page shows no panel
-  // the kill feed on both pages
-  await expect.poll(async () => (await hud(A.page)).feed, { timeout: 30_000, intervals: [250] }).toContain('Alpha  >  Bravo');
-  await expect.poll(async () => (await hud(B.page)).feed, { timeout: 30_000, intervals: [250] }).toContain('Alpha  >  Bravo');
+  // Bravo's knockout on its page's record: its first frame down (the kill, for the timing checks below). Its death
+  // panel shows from that frame for the 3 s respawn and goes when Bravo is back up: the first one shown since, read
+  // whole from the record once it has gone
+  let rb = await rec(B.page);
+  const knock = rb.downs[knocks0];
+  expect(knock.at).toBeGreaterThanOrEqual(fightAt[1]);
+  await expect.poll(async () => (rb = await rec(B.page)).panel.find((s) => s.at >= knock.at)?.gone ?? null,
+    { message: "Bravo's death panel shown since its knockout, and gone again", timeout: 30_000, intervals: [100] }).not.toBeNull();
+  const show = rb.panel.find((s) => s.at >= knock.at)!;
+  const backUp = rb.downs[knocks0].up;
+  expect(show.at - knock.at, "Bravo's panel: shown within its 3 s down").toBeLessThanOrEqual(SLAB_CFG.respawn * 1000);
+  if (backUp !== null) expect(show.at).toBeLessThan(backUp);
+  // line 1 is "TAKEN DOWN BY Alpha  ·", the triangle glyph (no text), then the team: its text runs together. Every
+  // change the panel showed (its countdown) reads so
+  const PANEL = ['TAKEN DOWN BY Alpha  ·CORGI COMPANY', 'YOU: CAT CADRE', 'BACK AT THE SCAFFOLDS  ·  132 m TO THE SLAB', expect.stringMatching(/^BACK IN [0-3]\.\d$/)];
+  expect(show.frames.length).toBeGreaterThan(0);
+  for (const [i, lines] of show.frames.entries()) expect(lines, `Bravo's panel, change ${i + 1} of ${show.frames.length}`).toEqual(PANEL);
+  // the kill feed on both pages: "Alpha  >  Bravo" shown since the fight began, within the feed's 6 s of the kill (a
+  // line shown later, or never, fails)
+  const KILL = 'Alpha  >  Bravo';
+  const feedLines: Array<Rec['feed'][number]> = [];
+  for (const [i, P] of [A, B].entries()) {
+    const since = async () => (await rec(P.page)).feed.filter((l) => l.at >= fightAt[i]);
+    await expect.poll(async () => (await since()).map((l) => l.text), { timeout: 30_000, intervals: [250] }).toContain(KILL);
+    const line = (await since()).find((l) => l.text === KILL)!;
+    expect(line.at - knock.at, `${i ? 'Bravo' : 'Alpha'}'s page first showed "${KILL}" ${((line.at - knock.at) / 1000).toFixed(2)} s after Bravo went down`).toBeLessThanOrEqual(FEED_TTL * 1000);
+    // and it stayed up its life: a line that flashes for a frame fails (measured 8.8-9.2 s; a line naming the page's
+    // own pet lives 1.5 x FEED_TTL, so the base 6 s less 0.5 s of frame slack is the floor)
+    if (line.gone !== null) expect(line.gone - line.at, `${i ? 'Bravo' : 'Alpha'}'s page kept "${KILL}" only ${((line.gone - line.at) / 1000).toFixed(2)} s`).toBeGreaterThanOrEqual(FEED_TTL * 1000 - 500);
+    feedLines.push(line);
+  }
+  // the killer's page shows no panel: none since the fight began, nor now
+  expect((await rec(A.page)).panel.filter((s) => s.at >= fightAt[0])).toEqual([]);
   expect((await hud(A.page)).death).toBeNull();
   const atTakedown = await sameLog(A.page, B.page, 'takedown');
   expect(A.errors).toEqual([]);
   expect(B.errors).toEqual([]);
+  const fightSecs = (knock.at - fightAt[1]) / 1000;
+  const secs = (from: number, to: number | null) => (to === null ? 'still up' : `${((to - from) / 1000).toFixed(1)} s`);
+  const rel = (t: number) => `${t >= knock.at ? '+' : '-'}${(Math.abs(t - knock.at) / 1000).toFixed(2)} s`; // from the kill
+  console.log(`[net-slab] the records: Bravo down at ${knock.timeLeft?.toFixed(1)} s on the clock (tick ${knock.tick}), up after ${secs(knock.at, backUp)}; its panel from ${rel(show.at)} for ${secs(show.at, show.gone)} (${show.frames.length} changes); "${KILL}" from ${rel(feedLines[0].at)} for ${secs(feedLines[0].at, feedLines[0].gone)} on Alpha's page, from ${rel(feedLines[1].at)} for ${secs(feedLines[1].at, feedLines[1].gone)} on Bravo's; read ${((Date.now() - downAt) / 1000).toFixed(1)} s after the takedown was seen`);
 
   // 4. Alpha holds the slab until the match ends (60 points, or the horn)
   // face the slab centre first (the view still points where Bravo stood), then walk until well inside the slab
