@@ -18,7 +18,10 @@ import { SLAB as SLAB_CFG, onSlab } from '../../src/shared/content/modes';
 //      to Bravo, closes to 10 m across the slab and fires until Bravo is down. The kill feed shows "Alpha  >  Bravo"
 //      on both pages; the death panel shows only on Bravo's, naming Alpha and Corgi Company. Shots: each page once
 //      Alpha has first aimed (artifacts/net-slab-{a,b}-aim.png, both pets standing) and when Bravo's panel shows
-//      (artifacts/net-slab-{a,b}.png);
+//      (artifacts/net-slab-{a,b}.png). The authority's match clock runs in real time (180 s, SLAB.timeLimit, from the
+//      room's first tick) while the slow pages drive the walks and the fight, so on a loaded box the horn can come
+//      first (CI 158). Then that try is over: R as in step 4, both pages live at 0 - 0 on one tick log, and the walks
+//      and the fight again in the fresh match, at most RETRIES (2) times, each logged ("[net-slab] retry N: ...");
 //   4. Alpha holds the slab until the match ends; R on Alpha's page, pressed once the authority's own clock is
 //      SLAB.rematchDelay past the end (its tick: the server drops time on overrun, so a wall-clock wait can lose the
 //      press), rematches both pages to 0 - 0 from a non-zero result. The HUD's cue resets on a rematch (no death
@@ -30,21 +33,27 @@ import { SLAB as SLAB_CFG, onSlab } from '../../src/shared/content/modes';
 // LT aims. Pages run at 640 x 360 and quality low: the authority moves a pet only by the inputs its page sends, one
 // per frame (a frame's step is capped at 0.25 s), so slow SwiftShader frames walk it slower.
 // Ports (CI and agents): the authority on the first free port from NET_SLAB_PORT (default 8791) up to 8799; the pages
-// from playwright's webServer. On a failure the spec prints the server log and, per page, the reason of any bus
-// 'disconnected' (main.ts logs "[net] disconnected: <reason>" to the console), its net state, text and console tail.
+// from playwright's webServer. On a failure the spec prints the server log and, per player's page (labelled by
+// player: the pages open in parallel), the reason of any bus 'disconnected' (main.ts logs "[net] disconnected:
+// <reason>" to the console), its net state, text and console tail.
+// NET_SLAB_DELAY_MS (test-only, default 0): wait this long before the first walks (only the first try), to reproduce
+// the horn before the takedown. How long depends on the box: with the pages quick, 120000 still left the takedown
+// 4.5 s before the horn, and 150000 sent the first try past it (retry 1, then a pass).
 
 test.describe.configure({ mode: 'serial' });
 
 const PORT0 = Number(process.env.NET_SLAB_PORT ?? 8791);
 let PORT = PORT0;
+const DELAY_MS = Math.max(0, Number(process.env.NET_SLAB_DELAY_MS ?? 0) || 0);
+const RETRIES = 2; // fresh matches after the horn came before the takedown
 const VIEW = { width: 640, height: 360 };
 const SLAB = { x: SLAB_CFG.center.x, z: SLAB_CFG.center.z }; // the slab's centre on the ground
 const TICK_DT = 1 / 60;
 
 let server: { proc: ChildProcess; log: string[] } | null = null;
 const browsers: Browser[] = [];
-const pages: Page[] = [];
-const consoles: string[][] = [];
+/** Every open page: its player ('Alpha' / 'Bravo') and console tail. */
+const players = new Map<Page, { who: string; log: string[] }>();
 
 function killGroup(s: ChildProcess, sig: NodeJS.Signals): void {
   try { if (s.pid) process.kill(-s.pid, sig); } catch { s.kill(sig); }
@@ -97,18 +106,17 @@ async function startServerOn(): Promise<void> {
 test.afterEach(async ({}, info) => {
   if (info.status !== info.expectedStatus) {
     if (server) console.log(`[net-slab] server log (tail):\n${server.log.join('').slice(-6000)}`);
-    for (const [i, p] of pages.entries()) {
+    for (const [p, { who, log }] of [...players].sort((x, y) => x[1].who.localeCompare(y[1].who))) {
       const d = await p.evaluate(() => {
         const text = document.body.innerText.replace(/\s+/g, ' ');
         const net = (globalThis as unknown as { __cvc?: { net?: Record<string, unknown> } }).__cvc?.net ?? {};
         return { disconnected: /Disconnected: [^.·]*/.exec(text)?.[0] ?? 'none', net: { connected: net.connected, tick: net.tick, rttMs: net.rttMs, pending: net.pending }, text: text.slice(0, 600) };
       }).catch((e) => ({ error: String(e) }));
-      const reasons = consoles[i]?.filter((l) => /\[net\] disconnected:/.test(l)) ?? [];
-      console.log(`[net-slab] page ${'AB'[i]}: disconnect reason: ${reasons.join(' | ') || 'none logged'}; ${JSON.stringify(d)}\n  console: ${consoles[i]?.slice(-30).join('\n  ') ?? ''}`);
+      const reasons = log.filter((l) => /\[net\] disconnected:/.test(l));
+      console.log(`[net-slab] ${who}'s page: disconnect reason: ${reasons.join(' | ') || 'none logged'}; ${JSON.stringify(d)}\n  ${who}'s console: ${log.slice(-30).join('\n  ')}`);
     }
   }
-  pages.length = 0;
-  consoles.length = 0;
+  players.clear();
   for (const b of browsers.splice(0)) await b.close().catch(() => {});
   const s = server;
   server = null;
@@ -180,12 +188,11 @@ async function sameLog(a: Page, b: Page, what: string): Promise<{ common: number
   return { common: common.length, last: common.at(-1)! };
 }
 
-async function openPlayer(browser: Browser, url: string): Promise<{ ctx: BrowserContext; page: Page; errors: string[] }> {
+async function openPlayer(browser: Browser, url: string, who: string): Promise<{ ctx: BrowserContext; page: Page; errors: string[] }> {
   const ctx = await browser.newContext({ viewport: VIEW });
   const page = await ctx.newPage();
-  pages.push(page);
   const log: string[] = [];
-  consoles.push(log);
+  players.set(page, { who, log });
   page.on('console', (m) => { log.push(`${m.type()}: ${m.text().slice(0, 300)}`); if (log.length > 200) log.shift(); });
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -274,7 +281,7 @@ test('SLAB online: two players in one room see each other, share the score and c
   // Bravo's browser of its own (net.spec.ts W11: two contexts of one Chromium starve each other's GPU process)
   const browserB = await chromium.launch(test.info().project.use.launchOptions);
   browsers.push(browserB);
-  const [A, B] = await Promise.all([openPlayer(browser, url('Alpha', 0)), openPlayer(browserB, url('Bravo', 1))]);
+  const [A, B] = await Promise.all([openPlayer(browser, url('Alpha', 0), 'Alpha'), openPlayer(browserB, url('Bravo', 1), 'Bravo')]);
   await Promise.all([ready(A.page), ready(B.page)]);
 
   // 1. each sees the other's pet (a Player entity, not a bot), and its own side
@@ -302,7 +309,9 @@ test('SLAB online: two players in one room see each other, share the score and c
   // once used up the 180 s clock before the takedown) and stop clearly off it: W is released once a pet is within 7 m
   // of the slab's edge (checked every 0.2 s; on a loaded box a pet ran on up to about 3 m past the check), and where
   // Bravo settles must be off the slab with 1 m to spare. So no Cat points ever accrue. Then Alpha turns to Bravo,
-  // closes to 10 m across the slab (the Corgis score while it is on it) and fires.
+  // closes to 10 m across the slab (the Corgis score while it is on it) and fires. The horn can still come first (the
+  // authority's clock is real time, the pages are slow; CI 158 ended 11 - 0 in the fight): the walks stop at it, the
+  // try is over (no damage once the match has ended), and a retry rematches and plays the walks and the fight again.
   const half = SLAB_CFG.size.x / 2;
   const box = (p: { x: number; z: number }) => Math.max(Math.abs(p.x - SLAB.x), Math.abs(p.z - SLAB.z));
   /** Where `page`'s pet settles once the inputs already sent have played out (two reads 0.5 s apart agree). */
@@ -316,52 +325,108 @@ test('SLAB online: two players in one room see each other, share the score and c
     }, { timeout: 30_000, intervals: [0] }).toBe(true);
     return at;
   };
-  await Promise.all([
-    walk(B.page, (s) => !!s.local && box(s.local) < half + 7, 'Bravo toward the slab'),
-    walk(A.page, (s) => !!s.local && box(s.local) < half + 7, 'Alpha toward the slab'),
-  ]);
-  const [bravoAt, alphaEdge] = await Promise.all([settle(B.page), settle(A.page)]);
-  expect(onSlab(bravoAt.x, bravoAt.y, bravoAt.z)).toBe(false);
-  expect(box(bravoAt)).toBeGreaterThan(half + 1); // with margin
-  const alphaView = (await state(A.page)).twin.view;
-  await turnTo(A.page, Math.atan2(-(bravoAt.x - alphaEdge.x), -(bravoAt.z - alphaEdge.z)), alphaView.pitch);
-  await walk(A.page, (s) => {
-    const b = s.ents.find((e) => e[0] === idB);
-    return !!s.local && !!b && Math.hypot(s.local.x - b[2], s.local.z - b[4]) < 10;
-  }, 'Alpha toward Bravo', 60_000);
-  // the Cats have no points and gain none (Bravo never set foot on the slab): the fight cannot race a Cat win
+  const horn = (s: State) => s.twin.match?.phase === 'ended';
+  const hornNow = async () => horn(await state(A.page));
+  // the Cats have no points and gain none (Bravo never sets foot on the slab): the fight cannot race a Cat win
   const catsNow = async () => (await state(B.page)).twin.match!.score[1];
-  expect(await catsNow()).toBe(0);
-  await B.page.waitForTimeout(2500);
-  expect(await catsNow()).toBe(0);
-  const alphaOnSlab = ((l) => onSlab(l.x, l.y, l.z))((await state(A.page)).local!); // logged
-  const fightT0 = Date.now();
-  const deadline = Date.now() + 240_000;
   const pad = (p: Page, fire: boolean, aim: boolean) => p.evaluate(([f, a]) => { const q = (window as unknown as { __pad: { fire: boolean; aim: boolean } }).__pad; q.fire = f; q.aim = a; }, [fire, aim]);
   const down = async () => { const b = await state(B.page); return !!b.local && (b.local.flags & DEAD) !== 0; };
+  /** R on Alpha's page once the authority's clock is SLAB.rematchDelay past its end tick (the latest snapshot's tick is
+   *  at or past it): both pages restart at 0 - 0 and the result goes. */
+  const rematch = async () => {
+    const before = [(await state(A.page)).twin.restarts, (await state(B.page)).twin.restarts];
+    const endTick: number = await A.page.evaluate(() => (globalThis as unknown as { __cvc: { net: { tick: number } } }).__cvc.net.tick);
+    await A.page.waitForFunction((t) => (globalThis as unknown as { __cvc: { net: { tick: number } } }).__cvc.net.tick >= t,
+      endTick + SLAB_CFG.rematchDelay * TICK_HZ + 6, { timeout: 60_000, polling: 100 });
+    await A.page.bringToFront();
+    await A.page.keyboard.press('KeyR');
+    for (const [i, P] of [A, B].entries()) {
+      await P.page.waitForFunction((n) => (globalThis as unknown as { __cvc: { twin: { restarts: number } } }).__cvc.twin.restarts > n, before[i], { timeout: 60_000, polling: 250 });
+      expect((await state(P.page)).twin.restartScore).toEqual([0, 0]);
+      await expect(P.page.locator('#cvc-slab [data-slab-win]')).toBeHidden({ timeout: 30_000 });
+      await expect(P.page.locator('#cvc-slab [data-slab-s0]')).toHaveText('0');
+      await expect(P.page.locator('#cvc-slab [data-slab-s1]')).toHaveText('0');
+    }
+  };
   mkdirSync('artifacts', { recursive: true });
-  let aimShots = false;
-  while (!(await down())) {
-    if (Date.now() > deadline) throw new Error('no takedown in 4 min');
-    const a = await state(A.page), b = await state(B.page);
-    if (a.twin.match?.phase === 'ended') throw new Error(`the match ended before the takedown (${JSON.stringify(a.twin.match)})`);
-    const target = b.local ?? bravoAt;
-    const v = aimAt(a.local!, { x: target.x, y: target.y + 0.75, z: target.z });
-    await pad(A.page, false, true);
-    await turnTo(A.page, v.yaw, v.pitch);
-    if (!aimShots) { // both pets standing about 10 m apart, Alpha aimed down its sights at Bravo
-      aimShots = true;
-      await Promise.all([A.page.screenshot({ path: 'artifacts/net-slab-a-aim.png' }), B.page.screenshot({ path: 'artifacts/net-slab-b-aim.png' })]);
+  let step = ''; // where the try is (logged with a retry)
+  /** One try at the takedown in the live match: the walks, the close and the fight; null if the horn came first. */
+  const tryTakedown = async () => {
+    step = 'the walks to the slab';
+    await Promise.all([
+      walk(B.page, (s) => horn(s) || (!!s.local && box(s.local) < half + 7), 'Bravo toward the slab'),
+      walk(A.page, (s) => horn(s) || (!!s.local && box(s.local) < half + 7), 'Alpha toward the slab'),
+    ]);
+    if (await hornNow()) return null;
+    const [bravoAt, alphaEdge] = await Promise.all([settle(B.page), settle(A.page)]);
+    expect(onSlab(bravoAt.x, bravoAt.y, bravoAt.z)).toBe(false);
+    expect(box(bravoAt)).toBeGreaterThan(half + 1); // with margin
+    step = 'Alpha closing on Bravo';
+    const alphaView = (await state(A.page)).twin.view;
+    await turnTo(A.page, Math.atan2(-(bravoAt.x - alphaEdge.x), -(bravoAt.z - alphaEdge.z)), alphaView.pitch);
+    await walk(A.page, (s) => {
+      const b = s.ents.find((e) => e[0] === idB);
+      return horn(s) || (!!s.local && !!b && Math.hypot(s.local.x - b[2], s.local.z - b[4]) < 10);
+    }, 'Alpha toward Bravo', 60_000);
+    if (await hornNow()) return null;
+    expect(await catsNow()).toBe(0);
+    await B.page.waitForTimeout(2500);
+    expect(await catsNow()).toBe(0);
+    step = 'the fight';
+    const alphaOnSlab = ((l) => onSlab(l.x, l.y, l.z))((await state(A.page)).local!); // logged
+    const fightT0 = Date.now();
+    const deadline = Date.now() + 240_000;
+    let aimShots = false;
+    while (!(await down())) {
+      if (Date.now() > deadline) throw new Error('no takedown in 4 min');
+      const a = await state(A.page), b = await state(B.page);
+      if (horn(a)) { await pad(A.page, false, false); return null; }
+      const target = b.local ?? bravoAt;
+      const v = aimAt(a.local!, { x: target.x, y: target.y + 0.75, z: target.z });
+      await pad(A.page, false, true);
+      await turnTo(A.page, v.yaw, v.pitch);
+      if (!aimShots) { // both pets standing about 10 m apart, Alpha aimed down its sights at Bravo
+        aimShots = true;
+        await Promise.all([A.page.screenshot({ path: 'artifacts/net-slab-a-aim.png' }), B.page.screenshot({ path: 'artifacts/net-slab-b-aim.png' })]);
+      }
+      await pad(A.page, true, true);
+      if (process.env.NET_SLAB_DEBUG) {
+        console.log(`[net-slab] aim: A ${JSON.stringify(a.local)} B ${JSON.stringify(b.local)} dist ${Math.hypot(a.local!.x - target.x, a.local!.z - target.z).toFixed(1)} view ${JSON.stringify(v)}`);
+        await A.page.screenshot({ path: `artifacts/net-slab-aim-${Date.now()}.png` });
+      }
+      const until = Date.now() + 6000; // fire for up to 6 s
+      while (Date.now() < until && !(await down())) await A.page.waitForTimeout(150);
     }
-    await pad(A.page, true, true);
-    if (process.env.NET_SLAB_DEBUG) {
-      console.log(`[net-slab] aim: A ${JSON.stringify(a.local)} B ${JSON.stringify(b.local)} dist ${Math.hypot(a.local!.x - target.x, a.local!.z - target.z).toFixed(1)} view ${JSON.stringify(v)}`);
-      await A.page.screenshot({ path: `artifacts/net-slab-aim-${Date.now()}.png` });
+    await pad(A.page, false, false);
+    return { bravoAt, alphaEdge, alphaOnSlab, fightT0 };
+  };
+  let got: Awaited<ReturnType<typeof tryTakedown>> = null;
+  let retries = 0;
+  for (;;) {
+    if (retries === 0 && DELAY_MS > 0) {
+      console.log(`[net-slab] NET_SLAB_DELAY_MS: waiting ${DELAY_MS / 1000} s before the walks`);
+      await A.page.waitForTimeout(DELAY_MS);
     }
-    const until = Date.now() + 6000; // fire for up to 6 s
-    while (Date.now() < until && !(await down())) await A.page.waitForTimeout(150);
+    const m0 = (await state(A.page)).twin.match!, t0 = Date.now();
+    if ((got = await tryTakedown())) break;
+    const m = (await state(A.page)).twin.match!;
+    const when = `the horn came first at ${m.timeLeft.toFixed(1)} s on the clock, ${m.score[0]} - ${m.score[1]} (in ${step}, ${((Date.now() - t0) / 1000).toFixed(0)} s into a try begun at ${m0.timeLeft.toFixed(1)} s, ${m0.score[0]} - ${m0.score[1]}; ${JSON.stringify(m)})`;
+    expect(m.score[1], `the Cats scored in a try the horn cut short: ${when}`).toBe(0); // Bravo never sets foot on the slab
+    if (retries >= RETRIES) throw new Error(`the match ended before the takedown, ${retries} retries in: ${when}`);
+    console.log(`[net-slab] retry ${++retries}: ${when}`);
+    // a fresh match: R once the authority's clock allows it, then both pages live at 0 - 0 on one tick log
+    await expect.poll(async () => (await state(B.page)).twin.match?.phase, { timeout: 30_000, intervals: [500] }).toBe('ended');
+    await rematch();
+    await expect.poll(async () => {
+      const [a, b] = await Promise.all([state(A.page), state(B.page)]);
+      return [a.twin.match?.phase, a.twin.match?.score, b.twin.match?.phase, b.twin.match?.score];
+    }, { timeout: 30_000, intervals: [250] }).toEqual(['live', [0, 0], 'live', [0, 0]]);
+    await A.page.waitForTimeout(2000);
+    const fresh = await sameLog(A.page, B.page, `retry ${retries}`);
+    expect(fresh.last.slice(2)).toEqual([0, 0, 'live']);
+    console.log(`[net-slab] retry ${retries}: both pages live at 0 - 0, ${fresh.common} common ticks agree (latest ${JSON.stringify(fresh.last)})`);
   }
-  await pad(A.page, false, false);
+  const { bravoAt, alphaEdge, alphaOnSlab, fightT0 } = got;
   // Bravo is down: its death panel shows on its next frames and holds for the 3 s respawn; read it then
   let panel: string[] | null = null;
   await expect.poll(async () => (panel = (await hud(B.page)).death), { timeout: 15_000, intervals: [100] }).not.toBeNull();
@@ -396,24 +461,11 @@ test('SLAB online: two players in one room see each other, share the score and c
   const atEnd = await sameLog(A.page, B.page, 'end');
   expect(atEnd.last[4]).toBe('ended');
   expect(atEnd.last[2] + atEnd.last[3]).toBeGreaterThan(0); // compared on a real result, not 0 - 0
-  // R once the authority's clock is SLAB.rematchDelay past its end tick (the latest snapshot's tick is at or past it)
-  const before = [(await state(A.page)).twin.restarts, (await state(B.page)).twin.restarts];
-  const endTick: number = await A.page.evaluate(() => (globalThis as unknown as { __cvc: { net: { tick: number } } }).__cvc.net.tick);
-  await A.page.waitForFunction((t) => (globalThis as unknown as { __cvc: { net: { tick: number } } }).__cvc.net.tick >= t,
-    endTick + SLAB_CFG.rematchDelay * TICK_HZ + 6, { timeout: 60_000, polling: 100 });
-  await A.page.bringToFront();
-  await A.page.keyboard.press('KeyR');
-  for (const [i, P] of [A, B].entries()) {
-    await P.page.waitForFunction((n) => (globalThis as unknown as { __cvc: { twin: { restarts: number } } }).__cvc.twin.restarts > n, before[i], { timeout: 60_000, polling: 250 });
-    expect((await state(P.page)).twin.restartScore).toEqual([0, 0]);
-    await expect(P.page.locator('#cvc-slab [data-slab-win]')).toBeHidden({ timeout: 30_000 });
-    await expect(P.page.locator('#cvc-slab [data-slab-s0]')).toHaveText('0');
-    await expect(P.page.locator('#cvc-slab [data-slab-s1]')).toHaveText('0');
-  }
+  await rematch(); // R once the authority's clock allows it: both pages from the result to 0 - 0
   expect(A.errors).toEqual([]);
   expect(B.errors).toEqual([]);
   console.log(`[net-slab] Bravo stopped ${(box(bravoAt) - half).toFixed(1)} m off the slab, Alpha ${(box(alphaEdge) - half).toFixed(1)} m; Alpha fired from ${alphaOnSlab ? 'on' : 'off'} it and took Bravo down in ${fightSecs.toFixed(0)} s (${atTakedown.last[1]} s on the clock at the takedown check)`);
-  console.log(`[net-slab] takedown: ${atTakedown.common} common ticks agree (latest ${JSON.stringify(atTakedown.last)}); scoring: ${scoring.common} agree (latest ${JSON.stringify(scoring.last)}); end: ${atEnd.common} agree (latest ${JSON.stringify(atEnd.last)}); R ${((Date.now() - downAt) / 1000).toFixed(0)} s after the takedown rematched both pages from ${atEnd.last[2]}-${atEnd.last[3]}; ids A ${idA} B ${idB}`);
+  console.log(`[net-slab] takedown: ${atTakedown.common} common ticks agree (latest ${JSON.stringify(atTakedown.last)}); scoring: ${scoring.common} agree (latest ${JSON.stringify(scoring.last)}); end: ${atEnd.common} agree (latest ${JSON.stringify(atEnd.last)}); R ${((Date.now() - downAt) / 1000).toFixed(0)} s after the takedown rematched both pages from ${atEnd.last[2]}-${atEnd.last[3]}; ids A ${idA} B ${idB}; ${retries} retr${retries === 1 ? 'y' : 'ies'}`);
   await A.ctx.close();
   await B.ctx.close();
 });
