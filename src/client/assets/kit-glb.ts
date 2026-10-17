@@ -34,7 +34,7 @@
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { PBR_PAINT_TINT, pbr, stylize, toon } from '../style/style-webgpu.js';
+import { COVER_ALL, PBR_COVER_BASE, PBR_PAINT_TINT, pbr, stylize, toon } from '../style/style-webgpu.js';
 import { smoothNormalsByPosition } from '../style/style-utils.js';
 import { worldColor } from '../world/world-palette';
 import { buildPrimMeshes, disposePrimMeshes } from '../world/prim-mesh';
@@ -82,7 +82,43 @@ export interface KitPiece {
   pbrOpts?: Record<string, unknown>;
   /** The toon side's SURFACES preset (stylize remap). */
   toonSurface: string;
+  /**
+   * W15 item 11, the cover read [godot look.gd COVER]: the top of the piece's cover zone in metres over its foot, from
+   * the shared colliders (tests/unit/kit-cover.test.ts): COVER_ALL = the whole piece shields a standing pet; 0 = it
+   * does not (thin or overhead). The pbr() look lights the zone (a self-lit fill and a moonlit sheen); the rest is left
+   * as it was.
+   */
+  cover: number;
+  /**
+   * The piece's mean base-colour luminance [godot look.gd COVER_MEAN; shared data]: the cover read's one gain per piece
+   * (clamp(mean, floor, ceil) / mean). The mean over every texel of the master GLB's baseColor image of Rec.709
+   * luminance, each channel sRGB-decoded, × the baseColorFactor's luminance (kit-cover.test.ts recomputes it).
+   */
+  coverMean: number;
+  /**
+   * The web's per-piece scale on the cover read's fill (a per-build knob, like Godot's per-renderer COVER_SCALE; lead ruling:
+   * only where measured, each in [0.5, 2.5]): KIT_COVER_SCALE.
+   */
+  coverScale?: { fill: number };
 }
+
+/**
+ * The web's per-piece cover scales (W15 item 11; a per-build knob, lead ruling 2026-10-12: Container20 and FloodMast
+ * only, each in [0.5, 2.5]), measured with labs/cover-metric.mjs (docs/qa/w15/COVER.md, Web):
+ * - Container20: its silhouette at 30 m is its near-black frame, which the guard keeps at lo, so its edge needs about
+ *   twice the global fill;
+ * - FloodMast: its mean (0.0661) gives its ballast a x3.3 gain, so at the global fill the cat-base ballast (a dark
+ *   view) went over 40 L*.
+ */
+export const KIT_COVER_SCALE: Readonly<Record<string, { fill: number }>> = {
+  Kit_Lot_Container20_01: { fill: 2.1 }, Kit_Lot_FloodMast_01: { fill: 0.85 },
+};
+
+/** KitPiece.coverMean per piece [godot look.gd COVER_MEAN, copied exactly]. */
+export const KIT_COVER_MEAN: Readonly<Record<string, number>> = {
+  Kit_Lot_BagWall_01: 0.1409, Kit_Lot_Footing_01: 0.1251, Kit_Lot_Pipe_01: 0.1405,
+  Kit_Lot_Container20_01: 0.1312, Kit_Lot_FloodMast_01: 0.0661, Kit_Lot_FloodLamp_01: 0.0597,
+};
 
 /**
  * The Lot's containers as kit placements, from the world data's own colliders: the floor slab gives the base centre
@@ -129,7 +165,8 @@ export const kitLodFor = (d: number): number => kitLodAt(d, KIT_LOD_DIST);
 
 export const KIT_CONTAINER_PIECE: KitPiece = {
   name: KIT_CONTAINER, url: KIT_CONTAINER_URL, lodDist: KIT_LOD_DIST, centreY: CONTAINER.H / 2, paintTint: true,
-  pbrOpts: { paintTint: true }, toonSurface: 'metal',
+  pbrOpts: { paintTint: true }, toonSurface: 'metal', cover: COVER_ALL, coverMean: KIT_COVER_MEAN[KIT_CONTAINER],
+  coverScale: KIT_COVER_SCALE[KIT_CONTAINER],
 };
 
 // ------------------------------------------------------------------------------------------------ bag walls (P-GLB1b)
@@ -143,6 +180,7 @@ export const KIT_BAGWALL_PIECE: KitPiece = {
   name: KIT_BAGWALL, url: KIT_BAGWALL_URL, lodDist: KIT_BAGWALL_LOD_DIST, centreY: 0.55, paintTint: false,
   // cloth: no metal scratches, no rivulets, no puddles; a deeper weave bump
   pbrOpts: { scratch: 0, rivulets: 0, puddle: 0, detailBump: [0.006, 0.001], detailRough: 0.05 }, toonSurface: 'cloth',
+  cover: COVER_ALL, coverMean: KIT_COVER_MEAN[KIT_BAGWALL],
 };
 
 /** A bag wall from its world-data collider ('bags'): base centre, turn, length. */
@@ -427,7 +465,7 @@ export const kitPlacementMatrix = (p: KitPlacement): THREE.Matrix4 => new THREE.
  * draw per pass. `split.prims` (the procedural stand-in) are drawn until the GLB is ready, and for good if it fails.
  * `far`: buildPrimMeshes' far-scenery distance for that stand-in.
  */
-export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; placements: KitPlacement[] }, look: KitLook, opts: { url?: string; far?: number; forceLod?: number | null } = {}): KitPieceView {
+export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; placements: KitPlacement[] }, look: KitLook, opts: { url?: string; far?: number; forceLod?: number | null; floods?: readonly KitCoverFlood[] } = {}): KitPieceView {
   const group = new THREE.Group();
   group.name = `kit_glb_${piece.name}`;
   const placements = split.placements;
@@ -461,6 +499,9 @@ export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; pla
       // pbr(): the paint-mask tint (PBR_PAINT_TINT); the toon side: the whole albedo, as a vertex colour (was instanceColor)
       extras.push({ name: look === 'pbr' ? PBR_PAINT_TINT : 'color', itemSize: 3, values });
     }
+    // W15 item 11: a partly-cover piece (the FloodMast's ballast) measures its cover zone from each placement's foot
+    const partCover = look === 'pbr' && piece.cover > 0 && piece.cover < COVER_ALL;
+    if (partCover) extras.push({ name: PBR_COVER_BASE, itemSize: 1, values: Float32Array.from(placements, (p) => p.y) });
     // the toon side's outline normals: stylize() smooths a geometry's normals by position once; do it on each source LOD
     // (as it did on the instanced LOD meshes), then bake
     if (look === 'stylize') for (const m of src) smoothNormalsByPosition(THREE, m.geometry);
@@ -474,7 +515,7 @@ export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; pla
     const batchGroup = new THREE.Group();
     batchGroup.name = `${piece.name}_instances`;
     batchGroup.add(bm);
-    if (look === 'pbr') bm.material = pbr(material, piece.pbrOpts ?? {});
+    if (look === 'pbr') bm.material = pbr(material, kitPbrOpts(piece, opts.floods));
     // the toon side: toon() keeps the colour map; the ORM/normal maps have no place in the toon model (surface preset)
     else stylize(batchGroup, { remap: (m: THREE.MeshStandardMaterial) => toon({ color: m.color?.getHex() ?? 0xffffff, map: m.map ?? null, surface: piece.toonSurface, vertexColors: piece.paintTint, ...(piece.toonSurface === 'metal' ? { rough: 0.55, metal: 0.2 } : {}) }) });
     drawn = b.select(placements.map(() => force ?? 0));          // drawn before the first update() picks by distance
@@ -527,6 +568,31 @@ export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; pla
   };
 }
 
+/**
+ * The cover read's floods [godot look.gd _cover_floods(), shared data: WorldData.floodlights]: per flood (at most 8)
+ * [lamp x, y, z, aim x, y, z], the aim the unit vector from the lamp to its target (straight down if they coincide).
+ */
+export type KitCoverFlood = [number, number, number, number, number, number];
+export function kitCoverFloods(data: WorldData): KitCoverFlood[] {
+  return (data.floodlights ?? []).slice(0, 8).map(({ pos, target }) => {
+    const d = new THREE.Vector3(target[0] - pos[0], target[1] - pos[1], target[2] - pos[2]);
+    if (d.lengthSq() < 1e-12) d.set(0, -1, 0); else d.normalize();
+    return [pos[0], pos[1], pos[2], d.x, d.y, d.z];
+  });
+}
+
+/**
+ * The pbr() options a kit piece's material is built with: its own overrides plus the cover read's terms (W15 item 11):
+ * its zone, its mean base-colour luminance and the world's floods.
+ */
+export function kitPbrOpts(piece: KitPiece, floods: readonly KitCoverFlood[] = []): Record<string, unknown> {
+  return {
+    ...(piece.pbrOpts ?? {}), coverTop: piece.cover, coverBase: piece.cover > 0 && piece.cover < COVER_ALL,
+    coverMean: piece.coverMean, coverFloods: floods.map((f) => [...f]),
+    ...(piece.coverScale ? { coverScale: { ...piece.coverScale } } : {}),
+  };
+}
+
 /** The Lot's containers from the shared GLB (P-GLB1's entry point, kept): createKitView with KIT_CONTAINER_PIECE. */
 export function createContainerKitView(split: { containers: VisualPrim[]; placements: KitPlacement[] }, look: KitLook, opts: { url?: string; far?: number } = {}): KitView {
   return createKitView(KIT_CONTAINER_PIECE, { prims: split.containers, placements: split.placements }, look, opts);
@@ -555,7 +621,7 @@ const PIPE_COS = Math.cos(Math.PI / PIPE.seg);
 export const KIT_PIPE_PIECE: KitPiece = {
   name: KIT_PIPE, url: kitUrl(KIT_PIPE), lodDist: KIT_PIPE_LOD_DIST, centreY: PIPE.ro * PIPE_COS, paintTint: false,
   // concrete: no metal scratches; a finer, shallower bump
-  pbrOpts: { scratch: 0, detailBump: [0.003, 0.0006] }, toonSurface: 'world',
+  pbrOpts: { scratch: 0, detailBump: [0.003, 0.0006] }, toonSurface: 'world', cover: COVER_ALL, coverMean: KIT_COVER_MEAN[KIT_PIPE],
 };
 
 /** Is `q` a Lot drainage pipe's ring (pipes.ts addPipe() with layout.ts PIPE)? */
@@ -577,7 +643,7 @@ export function splitPipePrims(data: WorldData, prims: readonly VisualPrim[] = d
 export const KIT_FOOTING = 'Kit_Lot_Footing_01';
 export const KIT_FOOTING_PIECE: KitPiece = {
   name: KIT_FOOTING, url: kitUrl(KIT_FOOTING), lodDist: KIT_FOOTING_LOD_DIST, centreY: 0.7, paintTint: false,
-  pbrOpts: { scratch: 0, detailBump: [0.003, 0.0006] }, toonSurface: 'world',
+  pbrOpts: { scratch: 0, detailBump: [0.003, 0.0006] }, toonSurface: 'world', cover: COVER_ALL, coverMean: KIT_COVER_MEAN[KIT_FOOTING],
 };
 
 /** Footing blocks from their 'footing' colliders (base centre, turn), rebuilt with props.ts footing() and matched. */
@@ -594,13 +660,16 @@ export function splitFootingPrims(data: WorldData, prims: readonly VisualPrim[] 
 
 export const KIT_FLOODMAST = 'Kit_Lot_FloodMast_01';
 export const KIT_FLOODLAMP = 'Kit_Lot_FloodLamp_01';
+/** The FloodMast's cover zone: its ballast, the bottom 1.25 m of the mesh (collider top 1.1 m) [godot look.gd COVER]. */
+export const KIT_FLOODMAST_COVER = 1.25;
 export const KIT_FLOODMAST_PIECE: KitPiece = {
   name: KIT_FLOODMAST, url: kitUrl(KIT_FLOODMAST), lodDist: KIT_FLOODMAST_LOD_DIST, centreY: 11, paintTint: false,
-  pbrOpts: {}, toonSurface: 'metal',
+  pbrOpts: {}, toonSurface: 'metal', cover: KIT_FLOODMAST_COVER, coverMean: KIT_COVER_MEAN[KIT_FLOODMAST],
+  coverScale: KIT_COVER_SCALE[KIT_FLOODMAST],
 };
 export const KIT_FLOODLAMP_PIECE: KitPiece = {
   name: KIT_FLOODLAMP, url: kitUrl(KIT_FLOODLAMP), lodDist: KIT_FLOODLAMP_LOD_DIST, centreY: 0.475, paintTint: false,
-  pbrOpts: {}, toonSurface: 'metal',
+  pbrOpts: {}, toonSurface: 'metal', cover: 0, coverMean: KIT_COVER_MEAN[KIT_FLOODLAMP],
 };
 
 /**
@@ -677,6 +746,8 @@ export function splitLotKitPrims(data: WorldData, table: readonly KitEntry[] = L
   const c = at(KIT_CONTAINER), b = at(KIT_BAGWALL);
   return {
     rest, pieces,
+    /** the cover read's floods (kitCoverFloods) */
+    floods: kitCoverFloods(data),
     containers: { containers: c?.matched ?? [], placements: c?.placements ?? [], missing: c?.missing ?? 0 },
     bags: { walls: b?.matched ?? [], placements: b?.placements ?? [], missing: b?.missing ?? 0 },
   };
@@ -699,7 +770,7 @@ export interface LotKitView extends KitView {
  * kitShadowCasters. `forceLod` (default ?kitlod=) pins every instance to one LOD.
  */
 export function createLotKitView(split: ReturnType<typeof splitLotKitPrims>, look: KitLook, opts: { far?: number; forceLod?: number | null } = {}): LotKitView {
-  const o = { far: opts.far, forceLod: opts.forceLod === undefined ? kitForcedLod() : opts.forceLod };
+  const o = { far: opts.far, forceLod: opts.forceLod === undefined ? kitForcedLod() : opts.forceLod, floods: split.floods };
   const views: [KitPiece, KitPieceView][] = split.pieces.filter((p) => p.placements.length).map((p) => [p.piece, createKitView(p.piece, { prims: p.matched, placements: p.placements }, look, o)]);
   const group = new THREE.Group();
   group.name = 'kit_glb';

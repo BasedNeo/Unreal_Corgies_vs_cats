@@ -208,3 +208,191 @@ Suites:
    object if the "mud" tint was meant to stay.
 6. **Ground shader cost:** 8 texture reads per pixel (wear × 2, aggregate × 3, crack, puddle, detail normal) and two
    `fwidth`s. The W12 shader had 4 reads. It was not measured on a GPU.
+
+# G-ATMOS (W15 Sprint D, item 11): the cover read in Godot
+
+The full report is in `docs/qa/w15/COVER.md`. It has the cover table, the rule, the metric, the bar, the read on / off
+numbers, the draw budget and the shots.
+
+**Status (2026-10-12): accepted by the lead as item 11's Godot half (round 3).**
+- **The shared rule changed.** The fill keeps the albedo's texture: one gain per piece, from its mean base-colour
+  luminance, instead of a per-texel luminance band. It fades inside the floods' cones. A wide per-texel guard catches
+  outliers only.
+- **The shared bar:**
+  - a dark view (read off < 35 L\*) may be lifted to 40 L\* at most at 10 and 30 m;
+  - a flood-lit view (≥ 35 off) may be lifted by 5 L\* at most at 10 and 30 m (no Godot view is flood-lit);
+  - at every view and distance, std_on ≥ 0.85 × std_off;
+  - edge ≥ 15 at every distance, 60 m included;
+  - value gap ≥ 10 at 10 and 30 m, reported at 60 m;
+  - draws ×1.000 (lead ruling), gated exactly by the headless draw-item check (`test_look_cover.gd`, read on against
+    off); the rendered `DRAW_GROWTH` 1.05 is only a tolerance.
+- **Result:** both renderers pass all 15 split runs: Compatibility, and Forward+ with the gap gated at 10 / 30 m.
+- **A known item for W17 AIR:** the Forward+ corgi-base gap at 60 m is 7.8, reported, not gated. The darkest cover
+  there is the rim BagWall at 27.6, against a mast pole that Forward+'s volumetric sodium haze lights to 19.8.
+  - The lead's ruling: the gap bar applies at the fight distances (10 and 30 m) like the lift rule. The AIR pass
+    retunes that haze, so no distance-dependent fill is added now; it would be a shared term the AIR pass would undo.
+  - `test_look_cover.gd` follows the ruling. The gap is gated at 10 / 30 m (`GAP_GATED_MAX`, `_gap_verdict()`, with
+    a headless self-check). The Forward+ `corgi base` / `COVER_D=60` run passes and prints the 7.8 as REPORTED.
+- **Forward+ std / C\* against Compatibility's:** report-only (COVER.md §4).
+
+## Files
+
+| Path | Change |
+|---|---|
+| `engines/godot/look/look.gd` | **Cover tables:**<br>- `COVER`: each piece's cover zone;<br>- `COVER_VALUES`: the per-renderer fill, band, guard, sheen, power, sat and pool;<br>- `COVER_MEAN`: each piece's mean base-colour luminance;<br>- `COVER_SCALE`: the per-renderer, per-piece scales.<br>**The read:** `cover_values()`, `cover_scale()`, the toggle (`set_cover_read`, `-- --cover-read off`), and the floods passed to the pool term (`_cover_floods()`). |
+| `engines/godot/look/kit_wet.gdshader` | The cover rule. Its header states the rule with exact constants. |
+| `engines/godot/tests/test_look_cover.gd` | **Headless (CI):**<br>- the shader-rule pins (`SHADER_RULE`);<br>- the band, guard and power pins;<br>- `COVER_MEAN` recomputed from the GLBs;<br>- the per-renderer gate through the helpers with every rendering method;<br>- the floods on every material;<br>- the glow bound;<br>- the draw shape.<br>**Rendered:** edge, gap, the dark-ceiling and lit-lift rule, the no-flattening rule and the draw A/B. Run per place and distance (`COVER_ONLY`, `COVER_D`). |
+| `docs/qa/w15/COVER.md` | Godot half (tw-look writes the web half) |
+| `docs/qa/w15/cover-godot-*.jpg` | 7 montages |
+
+`world.gd` is not touched.
+
+## The rule the web twin mirrors (tw-look)
+
+Everything in this section is shared and must be copied exactly, except what "Per build" lists. Source of truth:
+`kit_wet.gdshader` (the cover block and its header) and `look.gd` (`COVER`, `COVER_VALUES`' band / guard / power,
+`COVER_MEAN`, `COVER_SHEEN_COLOR`, `_cover_floods()`).
+
+### 1. The zone
+
+A fragment is on the cover zone when:
+
+```
+cover = step(ly, cover_top) × step(0.001, cover_top)      ly = the vertex's mesh-local height (m, from the piece's foot)
+```
+
+`cover_top = COVER[piece]`:
+
+| Piece | `cover_top` | Zone |
+|---|---|---|
+| `Kit_Lot_BagWall_01` | `COVER_ALL` = 1.0e6 | the whole piece |
+| `Kit_Lot_Footing_01` | `COVER_ALL` | the whole piece |
+| `Kit_Lot_Pipe_01` | `COVER_ALL` | the whole piece |
+| `Kit_Lot_Container20_01` | `COVER_ALL` | the whole piece |
+| `Kit_Lot_FloodMast_01` | 1.25 | the ballast |
+| `Kit_Lot_FloodLamp_01` | 0 | none |
+
+Off the zone, nothing is added, and nothing is dimmed anywhere: `ALBEDO = wet_alb`.
+
+### 2. On the zone, in this order
+
+All colour maths is linear. `lum(c) = dot(c, (0.2126, 0.7152, 0.0722))`. `step(e, x)` is 1 when x ≥ e, else 0.
+
+```
+graze = (1 − clamp(dot(normalize(N), V), 0, 1)) ^ cover_sheen_power
+        × (1 − smoothstep(0.85, 0.97, Nw.y))
+held0 = wet_alb × clamp(m, cover_floor, cover_ceil) / max(m, 1e-4)          m = COVER_MEAN[piece]
+hl    = lum(held0)
+held1 = mix(vec3(cover_lo), held0 × clamp(hl, cover_lo, cover_cap) / max(hl, 1e-4), step(1e-4, hl))
+held  = max(mix(vec3(lum(held1)), held1, cover_sat), vec3(0))
+pool  = max over the floods i (at most 8) of
+        smoothstep(0.848, 0.961, dot(normalize(P − lamp_i), aim_i))          aim_i = normalize(target_i − lamp_i)
+EMISSION += held × cover_fill × (1 − cover_pool × pool) + moon × cover_sheen × graze
+```
+
+- `N`: the interpolated vertex normal in view space, before the normal map.
+- `V`: the unit vector to the camera.
+- `Nw`: the vertex normal in world space (model matrix, normalised per vertex, interpolated).
+- `P`: the fragment's world position (model matrix × vertex, interpolated).
+- `moon`: `COVER_SHEEN_COLOR` = (0.62, 0.72, 0.95) sRGB, used as linear ≈ (0.3424, 0.4770, 0.8900). Godot's uniform is
+  `source_color`.
+- 0.848 and 0.961 are cos 32° and cos 16°. 32° is the floods' own spot (Godot `spot_angle` 32, web `angle` 0.559).
+- If a flood's target equals its lamp, its aim is straight down.
+
+### 3. Shared constants (copy exactly)
+
+| Term | Value |
+|---|---|
+| band `cover_floor`, `cover_ceil` | 0.22, 0.28 |
+| guard `cover_lo`, `cover_cap` | 0.08, 0.5 |
+| `cover_sheen_power` | 3 |
+| up-face edges | 0.85, 0.97 |
+| cone | 0.848, 0.961 |
+| luminance weights | 0.2126, 0.7152, 0.0722 |
+| near-zero guards | 1e-4 |
+| moon | (0.62, 0.72, 0.95) sRGB |
+| `COVER` | the table in §1 |
+| `COVER_MEAN` | the table in §4 |
+
+The headless Godot test pins the band, the guard and the power on both renderers.
+
+### 4. `COVER_MEAN`: the per-piece mean (shared data)
+
+| Piece | `COVER_MEAN` |
+|---|---|
+| `Kit_Lot_BagWall_01` | 0.1409 |
+| `Kit_Lot_Footing_01` | 0.1251 |
+| `Kit_Lot_Pipe_01` | 0.1405 |
+| `Kit_Lot_Container20_01` | 0.1312 |
+| `Kit_Lot_FloodMast_01` | 0.0661 |
+| `Kit_Lot_FloodLamp_01` | 0.0597 |
+
+How it is computed, from each `assets/masters/<piece>.glb`:
+1. Read the GLB's JSON chunk.
+2. Take `materials[0].pbrMetallicRoughness.baseColorTexture.index` → `textures[i].source` → `images[j]`. On all six
+   this is one embedded 1024 × 1024 PNG, read from `bufferViews[images[j].bufferView]` in the BIN chunk.
+3. Decode it to RGBA8.
+4. For every texel, decode each of R, G and B from sRGB: `c/255 ≤ 0.04045 ? (c/255)/12.92 : ((c/255 + 0.055)/1.055)^2.4`.
+   Ignore alpha.
+5. Take `lum()` of each texel and average over all texels at full resolution: no mips, no resizing.
+6. Multiply by `lum(baseColorFactor.rgb)`, which is 1 on all six.
+
+`test_look_cover.gd` (`_check_means`) recomputes the means from the files and fails if any is off by more than
+0.0005. The web may parse `look.gd`'s `COVER_MEAN` or compute it the same way.
+
+### 5. The pool's data (shared)
+
+`WorldData.floodlights`, each row's `pos` (the lamp) and `target`, from the shared Lot data. Godot reads it through
+`World.floodlights()`, from `engines/godot/data/the_lot.json`. The Lot has 4 floods.
+
+### 6. Per build (not shared)
+
+- **The gains:** `cover_fill`, `cover_sheen`, `cover_sat`, `cover_pool`.
+- **`COVER_SCALE`:** the per-piece multipliers on those gains.
+- **`wet_alb`:** each build's own wet albedo. Godot's is
+  `albedo × mix(1, wet_darken, wet) × mix(1, 0.6, 1 − metallic)`.
+- **The tonemap and the exposure.**
+
+**Godot's gains:**
+
+| Renderer | fill | sheen | sat | pool |
+|---|---|---|---|---|
+| Forward+ / Mobile | 0.38 | 0.5 | 1.0 | 0.2 |
+| Compatibility | 0.5 | 0.35 | 1.0 | 0.2 |
+
+**`COVER_SCALE` (Godot):**
+
+| Renderer | Piece | Scales |
+|---|---|---|
+| Forward+ | Footing | fill ×1.47 |
+| Forward+ | BagWall | fill ×0.97, sheen ×0.6 |
+| Forward+ | FloodMast | fill ×0.84 |
+| Forward+ | Container20 | fill ×1.32, sat ×1.3 |
+| Compatibility | Container20 | fill ×2.2, sheen ×0.5 |
+
+### 7. What changed from round 2, and `kit-cover.test.ts`
+
+- **Gone:**
+  - the per-texel band on `wet_alb`'s luminance (`float al = dot(wet_alb, …)`, `clamp(al, cover_floor, cover_ceil)`);
+  - the near-black window `smoothstep(0.0, 0.04, al)`.
+- **New uniforms:**
+  - `cover_mean`, `cover_lo`, `cover_cap`, `cover_pool`;
+  - `cover_flood_pos[8]`, `cover_flood_aim[8]`, `cover_flood_count`.
+- **New `COVER_VALUES` keys:** `lo`, `cap`, `pool`.
+- **New tables:** `COVER_MEAN`, and `COVER_SCALE`, which is now one row per renderer.
+- **Unchanged names:** `COVER`, `COVER_ALL`, `COVER_VALUES` (`fill`, `floor`, `ceil`, `sheen`, `power`, `sat`),
+  `COVER_SHEEN_COLOR`, `graze`, the up-face mask, and `ALBEDO = wet_alb;`.
+- **`tests/unit/kit-cover.test.ts` passes 11/11 against these files.** tw-look moved its parse to the new terms
+  (the weights in `dot(held, vec3(0.2126, 0.7152, 0.0722))`, no near-black window) and the `lo`, `cap` and `pool` keys.
+
+## Found on the way (not fixed: outside this card)
+
+**Compatibility's dark tones are crushed.** On this look, Compatibility shows emission under about 0.07 as black,
+where Forward+ shows 0.025 as 0.14. The probe is `scratchpad/g-atmos/probe2/emit.gd`. It survives with:
+- the colour correction off;
+- the adjustments off;
+- AgX contrast at 1.25;
+- the linear tonemapper.
+
+So it is in the Compatibility path itself, and that is why "Compatibility is flatter and darker" (Q6 P2-7). Its night
+is much darker than Forward+'s. Worth its own look card: exposure or ambient per renderer, as the cover read now does.

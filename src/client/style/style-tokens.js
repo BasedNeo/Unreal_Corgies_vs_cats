@@ -208,5 +208,24 @@ export const STYLE = {
     color: 0xff9e47, intensity: 132, decay: 0.9, range: 34, angle: 0.559, penumbra: 0.8, poolRadius: 7, poolWithLight: 0,
     poolGain: 0.12, budget: { high: 4, medium: 2, low: 0 },
   },
+  // The cover read (W15 item 11) [godot kit_wet.gdshader's cover block, look.gd COVER / COVER_VALUES / COVER_MEAN; shared
+  // rule, copied: docs/handoff/G-ATMOS.md "The rule the web twin mirrors"]: on a kit piece's cover zone (pieces that
+  // shield a standing pet, from the shared colliders: kit-glb.ts KitPiece.cover) the emission adds
+  //   fill × (1 − pool × the flood cone it stands in) × held, held = the wet albedo × one gain per piece that puts the
+  //   piece's mean base-colour luminance (KitPiece.coverMean, Godot's COVER_MEAN) in [floor, ceil] (texture kept), a
+  //   texel's held luminance kept in [lo, cap] (outliers only), its saturation × sat; the cone: smoothstep(cone[0],
+  //   cone[1], cos of the angle to a flood's axis), the floods' own 32° spot (WorldData.floodlights);
+  //   sheen × the moon's colour (sRGB) × (1 − N·V)^power on the geometric normal × (1 − smoothstep(upFace, world N.y)):
+  //   none on a flat up-facing face (always grazing from eye height).
+  // Off the zone, and the albedo everywhere, nothing changes (no dim). Shared, Godot's (parsed in kit-cover.test.ts):
+  // floor, ceil, lo, cap, power, upFace, cone, the moon. Per build, the web's own: fill, sheen, sat, pool (Godot's are
+  // per renderer, with per-renderer COVER_SCALE rows for Forward+ and Compatibility; the web's own per-piece scale is
+  // kit-glb.ts KIT_COVER_SCALE); measured with labs/cover-metric.mjs against the
+  // lead's bar (docs/qa/w15/COVER.md, Web). Emission stays under the bloom threshold (tests/unit/kit-cover.test.ts).
+  cover: {
+    fill: 0.16, sheen: 0.1, sat: 1.0, pool: 1.0,
+    floor: 0.22, ceil: 0.28, lo: 0.08, cap: 0.5, power: 3.0, upFace: [0.85, 0.97], cone: [0.848, 0.961],
+    sheenColor: [0.62, 0.72, 0.95],
+  },
   maxPixelRatio: 1.5,
 };

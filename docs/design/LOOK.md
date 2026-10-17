@@ -71,6 +71,21 @@ and Godot disagree, Godot wins. The web has used the same look since Wave 13. It
   markers, the kill feed and damage feedback stay. Particles have no ink rim, halftone or toon bands: puffs are soft-edged
   and fade with real alpha, flashes and respawns are soft glows, and nothing pops or overshoots. A dead pet shuts its
   eyes: no X eyes, no tongue (W15 Sprint D).
+- **Cover read (W15 item 11).** Both builds use one rule: `kit_wet.gdshader`'s cover block and `look.gd`'s `COVER` /
+  `COVER_MEAN`, which the web copies in `style-webgpu.js` `coverRead()`. Kit pieces that shield a standing pet get two
+  things on their cover zone, so they read as a light value at night:
+  - **A self-lit fill:** the wet albedo × one gain per piece, which puts its mean base-colour luminance in
+    [0.22, 0.28] and so keeps its texture. The fill fades inside a flood's cone, where the floods already light the
+    piece.
+  - **A cool moonlit grazing sheen,** never on a flat up-facing face.
+
+  Nothing else changes. The mast pole and the lamp heads stay dark lines because nothing lights them. The gains are per
+  build:
+  - Web: fill 0.16, sheen 0.10, pool 1.0, with a per-piece fill scale on Container20 (×2.1) and FloodMast (×0.85).
+  - Godot: its own gains per renderer, and its per-renderer `COVER_SCALE` (Forward+: Footing, BagWall, FloodMast,
+    Container20; Compatibility: Container20).
+
+  Both builds pass the same bar (`docs/qa/w15/COVER.md`).
 
 ## Rules
 - All materials go through the style factory (`toon()`, `toonMaterial()`, `glow()`, `stylize()`, `pbr()`).

@@ -8,6 +8,10 @@ extends Node
 ## - Wet asphalt shader on group `ground`; `kit` and `prims` materials darkened and smoothed in place (maps kept); the
 ##   ditch water (group `water`) a dark, still mirror.
 ## - pet_material(kind, species, team) for G-GAME; cheap rain around the camera.
+## Wave 15 (G-ATMOS): the cover read. The kit pieces that shield a pet (COVER, from the shared colliders; see
+## tests/test_look_cover.gd) carry a faint moonlit self-lit fill and a cool grazing sheen on their cover zone, so at
+## night a player tells them at a glance from the thin and overhead pieces (the mast pole, the lamp heads), which stay
+## matte and dark. Material-only: no mesh, placement, collider or draw is added.
 ## Materials go on after World.built (or at once if the world was already built when the look woke up).
 ## Command line (after `--`): `--look off` (the skeleton look, for A/B), `--look-quality low|medium|high`,
 ## `--look-stats` (prints draws / frame time at the end of a `--shot` run).
@@ -28,6 +32,54 @@ const SKY_SHADER := preload("res://look/night_sky.gdshader")
 const KIT_SHADER := preload("res://look/kit_wet.gdshader")
 const PRIMS_SHADER := preload("res://look/prims_wet.gdshader")
 const LENS_ENERGY := 9.0
+## The cover read (Wave 15). Kit piece -> the top of its cover zone in the mesh's own metres from its foot (COVER_ALL:
+## the whole piece; 0: not cover). From the shared colliders (src/shared/world/lot): bag walls 0.85-1.06 m, footings
+## 1.36 m, pipes 5.7 m and containers 10.4 m stand on the ground and are wider than a pet; the FloodMast's ballast
+## (1.1 m) is cover but its 0.8 m mast above a pet's head is not; the FloodLamp heads hang at 22 m.
+const COVER_ALL := 1.0e6
+const COVER := {"Kit_Lot_BagWall_01": COVER_ALL, "Kit_Lot_Footing_01": COVER_ALL, "Kit_Lot_Pipe_01": COVER_ALL,
+	"Kit_Lot_Container20_01": COVER_ALL, "Kit_Lot_FloodMast_01": 1.25, "Kit_Lot_FloodLamp_01": 0.0}
+## The cover read's values per renderer (see cover_values(); the rule is in kit_wet.gdshader's header, shared with the
+## web twin). fill: a self-lit fill, x the piece's wet albedo scaled by one gain per piece so its mean base-colour
+## luminance (COVER_MEAN) lands in [floor, ceil]: the fill keeps the albedo's texture (W15 Q-check: a per-texel clamp
+## made a flat cream block); lo / cap: a wide per-texel guard, for outliers only (near-black frames and seams, white
+## decals); sat: the fill's saturation; pool: how far the fill fades inside a flood's cone, so the read leaves what the
+## floods already light (every footing and the corgi-rim bag walls stand in one); sheen: a cool grazing sheen at the
+## silhouette (power: only where the surface turns away; never on a flat up-facing face, which eye height always sees
+## at a grazing angle). The non-cover parts (the mast above the ballast, the lamp housings) are left as they were:
+## dark. Emission stays under the glow threshold (1.3, exposed: tests/test_look_cover.gd).
+## The two renderers do not tone the night alike: measured on this look, an emission of 0.1 shows as 0.40 on Forward+
+## but 0.05 on Compatibility, which crushes everything under ~0.07 to black, so the gains are per renderer; the band,
+## the guard, the power, the cone and the moon are shared.
+const COVER_VALUES := {
+	"forward_plus": {"fill": 0.38, "floor": 0.22, "ceil": 0.28, "lo": 0.08, "cap": 0.5, "sheen": 0.5, "power": 3.0, "sat": 1.0, "pool": 0.2},
+	"gl_compatibility": {"fill": 0.5, "floor": 0.22, "ceil": 0.28, "lo": 0.08, "cap": 0.5, "sheen": 0.35, "power": 3.0, "sat": 1.0, "pool": 0.2},
+}
+## Each piece's mean base-colour luminance: the mean over every texel of its GLB's base-colour image (the one material's
+## baseColorTexture, a 1024 x 1024 PNG; alpha ignored) of 0.2126 R + 0.7152 G + 0.0722 B, each channel decoded from
+## sRGB to linear, times the material's baseColorFactor luminance (1 on all six). tests/test_look_cover.gd recomputes it
+## from the GLBs; the web twin reads this table (or recomputes it the same way).
+const COVER_MEAN := {"Kit_Lot_BagWall_01": 0.1409, "Kit_Lot_Footing_01": 0.1251, "Kit_Lot_Pipe_01": 0.1405,
+	"Kit_Lot_Container20_01": 0.1312, "Kit_Lot_FloodMast_01": 0.0661, "Kit_Lot_FloodLamp_01": 0.0597}
+const COVER_SHEEN_COLOR := Color(0.62, 0.72, 0.95)  # the moon's colour
+## Per-piece scales of the fill, the sheen, the fill's saturation and the pool fade, per renderer (1 for every piece not
+## listed; Mobile takes Forward+'s row, as in COVER_VALUES). Measured at the play camera (W15 Q-check bar: a dark view
+## lifted to at most 40 L* at 10 and 30 m, edge >= 15 at 60 m): every footing stands in a flood's cone, so it takes more
+## fill (x 1.47 x the pool's 0.8 = the 0.45 its 60 m edge needs); the bag walls and the ballast are pale and small, so
+## less; the containers' near-black frames are their silhouette, so more fill (and, on Forward+, the paint saturated
+## back where AgX greys it); on Compatibility, which crushes dark emission to black, the container takes more again
+## with half the sheen (the glow bound).
+const COVER_SCALE := {
+	"forward_plus": {
+		"Kit_Lot_Footing_01": {"fill": 1.47, "sheen": 1.0, "sat": 1.0, "pool": 1.0},
+		"Kit_Lot_BagWall_01": {"fill": 0.97, "sheen": 0.6, "sat": 1.0, "pool": 1.0},
+		"Kit_Lot_FloodMast_01": {"fill": 0.84, "sheen": 1.0, "sat": 1.0, "pool": 1.0},
+		"Kit_Lot_Container20_01": {"fill": 1.32, "sheen": 1.0, "sat": 1.3, "pool": 1.0},
+	},
+	"gl_compatibility": {
+		"Kit_Lot_Container20_01": {"fill": 2.2, "sheen": 0.5, "sat": 1.0, "pool": 1.0},
+	},
+}
 
 signal applied
 
@@ -51,6 +103,9 @@ var _streaks: NoiseTexture2D
 var _applied := false
 var _pets: RefCounted
 var _forward_plus := true
+## The cover read on (default) or off (A/B: `-- --cover-read off`, or set_cover_read()).
+var cover_read := true
+var _cover_mats: Array[ShaderMaterial] = []
 ## The rendering method the look builds for. Empty: RenderingServer's, read in _ready (a test may set it first).
 var rendering_method := ""
 var _stats := false
@@ -88,6 +143,7 @@ func _parse_args() -> void:
 			"--look": enabled = v != "off"
 			"--look-quality": quality = {"low": Quality.LOW, "medium": Quality.MEDIUM, "high": Quality.HIGH}.get(v, quality)
 			"--look-stats": _stats = true
+			"--cover-read": cover_read = v != "off"
 			"--frames": _stat_frames = int(v)
 
 
@@ -125,7 +181,7 @@ func apply() -> void:
 	for grp in ["kit", "prims"]:
 		for n in get_tree().get_nodes_in_group(grp):
 			for g in _geometry(n):
-				_wet_instance(g, grp)
+				_wet_instance(g, grp, String(g.name) if grp == "kit" else "")
 	for n in get_tree().get_nodes_in_group("water"):
 		for g in _geometry(n):
 			g.material_override = _water_material()
@@ -141,6 +197,61 @@ func pet_material(kind: String, species: int, team: int) -> Material:
 	if _pets == null:
 		_pets = PetMaterials.new()
 	return _pets.get_material(kind, species, team)
+
+
+## Public: the cover read on or off (an A/B for the cover metric; the default is on).
+func set_cover_read(on: bool) -> void:
+	cover_read = on
+	for sm in _cover_mats:
+		_cover_params(sm)
+
+
+## The cover read's values for a renderer (Mobile tones like Forward+).
+static func cover_values(method: String) -> Dictionary:
+	return COVER_VALUES.get(method, COVER_VALUES.forward_plus)
+
+
+## A piece's fill, sheen and saturation scales on a renderer (COVER_SCALE's row for it; Mobile tones like Forward+).
+static func cover_scale(piece: String, method: String) -> Dictionary:
+	var row: Dictionary = COVER_SCALE.get(method, COVER_SCALE.forward_plus)
+	return row.get(piece, {"fill": 1.0, "sheen": 1.0, "sat": 1.0, "pool": 1.0})
+
+
+func _cover_params(sm: ShaderMaterial) -> void:
+	var on := cover_read and float(sm.get_shader_parameter("cover_top")) > 0.0
+	var v := cover_values(rendering_method)
+	var k: Dictionary = cover_scale(sm.get_meta("look_piece", ""), rendering_method)
+	sm.set_shader_parameter("cover_fill", float(v.fill) * float(k.fill) if on else 0.0)
+	sm.set_shader_parameter("cover_floor", v.floor)
+	sm.set_shader_parameter("cover_ceil", v.ceil)
+	sm.set_shader_parameter("cover_sat", float(v.sat) * float(k.sat))
+	sm.set_shader_parameter("cover_sheen", float(v.sheen) * float(k.sheen) if on else 0.0)
+	sm.set_shader_parameter("cover_sheen_power", v.power)
+	sm.set_shader_parameter("cover_sheen_color", COVER_SHEEN_COLOR)
+	sm.set_shader_parameter("cover_mean", float(COVER_MEAN.get(sm.get_meta("look_piece", ""), 0.25)))
+	sm.set_shader_parameter("cover_lo", v.lo)
+	sm.set_shader_parameter("cover_cap", v.cap)
+	sm.set_shader_parameter("cover_pool", float(v.pool) * float(k.pool))
+	var fl := _cover_floods()
+	sm.set_shader_parameter("cover_flood_pos", fl[0])
+	sm.set_shader_parameter("cover_flood_aim", fl[1])
+	sm.set_shader_parameter("cover_flood_count", (fl[0] as PackedVector3Array).size())
+
+
+## The floods' lamps and unit aims (World.floodlights(): the shared Lot data's pos and target), at most 8, for the
+## cover read's pool term.
+func _cover_floods() -> Array:
+	var pos := PackedVector3Array()
+	var aim := PackedVector3Array()
+	if _world != null and _world.has_method("floodlights"):
+		for e in _world.floodlights():
+			if pos.size() >= 8:
+				break
+			var p: Vector3 = e.get("pos", Vector3.ZERO)
+			var t: Vector3 = e.get("target", p + Vector3.DOWN)
+			pos.append(p)
+			aim.append((t - p).normalized() if not t.is_equal_approx(p) else Vector3.DOWN)
+	return [pos, aim]
 
 
 ## Public quality knob (LOW: no volumetrics / SSR / SSAO / rain / flood shadows; MEDIUM; HIGH). SSR and volumetric fog
@@ -355,9 +466,9 @@ func _water_material() -> StandardMaterial3D:
 	return _water_mat
 
 
-func _wet_instance(g: GeometryInstance3D, grp: String) -> void:
+func _wet_instance(g: GeometryInstance3D, grp: String, piece := "") -> void:
 	if g.material_override != null:
-		g.material_override = _wet_of(g.material_override, grp, _has_uv2(g, 0))
+		g.material_override = _wet_of(g.material_override, grp, _has_uv2(g, 0), piece)
 		return
 	if g is MeshInstance3D and g.mesh != null:
 		var mi := g as MeshInstance3D
@@ -366,13 +477,13 @@ func _wet_instance(g: GeometryInstance3D, grp: String) -> void:
 			if src == null:
 				src = mi.mesh.surface_get_material(i)
 			if src != null:
-				mi.set_surface_override_material(i, _wet_of(src, grp, _has_uv2(g, i)))
+				mi.set_surface_override_material(i, _wet_of(src, grp, _has_uv2(g, i), piece))
 	elif g is MultiMeshInstance3D and g.multimesh != null and g.multimesh.mesh != null:
 		var mesh: Mesh = g.multimesh.mesh  # the piece's own mesh (one per MultiMesh): wetting it in place is safe
 		for i in mesh.get_surface_count():
 			var src := mesh.surface_get_material(i)
 			if src != null:
-				mesh.surface_set_material(i, _wet_of(src, grp, _has_uv2(g, i)))
+				mesh.surface_set_material(i, _wet_of(src, grp, _has_uv2(g, i), piece))
 
 
 func _has_uv2(g: GeometryInstance3D, surface: int) -> bool:
@@ -385,11 +496,12 @@ func _has_uv2(g: GeometryInstance3D, surface: int) -> bool:
 ## A wet version of a material, cached per source (shared sources stay shared, so batching is kept). The maps are
 ## never replaced: textured kit materials move onto kit_wet.gdshader with the same textures (plus the paint mask);
 ## G-WORLD's vertex-coloured prims onto prims_wet.gdshader (its UV2 roughness / metallic); any other BaseMaterial3D
-## is duplicated darker and smoother; a ShaderMaterial is wetted only if it exposes a `wetness` uniform.
-func _wet_of(m: Material, grp := "", uv2 := false) -> Material:
+## is duplicated darker and smoother; a ShaderMaterial is wetted only if it exposes a `wetness` uniform. A kit piece's
+## material also carries its cover zone (COVER) and the cover read.
+func _wet_of(m: Material, grp := "", uv2 := false, piece := "") -> Material:
 	if m == null or m.has_meta("look_wet"):
 		return m
-	var key := [m, grp, uv2]
+	var key := [m, grp, uv2, piece]
 	if _wet.has(key):
 		return _wet[key]
 	var w: Material = m
@@ -415,6 +527,10 @@ func _wet_of(m: Material, grp := "", uv2 := false) -> Material:
 		sm.set_shader_parameter("wet_rough", WET_ROUGH)
 		sm.set_shader_parameter("clearcoat_amount", clearcoat)
 		sm.set_shader_parameter("streak_tex", _streak_tex())
+		sm.set_shader_parameter("cover_top", float(COVER.get(piece, 0.0)))
+		sm.set_meta("look_piece", piece)
+		_cover_params(sm)
+		_cover_mats.append(sm)
 		sm.set_meta("look_src", b)
 		w = sm
 	elif m is BaseMaterial3D and grp == "prims" and uv2 and (m as BaseMaterial3D).vertex_color_use_as_albedo:

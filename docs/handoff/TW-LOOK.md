@@ -423,3 +423,358 @@ below the glows. The order relative to the rain sheet is not tested.
   tests.
 - Mutants: the 10 new ones plus the earlier 16 and 8 were all re-run, and all 34 fail their test. The private copy was
   restored after each one.
+
+## W15 Sprint D, item 11 (web half): the cover read on the twin
+
+The full report is `docs/qa/w15/COVER.md`, section "Web". HEAD 54a0abf plus every working-tree file. Nothing is
+committed.
+
+**Code.**
+- `style-tokens.js`: `STYLE.cover`.
+  - Floor, ceil, power 3 and the moon colour are Godot's. The test parses them from `look.gd` and `kit_wet.gdshader`.
+  - Fill 0.15 and sheen 0.25 are the web's.
+  - No dim. Godot dropped its 0.6, and the twin followed (see "the DO NOT LAND fixes" below).
+- `style-webgpu.js`: `pbr({ coverTop, coverBase })` puts Godot's `kit_wet.gdshader` rule on a kit material.
+  - On the cover zone, the emission gets a fill of the luminance-held albedo plus the moon sheen.
+  - The albedo is left as it was, on and off the zone. The mast pole and the lamp heads stay dark lines because
+    nothing lights them, not because of a dim.
+  - New exports: `STYLE_COVER` (the uniforms: on, fill, sheen), `setCoverRead()`, `coverPeakLuminance()`,
+    `COVER_ALL` and `PBR_COVER_BASE`.
+- `kit-glb.ts`:
+  - `KitPiece.cover`: all for Container20, BagWall, Pipe and Footing; 1.25 m for the FloodMast; 0 for the FloodLamp.
+  - `kitPbrOpts()`.
+  - A `coverBase` per-vertex float on the FloodMast batch, so its zone is measured from each foot.
+
+**Tests.** `tests/unit/kit-cover.test.ts`:
+- **The cover set.** It recomputes Godot's `cover_table` from the shared colliders and the master GLBs' LOD0 bounds,
+  and checks it against `KitPiece.cover`.
+- **The material terms:**
+  - the values;
+  - fill and sheen only on cover pieces, and the emission really reads `STYLE_COVER`;
+  - the mast's zone measured from the foot;
+  - the lamp left as it was (no emission, and the same colour as without the cover read);
+  - the knobs start at the tokens;
+  - the peak emission × exposure stays under the bloom threshold;
+  - the A/B switch adds no material.
+- **Mutants, first pass (7), each of which fails the test.** The verification then found 8 of its 10 surviving. The
+  current list is under "the DO NOT LAND fixes" below.
+  - the mast marked as cover;
+  - the lamps marked as cover;
+  - the fill off (token 0);
+  - the emission over the bloom threshold (fill 8);
+  - the fill dropped from the material while the token stays;
+  - the mast zone not read from the foot;
+  - a non-cover piece that glows.
+
+**Metric.** `labs/cover.html` and `labs/cover-metric.mjs` run Godot's measure on the web: the same samples, play
+camera, turn search, masks, edge read and value gap. The worst cover read goes from 3.0 (15 of 23 views under the bar)
+to 17.2 (none under). The minimum value gap goes from −0.1 to 24.7 (24.4 after the dim drop; see below). Draws are
+identical in every view (2106 → 2106).
+
+**Why not Godot's 0.45 / 0.30?** On the web they also hold the bar (worst 22.0), but they turn the containers and
+pipes near-white (L\* 51–54). I swept nine pairs. 0.15 / 0.25 is the darkest that keeps about 2 L\* of margin
+(L\* 35–40 bodies).
+
+**Shots.** `docs/qa/w15/cover-web-{corgi-base,cat-base,west-lane,east-lane}.jpg` each show three panels: before,
+Godot's values on the web, and the web's values. I looked at each.
+
+**Open.**
+- The concrete pipes lose their moonlit blue: chroma C\* 14 → 5. A fill tinted toward the moon colour would keep it.
+  That is a rule change, so it is Godot's call first.
+- The `stylize` (toon) A/B path of the kit carries no cover read.
+
+### Item 11: the DO NOT LAND fixes (lead, after the verification)
+
+Base: a fresh copy of HEAD 7a671f1 plus every working-tree file. Nothing is committed.
+
+**The dim is gone (lead-approved, to match Godot).**
+- g-atmos dropped Godot's non-cover dim (albedo × 0.6) because it had no measurable effect.
+- On the web it had kept the mast pole 0.1–0.6 L\* darker, against gaps of 24.4 or more.
+- `STYLE.cover.dim` and `STYLE_COVER.dim` are removed. `colorNode` is the plain wet albedo, as Godot's
+  `ALBEDO = wet_alb`. The lab and the metric no longer take a dim.
+- The mast pole and the lamp heads stay dark lines because nothing lights them, not because of a dim.
+
+**Back faces.**
+- In `coverRead`, the graze now uses `normalViewGeometry.mul(faceDirection)`.
+- The kit GLBs are double-sided here (all five cover masters), while Godot culls back faces. Before this fix, a wall
+  seen from inside took the full sheen.
+- No measured view moved by more than 0.1 L\*.
+
+**The test sees the rule.** `tests/unit/kit-cover.test.ts` now does three things.
+- **It parses Godot's shared terms from Godot's files:**
+  - from `look.gd`: the cover table and the FloodMast's 1.25 m zone (`COVER`); floor, ceil and power on every
+    renderer (`COVER_VALUES`); the moon colour (`COVER_SHEEN_COLOR`);
+  - from `kit_wet.gdshader`: the luminance weights and the near-black window.
+  - The fill and sheen gains are per renderer. They are not parsed or compared, because g-atmos is still tuning them.
+- **It walks the FloodMast's built emissive graph** and checks:
+  - a `step` whose first operand is `positionWorld.y − coverBase` and whose second is `KIT_FLOODMAST_COVER`, which
+    equals `look.gd`'s value;
+  - `STYLE_COVER.on`;
+  - the clamp at [floor, ceil];
+  - Godot's luminance weights and near-black window;
+  - the power;
+  - the moon colour (linear);
+  - a `FrontFacingNode` under the power's operand.
+- **It checks that neither side has a dim:**
+  - no dim key in `COVER_VALUES`;
+  - `_cover_params` sets none;
+  - `kit_wet.gdshader` has no dim uniform and keeps `ALBEDO = wet_alb;`;
+  - `STYLE.cover` and `STYLE_COVER` have no dim;
+  - every kit piece's colour graph matches, node for node, the one it has without the cover read.
+
+**Mutants (26).** Each was applied alone to a second fresh copy and run against `kit-cover.test.ts`. Every one fails
+it (exit 1). The script is `scratchpad/i11-mut.py`.
+
+| Mutant | Change | Caught by |
+|---|---|---|
+| M1 | `KIT_FLOODMAST_COVER` 1.25 → 0 | the cover set vs the colliders; no step in the emission |
+| M1b | the step's second operand → 0 | the step's second operand is the zone's top |
+| M1c | the step's operands swapped | the step's first operand is the foot-relative height |
+| M2 | the luminance clamp removed | the clamp [floor, ceil] |
+| M3 | the sheen power → 1 | the sheen power |
+| M4, M4b | (the dim) | **N/A**: the dim was dropped to match Godot. It moved the pole ~0.4 L\* against a gap of ≥ 24.7. D1–D4 and GD1–GD4 replace them |
+| M5 | the emission not masked to the zone | the emission is masked by the cover step; the zone from the foot |
+| M6 | the sheen colour → sodium | the moon's colour (linear) |
+| M7 | the clamp's ceil → 2.8 | the clamp [floor, ceil] |
+| G1 | `look.gd` FloodMast 1.25 → 0.6 | the piece table vs `look.gd` `COVER` |
+| G2 | `look.gd` Forward+ floor / ceil → 0.10 / 0.40 | floor vs `look.gd` |
+| G2b | `look.gd` Forward+ power → 1.5 | power vs `look.gd` |
+| G3 | `look.gd` moon → sodium | `sheenColor` vs `look.gd` |
+| G4 | `kit_wet` luminance weights → Rec.601 | the luminance weights of `kit_wet.gdshader` |
+| G5 | `kit_wet` near-black window 0.04 → 0.1 | the near-black window of `kit_wet.gdshader` |
+| BF | back face: `.mul(faceDirection)` removed | the graze turns its normal to the viewer |
+| T1 | token ceil → 2.8 | ceil vs `look.gd` |
+| T2 | token power → 1 | power vs `look.gd` |
+| T3 | token moon → sodium | `sheenColor` vs `look.gd`; the moon's colour in the graph |
+| D1 | web: the dim back on the zone (`colorNode × mix(0.6, 1, cover)`) | the colour graph vs without the cover read |
+| D2 | web: the dim back on the lamp (`colorNode × 0.6`) | the same, on the FloodLamp |
+| D3 | web: `STYLE.cover.dim` back | `STYLE.cover` has no dim |
+| D4 | web: `STYLE_COVER.dim` back | `STYLE_COVER` has no dim |
+| GD1 | Godot: `"dim": 0.6` back in `COVER_VALUES` | `look.gd` `COVER_VALUES` has no dim |
+| GD2 | Godot: `ALBEDO = wet_alb * mix(0.6, …)` | `kit_wet`: the albedo is the wet albedo |
+| GD3 | Godot: a `cover_dim` uniform back | `kit_wet` has no dim uniform |
+| GD4 | Godot: `_cover_params` sets `cover_dim` | `_cover_params` sets no dim |
+
+**The metric fails under the bar.**
+- `labs/cover-metric.mjs` exits 1 with `COVER FAIL: …` when:
+  - any cover read is under 15;
+  - any value gap is under 10;
+  - the draws grow by more than 5 %;
+  - or no cover view was measured.
+- Otherwise it prints `COVER PASS` and exits 0. The bar is checked on the first config: the built values, by default.
+- I chose the lab script's exit code over a gate e2e. Its CI cost is none: it is a local run, about 35 min on
+  SwiftShader for the 29 views. A gate e2e would add that to every CI run, or cover only a subset.
+- **M5,** run on views 0, 2, 3, 4 and 5 at 30 m: `COVER FAIL`, exit 1. The mast poles light up to L\* 32.7 and 31.3,
+  so the gaps fall to 0.8 and 2.6, both under 10.
+- **Shipped,** the full run: `COVER PASS`, exit 0.
+  - The worst cover read is 17.2, with none of 23 under the bar.
+  - The minimum value gap is **24.4** (corgi base, 60 m). It was 24.7 with the dim.
+  - Draws are 2106 → 2106.
+  - Against the first run, one cover read moved: the west-lane container at 30 m, 19.8 → 19.7.
+- **Shots:** `cover-web-*.jpg` were retaken with the shipped code. I looked at each, and they look the same as the
+  first ones.
+
+**Proof.**
+- `tsc` exit 0, and the labs typecheck (`labs/cover.ts`) exit 0.
+- Boundaries PASS.
+- The 14 touched unit files are green (166 tests): kit-cover, render-budget, lot-atmosphere, the five glb-* files, the
+  four style-* files, cosmetics-looks and net-look.
+
+### Item 11: Godot's final rule mirrored, and the lead's new bar (2026-10-10)
+
+Base: a fresh copy of HEAD 7a671f1 plus every working-tree file, including g-atmos's final `look.gd`,
+`kit_wet.gdshader` and `test_look_cover.gd`. Nothing is committed.
+
+**Mirrored (shared rule, both renderers).**
+- **The up-facing sheen mask.** In `coverRead`, the graze is × (1 − smoothstep(0.85, 0.97, y)), where y is
+  `normalWorldGeometry.mul(faceDirection).y`: the world normal as seen, turned to the viewer on a back face like the
+  graze's own.
+  - The edges are `STYLE.cover.upFace` = [0.85, 0.97]. `kit-cover.test.ts` parses them from `kit_wet.gdshader`, which
+    reads `* (1.0 - smoothstep(0.85, 0.97, wnrm.y))`.
+  - The mask is on the sheen only.
+- **The value gap on the body mean.** `cover-metric.mjs` measures the body as Godot's `_body` does: the mean L\*, its
+  std and the mean C\* over the visible pixels, every 2nd px. The gap is now the darkest cover body against the
+  brightest pole body. Before, it was the edge-inner L\*.
+
+**Not mirrored (lead ruling).** `COVER_SCALE` (per-piece Forward+ gains) and `cover_sat` (1.0 on both renderers). The
+web keeps fill 0.15 and sheen 0.25.
+
+**The test sees the mask.** In the FloodMast's built emissive graph, `kit-cover.test.ts` checks:
+- a `smoothstep` with `kit_wet.gdshader`'s edges;
+- its x is the y of `normalWorldGeometry` × the face direction;
+- `1 −` that smoothstep multiplies the sheen's `pow` (the graze), not the fill.
+
+`STYLE.cover.upFace` must equal the parsed edges, and if Godot drops the mask, the parse fails by name.
+
+**New mutants (8).** All fail `kit-cover.test.ts`. With the earlier 26 that makes 34, all re-run on a fresh copy: 34
+of 34 fail, and the shipped code passes 8 of 8.
+
+| Mutant | Change | Caught by |
+|---|---|---|
+| UP1 | the mask removed (`rim = graze`) | a smoothstep with `kit_wet`'s up-facing edges |
+| UP2 | the edges swapped | the same |
+| UP3 | the view-space normal instead of the world normal | its x is the y of the world normal |
+| UP4 | the world normal not turned to the viewer | the same |
+| UP5 | the mask on the whole emission, the fill included | the mask multiplies the graze (the sheen only) |
+| UP6 | token edges → 0.6 / 0.9 | the edges vs `kit_wet.gdshader` |
+| GUP1 | Godot's edges → 0.6 / 0.9 | the same |
+| GUP2 | Godot's mask removed | `kit_wet.gdshader`: the graze × (1 − smoothstep(lo, hi, wnrm.y)) |
+
+The M6, T2 and D3 anchors moved with the code (`.mul(rim)`, `upFace` after `power`). The mutants themselves are
+unchanged.
+
+**The metric with the mask.** This is the full shipped run on the old bar, reproduced exactly in a second fresh run.
+- The worst edge is **16.3** (the east-lane pipe at 60 m; it was 17.2). None of 23 views is under 15.
+- The minimum body gap is **23.8** (corgi base, 60 m).
+- Draws are 2106 → 2106, equal in every view.
+- The mask lowered only views with flat tops in sight: the bag-wall tops, the pipe crowns, the ballast's top. The
+  west-lane container floor no longer washes out: it shows its own paint (`cover-web-west-lane.jpg`).
+- **M5** still fails it (exit 1): the body gaps fall to −0.3 and 2.9.
+
+**The lead's new bar,** in `cover-metric.mjs`'s exit-code gate:
+- At 10 and 30 m on every cover piece, a dark view (read-off body < 35) stays ≤ 40, and a lit view is lifted by
+  ≤ 5 L\*.
+- Every view keeps ≥ 0.85 of its read-off L\* std.
+- Edge ≥ 15, gap ≥ 10, and draws ×1.000 per view.
+- `REGATE=<results.json>` re-applies the bar to a saved run.
+
+**Under the new bar the shipped web FAILS (exit 1) with 20 failures.** The table is in COVER.md (Web, section 3).
+- **Lifts over 5:** the corgi-base footing (+8.9 at 10 m, +7.2 at 30 m) and the rim bag wall (+12.0 and +12.5). Both
+  stand in the flood pool at L\* 39–41 before any read. The footing at 30 m is 40.9 with the read off, so no web gain
+  can bring it under 40.
+- **Over 40:** the west-lane bag wall at 10 m (40.1).
+- **Flattened (std kept < 0.85), 15 views:**
+  - footing ×0.62 / 0.69 / 0.71;
+  - rim bag wall ×0.53 / 0.44 / 0.69;
+  - cat-base ballast ×0.42 / 0.48;
+  - west-lane bag wall ×0.59 / 0.73 / 0.74;
+  - pipe ×0.56 / 0.51 / 0.53;
+  - slab bag wall ×0.67 at 10 m.
+- **Pass:** the container (×0.91 / 0.95) and the corgi-base ballast (×2.1).
+- **Why the dark views flatten:** a constant emission compresses L\* spread, because L\* is close to a cube root. The
+  pool-aware fill (g-atmos, option c) will cover the lit views. The dark-view flattening needs the shared design to
+  address it too.
+
+**Waiting** for g-atmos's pool-aware fill rule, to mirror as named.
+
+**Proof (this round).**
+- **Checks:** `tsc` exit 0, the labs typecheck exit 0, boundaries PASS, and the 14 touched unit files pass (166
+  tests). All on a fresh copy of HEAD plus the working tree.
+- **Mutants:** 34 of 34 fail `kit-cover.test.ts`.
+- **Metric,** on the old bar: M5 fails (exit 1) and the shipped run passes (exit 0). A second fresh full run gave the
+  same 29 views to the last digit.
+- **The new bar** re-applied to that run (`REGATE`): exit 1, with 20 failures (4 lift, 1 over 40, 15 flattened).
+- **Live end to end** on the corgi footing and the pipe at 10 m: exit 1, with the same numbers.
+- **Shots:** `cover-web-*.jpg` retaken with the mask in. I looked at all four.
+
+### Item 11: the shared rule mirrored (g-atmos's round 3), the scales and the floors (2026-10-12 to 10-17)
+
+Base: a fresh copy of HEAD e6837d5 plus the item 11 working-tree files only; tw-view's UI files are left out. Nothing
+is committed.
+
+**The rule,** copied from `kit_wet.gdshader` and `docs/handoff/G-ATMOS.md` "The rule the web twin mirrors", in
+`style-webgpu.js` `coverRead()`:
+- **The fill:** the wet albedo × the piece's own gain, clamp(COVER_MEAN, 0.22, 0.28) / max(COVER_MEAN, 1e-4).
+  - The old per-texel band is gone.
+  - Each texel's luminance is kept in [0.08, 0.5], and black becomes grey 0.08.
+  - Then × sat.
+  - Then × fill × (1 − pool_k × the strongest flood cone): smoothstep(0.848, 0.961) on the world position.
+- **The sheen:** unchanged (the moon, the graze, the up-face mask), with no pool on it.
+- **The data:**
+  - `KitPiece.coverMean` (`KIT_COVER_MEAN`) is Godot's `COVER_MEAN`.
+  - The floods come from `kitCoverFloods(WorldData)`. `splitLotKitPrims` carries them, and `createLotKitView` passes
+    them to each piece's material.
+- **The knobs:** `STYLE.cover` gains `lo`, `cap`, `cone`, `sat` and `pool`. `STYLE_COVER` gains the `sat` and `pool`
+  uniforms.
+
+**The web's per-build values** (measured; lead rulings of 2026-10-12):
+- **Gains:** fill 0.16, sheen 0.10, sat 1.0, pool 1.0.
+- **Per-piece fill scales** (`KIT_COVER_SCALE`; Container20 and FloodMast only, each in [0.5, 2.5]):
+  - **Container20 ×2.1.** Its 30 m silhouette is its near-black frame, which the guard holds at 0.08. Its edge there
+    is 7.1 at ×1, 14.6 at ×2.0 and 16.2 at ×2.1. At ×2.3 its 10 m body is 39.8.
+  - **FloodMast ×0.85.** Its ×3.3 gain put the cat-base ballast, a dark view, at 40.6. It is 37.7 / 38.9 at ×0.85.
+- **Why each gain:**
+  - **pool 1.0** zeroes the fill in the flood pools: the footing's lift is +0.1, against +7.2 at pool 0.2.
+  - **sheen** sits in a window: 0.15 lifts the rim bag wall +5.1 at 30 m (in the full-run order; at 30 m a view keeps
+    the previous view's LOD, and measured alone it is +2.8), while 0.05 or less drops the pipe's 60 m edge under 15.
+  - **fill 0.16** holds that edge at 15.1, and keeps the west-lane bag wall at 10 m at 39.5.
+
+**The calibrated std floors** (lead ruling: the measured best ratio, holding every other bar, minus 0.05):
+- **east lane Pipe[0]: 0.60.** Its best is 0.65 at the shipped values. Its read-off std is shading across the
+  cylinder, not texture. Every config that held its 60 m edge was at 0.56–0.65.
+- **corgi base BagWall[3] (the lit rim): 0.59.** Its best is 0.64 (30 m) at the shipped values. It keeps 0.85 only at
+  sheen ≈ 0, where the pipe's edge fails.
+- Every other sample keeps 0.85.
+
+**The bar,** in `cover-metric.mjs`'s exit-code gate (`REGATE` / `GATE` re-apply it to a saved run):
+- edge ≥ 15 at every distance;
+- gap ≥ 10 at 10 and 30 m, reported at 60 m;
+- at 10 and 30 m: a dark view (read-off < 35) stays ≤ 40, and a lit view is lifted ≤ 5;
+- std kept ≥ 0.85, or the sample's floor, in every view;
+- draws equal per view.
+
+**Result,** the full 29 views at the shipped values: `COVER PASS`, exit 0.
+- Worst edge 15.1 (the pipe at 60 m).
+- Gap ≥ 24.5 at 10 and 30 m.
+- Dark bodies 26.9–39.5; lit lifts +0.0 to +4.1.
+- Std kept: the pipe ×0.65 and the rim bag wall ×0.64, above their floors; every other sample ×0.97 or more.
+- Draws 2106 → 2106.
+- The full table is in COVER.md (Web, section 3).
+
+**Shots:**
+- `cover-web-{corgi-base,cat-base,west-lane,east-lane}.jpg`, BEFORE | AFTER, retaken.
+- `cover-web-montage.jpg`: every cover view at 30 m, off | on.
+- I looked at each.
+
+**Tests.** `kit-cover.test.ts` has 11 tests.
+- **Shared terms parsed from Godot's files:**
+  - the band, guard, power, up-face edges and cone;
+  - the luminance weights, the 1e-4 guards and the moon;
+  - `COVER`, `COVER_MEAN` and the floods (against Godot's `the_lot.json`).
+- **COVER_MEAN** recomputed from the master GLBs' baseColor images, within 0.0005 of the table.
+- **Every cover piece's built graph:**
+  - its gain, guard and sat;
+  - one cone per flood, on the world position with that flood's lamp and aim;
+  - `1 − pool × cones` on the fill only;
+  - `STYLE_COVER.fill` as is, or × the piece's pinned scale uniform;
+  - moon × sheen × graze, with no pool on it.
+- **The gains and scales pinned, and the glow bound** with the largest scale.
+- The old near-black window and per-texel band asserts are gone, because Godot no longer has them.
+
+**Mutants: 52, each run alone on a fresh copy. All 52 fail `kit-cover.test.ts`, and the shipped code passes 11 of 11.**
+The script is `scratchpad/i11-mut2.py`.
+- **The 31 earlier mutants:** M1/M1b/M1c, M3, M5, M6, BF, T1–T3, G1, G2, G2b, G3, G4, D1–D4, GD1–GD4, UP1–UP6, GUP1,
+  GUP2. Their anchors moved with the code.
+- **New in this round (21):**
+
+| Mutant | Change | Caught by |
+|---|---|---|
+| M7 | the band's ceil → 2.8 (in the per-piece gain) | the gain clamp(COVER_MEAN, floor, ceil) |
+| N1 | the old per-texel band back | the gain clamp(COVER_MEAN, floor, ceil) |
+| N2 | the pool dropped | a cone per flood |
+| N3 | the pool on the sheen too | the fill plus the sheen |
+| N4 | the pool on the view position | cone 0: dot(normalize(positionWorld − lamp), aim) |
+| N5 | BagWall COVER_MEAN +10 % | BagWall vs look.gd COVER_MEAN |
+| N6 | the guard removed | the guard clamp(lum(held), lo, cap) |
+| N7 | a scale on the Footing | the Footing's pbr() options; its scale uniform |
+| N8 | a dark-view lift: fill × 3 in the shader | held × the fill |
+| N9 | sat ignored | mix(vec3(lum(held)), held, STYLE_COVER.sat) |
+| N10 | the token cone swapped | the cone vs kit_wet.gdshader |
+| N11 | a flood aim not normalised | the aim is a unit vector |
+| N12 | the gain divided by the clamped mean | / max(mean, 1e-4) |
+| N13 | the gain removed | the gain clamp(...) |
+| S1 | Container20 scale → 1.0 | the pinned scales; the container's scale uniform |
+| S2 | FloodMast scale → 1.0 | the pinned scales; the mast's scale uniform |
+| S3 | a scale on the Pipe too | the pinned scales (Container20 and FloodMast only) |
+| S4 | the scale ignored in the shader | STYLE_COVER.fill × its scale |
+| GC1 | Godot's cone drifts | the cone vs kit_wet.gdshader |
+| GG1 | Godot's guard drifts | lo vs look.gd |
+| GM1 | Godot's COVER_MEAN drifts | Footing vs look.gd COVER_MEAN |
+
+**Proof:**
+- `tsc` exit 0, the labs typecheck exit 0, boundaries PASS.
+- The 14 touched unit files pass (169 tests).
+- The metric: the full shipped run passes (exit 0). Each other gain set swept fails the gate on something.
+
+**Known limit:** `createKitView` passing the floods to the material has no unit test, because no test builds a kit
+view. A broken pass shows in the metric as lit-view lifts.

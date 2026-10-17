@@ -41,6 +41,7 @@ import {
   mx_noise_float, materialReference, attribute, diffuseColor, roughness, metalness, specularColor, specularColorBlended,
   diffuseContribution, BRDF_Lambert, uniformArray, Loop, materialColor, materialRoughness, cameraWorldMatrix,
   cameraPosition, texture, faceDirection, materialNormal, materialMetalness, positionView, positionGeometry,
+  normalViewGeometry, materialEmissive, step,
 } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { PALETTE, STYLE, SURFACES } from './style-tokens.js';
@@ -554,6 +555,82 @@ export class StylePbrMaterial extends THREE.MeshStandardNodeMaterial {
 
 /** The per-instance paint tint attribute pbr({ paintTint: true }) reads (vec3, linear; an InstancedBufferAttribute). */
 export const PBR_PAINT_TINT = 'paintTint';
+/** The per-vertex base height (m, the placement's foot) a partly-cover kit piece's pbr({ coverTop }) measures from. */
+export const PBR_COVER_BASE = 'coverBase';
+/** pbr({ coverTop }) value for "the whole piece is cover" [godot look.gd COVER_ALL]. */
+export const COVER_ALL = 1e6;
+
+/**
+ * The cover read's live knobs (W15 item 11): `on` [godot look.gd set_cover_read / -- --cover-read off] 1 = on (the
+ * default), 0 = the look without it (an A/B for the cover metric, labs/cover.ts); the per-build gains fill, sheen, sat
+ * and pool start at STYLE.cover (a lab may sweep them). One set for every piece except the web's own per-piece fill
+ * scale, kit-glb.ts KIT_COVER_SCALE (Container20 x2.1, FloodMast x0.85); Godot's COVER_SCALE has a row per renderer
+ * (Forward+ and Compatibility), not mirrored. Material-only: no draw is added.
+ */
+export const STYLE_COVER = {
+  on: uniform(1), fill: uniform(STYLE.cover.fill), sheen: uniform(STYLE.cover.sheen), sat: uniform(STYLE.cover.sat),
+  pool: uniform(STYLE.cover.pool),
+};
+export function setCoverRead(on) { STYLE_COVER.on.value = on ? 1 : 0; }
+
+/** The cover read's brightest emission's luminance (a texel's held luminance at the guard's cap × the fill, outside every
+ *  pool, plus a full sheen), before exposure. Saturation keeps luminance. */
+export function coverPeakLuminance(v = STYLE.cover) {
+  const c = new THREE.Color().setRGB(v.sheenColor[0], v.sheenColor[1], v.sheenColor[2], THREE.SRGBColorSpace);
+  return v.cap * v.fill + v.sheen * (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b);
+}
+
+/** Rec.709 luminance weights [godot kit_wet: dot(held, vec3(0.2126, 0.7152, 0.0722))]. */
+const COVER_LUMA = [0.2126, 0.7152, 0.0722];
+
+/**
+ * The cover read on a kit material (W15 item 11), Godot's kit_wet.gdshader cover block, copied [docs/handoff/G-ATMOS.md
+ * "The rule the web twin mirrors"]. `wetAlb`: the wet albedo node (the web's own); `P.coverTop`: the top of the cover
+ * zone in metres over the placement's foot (COVER_ALL: the whole piece; 0: not cover); `P.coverBase`: read the foot from
+ * the PBR_COVER_BASE attribute (a partly-cover piece: the FloodMast's ballast under its non-cover mast); `P.coverMean`:
+ * the piece's mean base-colour luminance [godot look.gd COVER_MEAN]; `P.coverFloods`: [lamp x, y, z, aim x, y, z] per
+ * flood (at most 8, the aim a unit vector; kit-glb.ts kitCoverFloods); `P.coverScale`: { fill } the web's per-piece
+ * scale on the fill (kit-glb.ts KIT_COVER_SCALE; a uniform in m.userData.coverScale, which a lab may sweep). On the zone:
+ *   held  = wetAlb × clamp(mean, floor, ceil) / mean (one gain per piece, texture kept), each texel's luminance kept in
+ *           [lo, cap] (black → grey lo), saturation × sat
+ *   pool  = max over the floods of smoothstep(cone, dot(normalize(world pos − lamp), aim))
+ *   emission += held × fill × (1 − pool_k × pool) + moon × sheen × (1 − N·V)^power × (1 − smoothstep(upFace, world N.y))
+ * Off it, and the albedo everywhere: as they were [godot: ALBEDO = wet_alb]. STYLE_COVER.on switches it.
+ */
+function coverRead(m, wetAlb, P) {
+  const V = STYLE.cover, top = P.coverTop;
+  const { on, fill, sheen: sheenK, sat, pool: poolK } = STYLE_COVER;
+  m.userData.cover = top;
+  if (top <= 0) return;                                            // non-cover: as it was, no emission
+  const cover = top >= COVER_ALL || !P.coverBase ? float(1) : step(positionWorld.y.sub(attribute(PBR_COVER_BASE, 'float')), float(top));
+  const luma = vec3(...COVER_LUMA);
+  // the fill keeps the albedo's texture: one gain per piece puts its mean in the band (Godot's W15 Q-check: a per-texel
+  // clamp made a flat block)
+  const mean = float(P.coverMean ?? 0.25);
+  const held0 = wetAlb.mul(mean.clamp(V.floor, V.ceil).div(mean.max(1e-4)));
+  const hl = dot(held0, luma);
+  const held1 = mix(vec3(V.lo), held0.mul(hl.clamp(V.lo, V.cap).div(hl.max(1e-4))), step(1e-4, hl));
+  const held = mix(vec3(dot(held1, luma)), held1, sat).max(vec3(0));
+  // the flood pools: the fill fades where a flood's cone already lights the piece
+  let pool = float(0);
+  for (const f of (P.coverFloods ?? []).slice(0, 8)) {              // at most 8 floods, as Godot's uniform arrays
+    pool = pool.max(smoothstep(V.cone[0], V.cone[1], dot(normalize(positionWorld.sub(vec3(f[0], f[1], f[2]))), vec3(f[3], f[4], f[5]))));
+  }
+  // the geometric normal turned to the viewer on a back face (the kit GLBs are double-sided; Godot culls back faces), so
+  // a wall seen from inside grazes like one seen from outside instead of taking the full sheen
+  const graze = float(1).sub(dot(normalViewGeometry.mul(faceDirection), positionViewDirection).clamp(0, 1)).pow(V.power);
+  // no sheen on a flat up-facing face (a floor, a flat top): from eye height it is always at a grazing angle and
+  // would wash out whole [godot kit_wet: × (1 − smoothstep(0.85, 0.97, wnrm.y))]; the world normal as seen, as above
+  const up = normalWorldGeometry.mul(faceDirection).y;
+  const rim = graze.mul(float(1).sub(smoothstep(V.upFace[0], V.upFace[1], up)));
+  const moon = new THREE.Color().setRGB(V.sheenColor[0], V.sheenColor[1], V.sheenColor[2], THREE.SRGBColorSpace);
+  const sheen = vec3(moon.r, moon.g, moon.b).mul(sheenK).mul(rim);
+  // the web's per-piece scale (a per-build knob, only where measured: kit-glb.ts KIT_COVER_SCALE)
+  const scale = P.coverScale ? { fill: uniform(P.coverScale.fill) } : null;
+  if (scale) m.userData.coverScale = scale;
+  const filled = held.mul(scale ? fill.mul(scale.fill) : fill).mul(float(1).sub(poolK.mul(pool)));
+  m.emissiveNode = materialEmissive.add(filled.add(sheen).mul(cover).mul(on));
+}
 
 /**
  * The sanctioned entry point for authored PBR assets (a shared GLB's materials, docs/design/ASSET_PIPELINE.md). Keeps the
@@ -635,6 +712,7 @@ export function pbr(src, opts = {}) {
   c = c.mul(float(1).sub(riv.mul(0.2)));
   c = mix(c, c.mul(STYLE.wet.puddleAlbedo), puddle);
   m.colorNode = c;
+  if (P.coverTop !== undefined) coverRead(m, c, P);
 
   let r = materialRoughness.add(d2.mul(P.detailRough)).sub(scratch.mul(0.15));
   // soaked canvas / concrete stay fairly rough; painted metal gets the water film; top faces smoothest

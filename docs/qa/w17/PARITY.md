@@ -48,18 +48,18 @@ Their cells below are re-cited at this head (a difflib map of `b222e37` to `7a67
   allowed DIFF, logged in G15 only, until the lead rules on porting Godot's far branch (G-BAL did not address it),
   so the DIFF (allowed) total stays 3.
 
-## Totals (95 w15 rows + 23 W17 rows = 118)
-| Status | w15 rows (95) | W17 rows (18) | All |
+## Totals (95 w15 rows + 26 W17 rows = 121)
+| Status | w15 rows (95) | W17 rows (26) | All |
 |---|---|---|---|
 | MATCH | 79 | 12 (K1-K6, T1-T4, N1, H20a) | 91 |
 | GODOT ONLY | 3 (D9, F12, M20) | 1 (K7) | 4 |
 | WEB ONLY | 8 (R2, R4, R9b, R14, F13, H19, R15a, R15b) | 2 (X10, N2) | 10 |
-| DIFF (allowed) | 3 (D2, F10, H11) | 0 | 3 |
-| DEFECT | 2 (X4, B2) | 4 (B3, H1a, H1b, H20b) | 6 |
-| PENDING (lead fills in) | 0 | 2 (P1 sky source, P2 cover read) | 2 |
+| DIFF (allowed) | 3 (D2, F10, H11) | 1 (P2) | 4 |
+| DEFECT | 2 (X4, B2) | 7 (B3, H1a, H1b, H20b, P2a, P2b, P2c) | 9 |
+| PENDING (lead fills in) | 0 | 1 (P1 sky source) | 1 |
 | HUMAN (logged, not done) | 0 | 2 (U1 slab hold, U2 listen) | 2 |
 
-**DEFECT rows (6 now: 6 at the QA pass, 5 after the lead's rulings, 4 after X3 closed by W17 G-REMATCH, 5 after B3 opened by W17 G-BAL, then H1 and H20 closed and H1a, H1b, H20b opened by W17 H1/H20), each with its owner in the DEFECT table below.** K6
+**DEFECT rows (9 now: 6 at the QA pass, 5 after the lead's rulings, 4 after X3 closed by W17 G-REMATCH, 5 after B3 opened by W17 G-BAL, 6 after H1 and H20 closed and H1a, H1b, H20b opened by W17 H1/H20, then P2a, P2b, P2c opened by W17 item 11), each with its owner in the DEFECT table below.** K6
 was ruled MATCH: the card's distance is the zone centre, the measured respawn an end point 1.1-3.3 m off, within
 HUD_CONTRACT rev 5's ±4 m. The rest: H1a (rifle fire timing; lead, then g-game), H1b (sprint while firing; tw-sim via the lead), H20b (paint style;
 lead, then tw-view), X4 (pad X rematches on the web; lead), B2 (2v2 roles NOT MET; g-bot), B3 (bot aim geometry: the twin does not mirror G-BAL; tw-sim). Since w15: H2 is now MATCH (a
@@ -146,11 +146,14 @@ in unit tests, the e2e (both keys) and net-slab (R on two pages).
 | N1 | No ink: no outline pass, no inverted hull, no comic death face | look_scene:54 (`outline_scan` of the real main scene: no outline node, no front-culled grown hull, no outline or ink material); look_contract:109-118 (the scan catches a planted inverted hull, so its PASS means something). Shots `p17-godot-own-fire.jpg` (L, the Corgi from behind at 4 m), `p17-godot-marker-cat.jpg` (S, two Cat bots close by) and `p17-godot-marker-near.jpg` (S, both bots on the slab): no ink line on any pet or prop | no-comic:14 (no comic/ink/outline/crease/halftone export), :18 (no ink in labs), :32 (no `styleInk` or comic pipeline name in src, labs, tests), :46, :57, :66 (the dead face: lids shut, no X eyes, no eye bars): 6 of 6 pass. Shot `p17-web-own-fire.jpg` (L, the Corgi from behind at about 4 m) and `p17-web-death.jpg` (the downed pet): no ink line on any pet or prop | MATCH |
 | N2 | A second client on the slab | n/a: Godot has no online client | net-slab:268 (two browsers on the Node authority, Alpha a Corgi and Bravo a Cat: they see each other, their snapshot logs agree tick for tick at the start, the takedown, while scoring and at the end; the kill feed on both pages, the death panel on Bravo's; Alpha's R rematches both from 60-0). **Last CI pass: run 156** on `7a671f1`, 2.6 min, log: "start: 120 common ticks agree", "takedown: 120 common ticks agree … end: 120 agree … R 45 s after the takedown rematched both pages from 60-0". Not re-run here (the card allows it) | WEB ONLY (Godot has no second client) |
 
-### PENDING (the lead fills these in)
+### Look rows (the lead fills these in: P1 PENDING; P2 filled in at W17 item 11 from the fresh confirm)
 | # | Rule | Godot | Web | Status |
 |---|---|---|---|---|
 | P1 | Sky source: the same sky in both builds | the sky stitch is a later AAA pass | – | PENDING (lead) |
-| P2 | Cover read (item 11): the cover pieces read as cover from each lane and base | item 11 is in flight (uncommitted in the shared tree: `docs/qa/w15/COVER.md`, `tests/unit/kit-cover.test.ts`, `engines/godot/tests/test_look_cover.gd`); not at this head | – | PENDING (lead) |
+| P2 | Cover read (item 11): the cover pieces read as cover from each lane and base | kit_wet.gdshader:93-110: zone :93, graze and up-face mask :97-98, gain :100, guard :101-102, sat :103, pool :105-108, emission :109. look.gd:40 COVER; :54-56 COVER_VALUES (Forward+ fill .38, sheen .5, pool .2; Compatibility .5 / .35 / .2; band .22 / .28, guard .08 / .5, power 3); :62 COVER_MEAN; :64 moon; :72-82 COVER_SCALE (Forward+: Footing, BagWall, FloodMast, Container20; Compatibility: Container20 fill ×2.2, sheen ×.5); :220 _cover_params; :243 _cover_floods. CI, headless test_look_cover.gd: SHADER_RULE :99-114, COVER_MEAN from the GLBs :328-366, per-renderer values, scales and floods :251-287, glow bound :293-303, draw items exact :304-312. PASS, suite 26/26. Rendered, local (15 split runs per renderer, COVER.md §8): Forward+ 15/15, Compatibility 15/15. Dark bodies ≤ 39.8 / ≤ 36.7; std ≥ ×1.00 on cover views; edge minimum 15.9 / 17.9. Gap at 10 / 30 m: corgi base 30.7 / 13.2, cat base 38.8 / 34.7 (Forward+). Corgi base at 60 m on Forward+ is 7.8, REPORTED (W17 AIR). Draws ×1.000 | style-webgpu.js:600-633 coverRead: zone :605, gain :610, guard :611-612, sat :613, pool :615-618, graze :621, up mask :624-625, moon :626, emission :632. style-webgpu.js:570 STYLE_COVER. style-tokens.js:225-229: fill .16, sheen .10, sat 1, pool 1, plus the shared terms. kit-glb.ts:113 KIT_COVER_SCALE (Container20 ×2.1, FloodMast ×0.85, fill only); :118 KIT_COVER_MEAN; :503-504 coverBase; :576 kitCoverFloods; :664 zone 1.25. CI: kit-cover.test.ts 11/11 (shared terms parsed from look.gd and kit_wet.gdshader; COVER_MEAN recomputed to ≤ 0.0005; floods = the_lot.json). Local: labs/cover-metric.mjs (bar :33-43, exit :260-261), 29 views at q=high: COVER PASS; q=med gives identical numbers (verifier). Edge minimum 15.1 (Pipe 60 m); dark ≤ 39.5; lit lift ≤ +4.1; std Pipe ×0.65 (floor 0.60), rim BagWall ×0.64 (floor 0.59); draws 2106 → 2106 | DIFF (allowed: per-build gains and per-piece scales, lead ruling 2026-10-12). The shared rule MATCHES term for term (verifier: 9 Godot-only mutants fail the web test; COVER_MEAN recomputed independently) |
+| P2a | The pool fade where no flood actually lights the piece | n/a. Every Godot quality builds all 4 floods (only shadows vary), and pool_k 0.2 keeps ≥ 80 % of the fill. | The web's flood budget is high 4 / medium 2 / low 0 (style-tokens.js:209), but kitCoverFloods (kit-glb.ts:576) always passes all 4, and pool_k is 1.0. At q=low the pit footings (pool .95–1.0) and rim bag walls 2–6 (.94–.98) lose the fill with no light to replace it: Footing[1] edge 12.2 / 10.7 at 10 / 30 m, COVER FAIL. q=med and q=high PASS. | DEFECT (web only, low tier; not in the gated config; no regression, since read-off is also 12.2). Owner: tw-look |
+| P2b | Flood light on the corgi pit, read off | Forward+ body L* 13.3–17.7, Compatibility 8.5–18.6 (COVER.md §4): a dark view; the cool fill makes the read | 39.0–40.9 at 10 / 30 m (COVER.md Web): a lit view; warm sodium light makes the read, which is why the web's pool_k is 1.0 | DEFECT (pre-existing flood look, predates item 11; Godot wins). Owner: tw-look, in the W17 AAA/AIR pass |
+| P2c | The rule's untested seams | Neither test pins `ly = VERTEX.y` (kit_wet.gdshader:61) or the sheen colour that _cover_params sends (look.gd:231). SHADER_RULE matches substrings, so an extra term after the rule passes headless. | kit-cover parses constants, not the form of the graze or ly. Floods-not-passed and coverBase-0 pass CI; only the local metric catches them. | DEFECT (test gap, minor). Owners: g-atmos and tw-look |
 
 ### HUMAN (logged, not done)
 | # | Step | Status |
@@ -301,6 +304,9 @@ in unit tests, the e2e (both keys) and net-slab (R on two pages).
 | X4 | Pad X rematches on the web only (w15 G4) | lead | `src/client/input/input.ts:113` (pad X sends Reload) and `src/sim/match/index.ts:281-283` (any Reload press rematches); Godot `engines/godot/game/input_setup.gd:20-21` (pad X is `reload` only, Start is `rematch`) | On the web winner screen press pad X: rematch. In Godot pad X does not |
 | B2 | Sprint C item 8 NOT MET: the 2v2 roles stay nominal in play (the APPROACH bot is at its post under 1 % of its alive time) | g-bot (the trap card) | `engines/godot/game/bot.gd` `_steer()` (behaviour unchanged since 7a671f1; the lines moved with G-BAL) | `docs/qa/w15/bot-roles.md:89-93`; docs/qa/w17/BOT-ROLES.md § G-BAL role bar (post in zone + the fix: at its post 16.2 % / 17.9 %) |
 | B3 | The twin's bots aim with species eye and aim heights; Godot's use one geometry since W17 G-BAL. The twin's Cat bot looks 0.4425 m down to a Corgi's aim point and its Corgi bot 0.357 m (Godot: 0.276 m both). At 3 m their idealAim pitches differ by about 0.028 rad (Godot 0.0021) | tw-sim | `src/sim/ai/brain.ts:243`, `:263`, `:660-662`; `src/sim/combat/weapon-system.ts:119` (shared with humans: a bot-only branch on `ownerPid === null`) against `engines/godot/game/bot.gd:21-22` and its `_eye()` / `_aim_point()` | Godot: `run.gd -- --only bot_roles` parts 4-5. Web: no test; compute idealAim for a Corgi bot and a Cat bot 3 m apart on the slab |
+| P2a | Web q=low: the pool term fades the cover fill inside the 4 floods' cones, but the low tier draws no flood light, so the corgi pit's footings get no read (no regression: read off is the same) | tw-look | `src/client/assets/kit-glb.ts:576` (kitCoverFloods passes all 4 floods), `src/client/style/style-tokens.js:209` (flood budget high 4 / medium 2 / low 0), `:226` (pool 1.0) | `Q=low node labs/cover-metric.mjs <out> <url>`: Footing[1] edge 12.2 / 10.7 at 10 / 30 m, COVER FAIL; q=med and q=high PASS on all 29 views |
+| P2b | Flood light on the corgi pit with the read off: Godot's pit is a dark view (body L\* 8.5-18.6), the web's a flood-lit one (39.0-40.9); pre-existing, Godot wins | tw-look (W17 AAA, the AIR pass) | the web's flood pools (`style-tokens.js` floodlight, `kit-glb.ts`) against Godot's floods (`engines/godot/look/look.gd`) | `docs/qa/w15/COVER.md` §4 (Godot) against its Web section, the corgi-base views with the read off |
+| P2c | The cover rule's untested seams: Godot's SHADER_RULE is a substring pin, so an extra emission term after the rule passes headless (mutant V6); `set_cover_read` ignored passes both gates (V7; V6+V7 bleaches BagWall to L\* 47.9 and exits 0); neither test pins `ly = VERTEX.y` or the sheen colour; the glow bound is on luminance while Godot 4.7.2's glow keys on the max channel (Compatibility FloodMast 0.942 against the asserted 0.900; every real peak < 1.3). Web: floods not passed and coverBase 0 pass CI (m4, m5) | g-atmos (Godot), tw-look (web) | `engines/godot/tests/test_look_cover.gd:99-114`, `:293-312`; `tests/unit/kit-cover.test.ts` | the W17 item 11 confirm's mutants V6, V7, m4, m5 (lead scratchpad `verify-i11c`) |
 
 ## Shots (each opened and looked at)
 All in `docs/qa/w17/`. Godot shots are 1280 × 720 renders (gl_compatibility under Xvfb) except the hits grid (906 ×
@@ -362,6 +368,9 @@ Carried from w15 (its numbers), each re-checked at this head, then the new ones.
 | G26 | minor | H1a | Rifle fire timing differs (Godot's banked double tap and in-tick order); no test of either in Godot | lead, then g-game | **new**, open (DEFECT H1a) |
 | G27 | minor | H1b | The web lets a firing pet sprint; Godot does not; no test in either build | tw-sim via the lead | **new**, open (DEFECT H1b) |
 | G28 | note | H20b | Paint style around the X and the crosshair differs (fade, head diamond, arm style, drop-shadow) | lead, then tw-view | **new**, open (DEFECT H20b) |
+| G29 | minor | P2a | Web q=low: the cover read's pool fade has no flood light to replace the fill | tw-look | **new**, open (DEFECT P2a) |
+| G30 | note | P2b | The corgi pit is flood-lit on the web, dark in Godot (read off) | tw-look (AAA AIR) | **new**, open (DEFECT P2b) |
+| G31 | minor | P2c | Cover-rule gate holes (V6, V7, m4, m5, glow bound on luminance) | g-atmos, tw-look | **new**, open (DEFECT P2c) |
 
 ## Method notes
 - **Probes.** Five files in `scratchpad/qa17-probes/`: the two death-card probes (`test_zz_qa17_card.gd`,
