@@ -37,11 +37,13 @@ crease lines, no comic FX, placeholder pets stay labelled PLACEHOLDER, West Yard
      the twin's low tier;
    - **one Gaussian splat** (`.spz`, budget about 300k splats and 15 MB) for the twin's high tier only: a
      view-dependent layer that keeps wet highlights and lamp glints alive as the camera moves. It is trained from
-     multi-view Cycles renders taken from inside the play bounds looking out (OpenSplat runs on CPU here; gsplat if a
-     CUDA GPU is attached). If CPU training cannot finish, the fallback is a surface-sampled splat baked from the
-     same scene, recorded as untrained in its receipt.
+     multi-view Cycles renders taken from inside the play bounds looking out. Measured (docs/design/AAA_PLAN.md):
+     from scratch is 14-24 h on this CPU, so the splat is baked from the scene's surfaces first (labelled UNTRAINED,
+     always shippable) and then fine-tuned for 5k iterations with OpenSplat on CPU (gsplat if a CUDA GPU is attached),
+     which replaces it only if it gains 3 dB. The twin draws it with three 0.186.1's own GaussianSplat (no new
+     dependency), on the high tier with the WebGPU backend only.
    Splats are look-only: they never replace the Lot GLB, collision or the pet meshes, and nothing in the sim reads
-   them. Godot has no splat path, so Godot's backdrop is the GLB; PARITY logs the backdrop as an allowed look DIFF.
+   them. Godot has no shippable splat path (GDGS was tried and rejected), so Godot's backdrop is the GLB; PARITY logs the backdrop as an allowed look DIFF.
 5. **CHAR (parked).** The reference pets need an image-to-3D generator on a GPU (TRELLIS.2, MIT) or a hosted service
    with a real key (Scenario, Meshy, Tripo); no key is invented. When one is available: licence gate first, then
    Blender cleanup (one master armature, quadruped rig, actions `Idle` `Walk` `Plant` `Fire` `Hit` `Death`), one
