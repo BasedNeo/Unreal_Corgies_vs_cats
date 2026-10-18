@@ -133,6 +133,7 @@ async function main(): Promise<void> {
   const views = new EntityViews(ctx.scene, {
     surfaceAt: (x, z, y) => surfaceAt(worldData, x, z, y).y,
     lookOf: (id) => net?.roster.find((r) => r.entity === id)?.look, // N2: players' looks ride the roster
+    mode: () => net?.mode ?? '', // TW-PETS: the welcome's mode; a slab match draws Godot's PLACEHOLDER pets
   });
   views.setBlobShadows(!QUALITY[toQualityTier(q)].shadows); // low tier: no shadow pass → blob shadows
   const vehicles = createVehicleViews(ctx.scene, { world: worldData, camera: ctx.camera });

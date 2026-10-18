@@ -13,6 +13,7 @@ import { applyLook } from '../procgen/cosmetics';
 import { randomLook, wearsVeteranRank, type Look } from '../../shared/content/cosmetics';
 import { squadKitFor } from '../../sim/ai/archetypes';
 import type { Avatar } from './avatar';
+import { createSlabPet } from './slab-pet';
 import { mountedBodyTilt, mountedBodyYaw } from '../vehicles';
 
 interface View {
@@ -32,7 +33,12 @@ export interface EntityViewsOptions {
   surfaceAt?: (x: number, z: number, y: number) => number;
   /** N2: a player's equipped look (from the roster); bots wear randomLook(seed) without asking. */
   lookOf?: (entityId: number) => Look | undefined;
+  /** TW-PETS: the match mode (main.ts: the welcome's); drawsSlabPets(mode) draws Godot's PLACEHOLDER pets. */
+  mode?: () => string;
 }
+
+/** TW-PETS: only a slab match draws Godot's PLACEHOLDER pets (slab-pet.ts); every other mode draws createCharacter. */
+export const drawsSlabPets = (mode: string | undefined): boolean => mode === 'slab';
 
 export class EntityViews {
   readonly group = new THREE.Group();
@@ -76,25 +82,29 @@ export class EntityViews {
     for (const [id, v] of this.views) {
       if (!states.has(id)) { this.group.remove(v.avatar.root); releaseObject3D(v.avatar.root); v.avatar.dispose(); this.views.delete(id); }
     }
+    const slab = drawsSlabPets(this.opts.mode?.()); // TW-PETS
     for (const [id, s] of states) {
       const isBoss = s.kind === EntityKind.Boss;
       if (!isBoss && s.kind !== EntityKind.Player && s.kind !== EntityKind.Bot) continue;
+      const pet = slab && !isBoss; // TW-PETS: Godot's PLACEHOLDER pet per (species, team): no look, kit or rank
       const cls: ClassId = CLASS_IDS[s.cls] ?? 'assault';
       // N2: players wear their roster look, bots their seeded one (deterministic, no network), bosses none
-      const look: Look | null = isBoss ? null
+      const look: Look | null = isBoss || pet ? null
         : this.opts.lookOf?.(id) ?? (s.kind === EntityKind.Bot ? randomLook(s.seed, s.species as SpeciesId) : null);
       // W9 K3: a PvE squad kit from the class + max hp the snapshot already carries (squadKitFor); K2: about 1 bot in 6
       // is a veteran, picked from the seed (the same on every machine, no network); players are veterans when their
       // roster look wears a rank (the level-10 unlock). Each is its own kit, so a change rebuilds the view.
-      const squad = !isBoss && s.kind === EntityKind.Bot ? squadKitFor(cls, s.maxHp) : null;
-      const veteran = !isBoss && !squad && (s.kind === EntityKind.Bot ? isVeteranSeed(s.seed) : wearsVeteranRank(look, s.species as SpeciesId));
-      const key = isBoss ? `boss:${s.cls}:${s.seed}` : `${s.species}:${cls}:${s.team}:${s.seed}${veteran ? ':vet' : ''}${squad ? `:${squad}` : ''}`;
+      const squad = !isBoss && !pet && s.kind === EntityKind.Bot ? squadKitFor(cls, s.maxHp) : null;
+      const veteran = !isBoss && !pet && !squad && (s.kind === EntityKind.Bot ? isVeteranSeed(s.seed) : wearsVeteranRank(look, s.species as SpeciesId));
+      const key = isBoss ? `boss:${s.cls}:${s.seed}` : pet ? `pet:${s.species}:${s.team}`
+        : `${s.species}:${cls}:${s.team}:${s.seed}${veteran ? ':vet' : ''}${squad ? `:${squad}` : ''}`;
       let v = this.views.get(id);
       if (v && v.key !== key) { this.group.remove(v.avatar.root); releaseObject3D(v.avatar.root); v.avatar.dispose(); this.views.delete(id); v = undefined; }
       const lookKey = look ? `${look.coat ?? ''}|${look.neck ?? ''}` : '';
       if (!v) {
         const avatar = isBoss
           ? createBossAvatar({ boss: s.cls, seed: s.seed, team: s.team as TeamId })
+          : pet ? createSlabPet({ species: s.species as SpeciesId, team: s.team as TeamId })
           : createCharacter({ species: s.species as SpeciesId, cls, team: s.team as TeamId, seed: s.seed, isLocal: id === localId, look, veteran, squad });
         this.group.add(avatar.root);
         v = { id, avatar, bodyYaw: s.yaw, lastState: s, key, lookKey };
