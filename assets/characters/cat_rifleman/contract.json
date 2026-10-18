@@ -1,0 +1,1424 @@
+{
+  "schema_version": 2,
+  "contract_version": "0.1.0",
+  "status": "requirements_draft",
+  "asset_id": "cat_rifleman",
+  "delivery_name": "Char_Cat_Rifleman",
+  "role": "hero_body",
+  "role_note": "Third-person playable soldier: the human's own pet (over the shoulder at 2.1-3.2 m) and every Cat Cadre bot (seen to 60 m). A quadruped body, so its skeleton is its own creature family (production-standard.md §3). Docs: docs/design/CHARACTER_PIPELINE.md §1.",
+  "project_role": "Cat Cadre rifleman. Team = species in this game (engines/godot/game/match.gd:371). Bots of either 2v2 role (HOLD, APPROACH; engines/godot/game/bot.gd:42-48) use the same model.",
+  "first_increment": "the variant: the second character of the family, after assets/characters/corgi_rifleman/contract.json; it exposes family setup and reuse cost (benchmark protocol)",
+  "variant_of": {
+    "asset_id": "corgi_rifleman",
+    "relation": "same family (cvc_quadruped, proposed), its own skeleton release: legs 0.53 vs 0.24 m, the tail chain fully weighted, a different stride. Shared: bone names, sockets, clip names, overlay layers. No locomotion is retargeted from the corgi without the gait contact gate."
+  },
+  "family_version": null,
+  "body_family": {
+    "value": "quadruped",
+    "status": "proposed",
+    "owner_decision": "OD-1",
+    "basis": "The PLACEHOLDER (engines/godot/game/pet_model.gd) and its read tests (engines/godot/tests/test_read_pets.gd:70-125), NORTH_STAR.md:49 ('quadruped rig'), the W15 sheets (docs/qa/w15/ART.md). Against: the hero refs (docs/design/refs/*) and MASTER_PLAN.md:133 show an upright biped, as do the twin's K2 kits. An upright ruling is a new contract version: skeleton, clips and contacts all change."
+  },
+  "source_priority": [
+    "existing_verified_studio_asset",
+    "cleared_reusable_base",
+    "authored_or_generated_candidate"
+  ],
+  "coordinates": {
+    "units": "metres",
+    "blender_axes": "No character source exists yet. Kit convention to follow: geometry is built in game axes (x, y up, z front), mapped to Blender axes (x, y back, z up) by kitlib.g2b and back by the glTF exporter's export_yup (tools/assets/kitlib.py:6, :63, :264-268). Record the actual convention when the build script exists.",
+    "delivery_up": "+Y",
+    "delivery_forward": "+Z, the kit and glTF front (docs/design/ASSET_PIPELINE.md:31; a kit rule). Proposed (OD-5). The character rule today is -Z: MASTER_PLAN.md:146 checks that characters face -Z, pet_model.gd:17 builds facing -Z and pet.gd:4 faces -Z at yaw 0. If +Z is kept, each engine's adapter turns the imported scene 180 degrees about +Y on a child of Model, never on Model itself: pet.gd:185 overwrites model.rotation.y and pet.gd:147 overwrites model.position.y every frame.",
+    "pivot": "Feet: the origin on the ground on the capsule axis (engines/godot/game/pet.gd:4). Ground contact within 0.02 m of y = 0 (the project's feet rule, tools/char-audit.mjs:65)."
+  },
+  "identity": {
+    "reference_hashes": [
+      {
+        "path": "docs/design/refs/hardened-corgi-hero.jpg",
+        "sha256": "a1dd5ec5ae695221d7dcc6602f0b293692e9f630fa5c5d7aec5086dc07afcb94",
+        "governs": "materials, light, grooming and wear only (proposed, OD-11)"
+      },
+      {
+        "path": "docs/design/refs/hardened-corgi-sheet.webp",
+        "sha256": "4bae8fe2ca5955acd8054cde93860c8578810359db142de17b772e0979afcbcc",
+        "governs": "materials, light, grooming and wear only (proposed, OD-11)"
+      },
+      {
+        "path": "engines/godot/game/pet_model.gd",
+        "sha256": "6a8a297e3bde76f26b741ad791241fd276c72ce6ba8c8bf5821d1af58451492e",
+        "governs": "form, proportions and paint layout (the last shipped asset: the W14 PLACEHOLDER, READ3 PASS, pre-standard; not production_accepted)"
+      },
+      {
+        "path": "assets/incoming/w15-char-refs/condition/rig.json",
+        "sha256": "ad3bb26efade6c334ff9f5a087cb7a1a449a2107f265b8b82104a7d197bd238d",
+        "governs": "proportion landmarks"
+      },
+      {
+        "path": "assets/incoming/w15-char-refs/cat/cat_master_threequarter.jpg",
+        "sha256": "1cf19ec913d63e118ba7aee5f27cac3c784f32af8c7e678933568b891920ecfb",
+        "governs": "PATH A main view (docs/qa/w15/ART.md:8): a possible multi-view input; rights UNVERIFIED and upload needs the owner (OD-7)"
+      },
+      {
+        "path": "assets/incoming/w15-char-refs/cat/cat_front.jpg",
+        "sha256": "39e0376f7204460898820fc37b3e702ee3dc80b5d16c7081a75a4641501c25f4",
+        "governs": "PATH A main view; as above"
+      },
+      {
+        "path": "assets/incoming/w15-char-refs/cat/cat_side_right.jpg",
+        "sha256": "d7493e8d9f4133449272a0e740d4558617f15c1f063e60036526e2ea80282685",
+        "governs": "PATH A main view; as above"
+      },
+      {
+        "path": "assets/incoming/w15-char-refs/cat/cat_back.jpg",
+        "sha256": "28173cf3d22e688c955761bdeeb03824ba7f6b48709f17131324b27a6eb5eee8",
+        "governs": "PATH A main view; as above. The four views are framed separately, not same-scale orthographics."
+      }
+    ],
+    "style_profile": "Stylised-realistic: photoreal materials (wet fur, chipped painted plates, gunmetal) on the placeholder's exaggerated species proportions. No ink, no crease lines, no comic FX (docs/design/NORTH_STAR.md:5-6).",
+    "proportion_landmarks": {
+      "source": "assets/incoming/w15-char-refs/condition/rig.json (pets.cat), from pet_model.gd:122-151",
+      "body_length_m": 0.856,
+      "back_height_m": 0.77,
+      "leg_length_m": 0.53,
+      "head_top_m": 1.065,
+      "head_height_m": 0.27,
+      "ear_height_m": 0.21,
+      "ear_tip_m": 1.196,
+      "tail_top_m": 1.504,
+      "bounds_pet_only_m": {
+        "min": [
+          -0.25,
+          0,
+          -0.658
+        ],
+        "max": [
+          0.25,
+          1.504,
+          0.664
+        ]
+      },
+      "rules": [
+        "body length / back height <= 1.3 (engines/godot/tests/test_read_pets.gd:76)",
+        "legs >= 0.45 m and >= 1.8 x the corgi legs (test_read_pets.gd:83)",
+        "a long tail held up in an S, the tallest part of the silhouette (test_read_pets.gd:97-120)",
+        "side view: tail tip about 1.88 x VB, ear tip about 1.50 x VB; front and back: tail/ear about 1.26 (the W15 metrics, docs/qa/w15/ART.md:94-102, :114-120; +-0.05 by eye)",
+        "a closed mouth: no mouth or tongue part (test_read_pets.gd:57)"
+      ],
+      "part_map": {
+        "rule": "CHAR-READ measures each part on the skinned, imported master in the contract camera: a vertex belongs to the part of its dominant bone; parts that are not bones are named by the glTF mesh extras \"cvc_part\" of the primitives that carry them. These are the parts that engines/godot/tests/test_read_pets.gd:64-120 (_silhouettes) reads from the PLACEHOLDER layout.",
+        "body": [
+          "pelvis",
+          "spine_01",
+          "spine_02",
+          "spine_03",
+          "chest"
+        ],
+        "legs": [
+          "scapula_L",
+          "upperarm_L",
+          "forearm_L",
+          "metacarpus_L",
+          "toe_front_L",
+          "scapula_R",
+          "upperarm_R",
+          "forearm_R",
+          "metacarpus_R",
+          "toe_front_R",
+          "thigh_L",
+          "shin_L",
+          "metatarsus_L",
+          "toe_hind_L",
+          "thigh_R",
+          "shin_R",
+          "metatarsus_R",
+          "toe_hind_R"
+        ],
+        "head": [
+          "neck_02",
+          "head",
+          "jaw"
+        ],
+        "ear_l": [
+          "ear_L_01",
+          "ear_L_02"
+        ],
+        "ear_r": [
+          "ear_R_01",
+          "ear_R_02"
+        ],
+        "tail": [
+          "tail_01",
+          "tail_02",
+          "tail_03",
+          "tail_04",
+          "tail_05",
+          "tail_06"
+        ],
+        "band": "extras cvc_part=band",
+        "collar": "extras cvc_part=collar",
+        "trim": "extras cvc_part=trim",
+        "panel": "extras cvc_part=panel",
+        "bib": "extras cvc_part=bib"
+      }
+    },
+    "allowed_variant_dimensions": [
+      "team tint through the paint mask (baseColor alpha, 1 + 254 x mask; docs/design/ASSET_PIPELINE.md:39-41): Cat Cadre c9344a",
+      "LOD 0-3 (budgets.triangles_per_lod)"
+    ]
+  },
+  "camera": {
+    "engine_profile": {
+      "engine": "Godot",
+      "version": "4.7.2",
+      "renderers": [
+        "forward_plus",
+        "gl_compatibility"
+      ],
+      "configs": [
+        "fplus",
+        "compat"
+      ],
+      "base_viewport": [
+        1280,
+        720
+      ],
+      "viewport_note": "engines/godot/project.godot:15-16. Forward+ is the project default; Compatibility = --rendering-method gl_compatibility.",
+      "receiver_note": "The twin (three 0.186.1; WebGPU high and WebGL2, configs webgpu and webgl) is a receiver with its own gate (engine_parity_twin). It is not part of this profile and never holds production acceptance back."
+    },
+    "horizontal_fov_deg": 104.5,
+    "horizontal_fov_note": "Computed, not set: Godot's fov is vertical (Camera3D keep height). 2*atan(tan(36 deg)*16/9) = 104.5 at the play fov 72; 79.3 at the aim fov 50.",
+    "vertical_fov_deg": {
+      "play": 72,
+      "aim": 50,
+      "source": "engines/godot/game/player.gd:12-13"
+    },
+    "aspect_ratio": "16:9",
+    "view_distances_m": [
+      2.1,
+      3.2,
+      10,
+      30,
+      60
+    ],
+    "view_distance_notes": {
+      "10": "play view (CHARACTER_PIPELINE.md §3, V10, proposed)",
+      "30": "the 30 m team and species read (tools/aaa-30m.mjs; docs/qa/w17/AAA-30M.md)",
+      "60": "horizon lineup (CHARACTER_PIPELINE.md §3, V60, proposed)",
+      "2.1": "own pet, aim arm (player.gd:15)",
+      "3.2": "own pet, play arm (player.gd:14)"
+    },
+    "near_plane_m": 0.05,
+    "near_plane_source": "engines/godot/game/player.gd:47",
+    "locked_comparison_poses": [
+      "V30 face, side, horizon: tools/aaa-30m.mjs lineup (bots 30 m from the play camera)",
+      "V60: 60 m horizon lineup, 720p and 1440p (proposed)",
+      "V10: 10 m play view, in a flood pool and in moon/ambient light only (proposed)",
+      "V3: own pet over the shoulder, arm 3.2 m fov 72 and aim arm 2.1 m fov 50, behind and 3/4 (player.gd:12-15)",
+      "VH: hero bust, low 3/4 front-left, about 1.5 m, fov 30-40, framed like docs/design/refs/hardened-corgi-hero.jpg (proposed)"
+    ],
+    "lighting_and_exposure_profile": {
+      "path": "engines/godot/look/look.gd",
+      "rev": "f7f45b5",
+      "sha256": "fac9aaf3b6e70ed8d93cf9714e5106d95bd032ba42be2c4a182e4273fe488bc3",
+      "symbols": {
+        "SODIUM": [
+          1,
+          0.62,
+          0.28
+        ],
+        "tonemap_mode": "TONE_MAPPER_AGX",
+        "tonemap_exposure": 1.5,
+        "glow_hdr_threshold": 1.3
+      },
+      "placement": "V30 bots stand in the Corgi pit's flood pool (tools/aaa-30m.mjs header)",
+      "cite_note": "Cited by symbol: SODIUM, tonemap_mode, tonemap_exposure and glow_hdr_threshold are look.gd:20, :296, :297 and :301 at f7f45b5 (:21, :319 and :323 for three of them in the AAA lane's working tree). A look.gd change is a new lighting profile and a new contract version. Read the exposure from the environment, not a constant: test_read_pets.gd:19 still assumes 1.25 (a separate defect for the lead)."
+    }
+  },
+  "rig": {
+    "skeleton_contract_version": null,
+    "skeleton_contract_proposal": "cvc_quadruped v1: one family (shared bone names, hierarchy, sockets, clip names), two immutable species releases (corgi, cat) with their own bind proportions. Proposed; blocked on OD-1.",
+    "bind_pose": "Standing on four paws, back level, head forward, tail at rest; origin at the feet; rest transforms recorded in the skeleton release (proposed).",
+    "required_bones": [
+      "root",
+      "pelvis",
+      "spine_01",
+      "spine_02",
+      "spine_03",
+      "chest",
+      "neck_01",
+      "neck_02",
+      "head",
+      "jaw",
+      "ear_L_01",
+      "ear_L_02",
+      "ear_R_01",
+      "ear_R_02",
+      "scapula_L",
+      "upperarm_L",
+      "forearm_L",
+      "metacarpus_L",
+      "toe_front_L",
+      "scapula_R",
+      "upperarm_R",
+      "forearm_R",
+      "metacarpus_R",
+      "toe_front_R",
+      "thigh_L",
+      "shin_L",
+      "metatarsus_L",
+      "toe_hind_L",
+      "thigh_R",
+      "shin_R",
+      "metatarsus_R",
+      "toe_hind_R",
+      "tail_01",
+      "tail_02",
+      "tail_03",
+      "tail_04",
+      "tail_05",
+      "tail_06",
+      "socket_rifle"
+    ],
+    "required_bones_note": "Proposed (rig research, 2026-10-18). Names use [A-Za-z0-9_] only: three's GLTFLoader strips '.' from bone names (PropertyBinding.sanitizeNodeName), Godot keeps it. The cat weights all six tail bones (the S-tail, 7 points in pet_model.gd:122-151). root is deform-flagged with zero weight. One skin per skeleton.",
+    "joint_limit_source": null,
+    "max_skin_influences": 4,
+    "max_skin_influences_basis": "three 0.186.1 GLTFLoader reads only JOINTS_0/WEIGHTS_0 and skins with 4 (GLTFLoader.js:2277-2288; nodes/accessors/Skinning.js); Godot 4.7.2 imports 8 (gltf_document.cpp:1634-1728). One shared GLB must target the lower limit.",
+    "weight_sum_tolerance": null,
+    "weight_sum_note": "glTF 2.0 requires normalised weights; the tolerance is set with the validator card (CHAR-VAL), checked at 4 influences in both engines.",
+    "required_morph_targets": [],
+    "attachment_nodes": [
+      {
+        "name": "socket_rifle",
+        "parent": "chest",
+        "kind": "bone, deform-flagged with zero weight so a deform-only export keeps it",
+        "rest_position_m": [
+          0.22,
+          0.76,
+          -0.22
+        ],
+        "rest_position_space": "runtime model space, yaw 0 faces -Z (engines/godot/game/pet.gd:91)",
+        "engines": "Godot: BoneAttachment3D in copy mode (not override) holding the existing Rifle node, which keeps its runtime aim pitch. Twin: an Object3D on the bone.",
+        "rest_position_glb_m": [
+          -0.22,
+          0.76,
+          0.22
+        ],
+        "rest_position_glb_space": "delivery space (+Z front, OD-5): the runtime position turned 180 degrees about +Y. CHAR-VAL checks this one in the GLB."
+      },
+      {
+        "name": "Muzzle",
+        "parent": "the rifle model",
+        "kind": "Marker3D (Godot) / empty node",
+        "position_m": [
+          0,
+          0.015,
+          -0.47
+        ],
+        "source": "engines/godot/game/pet_model.gd:70-73",
+        "use": "visual only: flash, light, tracer start (engines/godot/game/rifle.gd:28-41)"
+      }
+    ],
+    "root_motion_authority": "existing_project_controller_contract: pet.gd's CharacterBody3D in Godot and src/sim in the twin. Every clip is in place; stride length ships as clip metadata so playback rate follows speed."
+  },
+  "budgets": {
+    "triangles_per_lod": {
+      "value": [
+        20000,
+        8000,
+        3000,
+        1000
+      ],
+      "status": "proposed",
+      "unit": "triangles per pet with its armour, LOD0..LOD3 (rifle separate)",
+      "basis": "LOD0: docs/design/NORTH_STAR.md:50 (a cited target, not a measurement). LOD2: the PLACEHOLDER level that passed the 30 m read (corgi 3,356 probed in Godot, docs/handoff/R-PETS.md:69; a lane claim, not re-measured). LOD1 and LOD3: designer proposal, no measurement. Conflicts with MASTER_PLAN.md:146 (hero <= 6k, NPC <= 3.5k): the owner reconciles.",
+      "owner_decision": "OD-3"
+    },
+    "fur_card_layer_triangles_lod0": {
+      "value": 8000,
+      "status": "proposed",
+      "unit": "triangles, own pet only",
+      "basis": "designer proposal, no measurement. Cards and fins only at ears, ruff and tail, only at LOD0 (budgets.lod_switch_projected_height_px).",
+      "owner_decision": "OD-3"
+    },
+    "rifle_triangles_per_lod": {
+      "value": [
+        4000,
+        1000,
+        200
+      ],
+      "status": "proposed",
+      "unit": "triangles, LOD0..LOD2; merged into the body at LOD3",
+      "basis": "designer proposal, no measurement. The PLACEHOLDER rifle is 2 primitive surfaces (pet_model.gd:54-74).",
+      "owner_decision": "OD-3"
+    },
+    "deform_bones_per_lod": {
+      "value": [
+        37,
+        30,
+        20,
+        12
+      ],
+      "status": "proposed",
+      "unit": "deform bones carrying weight, LOD0..LOD3",
+      "basis": "LOD0 = the proposed skeleton's weighted bones: rig.required_bones lists 39, minus root and socket_rifle (deform-flagged, zero weight) = 37 (the cat; the corgi weights 33, tail_03-06 unweighted). LOD1-3: designer proposal, no measurement. The twin K2 family's 48 (MASTER_PLAN.md:146) is a different family.",
+      "owner_decision": "OD-3"
+    },
+    "material_slots": {
+      "value": [
+        4,
+        2,
+        1,
+        1
+      ],
+      "status": "proposed",
+      "unit": "body material slots per LOD (the rifle has its own)",
+      "basis": "designer proposal, no measurement. The PLACEHOLDER body has 5 surfaces (pet_model.gd:18).",
+      "owner_decision": "OD-3"
+    },
+    "render_primitives": {
+      "value": [
+        5,
+        3,
+        2,
+        1
+      ],
+      "status": "proposed",
+      "unit": "draws per pass per pet with the rifle, LOD0..LOD3",
+      "basis": "designer proposal, no measurement (body slots + 1 rifle; LOD3 merged). Ceiling from the existing read test: at most 8 draws per pet per pass (engines/godot/tests/test_read_pets.gd:20); the PLACEHOLDER uses 7 (pet_model.gd:18-19).",
+      "owner_decision": "OD-3"
+    },
+    "texture_px": {
+      "value": {
+        "body": 2048,
+        "gear": 2048,
+        "rifle": 1024
+      },
+      "status": "proposed",
+      "basis": "NORTH_STAR.md:50 (2K); docs/design/ASSET_PIPELINE.md:38 (2048 squared for heroes); one set per species serves every team through the paint mask",
+      "owner_decision": "OD-3"
+    },
+    "resident_texture_memory_mib": {
+      "value": {
+        "godot_desktop_per_species_with_rifle": 30,
+        "godot_desktop_cast": 57,
+        "twin_webp_1k_cast": 80
+      },
+      "status": "proposed",
+      "basis": "Computed, not measured. Godot: a VRAM-compressed 2K set = BC3 baseColor+mask (4 MiB) + BC1 ORM (2 MiB) + RGTC normal (4 MiB), x 4/3 for mips = 13.3 MiB (formats per the Godot 4.7 image import docs); per species 2 sets + the shared 1K rifle set (3.3 MiB) = 30; cast 4 x 13.3 + 3.3 = 57. Twin: the existing WebP path (tools/assets/make-web-variant.mjs:31-32) decodes to RGBA8: a 1K set = 3 x 1024^2 x 4 B x 4/3 = 16 MiB; cast 5 sets = 80. KTX2 is not built (no encoder in make-web-variant, no KTX2Loader in src/client): a lead card (CHAR-KTX2) could lower the twin figure. 2K WebP (64 MiB per set) is rejected.",
+      "owner_decision": "OD-3"
+    },
+    "web_variant_bytes": {
+      "value": null,
+      "status": "proposed",
+      "basis": "Kit pieces are capped at 600 KB (ASSET_PIPELINE.md:46). MASTER_PLAN.md:304 caps the initial download at 5 MB gzipped: character textures load after match start, or the owner supersedes that budget.",
+      "owner_decision": "OD-3"
+    },
+    "simultaneous_character_test_counts": {
+      "value": [
+        1,
+        4,
+        8,
+        24
+      ],
+      "status": "proposed",
+      "basis": "1v1 and 2v2 are the product; 8 = a 4v4 stress; 24 = MASTER_PLAN.md:302 (fully animated characters on screen)",
+      "owner_decision": "OD-3"
+    },
+    "incremental_p95_frame_time_budget_ms": {
+      "value": null,
+      "status": "proposed",
+      "basis": "The standard's measure: the increment of a candidate over a live PLACEHOLDER baseline, same session, scene, camera path, resolution and hardware (production-standard.md §8). MASTER_PLAN.md:299 gives characters 1.5 ms GPU as a share of the frame, which is a different measure. Measurable only on a real GPU by a human (AAA_PLAN.md:62).",
+      "owner_decision": "OD-3"
+    },
+    "target_hardware": {
+      "value": null,
+      "status": "proposed",
+      "basis": "'the reference desktop' (docs/design/AAA_PLAN.md:62) has no recorded specification",
+      "owner_decision": "OD-3"
+    },
+    "target_resolution": {
+      "value": [
+        1280,
+        720
+      ],
+      "status": "proposed",
+      "basis": "the Godot base viewport (engines/godot/project.godot:15-16) and the 30 m check's render size; LOD switches are also checked at 1440p",
+      "owner_decision": "OD-3"
+    },
+    "cpu_animation_update_ms_per_character": {
+      "value": null,
+      "status": "proposed",
+      "unit": "ms per character per frame, p95, at each simultaneous count",
+      "basis": "production-standard.md §8 (CPU animation updates): AnimationTree, SpringBoneSimulator3D and Look/IK modifiers in Godot; the twin's AnimationMixer, springs and IK. Measured live with a named instrument (Godot Performance monitors or the profiler), else not recorded.",
+      "owner_decision": "OD-3"
+    },
+    "transparent_overdraw": {
+      "value": null,
+      "status": "proposed",
+      "unit": "share of the pet's screen coverage drawn by alpha-hash / alpha-to-coverage fur cards and fins, LOD0-1, at V3 and V10",
+      "basis": "production-standard.md §8 (transparency): the cards and fins are the only non-opaque pet surfaces (CHARACTER_PIPELINE.md §5).",
+      "owner_decision": "OD-3"
+    },
+    "passes_per_character": {
+      "value": null,
+      "status": "proposed",
+      "unit": "draws per pet per LOD in each pass: [shadow, depth prepass, main]",
+      "basis": "production-standard.md §8 (material passes; draws are counted, never inferred from material slots). Proposed: shadows cast at LOD0-1 only.",
+      "owner_decision": "OD-3"
+    },
+    "lod_switch_projected_height_px": {
+      "value": [
+        160,
+        60,
+        20
+      ],
+      "status": "proposed",
+      "unit": "projected pet height h in px at 720p where LOD0, LOD1 and LOD2 start; below the last, LOD3",
+      "basis": "20 px: the computed height of a 1.2 m pet at 30 m (vertical fov 72, 720p), where the PLACEHOLDER passed the 30 m read (W14 READ3, a claim). 160 and 60 px: designer proposal, no measurement. Chosen by h, never raw distance: Godot visibility ranges and three's LOD use distance only, and aiming zooms 1.56x.",
+      "owner_decision": "OD-3"
+    }
+  },
+  "required_clips": [
+    {
+      "name": "Idle",
+      "kind": "loop",
+      "loop": true,
+      "in_place": true,
+      "plays_when": "alive, speed below walk",
+      "sim_anim": "Idle 0 (src/shared/types.ts:25)",
+      "contacts": [
+        "paw_fl",
+        "paw_fr",
+        "paw_hl",
+        "paw_hr"
+      ]
+    },
+    {
+      "name": "Walk",
+      "kind": "loop",
+      "loop": true,
+      "in_place": true,
+      "plays_when": "speed near walk 3.8 m/s (engines/godot/game/tuning.gd:21)",
+      "sim_anim": "Walk 1",
+      "stride_length_m": null,
+      "contacts": [
+        "paw_fl",
+        "paw_fr",
+        "paw_hl",
+        "paw_hr"
+      ]
+    },
+    {
+      "name": "Run",
+      "kind": "loop",
+      "loop": true,
+      "in_place": true,
+      "plays_when": "speed near run 6.6 m/s; sprint 8.8 m/s plays Run at a higher rate until OD-4 adds Sprint",
+      "sim_anim": "Run 2 (and Sprint 3 until OD-4)",
+      "stride_length_m": null,
+      "contacts": [
+        "paw_fl",
+        "paw_fr",
+        "paw_hl",
+        "paw_hr"
+      ]
+    },
+    {
+      "name": "Plant",
+      "kind": "loop",
+      "loop": true,
+      "in_place": true,
+      "plays_when": "the braced firing stance: aiming, or holding still on the slab",
+      "sim_anim": "none (presentation)",
+      "contacts": [
+        "paw_fl",
+        "paw_fr",
+        "paw_hl",
+        "paw_hr"
+      ]
+    },
+    {
+      "name": "Fire",
+      "kind": "additive one-shot, restartable",
+      "loop": false,
+      "in_place": true,
+      "plays_when": "each shot, up to 10 per second, recovering in 0.12 s (tuning.gd RIFLE fire_rate, recoil_recover)",
+      "bones": [
+        "spine_03",
+        "chest",
+        "neck_01",
+        "neck_02",
+        "socket_rifle"
+      ],
+      "note": "may be a procedural recoil layer instead of a clip (OD-4)"
+    },
+    {
+      "name": "Hit",
+      "kind": "additive one-shot",
+      "loop": false,
+      "in_place": true,
+      "plays_when": "pet.gd emits damaged (engines/godot/game/pet.gd:195); twin trigger('hit')"
+    },
+    {
+      "name": "Death",
+      "kind": "full-body one-shot",
+      "loop": false,
+      "in_place": true,
+      "plays_when": "die() (pet.gd:201-213). Today the model hides at once; a Death clip may play only if collision and hitbox clearing stay immediate and respawn timing is unchanged (OD-4)."
+    },
+    {
+      "name": "AimPitch",
+      "kind": "layer (additive pose or SkeletonModifier3D)",
+      "loop": false,
+      "in_place": true,
+      "plays_when": "always: covers aim pitch -0.9..+0.9 rad (pet.gd:186) on spine_03, chest, neck and socket_rifle; the Rifle node keeps its own runtime pitch"
+    }
+  ],
+  "proposed_extra_clips": {
+    "value": [
+      "Sprint",
+      "TurnL",
+      "TurnR",
+      "JumpStart",
+      "Air",
+      "Land"
+    ],
+    "status": "proposed",
+    "owner_decision": "OD-4",
+    "basis": "The sim has Sprint, Jump, Fall and Land (src/shared/types.ts:25); yaw snaps to aim (pet.gd:185), so turning in place needs a clip or a procedural turn. NORTH_STAR.md:49 lists Idle Walk Plant Fire Hit Death; ASSET_PIPELINE.md:33 lists Idle Walk Run Attack_01."
+  },
+  "deformation_tests": [
+    {
+      "id": "DT1",
+      "test": "Armour plates are rigid: each plate 100% on one bone (1 influence); vertex distances inside a plate stay constant across every clip key"
+    },
+    {
+      "id": "DT2",
+      "test": "Front legs at Run's full protraction and retraction: no collapse at elbow or wrist; the vest edge does not cut the leg"
+    },
+    {
+      "id": "DT3",
+      "test": "Hind legs at full extension (Run) and in Death: no collapse at hock or knee"
+    },
+    {
+      "id": "DT4",
+      "test": "Spine flex at Plant and in turns: overlapping vest plates keep covering the body (no gap visible at V3)"
+    },
+    {
+      "id": "DT5",
+      "test": "Neck and head across aim pitch -0.9..+0.9: collar clearance; the rifle never passes through the head, ears or forelegs"
+    },
+    {
+      "id": "DT6",
+      "test": "Ears through Idle, Walk, Run, Plant with springs on: bounded; the tail stays above the ear tips (tail/ear about 1.26 front-on) at rest and in Idle and Plant"
+    },
+    {
+      "id": "DT7",
+      "test": "Tail: six weighted bones holding the S-curve; spring motion bounded so the tail never drops below the head in Idle, Walk or Plant (the species cue holds in motion)"
+    },
+    {
+      "id": "DT8",
+      "test": "Fur cards (LOD0-1): no plane seen edge-on in the turn sequence; no card through a plate"
+    },
+    {
+      "id": "DT9",
+      "test": "Weights evaluated at 4 influences in both engines (the shared GLB's count)"
+    },
+    {
+      "id": "DT10",
+      "test": "Near plane and occlusion at V3: the SpringArm3D (sphere 0.2 m, collision mask L_WORLD; engines/godot/game/player.gd:36-43) pulled in against a wall behind the pet at both arms (3.2 m fov 72; 2.1 m fov 50) and aim pitch -0.9, 0 and +0.9: no pet or rifle triangle inside the 0.05 m near plane, and no pet or rifle triangle over the crosshair or the hit-cue ring (110 px, engines/godot/game/hud.gd:43). The ears (tip 1.196 m), tail and rifle are the likely offenders. Numeric in controller_fit; captures in motion_visual."
+    }
+  ],
+  "contacts": [
+    {
+      "id": "paw_fl",
+      "type": "foot_plant",
+      "effector": "toe_front_L",
+      "target": "ground (y = 0 at the feet origin)",
+      "window": "all of Idle and Plant; each stance phase of Walk and Run (authored per clip)",
+      "thresholds": [
+        {
+          "metric": "height_error_m",
+          "op": "<=",
+          "value": 0.02,
+          "status": "proposed",
+          "basis": "the project's feet rule (tools/char-audit.mjs:65), applied in every stance window"
+        },
+        {
+          "metric": "slip_m_per_stance",
+          "op": "<=",
+          "value": null,
+          "status": "proposed",
+          "basis": "no measurement; the owner sets it",
+          "owner_decision": "OD-3"
+        }
+      ]
+    },
+    {
+      "id": "paw_fr",
+      "type": "foot_plant",
+      "effector": "toe_front_R",
+      "target": "ground",
+      "window": "as paw_fl",
+      "thresholds": [
+        {
+          "metric": "height_error_m",
+          "op": "<=",
+          "value": 0.02,
+          "status": "proposed",
+          "basis": "the project's feet rule (tools/char-audit.mjs:65), applied in every stance window"
+        },
+        {
+          "metric": "slip_m_per_stance",
+          "op": "<=",
+          "value": null,
+          "status": "proposed",
+          "basis": "no measurement; the owner sets it",
+          "owner_decision": "OD-3"
+        }
+      ]
+    },
+    {
+      "id": "paw_hl",
+      "type": "foot_plant",
+      "effector": "toe_hind_L",
+      "target": "ground",
+      "window": "as paw_fl",
+      "thresholds": [
+        {
+          "metric": "height_error_m",
+          "op": "<=",
+          "value": 0.02,
+          "status": "proposed",
+          "basis": "the project's feet rule (tools/char-audit.mjs:65), applied in every stance window"
+        },
+        {
+          "metric": "slip_m_per_stance",
+          "op": "<=",
+          "value": null,
+          "status": "proposed",
+          "basis": "no measurement; the owner sets it",
+          "owner_decision": "OD-3"
+        }
+      ]
+    },
+    {
+      "id": "paw_hr",
+      "type": "foot_plant",
+      "effector": "toe_hind_R",
+      "target": "ground",
+      "window": "as paw_fl",
+      "thresholds": [
+        {
+          "metric": "height_error_m",
+          "op": "<=",
+          "value": 0.02,
+          "status": "proposed",
+          "basis": "the project's feet rule (tools/char-audit.mjs:65), applied in every stance window"
+        },
+        {
+          "metric": "slip_m_per_stance",
+          "op": "<=",
+          "value": null,
+          "status": "proposed",
+          "basis": "no measurement; the owner sets it",
+          "owner_decision": "OD-3"
+        }
+      ]
+    },
+    {
+      "id": "rifle_mount",
+      "type": "attachment_contact",
+      "effector": "socket_rifle",
+      "target": "the harness mount on the barding vest: the rifle's receiver touches it (today it floats, pet_model.gd:54-74)",
+      "window": "every clip, every aim pitch in -0.9..+0.9 rad",
+      "rest_position_m": [
+        0.22,
+        0.76,
+        -0.22
+      ],
+      "position_rule": "equals pet.gd:91 unless a gameplay card moves it (visual_acceptance.blocking_criteria B3)",
+      "clearance": "no intersection with head, ears or forelegs (DT5)",
+      "rest_position_glb_m": [
+        -0.22,
+        0.76,
+        0.22
+      ],
+      "thresholds": [
+        {
+          "metric": "receiver_to_mount_gap_m",
+          "op": "<=",
+          "value": null,
+          "status": "proposed",
+          "basis": "no measurement; the owner sets it (the rifle's receiver touches the harness mount)",
+          "owner_decision": "OD-3"
+        },
+        {
+          "metric": "intersections_with_head_ears_forelegs",
+          "op": "==",
+          "value": 0,
+          "status": "proposed",
+          "basis": "DT5: the rifle never passes through the head, ears or forelegs"
+        }
+      ]
+    }
+  ],
+  "controller_contract": {
+    "authority": "Render only. The sim and pet.gd own motion, collision, hits and timing; the render mesh is never collision (pet.gd:2-3).",
+    "origin_and_facing": "origin at the feet; yaw 0 faces -Z; only the model turns (pet.gd:4, :185)",
+    "capsule_m": {
+      "radius": 0.33,
+      "half_height": 0.3,
+      "height": 1.26,
+      "source": "src/shared/content/classes.ts:45; engines/godot/game/tuning.gd:18-23, :52-54"
+    },
+    "hitbox_m": {
+      "radius": 0.37,
+      "height": 1.34,
+      "source": "pet.gd:79-80 (capsule radius + 0.04, height + 0.08)"
+    },
+    "headshot_above_m": 1.008,
+    "headshot_source": "0.8 x capsule height: engines/godot/game/rifle.gd:148; twin headFraction 0.8 (src/shared/content/weapons.ts:229)",
+    "aim_heights_m": {
+      "godot_eye": 0.983,
+      "godot_chest": 0.693,
+      "bot_eye": 0.936,
+      "bot_chest": 0.66,
+      "twin_sim_eye": 1.1025,
+      "sources": "pet.gd:105-109 (0.78 h, 0.55 h); bot.gd:21-22; src/shared/content/weapons.ts:231 (0.875 h; PARITY B3 DEFECT, docs/qa/w17/PARITY.md:292)"
+    },
+    "rifle_mount_m": [
+      0.22,
+      0.76,
+      -0.22
+    ],
+    "rifle_pitch_clamp_rad": 0.9,
+    "muzzle": "Marker3D 'Muzzle' at (0, 0.015, -0.47) in the rifle frame (pet_model.gd:70-73); visual only. The human fires from the camera (player.gd:107), bots from AIM_EYE (bot.gd:292-293).",
+    "death_and_respawn": "die(): the model hides, collision and hitbox layers clear at once (pet.gd:201-213); respawn shows it with a 1 s shield (pet.gd:215-228, tuning.gd:41)",
+    "step_up": "model.position.y = step_offset (pet.gd:145-147): the adapter and any 180-degree turn sit on a child of Model, so the offset and pet.gd:185's yaw still apply",
+    "draws_per_pet_max": 8,
+    "emissives": "below glow_hdr_threshold (1.3) at the environment's live exposure (look.gd symbols tonemap_exposure and glow_hdr_threshold; camera.lighting_and_exposure_profile)",
+    "no_ink": "no ink outline, no crease lines, no comic FX (NORTH_STAR.md:5-6; the outline scan in test_read_pets.gd)",
+    "placeholder_rule": "The PLACEHOLDER tags stay until a receipt for this asset has production_accepted: true and passes the checker with --contract: model meta placeholder (pet_model.gd:43, asserted by test_read_pets.gd:52-53), the HUD \"PLACEHOLDER PETS\" (hud.gd:165, asserted by engines/godot/tests/test_hud_hits.gd:146), the --debug Label3D (pet.gd:94-96). The twin's SLAB_PLACEHOLDER_TAG (src/client/ui/slab-hud.ts:64) stays until the twin's receiver proof is adopted.",
+    "twin_avatar": "src/client/views/avatar.ts is a lead-owned shared contract (MASTER_PLAN.md:281-284): AvatarOptions, AvatarFrame and Avatar (update, trigger, muzzleWorld, dispose) stay unchanged.",
+    "camera_rig": {
+      "pivot": "0.9 x the species height (engines/godot/game/player.gd:32)",
+      "arm_offset_m": [
+        0.72,
+        0.36,
+        0
+      ],
+      "spring": "SpringArm3D, sphere r 0.2 m, collision mask L_WORLD (player.gd:36-43)",
+      "arm_m": {
+        "play": 3.2,
+        "aim": 2.1
+      },
+      "vertical_fov_deg": {
+        "play": 72,
+        "aim": 50
+      },
+      "near_m": 0.05,
+      "sources": "player.gd:12-15, :32-47 (at f7f45b5)",
+      "check": "DT10: at V3 no pet or rifle triangle inside the near plane or over the crosshair and hit-cue ring, with the arm pulled in by a wall"
+    },
+    "avatar_contract": {
+      "path": "src/client/views/avatar.ts:19-47 (lead-owned; MASTER_PLAN.md:281-284)",
+      "members": {
+        "root": "the adapter's Object3D holding the SkeletonUtils clone",
+        "height": "the head top, never the ear tips: 1.065 m (identity.proportion_landmarks.head_top_m); nameplates and camera",
+        "update": "drives the AnimationMixer from AvatarFrame",
+        "muzzleWorld": "the Muzzle node's world position",
+        "dispose": "frees the clone's geometry, materials and mixer"
+      },
+      "triggers": {
+        "hit": "Hit (additive)",
+        "death": "Death, or hide at once (OD-4)",
+        "spawn": "layer reset; no clip",
+        "fire": "Fire (additive) or procedural recoil (OD-4)",
+        "jump": "ignored until OD-4 adds JumpStart",
+        "land": "ignored until OD-4 adds Land",
+        "emote": "ignored (no emote clip)"
+      },
+      "frame": {
+        "speed": "locomotion blend and playback rate = speed / stride_length_m",
+        "vy": "ignored until OD-4 adds Air",
+        "grounded": "ignored until OD-4 adds Air",
+        "anim": "Idle, Walk, Run; Sprint plays Run (OD-4)",
+        "flags": "ignored",
+        "aimPitch": "AimPitch layer",
+        "aimYawOffset": "turn in place (M7): a procedural turn or TurnL/TurnR (OD-4)",
+        "hpFrac": "ignored",
+        "dead": "Death",
+        "firing": "Fire layer",
+        "aiming": "Plant",
+        "sprinting": "Run at the sprint rate until OD-4 adds Sprint"
+      }
+    },
+    "rifle_mount_glb_m": [
+      -0.22,
+      0.76,
+      0.22
+    ]
+  },
+  "delivery": {
+    "editable_source": null,
+    "editable_source_rule": "Scripts are the source and no .blend is committed (tools/assets/README.md, Sources). Manual art (sculpt, weights, keyed motion) is kept as data files the build script reads, hashed in the manifest and never regenerated over (OD-12). The Rigify control rig is regenerated by a pinned script from a hashed metarig data file; keyed control-rig actions are hashed key tables (OD-12); both regenerations are listed in the receipt's tool_versions.",
+    "review_package": "self_contained_glb",
+    "production_layout": "assets/masters/Char_Cat_Rifleman.glb (PNG textures; Godot imports it) + its web variant (meshopt; WebP textures at 1K or below, the existing make-web-variant path; KTX2 only after a lead card; path proposed: public/assets/chars/Char_Cat_Rifleman.glb) + an assets/manifest.json entry (docs/design/ASSET_PIPELINE.md:42-45). Rifle delivery (a shared GLB or a node in each character) is the lead's call: the name rule has no weapon prefix (tools/assets/validate-glb.mjs:30).",
+    "render_mesh_used_as_physics_collision": false,
+    "source_and_delivery_hashes": {},
+    "tool_versions": {
+      "blender": null,
+      "godot": "4.7.2",
+      "three": "0.186.1",
+      "gltf_transform": "^4.5.1 (package.json)",
+      "blender_note": "One pin for the family, a lead decision (card CHAR-PIN): bpy 5.0.1 from PyPI (tools/assets/README.md:8, the proven static-kit path) or the Blender 5.2.2 binary (docs/handoff/BL-DCC.md:10-11). The export options of CHARACTER_PIPELINE.md §6 are re-verified on the pinned version."
+    },
+    "upstream_dependency_hashes": {},
+    "manifest_rule": "The assets/manifest.json entry records the receipt path and its sha256; the receipt records the export hash of that entry (one link each way)."
+  },
+  "rights": {
+    "code_license": null,
+    "weights_license": null,
+    "base_and_module_licenses": [],
+    "input_and_likeness_rights": null,
+    "output_terms": null,
+    "preprocessing_dependency_terms": [],
+    "upload_and_spend_authorization": "None granted. Grok real runs are CLOSED; no Scenario, Meshy, Tripo or Tencent key exists; no W15 image may be uploaded without the owner (docs/design/AAA_PLAN.md:63-64; OD-7, OD-8).",
+    "rights_notes": "Filled per route from docs/qa/char/ROUTES.md; a field that does not apply to the route used becomes { \"not_applicable\": \"<reason>\" }. The W15 xAI output-ownership clause is UNVERIFIED (assets/incoming/w15-char-refs/LICENSE.md). Neither W15 rifle design may be copied (trade-dress risk)."
+  },
+  "acceptance": {
+    "receipt_path": "assets/characters/cat_rifleman/receipt-<export sha256 first 8>.json, made from assets/characters/receipt.template.json",
+    "required_gate_ids": [
+      "design_form",
+      "structural",
+      "fresh_import",
+      "deformation_contact",
+      "motion_visual",
+      "runtime_performance",
+      "rights_provenance",
+      "controller_fit",
+      "team_read_30m",
+      "lod_identity",
+      "species_read",
+      "quadruped_gait_contact"
+    ],
+    "receiver_gate_ids": {
+      "twin": [
+        "engine_parity_twin"
+      ]
+    },
+    "allowed_statuses": [
+      "pass",
+      "fail",
+      "not_run",
+      "unsupported",
+      "not_applicable"
+    ]
+  },
+  "known_defects": [
+    "Last shipped asset (the W14 PLACEHOLDER, READ3 PASS, pre-standard; not production_accepted): no skeleton, skin, UVs or clips. It slides, shows no hit reaction and vanishes on death (pet.gd:182-213; docs/handoff/G-GAME.md:85).",
+    "The rifle floats at the shoulder: no harness contact (pet_model.gd:54-74, pet.gd:91).",
+    "Form vs hitbox (inferred from code numbers, not run): the head, ears (about 0.46 m from the axis) and tail lie outside the 0.37 m hitbox radius; the headshot band (above 1.008 m within 0.37 m of the axis) holds no part of the pet (pet.gd:79-80, rifle.gd:148, pet_model.gd:124-147). OD-6.",
+    "AAA-30M baseline at f7f45b5: Godot Forward+ head-on Cat edge 14.7 (colour, grey), 14.4 (deuteranopia) against the bar 15, attributed to the background (docs/qa/w17/AAA-30M.md:22-23, :226). The replacement may not fall more than the noise floor below these.",
+    "The Cat Cadre split pattern does not resolve at 30 m (docs/qa/w14/READ3_VERIFICATION.md:3, :35).",
+    "Twin eye height 0.875 h vs Godot 0.78 h: PARITY B3 DEFECT (docs/qa/w17/PARITY.md:292).",
+    "test_read_pets.gd:19 assumes exposure 1.25 while look.gd sets tonemap_exposure 1.5: a defect for the lead, outside this contract."
+  ],
+  "note": "Do not replace requirements with measured failing values. All null budgets and role-specific gates must be agreed before a production pass can be issued. Project: every requirement record is proposed until the owner agrees it; an agreed contract has no open item (tools/assets/check-char-contract.mjs rules 4 and 6).",
+  "source_authority": {
+    "editable_art_source": null,
+    "build_recipe": null,
+    "base_release_hash": null,
+    "skeleton_release_hash": null,
+    "preservation": {
+      "status": "not_run",
+      "evidence": []
+    }
+  },
+  "visual_acceptance": {
+    "reference_hashes": [
+      "a1dd5ec5ae695221d7dcc6602f0b293692e9f630fa5c5d7aec5086dc07afcb94",
+      "4bae8fe2ca5955acd8054cde93860c8578810359db142de17b772e0979afcbcc",
+      "1cf19ec913d63e118ba7aee5f27cac3c784f32af8c7e678933568b891920ecfb",
+      "39e0376f7204460898820fc37b3e702ee3dc80b5d16c7081a75a4641501c25f4",
+      "d7493e8d9f4133449272a0e740d4558617f15c1f063e60036526e2ea80282685",
+      "28173cf3d22e688c955761bdeeb03824ba7f6b48709f17131324b27a6eb5eee8"
+    ],
+    "blocking_criteria": [
+      {
+        "id": "A1",
+        "gate": "team_read_30m",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "tools/aaa-30m.mjs --configs compat,fplus passes every number (teams in colour, deuteranopia, protanopia and greyscale; every pet edge; pet and armour pixels) and no number regresses against the PLACEHOLDER baseline (--baseline, per number).",
+        "thresholds": [
+          {
+            "metric": "team_dE",
+            "op": ">=",
+            "value": 20,
+            "status": "proposed",
+            "basis": "the 30 m bar: tools/aaa-30m.mjs BAR (uncommitted, QA-30M lane) and docs/qa/w17/AAA-30M.md:140-151 (lead rulings of 2026-10-17); in colour, deuteranopia and protanopia"
+          },
+          {
+            "metric": "team_grey_dL",
+            "op": ">=",
+            "value": 10,
+            "status": "proposed",
+            "basis": "the 30 m bar: tools/aaa-30m.mjs BAR (uncommitted, QA-30M lane) and docs/qa/w17/AAA-30M.md:140-151 (lead rulings of 2026-10-17)"
+          },
+          {
+            "metric": "pet_edge_abs_dL",
+            "op": ">=",
+            "value": 15,
+            "status": "proposed",
+            "basis": "the 30 m bar: tools/aaa-30m.mjs BAR (uncommitted, QA-30M lane) and docs/qa/w17/AAA-30M.md:140-151 (lead rulings of 2026-10-17); every pet, every image"
+          },
+          {
+            "metric": "pet_px",
+            "op": ">=",
+            "value": 30,
+            "status": "proposed",
+            "basis": "the 30 m bar: tools/aaa-30m.mjs BAR (uncommitted, QA-30M lane) and docs/qa/w17/AAA-30M.md:140-151 (lead rulings of 2026-10-17) (a bot below it is not resolved)"
+          },
+          {
+            "metric": "armour_px",
+            "op": ">=",
+            "value": 6,
+            "status": "proposed",
+            "basis": "the 30 m bar: tools/aaa-30m.mjs BAR (uncommitted, QA-30M lane) and docs/qa/w17/AAA-30M.md:140-151 (lead rulings of 2026-10-17)"
+          },
+          {
+            "metric": "regression_per_number",
+            "op": "<=",
+            "value": 2,
+            "status": "proposed",
+            "basis": "tools/aaa-30m.mjs --baseline: no number may fall by more than the noise floor (2 L* / 2 dE) against the PLACEHOLDER baseline"
+          }
+        ]
+      },
+      {
+        "id": "A2",
+        "gate": "team_read_30m",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "Team paint is the armour plate field, not trim: the share of the pet's visible area in team paint, side on and head-on, per species, at V30.",
+        "thresholds": [
+          {
+            "metric": "team_share",
+            "species": "corgi",
+            "view": "side",
+            "op": ">=",
+            "value": 0.4,
+            "status": "proposed",
+            "basis": "the PLACEHOLDER floor, MIN_TEAM_SHARE in engines/godot/tests/test_read_pets.gd:21-23 (side on, head-on per species), so the replacement never shows less team paint than the shipped pet. The draft's single 0.35 would have lowered the corgi side-on floor (0.40). OD-2 may raise it"
+          },
+          {
+            "metric": "team_share",
+            "species": "corgi",
+            "view": "head_on",
+            "op": ">=",
+            "value": 0.32,
+            "status": "proposed",
+            "basis": "the PLACEHOLDER floor, MIN_TEAM_SHARE in engines/godot/tests/test_read_pets.gd:21-23 (side on, head-on per species), so the replacement never shows less team paint than the shipped pet. The draft's single 0.35 would have lowered the corgi side-on floor (0.40). OD-2 may raise it"
+          },
+          {
+            "metric": "team_share",
+            "species": "cat",
+            "view": "side",
+            "op": ">=",
+            "value": 0.3,
+            "status": "proposed",
+            "basis": "the PLACEHOLDER floor, MIN_TEAM_SHARE in engines/godot/tests/test_read_pets.gd:21-23 (side on, head-on per species), so the replacement never shows less team paint than the shipped pet. The draft's single 0.35 would have lowered the corgi side-on floor (0.40). OD-2 may raise it"
+          },
+          {
+            "metric": "team_share",
+            "species": "cat",
+            "view": "head_on",
+            "op": ">=",
+            "value": 0.26,
+            "status": "proposed",
+            "basis": "the PLACEHOLDER floor, MIN_TEAM_SHARE in engines/godot/tests/test_read_pets.gd:21-23 (side on, head-on per species), so the replacement never shows less team paint than the shipped pet. The draft's single 0.35 would have lowered the corgi side-on floor (0.40). OD-2 may raise it"
+          }
+        ]
+      },
+      {
+        "id": "A3",
+        "gate": "species_read",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "Species reads 1:1 at V30 and V60 to an independent reviewer: the corgi long and low with two ears taller than the head; the cat leggy with the S-tail above the head.",
+        "thresholds": []
+      },
+      {
+        "id": "A4",
+        "gate": "motion_visual",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "Inside a flood pool the team hue stays nameable: Corgi blue keeps its chroma and Cat crimson stays darker than its coat; the self-lit band stays below the glow threshold.",
+        "thresholds": [
+          {
+            "metric": "corgi_band_Cstar",
+            "view": "V10_flood",
+            "op": ">=",
+            "value": 20,
+            "status": "proposed",
+            "basis": "designer proposal, no measurement"
+          },
+          {
+            "metric": "cat_band_L_minus_coat_L",
+            "view": "V10_flood",
+            "op": "<",
+            "value": 0,
+            "status": "proposed",
+            "basis": "designer proposal, no measurement"
+          },
+          {
+            "metric": "band_peak_emission_over_glow_threshold",
+            "op": "<",
+            "value": 1,
+            "status": "proposed",
+            "basis": "glow_hdr_threshold 1.3 at the live exposure (camera.lighting_and_exposure_profile)"
+          }
+        ]
+      },
+      {
+        "id": "B1",
+        "gate": "design_form",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "Corgi ear/head ratio E/H at VH and V3; cat tail tip over the visible back (VB, ground to vest top) side-on.",
+        "thresholds": [
+          {
+            "metric": "corgi_E_over_H",
+            "op": ">=",
+            "value": 1.35,
+            "status": "proposed",
+            "basis": "the W15 corgi threshold, docs/qa/w15/ART.md:105"
+          },
+          {
+            "metric": "cat_tail_tip_over_VB",
+            "op": ">=",
+            "value": 1.83,
+            "status": "proposed",
+            "basis": "derived: about 1.88 (docs/qa/w15/ART.md:114) less the stated measurement error of 0.05 (ART.md:91)"
+          }
+        ]
+      },
+      {
+        "id": "B2",
+        "gate": "design_form",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "Head-on, the chest shield or vest covers the body's width.",
+        "thresholds": [
+          {
+            "metric": "vest_width_over_body_width",
+            "view": "head_on",
+            "op": ">=",
+            "value": 1,
+            "status": "proposed",
+            "basis": "designer proposal, no measurement"
+          }
+        ]
+      },
+      {
+        "id": "B3",
+        "gate": "motion_visual",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "The rifle reads as a heavy rifle at V3 (stock, receiver, magazine, barrel); Muzzle and the rifle mount unchanged unless a gameplay card says so.",
+        "thresholds": [
+          {
+            "metric": "rifle_length_m",
+            "op": ">=",
+            "value": 0.6,
+            "status": "proposed",
+            "basis": "designer proposal, no measurement"
+          },
+          {
+            "metric": "rifle_length_m",
+            "op": "<=",
+            "value": 0.75,
+            "status": "proposed",
+            "basis": "designer proposal, no measurement; Muzzle sits 0.47 m forward of the mount (pet_model.gd:70-73)"
+          }
+        ]
+      },
+      {
+        "id": "B4",
+        "gate": "team_read_30m",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "Fur cards, fins or shells move no V30 edge number by more than the noise floor.",
+        "thresholds": [
+          {
+            "metric": "fur_edge_shift_dL",
+            "op": "<=",
+            "value": 2,
+            "status": "proposed",
+            "basis": "the A1 noise floor"
+          }
+        ]
+      },
+      {
+        "id": "C1",
+        "gate": "motion_visual",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "At V3, distinct specular responses: wet fur, painted plate, chipped steel, leather, gunmetal (darkest).",
+        "thresholds": [
+          {
+            "metric": "distinct_specular_classes",
+            "view": "V3",
+            "op": ">=",
+            "value": 4,
+            "status": "proposed",
+            "basis": "designer proposal, no measurement (the LOOK lane brief of 2026-10-18)"
+          }
+        ]
+      },
+      {
+        "id": "C2",
+        "gate": "motion_visual",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "Chips sit on edges and reveal dark primer or steel, never team-tinted; the team field keeps most of the plate area; grime only in recesses.",
+        "thresholds": [
+          {
+            "metric": "team_field_share_of_plate_area",
+            "op": ">=",
+            "value": 0.6,
+            "status": "proposed",
+            "basis": "designer proposal, no measurement"
+          }
+        ]
+      },
+      {
+        "id": "D1",
+        "gate": "motion_visual",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "Groom direction follows the reference flow; wet clumps visible at VH.",
+        "thresholds": []
+      },
+      {
+        "id": "D2",
+        "gate": "motion_visual",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "Wet fur darker than dry with highlights broken along clumps, never a uniform plastic sheen.",
+        "thresholds": []
+      },
+      {
+        "id": "D3",
+        "gate": "motion_visual",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "Coat colours from the palette tokens, not sampled from the references.",
+        "thresholds": []
+      },
+      {
+        "id": "D4",
+        "gate": "motion_visual",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "Ear, ruff and tail edges soft at V3 and VH; no card popping or sorting flicker in motion.",
+        "thresholds": []
+      },
+      {
+        "id": "E1",
+        "gate": "motion_visual",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "At VH: an iris colour and a cornea catchlight under sodium; no flat black discs; no emissive eyes.",
+        "thresholds": []
+      },
+      {
+        "id": "F1",
+        "gate": "deformation_contact",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "Plates rigid; no plate, fur or leg interpenetration at Walk, Run, Plant and Death extremes; harness and rifle stay attached.",
+        "thresholds": []
+      },
+      {
+        "id": "F2",
+        "gate": "lod_identity",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "Walking 60 m to 3 m: no identity, team colour or silhouette pop at any LOD switch; A1 re-run with each LOD forced, --configs compat,fplus.",
+        "thresholds": []
+      },
+      {
+        "id": "G1",
+        "gate": "motion_visual",
+        "configs": [
+          "compat",
+          "fplus"
+        ],
+        "text": "The same master hash behind both Godot configs; their look differences are logged.",
+        "thresholds": []
+      }
+    ],
+    "non_blocking_criteria": [
+      "C3: every major plate shows edge thickness and a bevel highlight at VH",
+      "E2: a wet glossy nose; water beads on head and plate tops",
+      "Tapetum eyeshine only on a director call (no comic FX)"
+    ],
+    "motion_sequences": [
+      "M1 Idle 5 s, then Walk, Run and Sprint speeds, at V10 and V3",
+      "M2 Plant, then Fire held 3 s (10 shots per second), at V3 with aim pitch swept -0.9..+0.9",
+      "M3 Hit from the front and from behind, at V10",
+      "M4 Death and respawn, at V10",
+      "M5 Walk from 60 m to 3 m toward the camera (the LOD sweep)",
+      "M6 60 s of a 2v2 bots-only match, play camera",
+      "M7 Run -> stop -> Idle; yaw snaps of +-90 and 180 degrees at Idle and at Plant (pet.gd:185 snaps the model to the aim yaw), at V3 and V10",
+      "M8 Cancellation: Fire held -> Hit -> Death mid-burst -> respawn, at V3 and V10: clip endpoints reached or blended, every layer reset on respawn, no pose pop",
+      "DT10 captures: the arm pulled in by a wall at both arms, at V3"
+    ],
+    "configs": [
+      "Godot Forward+ (fplus)",
+      "Godot Compatibility (compat)"
+    ],
+    "independent_review_required": true,
+    "director_review_required": true,
+    "receiver_criteria": [
+      {
+        "id": "P1",
+        "gate": "engine_parity_twin",
+        "configs": [
+          "webgl",
+          "webgpu"
+        ],
+        "text": "Twin: tools/aaa-30m.mjs --configs webgl,webgpu passes the A1 thresholds against the twin's PLACEHOLDER port (TW-PETS) as its baseline.",
+        "thresholds": [
+          {
+            "metric": "team_dE",
+            "op": ">=",
+            "value": 20,
+            "status": "proposed",
+            "basis": "the 30 m bar: tools/aaa-30m.mjs BAR (uncommitted, QA-30M lane) and docs/qa/w17/AAA-30M.md:140-151 (lead rulings of 2026-10-17); in colour, deuteranopia and protanopia"
+          },
+          {
+            "metric": "team_grey_dL",
+            "op": ">=",
+            "value": 10,
+            "status": "proposed",
+            "basis": "the 30 m bar: tools/aaa-30m.mjs BAR (uncommitted, QA-30M lane) and docs/qa/w17/AAA-30M.md:140-151 (lead rulings of 2026-10-17)"
+          },
+          {
+            "metric": "pet_edge_abs_dL",
+            "op": ">=",
+            "value": 15,
+            "status": "proposed",
+            "basis": "the 30 m bar: tools/aaa-30m.mjs BAR (uncommitted, QA-30M lane) and docs/qa/w17/AAA-30M.md:140-151 (lead rulings of 2026-10-17); every pet, every image"
+          },
+          {
+            "metric": "pet_px",
+            "op": ">=",
+            "value": 30,
+            "status": "proposed",
+            "basis": "the 30 m bar: tools/aaa-30m.mjs BAR (uncommitted, QA-30M lane) and docs/qa/w17/AAA-30M.md:140-151 (lead rulings of 2026-10-17) (a bot below it is not resolved)"
+          },
+          {
+            "metric": "armour_px",
+            "op": ">=",
+            "value": 6,
+            "status": "proposed",
+            "basis": "the 30 m bar: tools/aaa-30m.mjs BAR (uncommitted, QA-30M lane) and docs/qa/w17/AAA-30M.md:140-151 (lead rulings of 2026-10-17)"
+          },
+          {
+            "metric": "regression_per_number",
+            "op": "<=",
+            "value": 2,
+            "status": "proposed",
+            "basis": "tools/aaa-30m.mjs --baseline: no number may fall by more than the noise floor (2 L* / 2 dE) against the PLACEHOLDER baseline"
+          }
+        ]
+      },
+      {
+        "id": "P2",
+        "gate": "engine_parity_twin",
+        "configs": [
+          "webgl",
+          "webgpu"
+        ],
+        "text": "Twin: the web variant derives from the accepted master hash (G1 for the receiver); every allowed look difference has a PARITY row.",
+        "thresholds": []
+      }
+    ],
+    "receiver_configs": [
+      "twin WebGPU high (webgpu)",
+      "twin WebGL2 (webgl)"
+    ],
+    "review_policy": {
+      "value": {
+        "independent_review_required": true,
+        "director_review_required": true
+      },
+      "status": "proposed",
+      "owner_decision": "OD-9",
+      "basis": "The project verifies with fresh lanes (QA-30M, Q1-Q3) and the owner makes look calls (docs/design/ASSET_PIPELINE.md:55-58). Director = the owner."
+    },
+    "criteria_source_note": "From the LOOK lane brief of 2026-10-18, proposed. Numbers live in thresholds; a basis that says \"designer proposal, no measurement\" is a judgement, not a derivation."
+  },
+  "intentional_exceptions": [
+    "Exaggerated species proportions: the tail held up in an S above the head is a 30 m species cue, not an anatomy error.",
+    "Armour plates overlap at flex zones by at least their travel; designed overlaps are not faults.",
+    "The team band is self-lit below the glow threshold so the team reads under sodium light.",
+    "A closed mouth and no face rig."
+  ],
+  "project_status_note": "CHAR is PARKED (docs/design/AAA_PLAN.md:63-64, owner decision 3; docs/design/NORTH_STAR.md:47-51). This is a draft requirement set for OD-0 (unpark CHAR for a CPU-authored route, docs/design/CHARACTER_PIPELINE.md §0). Nothing is built from it while CHAR is parked.",
+  "lod_selection": {
+    "rule": "One function of h with hysteresis and instant switches, written twice (GDScript and TS) as mirrored code with a Vitest parity test that parses the Godot file (the pattern of tests/unit/kit-cover.test.ts). src/shared is authority code and never reads a GLB (docs/design/ASSET_PIPELINE.md:47-48)."
+  },
+  "clip_table": {
+    "path": "assets/characters/cvc_quadruped.clips.json (proposed; card CHAR-CLIPS)",
+    "rule": "Loop modes, stride_length_m, stance windows and layer masks come from this one data file, read by the Godot import script and the twin loader, never from name tokens (Godot loops any clip whose name begins or ends with \"loop\" or \"cycle\" and keeps the token in the name)."
+  },
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "date": "2026-10-18",
+      "change": "First draft (CHAR standard adoption, task #75), merged with the critic reviews. Every requirement record is proposed. Not landed.",
+      "changes": [
+        "(initial)"
+      ]
+    }
+  ]
+}
