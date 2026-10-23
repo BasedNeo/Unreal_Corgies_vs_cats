@@ -10,12 +10,15 @@ extends RefCounted
 ##    kit_wet.gdshader's source (SHADER_RULE: one gain per piece from its mean base-colour luminance held in
 ##    [cover_floor, cover_ceil], the texel guard [cover_lo, cover_cap], the saturation by cover_sat, the fill faded by
 ##    cover_pool inside a flood's cone, the sheen's fall-off by cover_sheen_power masked off flat up-facing faces at
-##    0.85..0.97 on the world normal); the band [0.22, 0.28], the guard [0.08, 0.5] and the power 3 are pinned;
-##    Look.COVER_MEAN is recomputed from each GLB's base-colour image; each renderer's values and per-piece scales hold
-##    through the look's own helpers called with every rendering method (Compatibility takes its own scales, never
-##    Forward+'s), with the means and the Lot's floods on every cover material; no cover piece's emission reaches the
-##    glow threshold; the kit's draw shape (one MultiMesh per piece plus KitShadow) and the look's own draw items are
-##    unchanged with the cover read on, so it cannot add draws.
+##    0.85..0.97 on the world normal; the zone's height ly = VERTEX.y), and nothing else writes EMISSION (the lens's
+##    `=` and the read's `+=`, the fragment's last statement); the band [0.22, 0.28], the guard [0.08, 0.5], the power 3
+##    and the moon colour are pinned; Look.COVER_MEAN is recomputed from each GLB's base-colour image; each renderer's
+##    values and per-piece scales hold through the look's own helpers called with every rendering method
+##    (Compatibility takes its own scales, never Forward+'s), with the means, the moon and the Lot's floods on every
+##    cover material; no cover piece's brightest texel, max(r, g, b), reaches the glow threshold (_glow_check); the
+##    read's A/B toggle zeroes and restores every cover material's fill and sheen; the kit's draw shape (one MultiMesh
+##    per piece plus KitShadow) and the look's own draw items are unchanged with the cover read on, so it cannot add
+##    draws.
 ## 3. With a renderer: from the play camera (EYE_H over the ground, fov 72) at 10 / 30 / 60 m from cover pieces at both
 ##    bases and on two lanes, every cover piece's silhouette edge contrast is >= BAR_EDGE (CIE L*), every cover piece
 ##    is lighter than the non-cover mast pole at the same place by >= BAR_GAP L* at 10 and 30 m (cover is the light
@@ -96,8 +99,11 @@ void fragment() { ALBEDO = ly < split ? col_a : col_b; }
 ## The cover read's rule in kit_wet.gdshader, statement by statement (compared without comments or whitespace). CI
 ## renders nothing, so this is where a lost uniform, a hard-coded fall-off or a dropped or inverted up-face mask shows.
 ## tw-look's twin copies the same rule (tests/unit/kit-cover.test.ts).
+const MOON_SRGB := Color(0.62, 0.72, 0.95)  # the sheen's colour, sRGB (look.gd COVER_SHEEN_COLOR, the web's moon)
 const SHADER_RULE := [
-	["the world position and normal", "wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; wnrm = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);"],
+	["the cover zone's height (mesh-local, from the foot), the world position and normal",
+		"ly = VERTEX.y; wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; wnrm = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);"],
+	["the lens's own emission, before the cover read", "EMISSION = texture(emission_tex, UV).rgb * emission_color * emission_energy;"],
 	["the albedo, left as it was (no dim)", "ALBEDO = wet_alb;"],
 	["the cover zone", "float cover = step(ly, cover_top) * step(0.001, cover_top); if (cover > 0.0) {"],
 	["the sheen: (1 - N.V)^cover_sheen_power, off flat up-facing faces (0.85..0.97 on the world normal)",
@@ -237,6 +243,25 @@ func run(tree: SceneTree) -> Array:
 		for rule in SHADER_RULE:
 			if not _code(rule[1]) in src:
 				errs.append("kit_wet.gdshader lost the cover rule's %s: want `%s`" % [rule[0], rule[1]])
+		# ...and nothing else writes the emission: exactly the lens's `EMISSION =` and the cover's one `EMISSION +=`, and
+		# the cover's is the fragment's last statement (a term added after the rule would pass the statement pins alone)
+		if src.count("EMISSION") != 2:
+			errs.append("kit_wet.gdshader writes EMISSION %d times; want 2 (the lens's `=`, the cover read's `+=`)" % src.count("EMISSION"))
+		# the cover block is exactly the pinned statements, in order, contiguous, at the fragment's end: a statement
+		# inserted between two pins (a gain on `held`, a zeroed `pool`) passes the pins one by one (item 11b follow-up)
+		# ...and nothing outside the block feeds it: the rule's inputs are each written once (`wet_alb *= 3.0;` before the
+		# block, or `ly -= 0.3;` after the vertex pin, passes every pin and the block check)
+		for wv in ["wet_alb", "ly", "wpos", "wnrm"]:
+			var nw := RegEx.create_from_string("(?<![A-Za-z0-9_])" + wv + "[-+*/]?=(?!=)").search_all(src).size() + RegEx.create_from_string("vec3" + wv + "=(?!=)").search_all(src).size()
+			if nw != 1:
+				errs.append("kit_wet.gdshader writes %s %d times; want 1" % [wv, nw])
+		var blk := _code(SHADER_RULE[1][1])   # the block starts at the lens's `EMISSION =`
+		for ri in range(3, SHADER_RULE.size()):
+			blk += _code(SHADER_RULE[ri][1])
+		if not src.ends_with(blk + "}"):
+			errs.append("kit_wet.gdshader: the cover block is not exactly the pinned rule, contiguous, at the fragment's end")
+		if not src.ends_with(_code(SHADER_RULE[SHADER_RULE.size() - 1][1] + " }")):
+			errs.append("kit_wet.gdshader: the cover read's emission is not the fragment's last statement")
 		# the cover read's shape, pinned (the web twin copies it): the band [0.22, 0.28] a piece's mean is held in, the
 		# outlier guard [0.08, 0.5] and the sheen's falloff power 3, on every renderer
 		for method in look.COVER_VALUES:
@@ -245,6 +270,8 @@ func run(tree: SceneTree) -> Array:
 					and is_equal_approx(float(pv.cap), 0.5) and is_equal_approx(float(pv.power), 3.0)):
 				errs.append("%s: the cover read's band / guard / falloff moved (floor %.2f, ceil %.2f, lo %.2f, cap %.2f, power %.1f; want 0.22, 0.28, 0.08, 0.5, 3)" % [
 					method, pv.floor, pv.ceil, pv.lo, pv.cap, pv.power])
+		if not look.COVER_SHEEN_COLOR.is_equal_approx(MOON_SRGB):
+			errs.append("Look.COVER_SHEEN_COLOR %s moved off the moon %s (the web twin copies it)" % [look.COVER_SHEEN_COLOR, MOON_SRGB])
 		# each piece's mean base-colour luminance, recomputed from its GLB (the web twin computes the same)
 		errs.append_array(_check_means(world, look))
 		# every renderer's values and per-piece scales, through the look's own helpers: the materials as built for this
@@ -273,6 +300,11 @@ func run(tree: SceneTree) -> Array:
 					var want_v := float(cv[k[1]]) * float(k[2])
 					if not is_equal_approx(float(pm.get_shader_parameter(k[0])), want_v):
 						errs.append("%s on %s: material %s = %s, want %s" % [p, method, k[0], pm.get_shader_parameter(k[0]), want_v])
+				var moon_sent = pm.get_shader_parameter("cover_sheen_color")
+				if moon_sent is Vector3:
+					moon_sent = Color(moon_sent.x, moon_sent.y, moon_sent.z)
+				if not (moon_sent is Color and (moon_sent as Color).is_equal_approx(MOON_SRGB)):
+					errs.append("%s on %s: material cover_sheen_color = %s, want the moon %s" % [p, method, moon_sent, MOON_SRGB])
 				if not is_equal_approx(float(pm.get_shader_parameter("cover_mean")), float(look.COVER_MEAN[p])):
 					errs.append("%s: material cover_mean = %s, want COVER_MEAN's %s" % [p, pm.get_shader_parameter("cover_mean"), look.COVER_MEAN[p]])
 				var fl: Array = world.floodlights()
@@ -287,27 +319,33 @@ func run(tree: SceneTree) -> Array:
 							errs.append("%s: pool flood %d is %s -> %s, the Lot's %s -> %s" % [p, i, fpos[i], faim[i], fl[i].pos, want_aim])
 		look.rendering_method = built
 		look.set_cover_read(true)  # back to this renderer's values
-		# the look lock: the cover read's brightest emission, exposed, stays under the glow threshold on every renderer,
-		# so no cover piece blooms. Bound (on luminance): a texel at the outlier cap, its saturation pushed by sat, plus a
-		# full sheen, with each piece's own scales (outside any pool).
-		for method in ["forward_plus", "gl_compatibility"]:
-			var v: Dictionary = look.COVER_VALUES[method]
-			for p in look.COVER:
-				if float(look.COVER[p]) <= 0.0:
-					continue
-				var sc := _want_scale(look, p, method)
-				var peak: float = (float(v.fill) * float(sc.fill) * float(v.cap) * maxf(1.0, float(v.sat) * float(sc.sat))
-						+ float(v.sheen) * float(sc.sheen)) * look.environment.tonemap_exposure
-				if peak >= look.environment.glow_hdr_threshold:
-					errs.append("%s on %s: the cover read's peak emission %.2f (exposed) reaches the glow threshold %.2f" % [
-						p, method, peak, look.environment.glow_hdr_threshold])
+		# the look lock: the cover read's brightest emission, exposed, stays under the glow threshold on every renderer
+		# (max(r, g, b), as Godot's glow keys it; see _glow_check)
+		errs.append_array(_glow_check(world, look))
 		look.set_cover_read(false)
 		await tree.process_frame
 		if _draw_items(kit_root) != kit_items or _draw_items(look) != look_items:
 			errs.append("the cover read changes the draw items (kit %d -> %d, look %d -> %d)" % [
 				_draw_items(kit_root), kit_items, _draw_items(look), look_items])
+		# the A/B toggle is real (the rendered bar's "read off" frames depend on it): off zeroes every cover material's fill
+		# and sheen, on restores this renderer's values
+		var cvb: Dictionary = look.COVER_VALUES["gl_compatibility" if built == "gl_compatibility" else "forward_plus"]
+		for p in world.kit_nodes:
+			var tm: Material = (world.kit_nodes[p] as MultiMeshInstance3D).multimesh.mesh.surface_get_material(0)
+			if float(look.COVER.get(p, 0.0)) > 0.0 and tm is ShaderMaterial:
+				if float(tm.get_shader_parameter("cover_fill")) != 0.0 or float(tm.get_shader_parameter("cover_sheen")) != 0.0:
+					errs.append("set_cover_read(false) leaves %s's read on (cover_fill %s, cover_sheen %s)" % [
+						p, tm.get_shader_parameter("cover_fill"), tm.get_shader_parameter("cover_sheen")])
 		look.set_cover_read(true)
 		await tree.process_frame
+		for p in world.kit_nodes:
+			var tm: Material = (world.kit_nodes[p] as MultiMeshInstance3D).multimesh.mesh.surface_get_material(0)
+			if float(look.COVER.get(p, 0.0)) > 0.0 and tm is ShaderMaterial:
+				var tsc := _want_scale(look, p, built)
+				if not is_equal_approx(float(tm.get_shader_parameter("cover_fill")), float(cvb.fill) * float(tsc.fill)) \
+						or not is_equal_approx(float(tm.get_shader_parameter("cover_sheen")), float(cvb.sheen) * float(tsc.sheen)):
+					errs.append("set_cover_read(true) does not restore %s's read (cover_fill %s, cover_sheen %s)" % [
+						p, tm.get_shader_parameter("cover_fill"), tm.get_shader_parameter("cover_sheen")])
 	if world.kit_nodes.size() + 1 != kit_items:
 		errs.append("kit draw shape: %d items for %d pieces (want one MultiMesh per piece plus KitShadow)" % [
 			kit_items, world.kit_nodes.size()])
@@ -347,16 +385,10 @@ func _check_means(world: Node, look: Node) -> Array:
 		var bin := 28 + jl
 		var pbr: Dictionary = j.materials[0].get("pbrMetallicRoughness", {})
 		var f: Array = pbr.get("baseColorFactor", [1.0, 1.0, 1.0, 1.0])
-		var img_def: Dictionary = j.images[int(j.textures[int(pbr.baseColorTexture.index)].source)]
-		var bv: Dictionary = j.bufferViews[int(img_def.bufferView)]
-		var off := bin + int(bv.get("byteOffset", 0))
-		var img := Image.new()
-		var bytes := b.slice(off, off + int(bv.byteLength))
-		var ok := img.load_png_from_buffer(bytes) if str(img_def.get("mimeType", "image/png")) == "image/png" else img.load_jpg_from_buffer(bytes)
-		if ok != OK:
+		var img := _glb_image(b, j, bin, int(pbr.baseColorTexture.index))
+		if img == null:
 			errs.append("%s: its base-colour image does not decode" % piece)
 			continue
-		img.convert(Image.FORMAT_RGBA8)
 		var d := img.get_data()
 		var s := 0.0
 		for i in range(0, d.size(), 4):
@@ -364,6 +396,112 @@ func _check_means(world: Node, look: Node) -> Array:
 		var mean := s / (d.size() / 4) * (0.2126 * float(f[0]) + 0.7152 * float(f[1]) + 0.0722 * float(f[2]))
 		if absf(mean - float(look.COVER_MEAN[piece])) > 0.0005:
 			errs.append("%s: Look.COVER_MEAN %.4f, its GLB's base colour averages %.4f" % [piece, look.COVER_MEAN[piece], mean])
+	return errs
+
+
+## A GLB's embedded image (by texture index) as RGBA8, or null.
+static func _glb_image(b: PackedByteArray, j: Dictionary, bin: int, tex: int) -> Image:
+	var img_def: Dictionary = j.images[int(j.textures[tex].source)]
+	var bv: Dictionary = j.bufferViews[int(img_def.bufferView)]
+	var off := bin + int(bv.get("byteOffset", 0))
+	var bytes := b.slice(off, off + int(bv.byteLength))
+	var img := Image.new()
+	var ok := img.load_png_from_buffer(bytes) if str(img_def.get("mimeType", "image/png")) == "image/png" else img.load_jpg_from_buffer(bytes)
+	if ok != OK:
+		return null
+	img.convert(Image.FORMAT_RGBA8)
+	return img
+
+
+## The look lock on max(r, g, b): Godot 4.7.2's glow keys on a pixel's brightest channel, not on its luminance. For
+## every cover piece and renderer, the cover read's own emission at its brightest texel, x exposure, stays under the
+## glow threshold. Conservative, texel by texel through the shader's rule: every texel of the piece's base colour with
+## its ORM metal (the porous darkening) and every placement's paint tint, the brightest wet factor (wet 0.75:
+## mix(1, WET_DARKEN, 0.75)), no pool fade, and a full sheen (graze 1) on top of the fill.
+func _glow_check(world: Node, look: Node) -> Array:
+	var errs: Array = []
+	var lin := PackedFloat32Array()
+	lin.resize(256)
+	for i in 256:
+		var c := i / 255.0
+		lin[i] = c / 12.92 if c <= 0.04045 else pow((c + 0.055) / 1.055, 2.4)
+	var moon: Color = look.COVER_SHEEN_COLOR.srgb_to_linear()
+	var wf := lerpf(1.0, float(look.WET_DARKEN), 0.75)
+	var exposure: float = look.environment.tonemap_exposure
+	var thr: float = look.environment.glow_hdr_threshold
+	var methods := ["forward_plus", "gl_compatibility"]
+	var v0: Dictionary = look.COVER_VALUES.forward_plus
+	for k in world.data.kit:
+		var piece: String = k.name
+		if float(look.COVER.get(piece, 0.0)) <= 0.0:
+			continue
+		var path := ProjectSettings.globalize_path("res://").path_join("../..").path_join(k.glb).simplify_path()
+		var b := FileAccess.get_file_as_bytes(path)
+		var jl := b.decode_u32(12)
+		var j: Dictionary = JSON.parse_string(b.slice(20, 20 + jl).get_string_from_utf8())
+		var pbr: Dictionary = j.materials[0].get("pbrMetallicRoughness", {})
+		var f: Array = pbr.get("baseColorFactor", [1.0, 1.0, 1.0, 1.0])
+		var base := _glb_image(b, j, 28 + jl, int(pbr.baseColorTexture.index))
+		var orm: Image = _glb_image(b, j, 28 + jl, int(pbr.metallicRoughnessTexture.index)) if pbr.has("metallicRoughnessTexture") else null
+		if base == null:
+			errs.append("%s: its base-colour image does not decode" % piece)
+			continue
+		if orm != null and orm.get_size() != base.get_size():
+			orm.resize(base.get_width(), base.get_height(), Image.INTERPOLATE_NEAREST)
+		var tints: Array = [[1.0, 1.0, 1.0]]
+		if bool(k.get("paintTint", false)):
+			tints = []
+			for r in k.placements:
+				var t := [float(r[6]), float(r[7]), float(r[8])]
+				if not t in tints:
+					tints.append(t)
+		var m := float(look.COVER_MEAN[piece])
+		var gain := clampf(m, float(v0.floor), float(v0.ceil)) / maxf(m, 1e-4) * wf
+		var lo := float(v0.lo)
+		var cap := float(v0.cap)
+		var fill := PackedFloat32Array()
+		var sheen := PackedFloat32Array()
+		var sat := PackedFloat32Array()
+		for method in methods:
+			var v: Dictionary = look.COVER_VALUES[method]
+			var sc := _want_scale(look, piece, method)
+			fill.append(float(v.fill) * float(sc.fill))
+			sheen.append(float(v.sheen) * float(sc.sheen))
+			sat.append(float(v.sat) * float(sc.sat))
+		var peak := PackedFloat32Array([0.0, 0.0])
+		var d := base.get_data()
+		var od := orm.get_data() if orm != null else PackedByteArray()
+		for i in range(0, d.size(), 4):
+			var mask: float = clampf((d[i + 3] - 1.0) / 254.0, 0.0, 1.0)
+			var pf: float = 1.0 - 0.4 * (1.0 - (od[i + 2] / 255.0 if od.size() > 0 else 0.0))
+			for t in tints:
+				var r: float = lin[d[i]] * float(f[0]) * (1.0 - mask + mask * float(t[0])) * gain * pf
+				var g: float = lin[d[i + 1]] * float(f[1]) * (1.0 - mask + mask * float(t[1])) * gain * pf
+				var bl: float = lin[d[i + 2]] * float(f[2]) * (1.0 - mask + mask * float(t[2])) * gain * pf
+				var hl: float = 0.2126 * r + 0.7152 * g + 0.0722 * bl
+				var l2 := lo
+				if hl >= 1e-4:
+					l2 = clampf(hl, lo, cap)
+					var s: float = l2 / hl
+					r *= s
+					g *= s
+					bl *= s
+				else:
+					r = lo
+					g = lo
+					bl = lo
+				for mi in methods.size():
+					var e: float = maxf(maxf(l2 + sat[mi] * (r - l2), 0.0) * fill[mi] + moon.r * sheen[mi],
+							maxf(maxf(l2 + sat[mi] * (g - l2), 0.0) * fill[mi] + moon.g * sheen[mi],
+							maxf(l2 + sat[mi] * (bl - l2), 0.0) * fill[mi] + moon.b * sheen[mi]))
+					if e > peak[mi]:
+						peak[mi] = e
+		for mi in methods.size():
+			print("  cover glow: %-24s %-16s peak max(r, g, b) %.3f (exposed) against the threshold %.2f" % [
+				piece, methods[mi], peak[mi] * exposure, thr])
+			if peak[mi] * exposure >= thr:
+				errs.append("%s on %s: the cover read's brightest texel, max(r, g, b) %.3f (exposed), reaches the glow threshold %.2f" % [
+					piece, methods[mi], peak[mi] * exposure, thr])
 	return errs
 
 

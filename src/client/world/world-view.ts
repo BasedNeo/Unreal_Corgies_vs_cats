@@ -106,7 +106,7 @@ export function createWorldView(scene: THREE.Scene, data: WorldData, opts: World
   const kitSplit = kitLook ? splitLotKitPrims(data) : null;
   const props = buildPrimMeshes([...(kitSplit ? kitSplit.rest : data.prims ?? []), ...(fence?.prims ?? [])], { far: edge + 8 });
   root.add(props.group);
-  const kit: LotKitView | null = kitLook && kitSplit && kitSplit.pieces.some((p) => p.placements.length) ? createLotKitView(kitSplit, kitLook, { far: edge + 8 }) : null;
+  const kit: LotKitView | null = kitLook && kitSplit && kitSplit.pieces.some((p) => p.placements.length) ? createLotKitView(kitSplit, kitLook, { far: edge + 8, quality: q }) : null;
   if (kit) root.add(kit.group);
   // crease ink is built in every tier and only hidden on low, so the tier can switch live
 

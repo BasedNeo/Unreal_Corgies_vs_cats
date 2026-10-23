@@ -396,3 +396,40 @@ where Forward+ shows 0.025 as 0.14. The probe is `scratchpad/g-atmos/probe2/emit
 
 So it is in the Compatibility path itself, and that is why "Compatibility is flatter and darker" (Q6 P2-7). Its night
 is much darker than Forward+'s. Worth its own look card: exposure or ambient per renderer, as the cover read now does.
+
+# G-ATMOS (W17 item 11b): the Godot half of PARITY P2c, the gate holes
+
+**Tests only.** Only `engines/godot/tests/test_look_cover.gd` changed. The shipped `look.gd` and `kit_wet.gdshader`
+are unchanged, and so are their values.
+
+| Hole | The check that closes it, headless (CI) |
+|---|---|
+| **V7**: `set_cover_read` ignored passed both gates | After `set_cover_read(false)`, every cover material's `cover_fill` and `cover_sheen` must be 0. After `set_cover_read(true)`, they must equal this renderer's `COVER_VALUES` × `COVER_SCALE` again |
+| **V6**: an extra emission term after the rule passed the statement pins | The shader must write `EMISSION` exactly twice (the lens's `=`, the cover read's `+=`), and the cover block must be exactly the pinned statements in order, with nothing inserted between them and nothing after (the contiguous-block check, item 11b follow-up: it also fails the verifier's MY4 and MY5, a statement inserted between two pins); the block starts at the lens's `EMISSION =`, and `wet_alb`, `ly`, `wpos`, `wnrm` are each written exactly once (kills X2, X3) |
+| **Pins** | `ly = VERTEX.y` joins the vertex pin. The lens's own `EMISSION =` is pinned. `Look.COVER_SHEEN_COLOR` is pinned at (0.62, 0.72, 0.95), and every cover material must receive it as `cover_sheen_color` |
+| **Glow**: it keys on max(r, g, b), not luminance | `_glow_check()` runs every texel of each cover piece's GLB base colour through the shader's rule: ORM metal, each placement's paint tint, the brightest wet factor 0.775, no pool, a full sheen. It asserts max(r, g, b) × exposure < 1.3. Peaks: Container20 1.016 / 1.010 (Forward+ / Compatibility), FloodMast 0.809 / 0.942, Footing 0.873 / 0.652, Pipe 0.817 / 0.665, BagWall 0.591 / 0.725. They match the verifier's `glowpeak.py`; the old luminance bound asserted 0.900 for Compatibility FloodMast |
+| `DRAW_GROWTH` → 1.0 (optional) | Not done. Proving it needs the ten 30 m rendered runs, and load5 was 7.7–9.7 from the parallel SwiftShader metric (the rule is < 8). It stays a render tolerance; the headless draw-item check gates ×1.000 exactly |
+
+**Mutants** (`scratchpad/g-cover2/mut11b.py`; "e75c591" is the test as landed, "11b" is the new one):
+
+| Mutant | e75c591 test | 11b test |
+|---|---|---|
+| V6: `EMISSION *= 1.0 + cover_fill * 1.5;` after the rule | survives | killed |
+| V6b: `EMISSION += vec3(0.3) * cover_fill;` after the rule | survives | killed |
+| V7: `_cover_params` ignores `cover_read` | survives | killed |
+| V7b: `set_cover_read(true)` never restores | survives | killed |
+| P1: `ly = VERTEX.y - 0.3` | survives | killed |
+| P2: `_cover_params` sends a white sheen colour | survives | killed |
+| P3: `COVER_SHEEN_COLOR` moved to (0.62, 0.72, 1.0) | survives | killed |
+| G1: Compatibility FloodMast fill × 1.8 | survives | killed (1.552; the old luminance bound gave 1.2) |
+| MY4: `held *= 3.0` before the pool loop | survives | killed |
+| MY5: `pool = 0.0` before `EMISSION +=` | survives | killed |
+| X2: `wet_alb *= 3.0` before the block | survives | killed (write-once) |
+| X3: `ly -= 0.3` after the vertex pin | survives | killed (write-once) |
+| none | passes | passes |
+
+The 21 round-3 mutants (`mut.py`) behave as before against the new test: 20 killed headless, and H29 (the 60 m gap
+gate) fails the rendered run.
+
+**Suite:** a fresh copy of HEAD `c010d64` (fresh `--import`) with the new test: `--headless --script res://tests/run.gd` passes 26/26.
+`test_look_cover` headless now takes about 17 s instead of 4 s; the texel glow check is the addition.

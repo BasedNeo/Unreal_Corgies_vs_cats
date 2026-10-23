@@ -778,3 +778,156 @@ The script is `scratchpad/i11-mut2.py`.
 
 **Known limit:** `createKitView` passing the floods to the material has no unit test, because no test builds a kit
 view. A broken pass shows in the metric as lit-view lifts.
+
+## §11b: item 11b-WEB, PARITY P2a (web q=low) and the web half of P2c (gate holes m4 / m5)
+
+Base: a fresh copy of HEAD f7f45b5 (item 11 landed as e75c591) plus these files only. Nothing is committed.
+
+**Changed files:**
+- `src/client/assets/kit-glb.ts`:
+  - `kitLitFloods(floods, quality)` and the `KitQuality` type;
+  - `KIT_COVER_SCALE_LOW` and `kitCoverScale(name, quality)`, which replaces the static `KitPiece.coverScale`;
+  - `kitPbrOpts(piece, floods, quality)`;
+  - `createKitView` and `createLotKitView` take `quality` and a test `load`.
+- `src/client/world/world-view.ts:109`, one line, by the lead's leave: `createLotKitView(kitSplit, kitLook, { far: edge + 8, quality: q })`. Before it, the kit view never learned the tier; the lamps (`createLampsView(data, { quality: q })`) did.
+- `labs/cover.ts`:
+  - the tier (`?q=`) goes to `createWorldView`, which hands it to the lamps and to the kit, as in the game;
+  - `values()` resets the scales to the tier's row.
+- `labs/cover-metric.mjs`: CONFIGS also take the Footing and BagWall scales.
+- `tests/unit/kit-cover.test.ts`: pins the low row, its range, and the tier selecting the row.
+- `tests/unit/kit-cover-wiring.test.ts` (new): builds the Lot's kit view with stand-in GLBs at high, med and low.
+- `docs/qa/w15/COVER.md` (Web section).
+
+**P2a, the fix.** At a tier whose floods have no real light (`STYLE.floodlight.budget` low 0), the pool term has no
+floods, so nothing fades the fill where nothing lights the piece. High (4) and medium (2) keep all 4 floods, so
+their numbers are unchanged. Medium moves its 2 real lights to the floods nearest the camera.
+
+**P2a, the low row, first pass** (superseded by the §11b follow-up; lead ruling 2026-10-17: a tier row of the existing per-piece scale, fill only, in [0.5, 2.5]):
+- `KIT_COVER_SCALE_LOW`, laid over `KIT_COVER_SCALE` at q=low only: Footing ×1.35 and BagWall ×0.75.
+- Container20 ×2.1 and FloodMast ×0.85 apply at every tier, from the one row.
+- This is the simplest shape a test can pin: one extra table, and a selector `kitCoverScale`.
+- The sweep at Q=low (Footing ×1.3 / 1.4 / 1.5, BagWall ×0.8 / 0.85 / 0.9, then the chosen ×1.35 / ×0.75):
+  - Footing 60 m edge against 10 / 30 m body: ×1.3 gives 14.1 and 39.2 / 39.3; ×1.4 gives 14.5 and 40.2 / 40.4; ×1.5
+    gives 14.98 and 41.3 / 41.3; ×1.35 gives 14.3 and 39.7 / 39.8.
+  - No Footing scale holds both its 60 m edge ≥ 15 and its 10 / 30 m body ≤ 40. So, per the ruling, there is no third
+    knob: ×1.35 is the most the ceiling allows.
+  - BagWall: ×0.85 gives the rim 40.1 / 40.8 (over); ×0.8 gives 39.5 / 40.2; ×0.75 gives 38.8 / 39.6. The lane walls'
+    edges stay ≥ 18.1.
+
+**Results**, the full 29 views per tier:
+
+| Tier | Gate | Against e75c591 |
+|---|---|---|
+| high | `COVER PASS`, exit 0 | identical to the last digit, all 29 views (my item 11 final run and the lead's web/full/shipped) |
+| med | `COVER PASS`, exit 0 | identical to the last digit, all 29 views (the lead's judge/med run) |
+| low | exit 1, **one residual** | 28 of 29 pass |
+
+The low tier at the shipped values (**superseded, see §11b follow-up:** these low numbers, and the sweep above, were
+measured with the lab's render context left at high, so shadows, bloom and high style detail were on):
+- **Footing[1], edge** (read off → on): 10 m 12.2 → 17.0, 30 m 10.7 → 32.0, **60 m 8.2 → 14.3 (the residual, under 15)**.
+- **Footing[1], body:** 39.7 / 39.8 at 10 / 30 m.
+- **Rim BagWall[3]:** body 38.8 / 39.6, edges 24.2 / 24.6 / 15.7. Its std ×0.80 / 0.73 stays above its 0.59 floor.
+- **Lane bag walls:** edges ≥ 18.1.
+- Draws are 2054 → 2054 per view (low's own scene).
+- The residual goes to PARITY P2a as a known low-tier limit (lead).
+
+**P2c, the web gate holes.** `kit-cover-wiring.test.ts` builds `createLotKitView` as `world-view` does, with a
+stand-in GLB per piece, and checks:
+- the floods reach every cover material: 4 cones at high and med, 0 at low;
+- each material's fill scale is its tier's row;
+- the FloodMast batch carries each placement's foot height (the Lot's mast feet are not 0), and its material reads it;
+- no other piece carries a cover base;
+- `world-view.ts` passes `quality: q` to `createLotKitView` and to `createLampsView`. This is a source pin, so the
+  styleDetail fallback (for other callers) cannot stand in for it.
+
+**Mutants (13).** Each was applied alone to a private copy, and every one fails:
+- All 13 fail `npx vitest run tests/unit/kit-cover-wiring.test.ts tests/unit/kit-cover.test.ts`, exit 1, on the final
+  code.
+- W1 (m4), W3 (m5), W8 (the low row at med) and W6 (world-view drops `quality`) also ran CI's whole unit run
+  (`npx vitest run`, 157 files, one worker, nice 10), and each exits 1. The unmutated baseline is 157 files passed,
+  1386 tests passed and 4 skipped, exit 0.
+  - W1: the wiring file fails, 2 tests.
+  - W3: the wiring file fails, 1 test.
+  - W8: kit-cover and the wiring file fail.
+  - W6: the wiring file's source pin fails.
+- The W8 and W6 runs also tripped the CPU-time budgets of `ai-nav-links` and `lot-tdm` (3.1 to 3.6 s against 3 s) under
+  the box's load from other lanes. Those files are unchanged, they import neither mutated file, and they pass
+  unmutated on an idle box.
+
+| Mutant | Change | Caught by |
+|---|---|---|
+| W1 (m4) | createLotKitView passes no floods | kit-cover-wiring: the flood cones at high and med |
+| W2 (m4b) | createKitView passes no floods to the material | the same |
+| W3 (m5) | coverBase 0 | kit-cover-wiring: each placement's foot |
+| W4 (m5b) | no coverBase attribute | kit-cover-wiring: the coverBase attribute |
+| W5 | kitLitFloods ignores the tier | kitLitFloods at low; 0 cones at low |
+| W6 | world-view stops passing `quality` | the source pin |
+| W7 | the old wiring (all floods at every tier) | 0 cones at low |
+| W8 | the low row applied at med | kit-cover rows; wiring: the scale at med |
+| W9 | the low row ignored | kit-cover rows; wiring: the scale at low |
+| W10 | the low row's Footing 1.35 → 1.0 | kit-cover: the pinned low row |
+| W11 | the material ignores the tier | wiring: the scale at low |
+| W12 | createLotKitView drops the tier | wiring: the scale at low |
+| W13 | the high row's Container20 2.1 → 2.2 | kit-cover: the pinned high and med rows |
+
+### §11b follow-up: B1, the real low profile (lead ruling 2026-10-18)
+
+The verifier's B1: `labs/cover.ts` built its render context without the tier, so `Q=low` measured with the shadow
+pass, bloom and high style detail on. The game's low tier turns shadows and bloom off (`engine/quality.ts`). The low
+numbers above (Footing ×1.35, residual 14.3) are superseded by these.
+
+**Changed files (this pass):**
+- `labs/cover.ts`: the tier goes to `createRenderContext(…, { quality: toQualityTier(tier) })` as `main.ts` passes it,
+  then `ctx.adaptive.setBounds(1, 1)`.
+  - Measurement convention: the pixel ratio is pinned at 1 at every tier. `view()` computes the part's rect in the
+    canvas's drawing-buffer pixels, and the metric reads it from a 1280 × 720 screenshot in CSS pixels. These agree only
+    at ratio 1. At low's own 0.85 the rect lands on the wrong pixels, and the 30 and 60 m views read 0 px. Ratio 1 is
+    also the grid Godot's metric reads.
+- `labs/cover-metric.mjs`: CONFIGS take a ninth field, the Pipe's scale.
+- `src/client/assets/kit-glb.ts`: `KIT_COVER_SCALE_LOW` is now Footing ×1.32, BagWall ×0.75 and Pipe ×1.05, with its
+  reasons re-measured. The ×1.5 figure is corrected.
+- `tests/unit/kit-cover.test.ts`: pins the new low row.
+- `tests/unit/kit-cover-wiring.test.ts`: adds a behaviour check. `createWorldView` is built at high, med and low, with
+  `kit-glb` wrapped so that `kitFlag` is `'pbr'` and the GLBs are stand-ins. The tier it hands `createLotKitView` must be
+  its own, and the kit's materials must carry that tier's cones (4 / 4 / 0) and scale row. The verifier's
+  `q === 'low' ? 'high' : q` mutant passes the source pin but fails this check. The source pin stays.
+- `docs/qa/w15/COVER.md`, Web section: the low row, the tiers, the convention, and the fixes the verifier asked for.
+
+**The low row, re-tuned at the real low profile** (Q=low, ratio 1). All values are fill only, in [0.5, 2.5].
+
+| Piece | At ×1 | Sweep | Chosen |
+|---|---|---|---|
+| Footing[1] | 60 m edge 12.55 | ×1.3 / 1.31 / 1.32 / 1.33 / 1.35 / 1.5: 60 m edge 14.01 / 14.09 / 14.12 / 14.16 / 14.3 / 14.95; 30 m body 39.64 / 39.76 / 39.89 / 39.97 / 40.2 / 41.7 | **×1.32** (×1.33 clears the ceiling by only 0.03) |
+| Rim BagWall[3] | body 42.1 / 42.6 at 10 / 30 m | ×0.75 / 0.65 / 0.6: 39.0 / 37.6 / 36.8 at 10 m; lane edges at 60 m 18.0 / 17.2 / 16.8 | **×0.75** (lowering it does not help the footing) |
+| Pipe[0] | 60 m edge 14.95 | ×1.05 / 1.1: 60 m 15.20 / 15.4; 10 m body 39.28 / 39.9; std ×0.66 in both | **×1.05** |
+
+**Results** (the full 29 views per tier, exit code = verdict):
+
+| Tier | Result |
+|---|---|
+| high | `COVER PASS`, exit 0. Identical to e75c591: 0 differing values against the item 11 final run. |
+| med | `COVER PASS`, exit 0, at its own profile. Edges are within 0.9 L\* of high's and bodies within 0.3; against the first med run (render context left at high), within 0.12. Worst edge 15.1, gap 21.7, draws 2106 → 2106. |
+| low | exit 1, **28 of 29**. The residual is Footing[1] at 60 m: edge 14.12 against 15 (8.24 read off). |
+
+The low tier at the shipped row:
+- Footing[1]: edges 16.8 / 31.7, body 39.7 / 39.9 at 10 / 30 m.
+- Rim BagWall[3]: body 39.0 / 39.7, std ×0.80 / 0.73.
+- Pipe[0]: edges 24.1 / 16.1 / 15.2, std ≥ ×0.66.
+- Lane bag walls: edges ≥ 18.0. The minimum gap is 26.1 at 10 and 30 m (23.0 at 60 m, reported).
+- Draws: 1151 → 1151 (no shadow pass).
+
+Stop at (c): no footing scale holds both its 60 m edge and its 10 / 30 m ceiling. The residual goes to PARITY P2a
+(lead).
+
+**Mutants (16), this pass.** All 16 fail `npx vitest run` on the two cover files, on the final code. This adds three
+to W1–W13:
+- W14: world-view swaps the tier (`q === 'low' ? 'high' : q`). Caught by the wiring's createWorldView check at low.
+- W15: the low row drops the Pipe. Caught by kit-cover.
+- W16: the Pipe 1.05 → 1.1. Caught by kit-cover.
+
+W10 is now Footing 1.32 → 1.0.
+
+CI's whole unit run (`npx vitest run`, nice 10) was run on a fresh copy of HEAD c010d64 plus these files:
+- The baseline: 159 files passed, 1440 tests passed and 4 skipped, exit 0.
+- W8 (the low row at med): exit 1. Only kit-cover and kit-cover-wiring fail, 3 tests.
+- W14 (world-view swaps the tier): exit 1. Only kit-cover-wiring fails (the createWorldView check at low), 1 test.

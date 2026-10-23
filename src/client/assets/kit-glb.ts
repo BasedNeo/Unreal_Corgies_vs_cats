@@ -34,7 +34,8 @@
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { COVER_ALL, PBR_COVER_BASE, PBR_PAINT_TINT, pbr, stylize, toon } from '../style/style-webgpu.js';
+import { COVER_ALL, PBR_COVER_BASE, PBR_PAINT_TINT, pbr, styleDetail, stylize, toon } from '../style/style-webgpu.js';
+import { floodlightBudget } from '../style/floodlights.js';
 import { smoothNormalsByPosition } from '../style/style-utils.js';
 import { worldColor } from '../world/world-palette';
 import { buildPrimMeshes, disposePrimMeshes } from '../world/prim-mesh';
@@ -95,11 +96,6 @@ export interface KitPiece {
    * luminance, each channel sRGB-decoded, × the baseColorFactor's luminance (kit-cover.test.ts recomputes it).
    */
   coverMean: number;
-  /**
-   * The web's per-piece scale on the cover read's fill (a per-build knob, like Godot's per-renderer COVER_SCALE; lead ruling:
-   * only where measured, each in [0.5, 2.5]): KIT_COVER_SCALE.
-   */
-  coverScale?: { fill: number };
 }
 
 /**
@@ -113,6 +109,29 @@ export interface KitPiece {
 export const KIT_COVER_SCALE: Readonly<Record<string, { fill: number }>> = {
   Kit_Lot_Container20_01: { fill: 2.1 }, Kit_Lot_FloodMast_01: { fill: 0.85 },
 };
+
+/**
+ * The low tier's row of the per-piece scales (W17 item 11b; lead ruling 2026-10-17: the web's tier plays the part of
+ * Godot's renderer, whose COVER_SCALE has a row per renderer; same knob, same range, fill only), laid over
+ * KIT_COVER_SCALE at q=low only. At low the floods have no real light (budget 0), so the pool term is off
+ * (kitLitFloods), and the low engine profile drops the shadow pass and bloom (engine/quality.ts). Tuned at that
+ * profile (labs/cover.ts at ?q=low, pixel ratio 1; docs/qa/w15/COVER.md, Web):
+ * - Footing up: at x1 its 60 m edge was 12.55. x1.32 keeps its 10 / 30 m body (a dark view) under 40 (39.7 / 39.9);
+ *   its 60 m edge stays short of 15 at 14.1 (a known low-tier limit, PARITY P2a): x1.35 already puts the 10 / 30 m body at
+ *   40.04 / 40.2, and x1.5 reaches only 14.95 at 60 m (its body 41.6 / 41.7);
+ * - BagWall down: at x1 the corgi-rim walls, no longer lit, went to L* 42.1 / 42.6 at 10 / 30 m (a dark view, over 40);
+ *   x0.75 holds them at 39.0 / 39.7, and the lane walls keep their edges (>= 15);
+ * - Pipe up: at x1 its 60 m edge was 14.95; x1.05 gives 15.2, its 10 m body 39.3 and its std x0.66 (floor 0.60).
+ */
+export const KIT_COVER_SCALE_LOW: Readonly<Record<string, { fill: number }>> = {
+  Kit_Lot_Footing_01: { fill: 1.32 }, Kit_Lot_BagWall_01: { fill: 0.75 }, Kit_Lot_Pipe_01: { fill: 1.05 },
+};
+
+/** A piece's fill scale at a tier: KIT_COVER_SCALE, with KIT_COVER_SCALE_LOW over it at q=low; none if neither has it. */
+export function kitCoverScale(name: string, quality: KitQuality = kitDefaultTier()): { fill: number } | undefined {
+  const k = (quality === 'low' ? KIT_COVER_SCALE_LOW[name] : undefined) ?? KIT_COVER_SCALE[name];
+  return k ? { ...k } : undefined;
+}
 
 /** KitPiece.coverMean per piece [godot look.gd COVER_MEAN, copied exactly]. */
 export const KIT_COVER_MEAN: Readonly<Record<string, number>> = {
@@ -166,7 +185,6 @@ export const kitLodFor = (d: number): number => kitLodAt(d, KIT_LOD_DIST);
 export const KIT_CONTAINER_PIECE: KitPiece = {
   name: KIT_CONTAINER, url: KIT_CONTAINER_URL, lodDist: KIT_LOD_DIST, centreY: CONTAINER.H / 2, paintTint: true,
   pbrOpts: { paintTint: true }, toonSurface: 'metal', cover: COVER_ALL, coverMean: KIT_COVER_MEAN[KIT_CONTAINER],
-  coverScale: KIT_COVER_SCALE[KIT_CONTAINER],
 };
 
 // ------------------------------------------------------------------------------------------------ bag walls (P-GLB1b)
@@ -465,7 +483,7 @@ export const kitPlacementMatrix = (p: KitPlacement): THREE.Matrix4 => new THREE.
  * draw per pass. `split.prims` (the procedural stand-in) are drawn until the GLB is ready, and for good if it fails.
  * `far`: buildPrimMeshes' far-scenery distance for that stand-in.
  */
-export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; placements: KitPlacement[] }, look: KitLook, opts: { url?: string; far?: number; forceLod?: number | null; floods?: readonly KitCoverFlood[] } = {}): KitPieceView {
+export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; placements: KitPlacement[] }, look: KitLook, opts: { url?: string; far?: number; forceLod?: number | null; floods?: readonly KitCoverFlood[]; quality?: KitQuality; load?: KitLoad } = {}): KitPieceView {
   const group = new THREE.Group();
   group.name = `kit_glb_${piece.name}`;
   const placements = split.placements;
@@ -482,7 +500,8 @@ export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; pla
   let version = 0;                                                 // bumps when the index changes (the shadow caster follows)
   let disposed = false;
 
-  const ready = gltfLoader().loadAsync(opts.url ?? piece.url).then((gltf) => {
+  const load: KitLoad = opts.load ?? ((url) => gltfLoader().loadAsync(url));
+  const ready = load(opts.url ?? piece.url).then((gltf) => {
     if (disposed) return;
     gltf.scene.updateMatrixWorld(true);
     const src = [0, 1, 2].map((i) => {
@@ -515,7 +534,7 @@ export function createKitView(piece: KitPiece, split: { prims: VisualPrim[]; pla
     const batchGroup = new THREE.Group();
     batchGroup.name = `${piece.name}_instances`;
     batchGroup.add(bm);
-    if (look === 'pbr') bm.material = pbr(material, kitPbrOpts(piece, opts.floods));
+    if (look === 'pbr') bm.material = pbr(material, kitPbrOpts(piece, opts.floods, opts.quality));
     // the toon side: toon() keeps the colour map; the ORM/normal maps have no place in the toon model (surface preset)
     else stylize(batchGroup, { remap: (m: THREE.MeshStandardMaterial) => toon({ color: m.color?.getHex() ?? 0xffffff, map: m.map ?? null, surface: piece.toonSurface, vertexColors: piece.paintTint, ...(piece.toonSurface === 'metal' ? { rough: 0.55, metal: 0.2 } : {}) }) });
     drawn = b.select(placements.map(() => force ?? 0));          // drawn before the first update() picks by distance
@@ -581,15 +600,35 @@ export function kitCoverFloods(data: WorldData): KitCoverFlood[] {
   });
 }
 
+/** A quality tier's name ('low' | 'med' | 'medium' | 'high'). */
+export type KitQuality = 'low' | 'med' | 'medium' | 'high';
+const DETAIL_TIER: readonly KitQuality[] = ['low', 'medium', 'high'];
+/** A caller that names no tier gets the style detail tier the render context was built with (main.ts: the same q). */
+const kitDefaultTier = (): KitQuality => DETAIL_TIER[styleDetail()] ?? 'high';
+
+/**
+ * The floods whose cones the cover read fades its fill in (PARITY P2a): all of them at a tier that gives the floods
+ * real lights (STYLE.floodlight.budget > 0: floodlights.js hands them to the floods nearest the camera), none at a tier
+ * with no flood light (low: budget 0), where the fill has no light to fade into. createLotKitView passes the world
+ * view's tier (world-view.ts: the same `q` as the lamps); a caller that gives none gets the style detail tier.
+ */
+export function kitLitFloods(floods: readonly KitCoverFlood[], quality: KitQuality = kitDefaultTier()): KitCoverFlood[] {
+  return floodlightBudget(quality) > 0 ? floods.map((f) => [...f] as KitCoverFlood) : [];
+}
+
+/** Loads a kit GLB (createKitView's default: the shared GLTFLoader with meshopt); a test may hand its own. */
+export type KitLoad = (url: string) => Promise<{ scene: THREE.Object3D }>;
+
 /**
  * The pbr() options a kit piece's material is built with: its own overrides plus the cover read's terms (W15 item 11):
- * its zone, its mean base-colour luminance and the world's floods.
+ * its zone, its mean base-colour luminance, the world's floods and its fill scale at the tier (kitCoverScale).
  */
-export function kitPbrOpts(piece: KitPiece, floods: readonly KitCoverFlood[] = []): Record<string, unknown> {
+export function kitPbrOpts(piece: KitPiece, floods: readonly KitCoverFlood[] = [], quality: KitQuality = kitDefaultTier()): Record<string, unknown> {
+  const scale = kitCoverScale(piece.name, quality);
   return {
     ...(piece.pbrOpts ?? {}), coverTop: piece.cover, coverBase: piece.cover > 0 && piece.cover < COVER_ALL,
     coverMean: piece.coverMean, coverFloods: floods.map((f) => [...f]),
-    ...(piece.coverScale ? { coverScale: { ...piece.coverScale } } : {}),
+    ...(scale ? { coverScale: scale } : {}),
   };
 }
 
@@ -665,7 +704,6 @@ export const KIT_FLOODMAST_COVER = 1.25;
 export const KIT_FLOODMAST_PIECE: KitPiece = {
   name: KIT_FLOODMAST, url: kitUrl(KIT_FLOODMAST), lodDist: KIT_FLOODMAST_LOD_DIST, centreY: 11, paintTint: false,
   pbrOpts: {}, toonSurface: 'metal', cover: KIT_FLOODMAST_COVER, coverMean: KIT_COVER_MEAN[KIT_FLOODMAST],
-  coverScale: KIT_COVER_SCALE[KIT_FLOODMAST],
 };
 export const KIT_FLOODLAMP_PIECE: KitPiece = {
   name: KIT_FLOODLAMP, url: kitUrl(KIT_FLOODLAMP), lodDist: KIT_FLOODLAMP_LOD_DIST, centreY: 0.475, paintTint: false,
@@ -767,10 +805,13 @@ export interface LotKitView extends KitView {
  * Every Lot kit piece that has placements, in one view (world-view's ?kit=glb branch): one batched mesh per piece in
  * the colour pass and (after shadowFrom) one shared shadow draw. stats() sums the pieces (kitLoaded = pieces drawn
  * from their GLB), adds per-piece kitTriangles_<name> and kitLod0|1|2_<name> (instances at each LOD), and
- * kitShadowCasters. `forceLod` (default ?kitlod=) pins every instance to one LOD.
+ * kitShadowCasters. `forceLod` (default ?kitlod=) pins every instance to one LOD. `quality`: the world view's tier, which
+ * decides whether the cover read's pool term has floods (kitLitFloods); `load`: a GLB loader for tests.
  */
-export function createLotKitView(split: ReturnType<typeof splitLotKitPrims>, look: KitLook, opts: { far?: number; forceLod?: number | null } = {}): LotKitView {
-  const o = { far: opts.far, forceLod: opts.forceLod === undefined ? kitForcedLod() : opts.forceLod, floods: split.floods };
+export function createLotKitView(split: ReturnType<typeof splitLotKitPrims>, look: KitLook, opts: { far?: number; forceLod?: number | null; quality?: KitQuality; load?: KitLoad } = {}): LotKitView {
+  // the cover read's floods: only at a tier whose floods have real lights (kitLitFloods; PARITY P2a); the tier also
+  // picks the per-piece scales' row (kitCoverScale)
+  const o = { far: opts.far, forceLod: opts.forceLod === undefined ? kitForcedLod() : opts.forceLod, floods: kitLitFloods(split.floods, opts.quality), quality: opts.quality, load: opts.load };
   const views: [KitPiece, KitPieceView][] = split.pieces.filter((p) => p.placements.length).map((p) => [p.piece, createKitView(p.piece, { prims: p.matched, placements: p.placements }, look, o)]);
   const group = new THREE.Group();
   group.name = 'kit_glb';

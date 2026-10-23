@@ -284,22 +284,35 @@ The last five are 2 × 2 grids, 1200 px: rows before (HEAD) / after, columns Com
 |---|---|
 | `LOOK` | still `"stylised-realistic"` |
 | Outlines | none (`test_look_scene` `outline_scan` PASS) |
-| Glow | each piece's peak emission, exposed, is under the threshold of 1.3 (asserted per piece and renderer; table below) |
+| Glow | each piece's brightest texel, max(r, g, b) exposed, is under the threshold of 1.3 (asserted per piece and renderer; table below) |
 | Night, sky, ground, floods | unchanged |
 | `test_look_contract` | PASS |
 
-**The glow bound.** The peak is a texel at the guard's top (0.5) × max(1, sat), plus a full sheen, × exposure 1.5,
-outside any pool:
+**The glow bound (item 11b): max(r, g, b), texel by texel.** Godot 4.7.2's glow keys on a pixel's brightest
+channel, not on its luminance. The round-3 luminance bound therefore under-read one piece: Compatibility's FloodMast,
+asserted at 0.90, peaks at 0.942.
 
-| Renderer | Piece | Peak |
+`_glow_check()` now runs every texel of each cover piece's GLB base colour through the shader's own rule. It uses:
+- the ORM metal, for the porous darkening;
+- each placement's paint tint;
+- the brightest wet factor, `mix(1, WET_DARKEN, 0.75)` = 0.775;
+- no pool fade;
+- a full sheen on top.
+
+It takes max(r, g, b) of the emission, × exposure 1.5, and asserts the result under 1.3. These numbers match the
+verifier's independent `glowpeak.py` to the third decimal:
+
+| Piece | Forward+ | Compatibility |
 |---|---|---|
-| Forward+ | Footing | 1.17 |
-| Forward+ | Container | 1.24 |
-| Forward+ | Pipe | 1.04 |
-| Forward+ | Ballast | 0.99 |
-| Forward+ | Bags | 0.73 |
-| Compatibility | Container | 1.09 |
-| Compatibility | the others | 0.90 |
+| Container20 | 1.016 | 1.010 |
+| Footing | 0.873 | 0.652 |
+| Pipe | 0.817 | 0.665 |
+| FloodMast (ballast) | 0.809 | 0.942 |
+| BagWall | 0.591 | 0.725 |
+
+- The highest is 1.016, 0.28 under the threshold.
+- The bound is exact per texel. The GPU's filtering blends texels, and the read is not proven never to exceed the
+  brightest texel's peak; the 0.28 of headroom covers that.
 
 ### 8. Limits and how to run it
 
@@ -308,22 +321,36 @@ outside any pool:
 - **Headless (CI)** runs:
   - the collider table;
   - `COVER_MEAN` against the GLBs;
-  - the shader-rule pins (`SHADER_RULE`);
+  - the shader-rule pins (`SHADER_RULE`), including the zone's height `ly = VERTEX.y` and the lens's own emission;
+  - that the shader writes `EMISSION` exactly twice, and that the cover block, from the lens's `EMISSION =` on, is
+    exactly the pinned statements in order, with nothing inserted between them and nothing after, and that the rule's
+    inputs outside it (`wet_alb`, `ly`, `wpos`, `wnrm`) are each written exactly once;
   - the band, guard and power pins;
+  - the moon colour: `Look.COVER_SHEEN_COLOR` is (0.62, 0.72, 0.95), and every cover material receives it;
   - each renderer's values and per-piece scales, through `cover_scale()` and `_cover_params()` called for
-    `forward_plus`, `mobile` and `gl_compatibility`;
+    `forward_plus`, `mobile` and `gl_compatibility`. The gains themselves are gated by the rendered bar, not
+    headless: the verifier's Forward+ pool 0.2 → 0 passes headless and fails corgi base 10 m (Footing 42.4 > 40);
   - the floods on every material;
-  - the glow bound;
-  - the draw shape.
+  - the glow bound on max(r, g, b) (§7);
+  - the draw shape;
+  - the A/B toggle: `set_cover_read(false)` zeroes every cover material's fill and sheen, and `set_cover_read(true)`
+    restores them.
 
-  21 mutants of the rule and the gates each fail it headless (`scratchpad/g-cover2/mut.py`; H29, which gates the 60 m
-  gap, fails the rendered run instead, §4). They include:
+  Of 29 mutants of the rule and the gates (21 in `scratchpad/g-cover2/mut.py`, 8 in `scratchpad/g-cover2/mut11b.py`),
+  28 fail it headless; H29, which gates the 60 m gap, fails the rendered run instead (§4). The item 11b follow-up
+  adds the verifier's MY4 (`held *= 3.0;` before the pool loop) and MY5 (`pool = 0.0;` before `EMISSION +=`), each
+  inserted between two pins; the contiguous-block check fails both headless. The final verification added X2
+  (`wet_alb *= 3.0;` before the block: headless PASS, rendered Compatibility west lane 10 m Container20 66.8 > 40) and X3
+  (`ly -= 0.3;` after the vertex pin); the write-once check fails both headless. The 29 include:
   - H5 (the band's floor ignored);
   - H6 (the power hard-coded to 2);
   - H11 (the up-face mask removed);
   - H14 (the mask inverted);
   - Forward+'s scales applied on Compatibility;
-  - the gate inverted.
+  - the gate inverted;
+  - item 11b's eight: an extra emission term after the rule (V6, two forms); the toggle ignored or never restored
+    (V7, two forms); `ly` moved; the moon colour not sent, or moved; and a Compatibility FloodMast fill × 1.8 that
+    the old luminance bound passed and the max-channel bound catches (1.552).
 - **The rendered bar runs per place and distance.** The whole set takes 10+ min on a software Forward+, past
   `run.gd`'s 600 s watchdog, so it is split into 15 runs, each through `run.gd` and under the watchdog. A place's mast
   pole always comes with it, so every run still checks the gap:
@@ -392,6 +419,10 @@ emission += held × fill × (1 − pool_k × pool)
   - The sheen's normals (the graze's and the up-face mask's) are turned to the viewer on a back face, because the kit
     GLBs are double-sided here while Godot culls back faces.
   - The FloodMast's zone is measured from each placement's foot through the `coverBase` vertex float.
+  - **The tier decides the pool's floods** (W17 item 11b; PARITY P2a). Godot builds all 4 floods at every quality.
+    The web gives them real lights only within the tier's budget (high 4, medium 2, low 0). So the pool term counts the
+    floods only at a tier that lights them, and none at low, where nothing would replace the faded fill
+    (`kit-glb.ts` `kitLitFloods`). `world-view.ts` passes the kit view the same `q` its lamps take.
   - The albedo is left as it was, on the zone and off it (no dim).
   - `setCoverRead(on)` is a uniform A/B: same material, same draws.
 
@@ -414,13 +445,21 @@ emission += held × fill × (1 − pool_k × pool)
   39.5 at 0.16, at or under 40.
 - **sat 1.0:** saturation keeps luminance, so it moves no bar.
 
-**The per-piece scales** are allowed by lead ruling for Container20 and FloodMast only, in [0.5, 2.5]. Both are
-pinned in `kit-cover.test.ts`, with a mutant each.
+**The per-piece scales** are allowed by lead ruling, fill only, each in [0.5, 2.5]. Every value is pinned in
+`kit-cover.test.ts`, with a mutant each.
+- **High and medium** (`KIT_COVER_SCALE`): Container20 and FloodMast.
+- **Low** (`KIT_COVER_SCALE_LOW`, W17 item 11b): a second row laid over the first at q=low only. The web's tier plays
+  the part of Godot's renderer, whose `COVER_SCALE` has a row per renderer. It holds Footing, BagWall and Pipe.
+  Container20 and FloodMast keep their high/medium values at low. It is tuned at the game's real low profile (shadow
+  pass and bloom off, low style detail; see the metric's tier convention below).
 
 | Piece | Scale | Measured reason |
 |---|---|---|
 | Container20 | fill ×2.1 | Its silhouette at 30 m is its near-black frame, which the guard holds at 0.08. At the global fill its edge at 30 m was 14.6 (×2.0) and 7.1 (×1). At ×2.1 it is 16.2. At ×2.3 its body at 10 m reaches 39.8, too close to the 40 ceiling. |
 | FloodMast | fill ×0.85 | Its mean of 0.0661 gives the ballast a ×3.3 gain. At the global fill the cat-base ballast, a dark view, went over 40: 40.6 at fill 0.15. At ×0.85 it is 37.7 / 38.9 at 10 / 30 m. |
+| Footing (low only) | fill ×1.32 | At low, with no pool, the pit footing's 60 m edge is 12.55 at ×1, against the low tier's lit ground decal around it. Its 10 / 30 m body (a dark view at low) allows at most ×1.32: 39.7 / 39.9 (×1.33 gives 39.8 / 39.97; ×1.35 puts the 10 / 30 m body at 40.04 / 40.2). At ×1.5 the 60 m edge is still 14.95, and the 10 / 30 m body is 41.6 / 41.7. So 14.1 at 60 m remains (below). |
+| BagWall (low only) | fill ×0.75 | At low the corgi-rim walls are no longer lit and take the whole fill: 42.1 / 42.6 at 10 / 30 m at ×1, over 40. At ×0.75 they are 39.0 / 39.7, and the lane walls keep edge ≥ 18.0. |
+| Pipe (low only) | fill ×1.05 | At low its 60 m edge is 14.95 at ×1. At ×1.05 it is 15.2, with its 10 m body at 39.3 and its std ratio at 0.66 (floor 0.60). ×1.1 puts the 10 m body at 39.9. |
 
 **Glow.** The peak emission is a texel at the guard's cap × the fill (outside every pool) plus a full sheen:
 luminance 0.5 × 0.16 × 2.1 + 0.10 × 0.48 = 0.22. Exposed (×1.5) that is 0.32, against the bloom threshold of 1.3.
@@ -518,6 +557,27 @@ Every other sample keeps 0.85.
   every other sample keeps ≥ 0.97.
 - Draws are 2106 → 2106, equal in every view.
 
+**The tiers** (W17 item 11b), each the full 29 views at the shipped values, each at the game's own profile for the
+tier (the render context's shadows, bloom and style detail, and the world view's floods and scale row), pixel ratio 1:
+- **q=high:** `COVER PASS`, identical to e75c591 to the last digit on every view. High is the render context's default
+  profile, so passing the tier changes nothing there.
+- **q=med:** `COVER PASS`, close to high but not identical:
+  - its edges are within 0.9 L\* of high's and its bodies within 0.3, from the medium world's own knobs (two real flood
+    lights instead of four, among others) and its style detail;
+  - against item 11b's first med run, which left the render context at high, the medium style detail alone moves
+    values by at most 0.12;
+  - worst edge 15.1, minimum gap 21.7, the rim bag wall's std ratio 0.64 (floor 0.59), draws 2106 → 2106.
+- **q=low:** 28 of 29 pass (exit 1). The residual is Footing[1] at 60 m: edge 14.1 against 15 (8.2 with the read off).
+  It is logged in PARITY P2a as a known low-tier limit; the tier is web-only and not gated. At low:
+  - Footing[1] edge 16.8 / 31.7 at 10 / 30 m, body 39.7 / 39.9;
+  - the rim BagWall[3] body 39.0 / 39.7 at 10 / 30 m, std ratio 0.80 / 0.73 (floor 0.59);
+  - the Pipe's edges 24.1 / 16.1 / 15.2, its 10 m body 39.3, std ratio ≥ 0.66 (floor 0.60);
+  - the lane bag walls' edges ≥ 18.0; the minimum gap is 26.1 at 10 and 30 m (23.0 at 60 m, reported);
+  - draws equal per view (1151 → 1151: no shadow pass at low).
+- The numbers item 11b first gave for low (28 of 29, Footing ×1.35, residual 14.3) were measured with the lab's render
+  context left at high (shadows, bloom and high style detail on), so they were not the game's low tier. They are
+  superseded by these.
+
 Not measured:
 - **The cat-base ballast at 60 m.** No clear line of sight from the cat approach within ±80°, as in Godot.
 - **The lamp heads.** They are overhead. They carry no cover read (cover 0) and stay dark lines because nothing lights
@@ -573,17 +633,28 @@ I looked at each row:
 - **The container interiors** take the fill too (the whole piece is cover), so an open container reads light inside.
   Godot does the same.
 - **Software renderer only** (SwiftShader / WebGL2).
-- **Quality tier.** Measured at q=high, the lab's and Settings' default; the lead's fresh confirm measured q=med on
-  all 29 views with identical numbers.
-- **q=low fails the corgi pit (PARITY P2a, tw-look).** The low tier's flood budget is 0, but the pool term still fades
-  the fill inside the 4 floods' cones, so the pit's Footing[1] reads edge 12.2 / 10.7 at 10 / 30 m, the same as with the
-  read off: no regression, but no read either.
+- **Quality tier.** The gate is measured at q=high, the lab's and Settings' default. q=med passes at its own profile,
+  close to high but not identical (edges within 0.9 L\*, bodies within 0.3).
+- **q=low (W17 item 11b; PARITY P2a):** the tier gate on the floods plus the low row.
+  - 28 of 29 views pass at the real low profile. Footing[1] at 10 / 30 m goes from edge 12.2 / 10.9 (read off) to
+    16.8 / 31.7.
+  - **Known low-tier limit:** Footing[1] at 60 m reads 14.1 (8.2 with the read off), against 15. The footing cannot
+    hold both its 60 m edge and its 10 / 30 m ceiling with one fill scale, and no third knob was added (lead ruling).
+  - The low tier is web-only and not the gated config.
 - **Reproduce:**
   ```
   npx vite --port 5190
   node labs/cover-metric.mjs out http://localhost:5190/
   ```
-  - `CONFIGS=fill:sheen[:sat:pool[:container:mast]],...` sweeps the gains (the bar is checked on the first, or on
-    `GATE=`).
-  - `VIEWS=i:d,...` runs a subset.
+  - `CONFIGS=fill:sheen[:sat:pool[:container:mast[:footing:bagwall[:pipe]]]],...` sweeps the gains and the tier row's
+    scales (the bar is checked on the first, or on `GATE=`). A piece with no scale in the tier's row has no uniform to
+    sweep.
+  - `Q=low|med|high` picks the tier (default high), as `main.ts` does: the lab hands it to the render context (shadows,
+    bloom, style detail) and to the world view, whose lamps and kit both take it.
+  - **The pixel ratio is pinned at 1 at every tier** (a measurement convention). The lab computes each part's rect in
+    the canvas's drawing-buffer pixels, and the metric reads it from a 1280 × 720 screenshot in CSS pixels. Those agree
+    only at ratio 1: at low's own 0.85 the rect lands on the wrong pixels, and the 30 and 60 m views read 0 px. Ratio 1
+    is also the grid Godot's metric reads (1280 × 720 native).
+  - `VIEWS=i:d,...` runs a subset. A subset can differ from the full run in the second decimal (run order): Pipe[0] at
+    60 m reads edge 8.30 / 15.09 alone against 8.24 / 15.08 in the full run. Compare full runs.
   - The exit code is the verdict: 0 on `COVER PASS`, 1 on `COVER FAIL`.

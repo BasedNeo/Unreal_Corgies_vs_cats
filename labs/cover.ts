@@ -2,6 +2,12 @@
 // docs/qa/w15/COVER.md). The Lot with the six shared kit GLBs (?kit=glb: the pbr look the slab twin plays), rain off and
 // the clock still, seen from Godot's play camera (EYE_H over the ground, fov 72) at 10 / 30 / 60 m from each sample.
 //   /labs/cover.html?webgl&kit=glb[&q=high|med|low]
+// The tier (?q=, default high) is the game's whole profile, as main.ts builds it: the render context's engine knobs
+// (shadows, bloom) and style detail, and the world view's (the lamps' flood budget, the kit's floods and scale row).
+// One measurement convention: the pixel ratio is pinned at 1 at every tier. view() computes the part's rect in the
+// canvas's drawing-buffer pixels and the metric reads it from a 1280x720 screenshot (CSS pixels); those agree only at
+// ratio 1 (at low's 0.85 the rect lands on the wrong pixels: the 30 and 60 m views read 0 px). Ratio 1 is also the grid
+// Godot's metric reads (1280x720 native), so both twins measure the same pixels.
 // window.__cover, driven by labs/cover-metric.mjs:
 //   ready · samples · error
 //   view(i, d)  places the camera as Godot's _place_camera does (between the piece and the approach, turning up to
@@ -10,19 +16,20 @@
 //   mode(m)     'normal' (the frame) · 'vis' (the sample's part red, the other part green, everything else black: its
 //               visible pixels) · 'alone' (the same, with nothing else drawn: its whole outline)
 //   cover(on)   the cover read on or off (setCoverRead: the A/B) · values({ fill, sheen, sat, pool }) sets STYLE_COVER's
-//               per-build gains, and `scale: { <piece>: fill }` the per-piece fill scales (KIT_COVER_SCALE); anything
-//               left out goes back to the built value
+//               per-build gains, and `scale: { <piece>: fill }` the per-piece fill scales (kitCoverScale at the lab's
+//               tier: KIT_COVER_SCALE, and KIT_COVER_SCALE_LOW over it at q=low); anything left out goes back to the built value
 //   frames (rendered) · drawCalls (last normal frame)
 import * as THREE from 'three/webgpu';
 import { float, positionWorld, step, uniform, vec3, vec4 } from 'three/tsl';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createRenderContext } from '../src/client/engine/renderer';
+import { toQualityTier } from '../src/client/engine/quality';
 import { createWorldData } from '../src/shared/world/world-data';
 import { createWorldView } from '../src/client/world/world-view';
 import { weatherAt } from '../src/shared/world/weather';
 import { occupiedAt } from '../src/shared/world/queries';
-import { KIT_COVER_SCALE, KIT_FLOODMAST, kitPlacementMatrix, splitLotKitPrims } from '../src/client/assets/kit-glb';
+import { KIT_FLOODMAST, kitCoverScale, kitPlacementMatrix, splitLotKitPrims } from '../src/client/assets/kit-glb';
 import { STYLE_COVER, setCoverRead } from '../src/client/style/style-webgpu.js';
 import { STYLE } from '../src/client/style/style-tokens.js';
 
@@ -54,10 +61,15 @@ const lab = { ready: false, error: '', frames: 0, drawCalls: 0, samples: SAMPLES
 (globalThis as unknown as { __cover: CoverLab }).__cover = lab;
 
 async function main(): Promise<void> {
-  const ctx = await createRenderContext(document.getElementById('app')!, { forceWebGL: P.has('webgl') });
+  // the tier (?q=), as main.ts passes it: the render context takes its engine profile (shadows, bloom, style detail),
+  // and createWorldView hands it to the lamps (the floods' real-light budget) and to the kit (the cover read's floods
+  // and its per-piece scale row)
+  const tier = (P.get('q') as 'low' | 'med' | 'high' | null) ?? 'high';
+  const ctx = await createRenderContext(document.getElementById('app')!, { forceWebGL: P.has('webgl'), quality: toQualityTier(tier) });
+  ctx.adaptive.setBounds(1, 1);   // the metric's convention: pixel ratio 1 at every tier (see the header)
   const { scene, camera, renderer } = ctx;
   const data = createWorldData(1, 'the_lot');
-  const view = createWorldView(scene, data, { quality: (P.get('q') as 'low' | 'med' | 'high' | null) ?? 'high', grade: ctx.pipeline.grade.uniforms as unknown as { saturation: { value: number } } });
+  const view = createWorldView(scene, data, { quality: tier, grade: ctx.pipeline.grade.uniforms as unknown as { saturation: { value: number } } });
   // the night as the slab twin opens it (overcast before the first rain), with no rain: streaks are noise in a pixel metric
   view.setWeather({ ...weatherAt(data, 0), rain: 0, flash: 0, strike: null });
   const cam = camera as THREE.PerspectiveCamera;
@@ -138,7 +150,8 @@ async function main(): Promise<void> {
       const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
       const k = mat?.userData?.coverScale as { fill: { value: number } } | undefined;
       const piece = o.name.replace(/_batch$/, '');
-      if (k && KIT_COVER_SCALE[piece]) k.fill.value = v.scale?.[piece] ?? KIT_COVER_SCALE[piece].fill;
+      const built = kitCoverScale(piece, tier);
+      if (k && built) k.fill.value = v.scale?.[piece] ?? built.fill;
     });
   };
 

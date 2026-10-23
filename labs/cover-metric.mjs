@@ -2,8 +2,9 @@
 //   npx vite --port 5190            (another terminal)
 //   node labs/cover-metric.mjs [outDir=artifacts/cover] [base=http://localhost:5190/]
 //   env: ONLY=<piece substring> · DISTS=10,30,60 · Q=high|med|low (the world tier) · SHOTS=1 saves every frame ·
-//        CONFIGS=fill:sheen[:sat:pool[:container:mast]],... sweeps the per-build gains (the last two: the Container20 and
-//        FloodMast fill scales) in one pass (default: STYLE.cover and KIT_COVER_SCALE as built) ·
+//        CONFIGS=fill:sheen[:sat:pool[:container:mast[:footing:bagwall[:pipe]]]],... sweeps the per-build gains (then
+//        the Container20, FloodMast, Footing, BagWall and Pipe fill scales of the tier's row; a piece with no scale in
+//        that row has no uniform to sweep) in one pass (default: as built) ·
 //        VIEWS=i:d,... only those (sample index, distance) views (a tuning loop; the bar needs them all) ·
 //        REGATE=<results.json> re-applies the report and the bar to a saved run, without measuring · GATE=<config label>
 //        bars that config instead of the first
@@ -45,8 +46,9 @@ const stdFloor = (r) => STD_FLOOR[`${r.place} ${r.piece}[${r.idx}]`] ?? STD_KEEP
 const REGATE = process.env.REGATE ?? '';
 /** The cover values to measure; `null` = as built (STYLE.cover). Each config is labelled fill:sheen. */
 const CONFIGS = process.env.CONFIGS ? process.env.CONFIGS.split(',').map((c) => {
-  const [fill, sheen, sat, pool, cont, mast] = c.split(':').map(Number);
-  const scale = Number.isFinite(cont) ? { Kit_Lot_Container20_01: cont, ...(Number.isFinite(mast) ? { Kit_Lot_FloodMast_01: mast } : {}) } : undefined;
+  const [fill, sheen, sat, pool, cont, mast, foot, bag, pipe] = c.split(':').map(Number);
+  const named = { Kit_Lot_Container20_01: cont, Kit_Lot_FloodMast_01: mast, Kit_Lot_Footing_01: foot, Kit_Lot_BagWall_01: bag, Kit_Lot_Pipe_01: pipe };
+  const scale = Number.isFinite(cont) ? Object.fromEntries(Object.entries(named).filter(([, v]) => Number.isFinite(v))) : undefined;
   return { fill, sheen, ...(Number.isFinite(sat) ? { sat } : {}), ...(Number.isFinite(pool) ? { pool } : {}), ...(scale ? { scale } : {}) };
 }) : [null];
 const label = (c) => (c ? [c.fill, c.sheen, ...(c.sat !== undefined ? [c.sat] : []), ...(c.pool !== undefined ? [c.pool] : []),

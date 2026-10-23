@@ -23,7 +23,8 @@ import sharp from 'sharp';
 import { getBounds } from '@gltf-transform/core';
 import { createWorldData } from '../../src/shared/world/world-data';
 import {
-  LOT_KIT, KIT_FLOODMAST, KIT_FLOODLAMP, KIT_FLOODMAST_COVER, KIT_COVER_MEAN, KIT_COVER_SCALE, kitCoverFloods, kitPbrOpts, kitPlacementMatrix,
+  LOT_KIT, KIT_FLOODMAST, KIT_FLOODLAMP, KIT_FLOODMAST_COVER, KIT_COVER_MEAN, KIT_COVER_SCALE, KIT_COVER_SCALE_LOW, kitCoverFloods,
+  kitCoverScale, kitPbrOpts, kitPlacementMatrix,
   splitLotKitPrims,
 } from '../../src/client/assets/kit-glb';
 import { COVER_ALL, PBR_COVER_BASE, STYLE_COVER, coverPeakLuminance, pbr, setCoverRead } from '../../src/client/style/style-webgpu.js';
@@ -87,6 +88,8 @@ const GODOT_PARAMS = /func _cover_params\([\s\S]*?(?=\n(?:func|static func|##|co
 const WEB_GAINS = [0.16, 0.1, 1.0, 1.0];
 /** The web's per-piece fill scales (lead ruling: Container20 and FloodMast only, each in [0.5, 2.5]), measured likewise. */
 const WEB_SCALES = { Kit_Lot_Container20_01: { fill: 2.1 }, Kit_Lot_FloodMast_01: { fill: 0.85 } };
+/** The low tier's row (W17 item 11b; lead ruling 2026-10-17: Footing up, BagWall down, at q=low only), measured likewise. */
+const WEB_SCALES_LOW = { Kit_Lot_Footing_01: { fill: 1.32 }, Kit_Lot_BagWall_01: { fill: 0.75 }, Kit_Lot_Pipe_01: { fill: 1.05 } };
 
 // ---- a TSL node graph, walked ----
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- TSL nodes are untyped here
@@ -235,18 +238,27 @@ describe('the cover read (W15 item 11): the material terms', () => {
     expect(GODOT_FLOODS_MAX, 'kit_wet.gdshader: at most 8 floods').toBe(8);
     // the gains are per build: the web's own (Godot's are per renderer), measured with labs/cover-metric.mjs (COVER.md Web)
     expect([STYLE.cover.fill, STYLE.cover.sheen, STYLE.cover.sat, STYLE.cover.pool]).toEqual(WEB_GAINS);
-    // one set for every piece, but for the web's per-piece fill scale: Container20 and FloodMast only, each in [0.5, 2.5]
+    // one set for every piece, but for the web's per-piece fill scale (each in [0.5, 2.5]): high and med, Container20 and
+    // FloodMast only; low, that row with Footing, BagWall and Pipe laid over it
     expect(KIT_COVER_SCALE).toEqual(WEB_SCALES);
-    for (const [name, k] of Object.entries(KIT_COVER_SCALE)) {
+    expect(KIT_COVER_SCALE_LOW).toEqual(WEB_SCALES_LOW);
+    for (const [name, k] of [...Object.entries(KIT_COVER_SCALE), ...Object.entries(KIT_COVER_SCALE_LOW)]) {
       expect(k.fill, `${name}: scale in [0.5, 2.5]`).toBeGreaterThanOrEqual(0.5);
       expect(k.fill, `${name}: scale in [0.5, 2.5]`).toBeLessThanOrEqual(2.5);
     }
-    for (const { piece } of LOT_KIT) {
-      const scaled = piece.name in WEB_SCALES;
-      expect(piece.coverScale, `${piece.name}: KitPiece.coverScale`).toEqual(scaled ? KIT_COVER_SCALE[piece.name] : undefined);
-      const keys = Object.keys(kitPbrOpts(piece)).filter((k) => /^cover/.test(k)).sort();
-      expect(keys, `${piece.name}: the cover read's pbr() options`).toEqual(['coverBase', 'coverFloods', 'coverMean', ...(scaled ? ['coverScale'] : []), 'coverTop']);
+    const rows = { high: WEB_SCALES, med: WEB_SCALES, medium: WEB_SCALES, low: { ...WEB_SCALES, ...WEB_SCALES_LOW } } as const;
+    for (const [tier, row] of Object.entries(rows) as [keyof typeof rows, Record<string, { fill: number }>][]) {
+      for (const { piece } of LOT_KIT) {
+        const want = row[piece.name];
+        expect(kitCoverScale(piece.name, tier), `${piece.name} at ${tier}: its scale`).toEqual(want);
+        const opts = kitPbrOpts(piece, [], tier);
+        expect(opts.coverScale, `${piece.name} at ${tier}: pbr() coverScale`).toEqual(want);
+        const keys = Object.keys(opts).filter((k) => /^cover/.test(k)).sort();
+        expect(keys, `${piece.name} at ${tier}: the cover read's pbr() options`).toEqual(['coverBase', 'coverFloods', 'coverMean', ...(want ? ['coverScale'] : []), 'coverTop']);
+      }
     }
+    // a caller that names no tier gets the render context's (high in a test, where no tier was set): the high row
+    for (const { piece } of LOT_KIT) expect(kitPbrOpts(piece).coverScale, `${piece.name}: default tier`).toEqual(rows.high[piece.name as keyof typeof WEB_SCALES]);
   });
 
   it('COVER_MEAN is Godot\'s, and recomputed from each master GLB\'s baseColor image', async () => {
@@ -429,8 +441,8 @@ describe('the cover read (W15 item 11): the material terms', () => {
     expect(STYLE.cover.fill).toBeGreaterThan(0);
     expect(STYLE.cover.sheen).toBeGreaterThan(0);
     expect(coverPeakLuminance() * STYLE.grade.exposure).toBeLessThan(STYLE.bloom.threshold);
-    // and with the largest per-piece fill scale (the container's)
-    const k = Math.max(...Object.values(KIT_COVER_SCALE).map((v) => v.fill));
+    // and with the largest per-piece fill scale of any tier's row (the container's)
+    const k = Math.max(...[...Object.values(KIT_COVER_SCALE), ...Object.values(KIT_COVER_SCALE_LOW)].map((v) => v.fill));
     expect(coverPeakLuminance({ ...STYLE.cover, fill: STYLE.cover.fill * k }) * STYLE.grade.exposure).toBeLessThan(STYLE.bloom.threshold);
   });
 
