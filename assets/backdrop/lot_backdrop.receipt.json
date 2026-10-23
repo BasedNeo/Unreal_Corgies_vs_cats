@@ -1,0 +1,291 @@
+{
+ "kind": "BACKDROP: glb",
+ "outputs": {
+  "glb": {
+   "path": "assets/backdrop/lot_backdrop.glb",
+   "bytes": 3981692,
+   "sha256": "d6066756f8426eab3e95ece40fb80557a1c0e24c1e366a133ce65472f85004b5",
+   "up": "+Y",
+   "units": "metres",
+   "root": "Backdrop_Lot_01",
+   "draws": 8,
+   "triangles": 73086,
+   "texture_px": 256
+  }
+ },
+ "params": {
+  "out": "assets/backdrop/lot_backdrop",
+  "tex": 256
+ },
+ "rebuild": "\"$BLENDER\" --background --factory-startup --python tools/blender/backdrop_glb.py",
+ "rebuild_env": {
+  "BLENDER": "the Blender 5.2.2 Linux x64 binary (blender.org release)",
+  "cwd": "repo root"
+ },
+ "script": "tools/blender/backdrop_glb.py",
+ "script_sha256": "4c8ca7125a467c8d1811b8f71b6d01fb25b08adb2a86cdd234d8db1a1902a88c",
+ "bllib_sha256": "aa2049b7f60e5195afeca4fc595989a73e7dbae5824054288445d906879416d9",
+ "blender": {
+  "version": "5.2.2 LTS",
+  "build_hash": "d13f752e3b9c"
+ },
+ "build": {
+  "script": "tools/blender/backdrop.py",
+  "script_sha256": "60516bd866e51c0ba4c70870dcaf157272d6c7396391986b8e45bd34acf027a9",
+  "kits": [
+   "Kit_Lot_Container20_01",
+   "Kit_Lot_BagWall_01",
+   "Kit_Lot_Pipe_01",
+   "Kit_Lot_Footing_01",
+   "Kit_Lot_FloodMast_01",
+   "Kit_Lot_FloodLamp_01"
+  ],
+  "masters_sha256": {
+   "Kit_Lot_Container20_01": "d830b96e6df9458822584096137cb49c7aa82cef6647c31c5de339e44b43a2fe",
+   "Kit_Lot_BagWall_01": "f8bc6e6938b23937643f6aa4d6794f6a11f18c7da7982955e11a1409247f1f34",
+   "Kit_Lot_Pipe_01": "782a9d517977fa6da751d122d7425fb90798c93b11638877cf6d8754a3c02715",
+   "Kit_Lot_Footing_01": "665f6d4058f8a95679926a51807fcc66ce873f9452d685026df41f00ae858447",
+   "Kit_Lot_FloodMast_01": "c86b3987ae536939ba3be02026713abb6edcf5847fbc166ef5c4ca7702e6b063",
+   "Kit_Lot_FloodLamp_01": "6c85726e03abcf3872c1c8f2a7c1eced3c8ffaf9082024fea2ca32b669d7bbe8"
+  },
+  "near_m": 216.0,
+  "cranes_m": [
+   400.0,
+   900.0
+  ],
+  "apron_m": [
+   165.0,
+   1500.0
+  ],
+  "kit_instances": {
+   "Kit_Lot_Container20_01": 166,
+   "Kit_Lot_BagWall_01": 60,
+   "Kit_Lot_Footing_01": 20,
+   "Kit_Lot_Pipe_01": 15,
+   "Kit_Lot_FloodMast_01": 12,
+   "Kit_Lot_FloodLamp_01": 36
+  },
+  "lamp_colour": [
+   1.0,
+   0.55,
+   0.22
+  ],
+  "containers": 166,
+  "cranes": [
+   [
+    "sts",
+    172,
+    560
+   ],
+   [
+    "sts",
+    196,
+    620
+   ],
+   [
+    "sts",
+    214,
+    700
+   ],
+   [
+    "sts",
+    150,
+    640
+   ],
+   [
+    "sts",
+    120,
+    760
+   ],
+   [
+    "sts",
+    238,
+    780
+   ],
+   [
+    "tower",
+    185,
+    440
+   ],
+   [
+    "tower",
+    100,
+    470
+   ],
+   [
+    "tower",
+    300,
+    520
+   ],
+   [
+    "tower",
+    25,
+    600
+   ],
+   [
+    "tower",
+    250,
+    470
+   ],
+   [
+    "rtg",
+    160,
+    455
+   ],
+   [
+    "rtg",
+    176,
+    426
+   ],
+   [
+    "rtg",
+    205,
+    468
+   ],
+   [
+    "rtg",
+    222,
+    519
+   ],
+   [
+    "rtg",
+    75,
+    433
+   ],
+   [
+    "rtg",
+    88,
+    491
+   ],
+   [
+    "rtg",
+    335,
+    513
+   ]
+  ],
+  "lamp_cards": 68
+ },
+ "families": [
+  "BD_DarkSteel",
+  "BD_SodiumLamp",
+  "M_Kit_Lot_BagWall_01",
+  "M_Kit_Lot_Container20_01",
+  "M_Kit_Lot_FloodLamp_01",
+  "M_Kit_Lot_FloodMast_01",
+  "M_Kit_Lot_Footing_01",
+  "M_Kit_Lot_Pipe_01"
+ ],
+ "rules": {
+  "kit_and_lamps_min_cheb_m": 216.57,
+  "steel_dist_m": [
+   416.42,
+   897.39
+  ],
+  "apron_min_cheb_m": 165.0,
+  "objects": 569
+ },
+ "weld": {
+  "before": {
+   "bytes": 4230688,
+   "vertices": 86114
+  },
+  "after": {
+   "bytes": 3981692,
+   "vertices": 83045
+  },
+  "uv_dropped_primitives": 2,
+  "script": "tools/blender/glb_weld.mjs",
+  "script_sha256": "f320c10134217e6cc19a669d17bac573e9723cd4927557b5aa92666c63449aec"
+ },
+ "gltf": {
+  "nodes": [
+   "BD_BagWall_01",
+   "BD_Container20_01",
+   "BD_DarkSteel",
+   "BD_FloodLamp_01",
+   "BD_FloodMast_01",
+   "BD_Footing_01",
+   "BD_Pipe_01",
+   "BD_SodiumLamp",
+   "Backdrop_Lot_01"
+  ],
+  "meshes": 8,
+  "primitives_draws": 8,
+  "materials": [
+   "M_Kit_Lot_BagWall_01",
+   "M_Kit_Lot_Container20_01",
+   "BD_DarkSteel",
+   "M_Kit_Lot_FloodLamp_01",
+   "M_Kit_Lot_FloodMast_01",
+   "M_Kit_Lot_Footing_01",
+   "M_Kit_Lot_Pipe_01",
+   "BD_SodiumLamp"
+  ],
+  "images": 18,
+  "extensionsUsed": [
+   "KHR_materials_emissive_strength"
+  ],
+  "asset": {
+   "generator": "glTF-Transform v4.5.1",
+   "version": "2.0"
+  }
+ },
+ "fresh_import": {
+  "objects": 9,
+  "col_nodes": [],
+  "materials": [
+   "BD_DarkSteel",
+   "BD_SodiumLamp",
+   "M_Kit_Lot_BagWall_01",
+   "M_Kit_Lot_Container20_01",
+   "M_Kit_Lot_FloodLamp_01",
+   "M_Kit_Lot_FloodMast_01",
+   "M_Kit_Lot_Footing_01",
+   "M_Kit_Lot_Pipe_01"
+  ],
+  "triangles": 73086,
+  "min_cheb_m": 165.0,
+  "ok": true
+ },
+ "limits": {
+  "min_cheb_m": 165.0,
+  "draws_max": 8,
+  "texture_max_px": 1024
+ },
+ "world_data": {
+  "path": "engines/godot/data/the_lot.json",
+  "sha256": "6a2e80c57d5022162e5639111d8891690f9d3c32e4d3605b91aedca3119e0192",
+  "obstacles_beyond_165m": 330,
+  "west_fence_x": [
+   -152
+  ]
+ },
+ "timing": {
+  "load_at_start": [
+   10.14,
+   9.27,
+   8.35
+  ],
+  "build": {
+   "wall_s": 9.8,
+   "cpu_s": 10.78
+  },
+  "checks": {
+   "wall_s": 0.08,
+   "cpu_s": 0.07
+  },
+  "export": {
+   "wall_s": 2.76,
+   "cpu_s": 2.13
+  },
+  "fresh_import": {
+   "wall_s": 0.41,
+   "cpu_s": 0.41
+  },
+  "total": {
+   "wall_s": 13.13,
+   "cpu_s": 13.44
+  }
+ },
+ "licence": "Original work of the Corgis vs Cats project, rendered by its own scripts with Blender 5.2.2 (GPL tool; outputs are ours); no third-party content"
+}

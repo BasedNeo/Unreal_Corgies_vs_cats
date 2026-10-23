@@ -19,6 +19,12 @@
 //           EXT_texture_webp, WebP images, <= 600 KB
 //   misc    no skins / animations on kit pieces; finite positions
 // validateGlb(path, opts) is exported for tests (tests/unit/glb-validate.test.ts).
+// --backdrop (W17 AAA pass 4, BL-DCC; validateBackdrop): a backdrop GLB instead of a kit piece. Its rules replace the kit
+// rules entirely (the kit path is untouched): one scene, one root Backdrop_<Set>_<NN> with no transform, any children
+// (BD_* families, kit meshes) but no COL_ node anywhere and no LOD chain required, TRIANGLES with finite positions, every
+// vertex at max(|x|, |z|) >= the radius in its receipt (limits.min_cheb_m; --receipt <file>, default <stem>.receipt.json
+// beside the GLB; or --min-dist <m>), draws (primitives) <= 8 (or the receipt's limits.draws_max if lower), textures square,
+// power of two, <= 1024. Exported as validateBackdrop(path, { minDist, maxDraws }) for tests (tests/unit/aaa-receipts.test.ts).
 import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -264,22 +270,94 @@ export async function validateGlb(path, opts = {}) {
   return { ok: errors.length === 0, errors, warnings, report };
 }
 
+// ---------------------------------------------------------------------------------------------------------- backdrop
+export const BACKDROP = { nameRe: /^Backdrop_[A-Z][A-Za-z0-9]*_\d{2}$/, maxDraws: 8, maxTexture: 1024 };
+
+export async function validateBackdrop(path, opts = {}) {
+  const errors = [], warnings = [];
+  const err = (m) => errors.push(m);
+  const io = await createIO();
+  const doc = opts.doc ?? await io.read(path);
+  const bytes = opts.bytes ?? statSync(path).size;
+  const root = doc.getRoot();
+  const minDist = opts.minDist, maxDraws = Math.min(opts.maxDraws ?? BACKDROP.maxDraws, BACKDROP.maxDraws);
+  const report = { file: path, bytes, variant: 'backdrop', root: null, nodes: [], lods: [], colliders: 0, materials: [], textures: [],
+    extensions: root.listExtensionsUsed().map((e) => e.extensionName), draws: 0, triangles: 0, minCheb: null, minDist, maxDraws };
+  if (!(Number.isFinite(minDist) && minDist > 0)) err('no radius: --backdrop needs limits.min_cheb_m in the receipt, or --min-dist <m>');
+  const scenes = root.listScenes();
+  if (scenes.length !== 1) err(`expected 1 scene, got ${scenes.length}`);
+  const tops = scenes[0]?.listChildren() ?? [];
+  if (tops.length !== 1) err(`expected 1 root node, got ${tops.length}`);
+  const top = tops[0];
+  if (!top) return { ok: false, errors, warnings, report };
+  const name = top.getName();
+  report.root = name;
+  if (!BACKDROP.nameRe.test(name)) err(`root name "${name}" breaks Backdrop_<Set>_<NN>`);
+  const t = top.getTranslation(), r = top.getRotation(), s = top.getScale();
+  if (t.some((v) => Math.abs(v) > 1e-6) || !isIdentityRot(r) || s.some((v) => Math.abs(v - 1) > 1e-6)) err(`root "${name}" must have no transform (got T ${t} R ${r} S ${s})`);
+  let cheb = Infinity;
+  for (const n of root.listNodes()) {
+    if (n !== top) report.nodes.push(n.getName());
+    if (n.getName().startsWith('COL_')) { report.colliders++; err(`"${n.getName()}": a backdrop has no collision (no COL_ nodes)`); }
+    const mesh = n.getMesh();
+    if (!mesh) continue;
+    for (const p of mesh.listPrimitives()) {
+      report.draws++;
+      report.triangles += triCount({ listPrimitives: () => [p] });
+      if (p.getMode() !== 4) err(`${n.getName()}: primitive mode ${p.getMode()} (TRIANGLES required)`);
+    }
+    for (const v of worldPositions(n)) {
+      if (!v.every(Number.isFinite)) { err(`${n.getName()}: non-finite position`); break; }
+      cheb = Math.min(cheb, Math.max(Math.abs(v[0]), Math.abs(v[2])));
+    }
+  }
+  report.minCheb = Number.isFinite(cheb) ? +cheb.toFixed(3) : null;
+  if (report.draws > maxDraws) err(`${report.draws} draws (primitives) > ${maxDraws}`);
+  if (Number.isFinite(minDist) && cheb < minDist - 1e-3) err(`a vertex at max(|x|, |z|) = ${cheb.toFixed(3)} m, inside the ${minDist} m radius`);
+  for (const m of root.listMaterials()) report.materials.push({ name: m.getName(), alpha: m.getAlphaMode(), baseColor: !!m.getBaseColorTexture(), orm: !!m.getMetallicRoughnessTexture(), normal: !!m.getNormalTexture() });
+  for (const tx of root.listTextures()) {
+    const size = ImageUtils.getSize(tx.getImage(), tx.getMimeType());
+    const [w, h] = size ?? [0, 0];
+    report.textures.push({ name: tx.getName() || tx.getURI(), mime: tx.getMimeType(), size: [w, h], bytes: tx.getImage()?.byteLength ?? 0 });
+    if (!size) { err(`texture "${tx.getName()}": unreadable size`); continue; }
+    if (w !== h || (w & (w - 1)) !== 0) err(`texture "${tx.getName()}": ${w}x${h} (square power of two)`);
+    if (w > BACKDROP.maxTexture) err(`texture "${tx.getName()}": ${w}^2 > ${BACKDROP.maxTexture}^2`);
+  }
+  return { ok: errors.length === 0, errors, warnings, report };
+}
+
+/** The backdrop limits from its receipt (limits.min_cheb_m, limits.draws_max). */
+export function backdropLimits(receiptPath) {
+  const rec = JSON.parse(readFileSync(receiptPath, 'utf8'));
+  return { minDist: rec.limits?.min_cheb_m, maxDraws: rec.limits?.draws_max };
+}
+
 // ---------------------------------------------------------------------------------------------------------- CLI
 const isMain = import.meta.url === pathToFileURL(process.argv[1] ?? '').href;
 if (isMain) {
   const argv = process.argv.slice(2);
-  const file = argv.find((a) => !a.startsWith('--') && argv[argv.indexOf(a) - 1] !== '--manifest');
-  if (!file) { console.error('usage: node tools/assets/validate-glb.mjs <file.glb> [--manifest assets/manifest.json] [--hero] [--json]'); process.exit(2); }
+  const file = argv.find((a) => !a.startsWith('--') && !['--manifest', '--receipt', '--min-dist'].includes(argv[argv.indexOf(a) - 1]));
+  if (!file) { console.error('usage: node tools/assets/validate-glb.mjs <file.glb> [--manifest assets/manifest.json] [--hero] [--json] | <backdrop.glb> --backdrop [--receipt <file>] [--min-dist <m>]'); process.exit(2); }
   const mi = argv.indexOf('--manifest');
   const manifestPath = mi >= 0 ? argv[mi + 1] : resolve(import.meta.dirname, '../../assets/manifest.json');
   let manifest = null;
   try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')); } catch { /* validated without a manifest */ }
   let res;
-  try { res = await validateGlb(file, { manifest, hero: argv.includes('--hero') }); } catch (e) { console.error(`cannot read ${file}: ${e.message}`); process.exit(2); }
+  if (argv.includes('--backdrop')) {
+    const ri = argv.indexOf('--receipt'), di = argv.indexOf('--min-dist');
+    const receipt = ri >= 0 ? argv[ri + 1] : file.replace(/\.glb$/, '.receipt.json');
+    let lim = {};
+    try { lim = backdropLimits(receipt); } catch { /* no receipt: --min-dist or a failure */ }
+    if (di >= 0) lim.minDist = Number(argv[di + 1]);
+    try { res = await validateBackdrop(file, lim); } catch (e) { console.error(`cannot read ${file}: ${e.message}`); process.exit(2); }
+  } else {
+    try { res = await validateGlb(file, { manifest, hero: argv.includes('--hero') }); } catch (e) { console.error(`cannot read ${file}: ${e.message}`); process.exit(2); }
+  }
   if (argv.includes('--json')) console.log(JSON.stringify(res, null, 2));
   else {
     const R = res.report;
     console.log(`${file}  [${R.variant}]  ${R.bytes} bytes  root ${R.root}  size ${R.size?.join(' x ') ?? '?'} m  COL_ ${R.colliders}`);
+    if (R.variant === 'backdrop') console.log(`  draws ${R.draws} (max ${R.maxDraws})  triangles ${R.triangles}  nearest vertex max(|x|,|z|) ${R.minCheb} m (radius ${R.minDist} m)  nodes ${R.nodes.length}`);
     for (const l of R.lods) console.log(`  ${l.name}: ${l.tris} tris  min ${l.min.join(',')}  max ${l.max.join(',')}`);
     for (const m of R.materials) console.log(`  material ${m.name}: baseColor ${m.baseColor} ORM ${m.orm} normal ${m.normal} ${m.alpha}`);
     for (const t of R.textures) console.log(`  texture ${t.name}: ${t.mime} ${t.size.join('x')} ${t.bytes} bytes`);

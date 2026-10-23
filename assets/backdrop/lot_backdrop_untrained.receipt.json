@@ -1,0 +1,541 @@
+{
+ "kind": "SPLAT: baked, UNTRAINED",
+ "outputs": {
+  "spz": {
+   "path": "assets/backdrop/lot_backdrop_untrained.spz",
+   "bytes": 3436508,
+   "sha256": "a4ac822d3f5ef8943302c287d3f550d6b5b19e3abde740dd354989d8c250e480",
+   "splats": 300000,
+   "sh_degree": 0,
+   "version": 3,
+   "fractional_bits": 12,
+   "decompressed_bytes": 6000016,
+   "label": "UNTRAINED"
+  }
+ },
+ "params": {
+  "set": "<scratch>/train",
+  "out": "assets/backdrop/lot_backdrop_untrained",
+  "n": 300000,
+  "apron": 0.15,
+  "apron_far": 1500.0,
+  "crop": 165.0,
+  "fb": 12,
+  "alpha": 0.95,
+  "alpha_apron": 0.9,
+  "min_cos": 0.15,
+  "min_cos_apron": 0.02,
+  "over": 2.0,
+  "samples_out": 16
+ },
+ "rebuild": "\"$BLENDER\" --background --factory-startup --python tools/splat/bake_splat.py -- --set <scratch>/train",
+ "rebuild_env": {
+  "BLENDER": "the Blender 5.2.2 Linux x64 binary (blender.org release)",
+  "cwd": "repo root"
+ },
+ "script": "tools/splat/bake_splat.py",
+ "script_sha256": "94c3418009dbb14fcdb76002cc58df7f8bbeab105f49cd46a4e1891d3d559186",
+ "bllib_sha256": "aa2049b7f60e5195afeca4fc595989a73e7dbae5824054288445d906879416d9",
+ "blender": {
+  "version": "5.2.2 LTS",
+  "build_hash": "d13f752e3b9c"
+ },
+ "label": "UNTRAINED",
+ "limits": {
+  "splats_max": 300000,
+  "bytes_max": 15000000,
+  "min_cheb_m": 165.0
+ },
+ "stats": {
+  "candidates": 600000,
+  "seen": 374130,
+  "kept": 300000,
+  "dropped_unseen": 225870,
+  "dropped_inside_crop": 0,
+  "apron_kept": 45000,
+  "by_part": {
+   "pieces": {
+    "candidates": 510000,
+    "seen": 311113,
+    "kept": 255000,
+    "seen_area_m2": 263886.7,
+    "spacing_m": 1.0173
+   },
+   "apron": {
+    "candidates": 90000,
+    "seen": 63017,
+    "kept": 45000,
+    "seen_area_m2": 6225449.4,
+    "spacing_m_at": {
+     "165": 2.735,
+     "450": 7.459,
+     "1500": 24.864
+    }
+   }
+  },
+  "views_per_splat_median": 15,
+  "min_cheb_m": 165.032,
+  "max_dist_m": 1111.7,
+  "bounds_min": [
+   -1096.76,
+   -0.1,
+   -1056.26
+  ],
+  "bounds_max": [
+   1060.72,
+   177.31,
+   1002.82
+  ],
+  "sigma_m": {
+   "median": 0.5086,
+   "max": 9.0898
+  },
+  "mean_colour": [
+   0.0946,
+   0.0982,
+   0.1004
+  ],
+  "candidates_pieces": 510000,
+  "candidates_apron": 90000,
+  "piece_area_m2": 432583.1,
+  "apron_ring_m": [
+   165.0,
+   1500.0
+  ]
+ },
+ "conventions": {
+  "space": "game axes: x, y up, z (metres) = the twin world; no 3DGS y-down flip",
+  "colour": "display values (sRGB) of the Standard-view training renders; SPZ SH DC, colour = 0.5 + SH_C0 * f_dc",
+  "sh_degree": 0,
+  "opacity": [
+   0.95,
+   0.9
+  ],
+  "surfel_normal_sigma_m": 0.02,
+  "visibility": "depth agrees within 1 % + 1 m + 1.5 px of depth slope; weight |cos|, min_cos 0.15 (apron 0.02)"
+ },
+ "training_set": {
+  "path_scratch": "<scratch>/train",
+  "views": 150,
+  "views_used_for_colour": 135,
+  "splat_set_script": "tools/blender/splat_set.py",
+  "splat_set_script_sha256": "6adffe9989aafd031f4e11b2a4a0fca7dc66b29eb38f3f7fee5620beb54cb604",
+  "rendered_by_script_sha256": "6adffe9989aafd031f4e11b2a4a0fca7dc66b29eb38f3f7fee5620beb54cb604",
+  "held_out": 15,
+  "size": [
+   768,
+   432
+  ],
+  "spp": 32,
+  "transforms_sha256": "e4f4f7133991d8ffee8aede72e8dff0b5b017524ffeaf1a630008873664a9701",
+  "rebuild": "\"$BLENDER\" --background --factory-startup --python tools/blender/splat_set.py -- --out <scratch>/train",
+  "timing": {
+   "load_at_start": [
+    6.23,
+    5.71,
+    3.46
+   ],
+   "total": {
+    "wall_s": 1794.92,
+    "cpu_s": 3517.29
+   },
+   "beauty_wall_s": 1708.2
+  }
+ },
+ "sources": {
+  "backdrop_glb_sha256": "d6066756f8426eab3e95ece40fb80557a1c0e24c1e366a133ce65472f85004b5",
+  "backdrop_script_sha256": "60516bd866e51c0ba4c70870dcaf157272d6c7396391986b8e45bd34acf027a9",
+  "sky_sha256": "1f6e85debb827a217b63de0bf7549b18c466a6c2b08c93a4b6e3ce869c774857"
+ },
+ "samples": [
+  {
+   "index": 0,
+   "position": [
+    245.60009765625,
+    0.28564453125,
+    18.453369140625
+   ],
+   "color_rgba": [
+    23,
+    19,
+    16,
+    242
+   ],
+   "covariance": [
+    0.00038012895786946363,
+    0.0,
+    -5.605726257559883e-17,
+    0.2528395958047464,
+    0.0,
+    0.2528395958047464
+   ]
+  },
+  {
+   "index": 19999,
+   "position": [
+    687.7802734375,
+    81.015625,
+    384.968505859375
+   ],
+   "color_rgba": [
+    51,
+    59,
+    63,
+    242
+   ],
+   "covariance": [
+    0.2528395958047464,
+    0.0,
+    0.0,
+    0.2528395958047464,
+    0.0,
+    0.00038012895786946363
+   ]
+  },
+  {
+   "index": 39999,
+   "position": [
+    -386.2021484375,
+    112.5166015625,
+    558.17529296875
+   ],
+   "color_rgba": [
+    19,
+    23,
+    23,
+    242
+   ],
+   "covariance": [
+    0.0009480807771323758,
+    0.011797495582633488,
+    0.001970112228927046,
+    0.25228705277046837,
+    -9.227143008572922e-05,
+    0.2528241870197616
+   ]
+  },
+  {
+   "index": 59999,
+   "position": [
+    300.907958984375,
+    19.70166015625,
+    250.966064453125
+   ],
+   "color_rgba": [
+    2,
+    2,
+    2,
+    242
+   ],
+   "covariance": [
+    0.000475868197664204,
+    0.0,
+    0.004915395348582756,
+    0.2528395958047464,
+    0.0,
+    0.25274385656495163
+   ]
+  },
+  {
+   "index": 79999,
+   "position": [
+    257.114013671875,
+    12.566650390625,
+    99.241455078125
+   ],
+   "color_rgba": [
+    25,
+    25,
+    25,
+    242
+   ],
+   "covariance": [
+    0.0003839887111442584,
+    0.0,
+    -0.0009871252991488918,
+    0.2528395958047464,
+    0.0,
+    0.2528357360514717
+   ]
+  },
+  {
+   "index": 99999,
+   "position": [
+    290.822509765625,
+    32.54541015625,
+    127.056396484375
+   ],
+   "color_rgba": [
+    14,
+    12,
+    12,
+    242
+   ],
+   "covariance": [
+    0.00038398871114425946,
+    0.0,
+    -0.000987125299149032,
+    0.2528395958047464,
+    0.0,
+    0.2528357360514717
+   ]
+  },
+  {
+   "index": 119999,
+   "position": [
+    -196.87548828125,
+    47.838623046875,
+    572.9482421875
+   ],
+   "color_rgba": [
+    10,
+    10,
+    12,
+    242
+   ],
+   "covariance": [
+    0.00038012895786946363,
+    0.0,
+    -5.605726257559883e-17,
+    0.2528395958047464,
+    0.0,
+    0.2528395958047464
+   ]
+  },
+  {
+   "index": 139999,
+   "position": [
+    224.944091796875,
+    10.68359375,
+    164.367431640625
+   ],
+   "color_rgba": [
+    14,
+    10,
+    8,
+    242
+   ],
+   "covariance": [
+    0.023511366462625704,
+    0.0,
+    -0.00038413964060988835,
+    0.02351774585600911,
+    0.0,
+    0.0003865083512528722
+   ]
+  },
+  {
+   "index": 159999,
+   "position": [
+    -394.339111328125,
+    98.877685546875,
+    609.340087890625
+   ],
+   "color_rgba": [
+    2,
+    2,
+    2,
+    242
+   ],
+   "covariance": [
+    0.25257681630504825,
+    -0.0037446078706986196,
+    -0.007228418307024298,
+    0.1994789336472911,
+    -0.10300496087509625,
+    0.054003570615022936
+   ]
+  },
+  {
+   "index": 179999,
+   "position": [
+    -180.66796875,
+    73.3818359375,
+    629.563232421875
+   ],
+   "color_rgba": [
+    12,
+    12,
+    14,
+    242
+   ],
+   "covariance": [
+    0.00038012895786946363,
+    0.0,
+    -5.605726257559883e-17,
+    0.2528395958047464,
+    0.0,
+    0.2528395958047464
+   ]
+  },
+  {
+   "index": 199999,
+   "position": [
+    223.09619140625,
+    2.353759765625,
+    -277.542724609375
+   ],
+   "color_rgba": [
+    23,
+    23,
+    25,
+    242
+   ],
+   "covariance": [
+    0.0004147307774751082,
+    0.0,
+    0.0029553950063659564,
+    0.2528395958047464,
+    0.0,
+    0.2528049939851408
+   ]
+  },
+  {
+   "index": 219999,
+   "position": [
+    -165.030029296875,
+    22.91015625,
+    301.266357421875
+   ],
+   "color_rgba": [
+    16,
+    16,
+    17,
+    242
+   ],
+   "covariance": [
+    0.00038012895786946363,
+    0.0,
+    -2.643504066953687e-17,
+    0.11943296826671962,
+    0.0,
+    0.11943296826671962
+   ]
+  },
+  {
+   "index": 239999,
+   "position": [
+    -180.66796875,
+    60.4765625,
+    630.19580078125
+   ],
+   "color_rgba": [
+    14,
+    16,
+    16,
+    242
+   ],
+   "covariance": [
+    0.00038012895786946363,
+    0.0,
+    -5.605726257559883e-17,
+    0.2528395958047464,
+    0.0,
+    0.2528395958047464
+   ]
+  },
+  {
+   "index": 259999,
+   "position": [
+    -599.073486328125,
+    0.0,
+    -327.205810546875
+   ],
+   "color_rgba": [
+    33,
+    36,
+    38,
+    230
+   ],
+   "covariance": [
+    25.790339917193066,
+    0.0,
+    0.0,
+    0.00038012895786946363,
+    -5.7265214322111286e-15,
+    25.790339917193066
+   ]
+  },
+  {
+   "index": 279999,
+   "position": [
+    59.2001953125,
+    0.0,
+    -198.752685546875
+   ],
+   "color_rgba": [
+    33,
+    34,
+    36,
+    230
+   ],
+   "covariance": [
+    2.7182818284590455,
+    0.0,
+    0.0,
+    0.00038012895786946363,
+    -6.034954090908098e-16,
+    2.7182818284590455
+   ]
+  },
+  {
+   "index": 299999,
+   "position": [
+    -77.776611328125,
+    0.0,
+    250.828369140625
+   ],
+   "color_rgba": [
+    36,
+    36,
+    38,
+    230
+   ],
+   "covariance": [
+    4.481689070338065,
+    0.0,
+    0.0,
+    0.00038012895786946363,
+    -9.95050473435776e-16,
+    4.481689070338065
+   ]
+  }
+ ],
+ "fine_tune": "NOT RUN: OpenSplat (AGPL-3.0) waits on the owner sign-off (AAA_PLAN decision 1); tools/splat/build_opensplat.sh is a recipe only",
+ "timing": {
+  "load_at_start": [
+   10.38,
+   9.39,
+   8.42
+  ],
+  "build": {
+   "wall_s": 11.46,
+   "cpu_s": 11.27
+  },
+  "triangles": {
+   "wall_s": 0.13,
+   "cpu_s": 0.14
+  },
+  "sample": {
+   "wall_s": 0.83,
+   "cpu_s": 0.66
+  },
+  "colour": {
+   "wall_s": 13.24,
+   "cpu_s": 13.01
+  },
+  "select": {
+   "wall_s": 0.02,
+   "cpu_s": 0.02
+  },
+  "encode": {
+   "wall_s": 1.81,
+   "cpu_s": 1.47
+  },
+  "total": {
+   "wall_s": 27.64,
+   "cpu_s": 26.71
+  }
+ },
+ "licence": "Original work of the Corgis vs Cats project, rendered by its own scripts with Blender 5.2.2 (GPL tool; outputs are ours); no third-party content"
+}

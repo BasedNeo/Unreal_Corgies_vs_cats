@@ -1,0 +1,179 @@
+{
+ "kind": "SOURCE: wet mask",
+ "outputs": {
+  "png": {
+   "path": "assets/lot/lot_wet_mask.png",
+   "bytes": 2728809,
+   "sha256": "9b5ca33f8874498a81abe6861321ded577008c8718e16390529582e3eab1edc2",
+   "width": 2048,
+   "height": 2048,
+   "encoding": "PNG 8-bit RGB, non-colour data",
+   "channels": {
+    "R": "puddle",
+    "G": "damp",
+    "B": "glint"
+   }
+  }
+ },
+ "params": {
+  "out": "assets/lot/lot_wet_mask",
+  "res": 2048,
+  "spp": 16,
+  "threads": 4,
+  "sub": 2,
+  "cap": 0.025,
+  "floor_r": 6.0,
+  "micro": 0.05,
+  "slope": 0.2,
+  "clear": 1.5,
+  "clear_soft": 3.0,
+  "glint_r": 22.0
+ },
+ "rebuild": "\"$BLENDER\" --background --factory-startup --python tools/blender/wet_mask.py",
+ "rebuild_env": {
+  "BLENDER": "the Blender 5.2.2 Linux x64 binary (blender.org release)",
+  "cwd": "repo root"
+ },
+ "script": "tools/blender/wet_mask.py",
+ "script_sha256": "eeadcc3aebed21c06cb9398cac3ee99ab5ae9dce6cca41274b75fd74e82f0685",
+ "bllib_sha256": "aa2049b7f60e5195afeca4fc595989a73e7dbae5824054288445d906879416d9",
+ "blender": {
+  "version": "5.2.2 LTS",
+  "build_hash": "d13f752e3b9c"
+ },
+ "render": {
+  "engine": "Cycles CPU",
+  "spp": 16,
+  "seed": 1717,
+  "adaptive": false,
+  "denoiser": null,
+  "threads": 4,
+  "bounces": 0,
+  "filter_px": 1.0,
+  "camera": "orthographic, top-down, image up = game -Z"
+ },
+ "world_data": {
+  "path": "engines/godot/data/the_lot.json",
+  "sha256": "6a2e80c57d5022162e5639111d8891690f9d3c32e4d3605b91aedca3119e0192",
+  "bounds": {
+   "minX": -156,
+   "maxX": 156,
+   "minZ": -156,
+   "maxZ": 156
+  },
+  "terrain_sha256": "283a465eb66fe7e428bdd48425c4b09e0d063590d6da9d98734f9e0105c74e16",
+  "fences": [
+   {
+    "x0": -152,
+    "z0": -152,
+    "x1": -152,
+    "z1": 152,
+    "h": 8,
+    "face": -1
+   }
+  ],
+  "water_zones": [
+   "ditch_0",
+   "ditch_1",
+   "ditch_2",
+   "ditch_3"
+  ],
+  "flood_targets": {
+   "flood_pit_west": [
+    -58,
+    -2.4,
+    -110
+   ],
+   "flood_pit_east": [
+    -22,
+    -2.4,
+    -108
+   ],
+   "flood_heap_west": [
+    26,
+    4.6,
+    106
+   ],
+   "flood_heap_east": [
+    44,
+    4.6,
+    106
+   ]
+  }
+ },
+ "transform": {
+  "source": "the_lot.json bounds",
+  "origin_game_xz": [
+   -156,
+   -156
+  ],
+  "span_m": [
+   312,
+   312
+  ],
+  "m_per_texel": 0.15234375,
+  "u_axis": "game +X (image right)",
+  "v_axis": "game +Z (image down; row 0 = top = minZ)",
+  "texel_centre": "x = -156 + (u + 0.5) * 0.15234375; z = -156 + (v + 0.5) * 0.15234375",
+  "shader_uv": "uv = ((x - minX) / (maxX - minX), (z - minZ) / (maxZ - minZ)), v = 0 at the top row"
+ },
+ "coverage": {
+  "R": {
+   "mean": 0.0236,
+   "gt_0_5_pct": 2.3,
+   "gt_0_1_pct": 3.24
+  },
+  "G": {
+   "mean": 0.6233,
+   "gt_0_5_pct": 67.24,
+   "gt_0_1_pct": 95.34
+  },
+  "B": {
+   "mean": 0.03,
+   "gt_0_5_pct": 0.47,
+   "gt_0_1_pct": 10.52
+  },
+  "rule": "per channel over all texels: mean, and % of texels above 0.5 and above 0.1"
+ },
+ "fields": {
+  "covers": 156,
+  "grid": "657x657 at 0.5 m",
+  "cells_depth_gt_1cm": 0.0284,
+  "cells_cleared_by_cover": 0.0023,
+  "cells_west_yard": 0.0381
+ },
+ "west_yard": {
+  "rule": "every texel whose whole cell lies on the yard side of a fence line (the_lot.json fences[]) is 0 in every channel, set in numpy after quantising",
+  "texels": 53248,
+  "columns_u": [
+   0,
+   25
+  ],
+  "zeroed_from_render_bleed": 425
+ },
+ "licence_note": "derived from the project's own world data (the_lot.json); no third-party content",
+ "timing": {
+  "load_at_start": [
+   8.08,
+   8.16,
+   7.87
+  ],
+  "fields": {
+   "wall_s": 1.8,
+   "cpu_s": 1.73
+  },
+  "scene": {
+   "wall_s": 0.62,
+   "cpu_s": 0.66
+  },
+  "render": {
+   "wall_s": 62.72,
+   "cpu_s": 73.17
+  },
+  "total": {
+   "wall_s": 67.55,
+   "cpu_s": 77.83
+  }
+ },
+ "licence": "Original work of the Corgis vs Cats project, rendered by its own scripts with Blender 5.2.2 (GPL tool; outputs are ours); no third-party content"
+}

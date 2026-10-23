@@ -6,6 +6,7 @@
 *.jpg binary
 *.glb binary
 *.spz binary
+*.exr binary
 *.wasm binary
 *.webp binary
 *.ktx2 binary

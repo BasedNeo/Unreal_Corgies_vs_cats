@@ -11,10 +11,12 @@ import { join } from 'node:path';
 const walk = (d) => readdirSync(d).flatMap((f) => { const p = join(d, f); return statSync(p).isDirectory() ? walk(p) : [p]; });
 const errors = [];
 const GLB = /\.(glb|gltf)\b/;
+// AAA_PLAN ruling 5: splats are look-only; nothing headless may load or name them.
+const SPLAT = /\.spz\b|GaussianSplat|SPZLoader/;
 const rules = [
-  { dir: 'src/sim', deny: [GLB, /from ['"]three/, /\bdocument\./, /\bwindow\./, /Math\.random\(/, /from ['"].*\/client\//] },
-  { dir: 'src/host', deny: [GLB, /from ['"]three/, /\bdocument\./, /\bwindow\./, /Math\.random\(/, /from ['"].*\/client\//] },
-  { dir: 'src/shared', deny: [GLB, /from ['"]three/, /\bdocument\./, /\bwindow\./, /Math\.random\(/, /from ['"]\.\.\/(sim|host|client)\//, /from ['"]\.\.\/\.\.\/(sim|host|client)\//] },
+  { dir: 'src/sim', deny: [GLB, SPLAT, /from ['"]three/, /\bdocument\./, /\bwindow\./, /Math\.random\(/, /from ['"].*\/client\//] },
+  { dir: 'src/host', deny: [GLB, SPLAT, /from ['"]three/, /\bdocument\./, /\bwindow\./, /Math\.random\(/, /from ['"].*\/client\//] },
+  { dir: 'src/shared', deny: [GLB, SPLAT, /from ['"]three/, /\bdocument\./, /\bwindow\./, /Math\.random\(/, /from ['"]\.\.\/(sim|host|client)\//, /from ['"]\.\.\/\.\.\/(sim|host|client)\//] },
 ];
 for (const r of rules) {
   for (const f of walk(r.dir).filter((f) => /\.(ts|js|mjs)$/.test(f) && !/\.test\.ts$/.test(f))) {
