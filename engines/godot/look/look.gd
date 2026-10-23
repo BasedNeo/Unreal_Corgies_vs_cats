@@ -2,8 +2,9 @@ extends Node
 ## Look (lane G-LOOK owns this folder): stylised-realistic wet night on The Lot (LOOK LOCKED, Wave 12). No ink outlines.
 ## Wave 13 (G-ATMOS): a night sky (not dusk), wet asphalt (not mud), sodium pools that read from the play cameras, and
 ## the Forward+-only effects (SSR, volumetric fog) requested only on Forward+.
-## - Environment: moonlit overcast night sky shader, height + distance fog (volumetric on Forward+), AgX, glow on
-##   emissives only (HDR threshold), SSAO, SSR (Forward+ only), a muted teal/warm grade.
+## - Environment: the night sky (W17 G-SKY: the shared SOURCE EXR, see SKY_SOURCE), height + distance fog the colour of
+##   its horizon (volumetric on Forward+), AgX, glow on emissives only (HDR threshold), SSAO, SSR (Forward+ only), a
+##   muted teal/warm grade.
 ## - One sodium SpotLight3D per World.floodlights() entry (shadows on a few), an emissive lens on the FloodLamp piece.
 ## - Wet asphalt shader on group `ground`; `kit` and `prims` materials darkened and smoothed in place (maps kept); the
 ##   ditch water (group `water`) a dark, still mirror.
@@ -18,10 +19,24 @@ extends Node
 const LOOK := "stylised-realistic"
 enum Quality { LOW, MEDIUM, HIGH }
 const SODIUM := Color(1.0, 0.62, 0.28)  # high-pressure sodium, ~2100 K
-const MOON_DIR := Vector3(-0.4, 0.55, -0.73)  # towards the moon (behind the cloud deck, seen through a break)
-# The night's key values (sRGB colours). docs/handoff/G-ATMOS.md lists them for the web twin.
-const SKY_ZENITH := Color(0.03, 0.042, 0.08)
-const SKY_HORIZON := Color(0.11, 0.13, 0.17)  # the fog colour too: far silhouettes sink into the horizon haze
+const MOON_DIR := Vector3(-0.4, 0.55, -0.73)  # towards the moon: a cold key light from behind the deck (no disc drawn)
+## The night sky is the shared SOURCE (W17 AAA pass 1, G-SKY; docs/design/NORTH_STAR.md): one Blender Cycles panorama
+## that Godot and the web twin both sample, read at runtime from the repo as world.gd reads the kit GLBs (never copied
+## under engines/godot), with its receipt read at startup, so a re-rendered sky re-colours the fog with no code change.
+const SKY_SOURCE := "assets/sky/lot_night_sky.exr"
+const SKY_RECEIPT := "assets/sky/lot_night_sky.receipt.json"
+## What the eye sees: the SOURCE's scene-linear radiance x SKY_ENERGY, before exposure 1.5 and AgX. The receipt's AgX
+## preview (energy 1, no exposure) has the sky where the reference does (sRGB 0.21-0.26), so 1 / 1.5 keeps it there.
+## W17 G-SKY ruling (v3 sky): 0.67 -> 0.60, so the corgi-rim bags' 30 m silhouette holds against the denser deck
+## (edge 15.0 -> 16.6 Compatibility, 15.4 -> 17.0 Forward+); the in-frame sky mean stays in the reference's range.
+const SKY_ENERGY := 0.60
+## The radiance map (the Lot's sky ambient and its reflections) is the SOURCE x SKY_LIGHT_ENERGY, decoupled from what
+## the eye sees: calibrated on probe spheres over the Lot (moon and lamps off) so ambient and sky reflections stay where
+## W15 item 11 measured them under the W13 sky (docs/handoff/G-ATMOS.md, G-SKY): matte 0.0268 -> 0.027 on Forward+.
+const SKY_LIGHT_ENERGY := 0.12
+## The W13 night keys (sRGB), used only when the receipt cannot be read (look.gd reports it: sky_error).
+const SKY_FALLBACK_HORIZON := Color(0.11, 0.13, 0.17)
+const SKY_FALLBACK_ZENITH := Color(0.03, 0.042, 0.08)
 const MOON_COLOR := Color(0.62, 0.72, 0.95)
 const FLOOD_ENERGY := 38.0
 const WET_DARKEN := 0.7
@@ -73,7 +88,7 @@ const COVER_SCALE := {
 	"forward_plus": {
 		"Kit_Lot_Footing_01": {"fill": 1.47, "sheen": 1.0, "sat": 1.0, "pool": 1.0},
 		"Kit_Lot_BagWall_01": {"fill": 0.97, "sheen": 0.6, "sat": 1.0, "pool": 1.0},
-		"Kit_Lot_FloodMast_01": {"fill": 0.84, "sheen": 1.0, "sat": 1.0, "pool": 1.0},
+		"Kit_Lot_FloodMast_01": {"fill": 0.82, "sheen": 1.0, "sat": 1.0, "pool": 1.0},  # W17 G-SKY ruling (b): 0.84 -> 0.82 under the SOURCE sky
 		"Kit_Lot_Container20_01": {"fill": 1.32, "sheen": 1.0, "sat": 1.3, "pool": 1.0},
 	},
 	"gl_compatibility": {
@@ -97,6 +112,19 @@ var _rain: GPUParticles3D
 var _ground_mat: ShaderMaterial
 var _water_mat: StandardMaterial3D
 var _sky_mat: ShaderMaterial
+## The night's key colours (sRGB), from the SOURCE's receipt at startup: the horizon (the fog colour too: far
+## silhouettes sink into the horizon haze) and the zenith, as the receipt states them; the sky and the fog show them
+## x SKY_ENERGY. docs/handoff/G-ATMOS.md lists them for the web twin.
+var SKY_HORIZON := SKY_FALLBACK_HORIZON
+var SKY_ZENITH := SKY_FALLBACK_ZENITH
+## "" when the sky is the SOURCE; else why not (the EXR or the receipt missing or broken): the sky then falls back to a
+## plain gradient (receipt colours if it could be read, else the W13 keys) and the error is pushed to the log.
+var sky_error := ""
+## The SOURCE and its receipt, repo-relative (a test may point them elsewhere before _ready); sky_quiet keeps a test's
+## deliberate miss out of the error log (sky_error is still set).
+var sky_source := SKY_SOURCE
+var sky_receipt := SKY_RECEIPT
+var sky_quiet := false
 var _wet := {}
 var _lens := {}
 var _streaks: NoiseTexture2D
@@ -276,18 +304,14 @@ static func features(method: String, q: int) -> Dictionary:
 func _build_environment() -> void:
 	environment = Environment.new()
 	var e := environment
-	_sky_mat = ShaderMaterial.new()
-	_sky_mat.shader = SKY_SHADER
-	_sky_mat.set_shader_parameter("cloud_noise", _noise_tex(512, 0.008, 7, 5, false))
-	_sky_mat.set_shader_parameter("moon_dir", MOON_DIR)
-	_sky_mat.set_shader_parameter("zenith_color", SKY_ZENITH)
-	_sky_mat.set_shader_parameter("horizon_color", SKY_HORIZON)
+	_build_sky_material()
 	var sky := Sky.new()
 	sky.sky_material = _sky_mat
 	sky.radiance_size = Sky.RADIANCE_SIZE_128
 	e.background_mode = Environment.BG_SKY
 	e.sky = sky
-	# ambient: half the (now dark) sky, half a cold moonlit fill, so pets and the slab stay readable off the floods
+	# ambient: half the sky (its radiance map, at SKY_LIGHT_ENERGY), half a cold moonlit fill, so pets and the slab stay
+	# readable off the floods
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	e.ambient_light_color = Color(0.2, 0.25, 0.36)
 	e.ambient_light_sky_contribution = 0.5
@@ -306,7 +330,7 @@ func _build_environment() -> void:
 	e.fog_enabled = true
 	e.fog_mode = Environment.FOG_MODE_EXPONENTIAL
 	e.fog_light_color = SKY_HORIZON
-	e.fog_light_energy = 1.0
+	e.fog_light_energy = SKY_ENERGY  # the horizon as the sky shows it
 	e.fog_density = 0.0045  # ~59 % at 200 m: the far side of the Lot stays a silhouette, not a wall
 	e.fog_sky_affect = 0.15
 	e.fog_aerial_perspective = 0.3
@@ -334,6 +358,64 @@ func _build_environment() -> void:
 	add_child(moon)
 	moon.basis = Basis.looking_at(-MOON_DIR, Vector3.UP)
 	_apply_quality()
+
+
+## The sky material: the SOURCE EXR and the receipt's colours, per renderer.
+func _build_sky_material() -> void:
+	var root := ProjectSettings.globalize_path("res://").path_join("../..")
+	var errs := PackedStringArray()
+	var rc := read_sky_receipt(root.path_join(sky_receipt).simplify_path())
+	if rc.error == "":
+		SKY_HORIZON = rc.horizon
+		SKY_ZENITH = rc.zenith
+	else:
+		errs.append(rc.error)
+	var src := load_sky_source(root.path_join(sky_source).simplify_path())
+	if src.error != "":
+		errs.append(src.error)
+	sky_error = "; ".join(errs)
+	if sky_error != "" and not sky_quiet:
+		push_error("Look: " + sky_error)
+	_sky_mat = ShaderMaterial.new()
+	_sky_mat.shader = SKY_SHADER
+	_sky_mat.set_shader_parameter("use_source", src.image != null)
+	if src.image != null:
+		_sky_mat.set_shader_parameter("source_panorama", ImageTexture.create_from_image(src.image))
+	_sky_mat.set_shader_parameter("energy", SKY_ENERGY)
+	_sky_mat.set_shader_parameter("light_energy", SKY_LIGHT_ENERGY)
+	_sky_mat.set_shader_parameter("encode_srgb", rendering_method == "gl_compatibility")
+	_sky_mat.set_shader_parameter("horizon_color", SKY_HORIZON)
+	_sky_mat.set_shader_parameter("zenith_color", SKY_ZENITH)
+
+
+## The sky SOURCE as an image (scene-linear half float, stored as shared-exponent RGBE9995: 4 bytes a texel, 8 MB at
+## 2048 x 1024), or why not: {"image": Image or null, "error": ""}. A missing or broken file is an error, never silent.
+static func load_sky_source(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {"image": null, "error": "the sky SOURCE is missing: %s (rebuild it with the command in its receipt)" % path}
+	var img := Image.load_from_file(path)
+	if img == null or img.is_empty():
+		return {"image": null, "error": "the sky SOURCE does not decode: %s" % path}
+	img.convert(Image.FORMAT_RGBE9995)
+	return {"image": img, "error": ""}
+
+
+## The SOURCE's receipt: its horizon and zenith colours (sRGB Colors, from the receipt's linear means), or why not.
+static func read_sky_receipt(path: String) -> Dictionary:
+	var out := {"horizon": SKY_FALLBACK_HORIZON, "zenith": SKY_FALLBACK_ZENITH, "error": ""}
+	if not FileAccess.file_exists(path):
+		out.error = "the sky SOURCE's receipt is missing: %s" % path
+		return out
+	var j = JSON.parse_string(FileAccess.get_file_as_string(path))
+	var sky = j.get("sky", {}) if j is Dictionary else {}
+	var h = sky.get("horizon_linear") if sky is Dictionary else null
+	var z = sky.get("zenith_linear") if sky is Dictionary else null
+	if not (h is Array and z is Array and h.size() == 3 and z.size() == 3):
+		out.error = "the sky SOURCE's receipt has no sky.horizon_linear / zenith_linear: %s" % path
+		return out
+	out.horizon = Color(float(h[0]), float(h[1]), float(h[2])).linear_to_srgb()
+	out.zenith = Color(float(z[0]), float(z[1]), float(z[2])).linear_to_srgb()
+	return out
 
 
 func _apply_quality() -> void:

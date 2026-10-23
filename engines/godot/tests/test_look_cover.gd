@@ -20,7 +20,9 @@ extends RefCounted
 ##    per piece plus KitShadow) and the look's own draw items are unchanged with the cover read on, so it cannot add
 ##    draws.
 ## 3. With a renderer: from the play camera (EYE_H over the ground, fov 72) at 10 / 30 / 60 m from cover pieces at both
-##    bases and on two lanes, every cover piece's silhouette edge contrast is >= BAR_EDGE (CIE L*), every cover piece
+##    bases and on two lanes, every cover piece's silhouette edge contrast against the Lot is >= BAR_EDGE (CIE L*) at 10
+##    and 30 m (at 60 m it is REPORTED, see EDGE_GATED_MAX; the ring's sky-backed pairs are reported beside it, see
+##    EDGE_MIN_LOT), every cover piece
 ##    is lighter than the non-cover mast pole at the same place by >= BAR_GAP L* at 10 and 30 m (cover is the light
 ##    value class, the thin mast a dark line; at 60 m the gap is printed as REPORTED), the read lifts a dark view's body to at most BODY_MAX L* and a flood-lit view's
 ##    by at most LIFT_MAX at 10 and 30 m and keeps its L* std (>= STD_KEEP x read off) at every distance, and the
@@ -44,6 +46,30 @@ const BAR_GAP := 10.0
 ## mast pole itself, which the W17 AIR pass retunes).
 const GAP_GATED_MAX := 30.0
 const DRAW_GROWTH := 1.05
+## The edge ring, split by what lies behind each outside sample (W17 G-SKY ruling, 2026-10-23): the bar asks whether a
+## piece reads as cover against the Lot, so only edge pairs whose outside sample is Lot geometry are gated (>= BAR_EDGE);
+## pairs whose outside sample is sky (the depth buffer at or past SKY_FAR_FRAC of the camera's far plane) are printed
+## beside them and not gated (a silhouette against the sky is the AIR / backdrop passes' read). The Lot-backed mean is
+## gated only on at least EDGE_MIN_LOT pairs; fewer, and the view is "sky-backed only": it is gated on its body (the
+## ceiling, lift and std rules, unchanged) and on a gated value gap at its place and distance, and fails if it has none
+## at 10 / 30 m; at 60 m, where the gap is only reported, it is REPORTED too.
+## EDGE_MIN_LOT = 30: three times the 10 pairs under which a view is skipped outright, and about 3.6 m of silhouette at
+## 60 m (8.3 px/m at FOV 72 on 720 px), so the smallest piece's full Lot-backed side at 60 m (the bag walls, the ballast:
+## 55-70 pairs, no sky) stays gated; the run prints each Lot-backed mean's standard error so the count's precision shows.
+const SKY_FAR_FRAC := 0.98
+const EDGE_MIN_LOT := 30
+## The edge is gated at the fight distances (<= EDGE_GATED_MAX: bot ai_range 7-24 m, rifle falloff 24-48 m) and
+## REPORTED farther (60 m), with its pairs and standard error, exactly like the value gap (lead's ruling 2026-10-23: at
+## 60 m the read belongs to the haze, which the horizon fog sets by design; no per-renderer fill row clears it without
+## breaking the ceiling). The 60 m known limits are named in docs/qa/w15/COVER.md section 4b for the AIR pass.
+const EDGE_GATED_MAX := 30.0
+## The 60 m known limits (COVER.md section 4b), "renderer|place|piece[idx]": [Lot-backed edge, SE]. A REPORTED 60 m edge
+## must be one of them and no lower than its edge - 2 SE (COVER.md's regression rule); any other 60 m edge under BAR_EDGE,
+## or a named limit that turned sky-backed only, fails: REPORTED is a logged limit, not a free pass.
+const EDGE_LIMITS_60 := {
+	"forward_plus|west lane|Container20[1]": [13.2, 0.6], "gl_compatibility|west lane|Container20[1]": [12.2, 0.5],
+	"gl_compatibility|east lane|Pipe[0]": [8.4, 1.3], "gl_compatibility|corgi base|BagWall[3]": [14.7, 1.2],
+	"gl_compatibility|slab approach|BagWall[13]": [10.5, 0.6]}
 ## The ceiling (W15 Q-check, shared with the web twin): each cover view is rendered with the read on and off. A dark view
 ## (body L* < LIT_OFF with the read off) may be lifted to at most BODY_MAX at 10 and 30 m; a view the floods already
 ## light (>= LIT_OFF) may be lifted by at most LIFT_MAX there. At every distance the read keeps the piece's own shading
@@ -95,6 +121,25 @@ uniform float split = 1e6;
 varying float ly;
 void vertex() { ly = VERTEX.y; }
 void fragment() { ALBEDO = ly < split ? col_a : col_b; }
+"""
+## The sky mask: a full-screen quad, drawn over a finished frame, that paints grey where the depth buffer holds nothing
+## nearer than SKY_FAR_FRAC x the far plane (the sky) and black where it holds Lot geometry.
+const SKY_MASK_SHADER := """shader_type spatial;
+render_mode unshaded, fog_disabled, depth_test_disabled, depth_draw_never, cull_disabled, shadows_disabled;
+uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
+uniform float cam_far = 400.0;
+uniform float far_frac = 0.98;
+void vertex() { POSITION = vec4(VERTEX.xy, 0.5, 1.0); }
+void fragment() {
+	float depth = textureLod(depth_tex, SCREEN_UV, 0.0).r;
+#if CURRENT_RENDERER == RENDERER_COMPATIBILITY
+	vec3 ndc = vec3(SCREEN_UV, depth) * 2.0 - 1.0;
+#else
+	vec3 ndc = vec3(SCREEN_UV * 2.0 - 1.0, depth);
+#endif
+	vec4 v = INV_PROJECTION_MATRIX * vec4(ndc, 1.0);
+	ALBEDO = -v.z / v.w >= far_frac * cam_far ? vec3(0.6) : vec3(0.0);
+}
 """
 ## The cover read's rule in kit_wet.gdshader, statement by statement (compared without comments or whitespace). CI
 ## renders nothing, so this is where a lost uniform, a hard-coded fall-off or a dropped or inverted up-face mask shows.
@@ -238,6 +283,18 @@ func run(tree: SceneTree) -> Array:
 			if _gap_verdict(c[0], c[1], c[2]) != c[3]:
 				errs.append("the value-gap gate: a gap of %.0f at %d m gives %s, want %s (gated at 10 and 30 m, reported at 60 m)" % [
 					c[0] - c[1], int(c[2]), _gap_verdict(c[0], c[1], c[2]), c[3]])
+		# the edge gate itself: gated on the Lot-backed pairs at 10 and 30 m, reported at 60 m, "sky-backed only" under
+		# EDGE_MIN_LOT of them (a 60 m edge of 5 is REPORTED, never a pass; a 30 m edge of 14 FAILS)
+		for c in [[EDGE_MIN_LOT, 15.0, 10.0, "ok"], [EDGE_MIN_LOT, 14.9, 10.0, "FAIL"], [645, 14.0, 30.0, "FAIL"],
+				[400, 30.0, 30.0, "ok"], [248, 5.0, 60.0, "REPORTED"], [248, 15.0, 60.0, "ok"],
+				[EDGE_MIN_LOT - 1, 40.0, 10.0, "SKY ONLY"], [0, 0.0, 60.0, "SKY ONLY"]]:
+			if _edge_verdict(c[0], c[1], c[2]) != c[3]:
+				errs.append("the edge gate: %d Lot-backed pairs at dL* %.1f, %d m, give %s, want %s (gated >= %.0f on >= %d pairs at <= %d m)" % [
+					c[0], c[1], int(c[2]), _edge_verdict(c[0], c[1], c[2]), c[3], BAR_EDGE, EDGE_MIN_LOT, int(EDGE_GATED_MAX)])
+		# the sky mask's distance: at 0.5 x far, Lot geometry 200-400 m away is classed sky and a named 60 m limit can
+		# turn "sky-backed only" (the G-SKY verifier's mutant c); the mask stays near the far plane
+		if SKY_FAR_FRAC < 0.95 or SKY_FAR_FRAC >= 1.0:
+			errs.append("SKY_FAR_FRAC %.3f is outside [0.95, 1): the sky mask would class far Lot geometry as sky" % SKY_FAR_FRAC)
 		# the rule in the shader's source, statement by statement
 		var src := _code(look.KIT_SHADER.code)
 		for rule in SHADER_RULE:
@@ -513,6 +570,17 @@ static func _gap_verdict(worst: float, pole: float, d: float) -> String:
 	return "FAIL" if d <= GAP_GATED_MAX else "REPORTED"
 
 
+## The edge gate on the Lot-backed part of the ring: "ok"; "FAIL" (under BAR_EDGE at <= EDGE_GATED_MAX); "REPORTED"
+## (under BAR_EDGE farther: printed with its pairs and SE, not gated); or "SKY ONLY" (too few Lot-backed pairs to gate:
+## judged on its body and the value gap instead, see EDGE_MIN_LOT).
+static func _edge_verdict(lot_n: int, lot_edge: float, d: float) -> String:
+	if lot_n < EDGE_MIN_LOT:
+		return "SKY ONLY"
+	if lot_edge >= BAR_EDGE:
+		return "ok"
+	return "FAIL" if d <= EDGE_GATED_MAX else "REPORTED"
+
+
 ## COVER_ONLY's match: a place by its name, a piece by a part of its name, or "place/piece".
 static func _picks(only: String, s: Array) -> bool:
 	if only == "":
@@ -566,6 +634,21 @@ func _measure(tree: SceneTree, world: Node, look: Node, cam: Camera3D, has_cover
 	var mask_mat := ShaderMaterial.new()
 	mask_mat.shader = Shader.new()
 	mask_mat.shader.code = MASK_SHADER
+	var sky_mat := ShaderMaterial.new()
+	sky_mat.shader = Shader.new()
+	sky_mat.shader.code = SKY_MASK_SHADER
+	sky_mat.set_shader_parameter("cam_far", cam.far)
+	sky_mat.set_shader_parameter("far_frac", SKY_FAR_FRAC)
+	var sky_q := MeshInstance3D.new()
+	var sky_qm := QuadMesh.new()
+	sky_qm.size = Vector2(2, 2)
+	sky_q.mesh = sky_qm
+	sky_q.material_override = sky_mat
+	sky_q.extra_cull_margin = 16384.0
+	sky_q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	sky_q.visible = false
+	cam.add_child(sky_q)
+	sky_q.position = Vector3(0, 0, -1)
 	var results := {}  # "place|d" -> {cover: [E...], pole: [E...]}
 	var table := cover_table(world)
 	# COVER_ONLY: only the samples at these places or of these pieces (comma-separated; a place by its name, a piece by a
@@ -615,6 +698,10 @@ func _measure(tree: SceneTree, world: Node, look: Node, cam: Camera3D, has_cover
 			mmi.material_override = null
 			var img := await _frame(tree, settle)
 			var dc: int = RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
+			# the sky mask: what lies at the far plane behind the scene (the edge ring's outside samples are split by it)
+			sky_q.visible = true
+			var skf := await _frame(tree, 1)
+			sky_q.visible = false
 			# two mask frames: part A (under split) grey then black; part B the other way round
 			mmi.material_override = mask_mat
 			mask_mat.set_shader_parameter("split", split)
@@ -643,20 +730,32 @@ func _measure(tree: SceneTree, world: Node, look: Node, cam: Camera3D, has_cover
 			for y in range(rect.position.y, rect.end.y):
 				for x in range(rect.position.x, rect.end.x):
 					vis[y * vw + x] &= full[y * vw + x]  # not its reflection in a puddle (SSR mirrors the mask colours)
-			var r := _edge_read(img, vis, full, rect, dbg)
+			var sky := PackedByteArray()
+			sky.resize(vw * img.get_height())
+			var skd := skf.get_data()
+			for y in range(rect.position.y, rect.end.y):
+				for x in range(rect.position.x, rect.end.x):
+					var k := (y * vw + x) * 3
+					if int(skd[k]) + int(skd[k + 1]) + int(skd[k + 2]) > 150:
+						sky[y * vw + x] = 1
+			var r := _edge_read(img, vis, full, rect, dbg, sky)
 			var body := _body(img, vis, rect)
 			r.body = body.mean
 			var key := "%s|%d" % [place, int(d)]
 			if not results.has(key):
-				results[key] = {"cover": [], "pole": []}
+				results[key] = {"cover": [], "pole": [], "sky_only": []}
 			var tag := "%s %s[%d] %s d=%d" % [place, piece.trim_prefix("Kit_Lot_").trim_suffix("_01"), idx, part, int(d)]
 			if r.px < 20 or r.pairs < 10:
 				print("  COVER %-44s too few pixels (%d px, %d edge pairs): skipped" % [tag, r.px, r.pairs])
 				continue
 			results[key][part].append(r)
 			measured += 1 if part == "cover" else 0
+			var ev := _edge_verdict(r.lot_n, r.lot_edge, d)
 			print("  COVER %-44s edge dL* %5.1f (median %5.1f)  edge in %5.1f out %5.1f  body L* %5.1f std %4.1f C* %4.1f  %6d px  draws %d" % [
-				tag, r.edge, r.median, r.inner, r.outer, body.mean, body.std, body.chroma, r.px, dc])
+				tag, r.lot_edge, r.lot_median, r.lot_inner, r.lot_outer, body.mean, body.std, body.chroma, r.px, dc])
+			print("  COVER %-44s ring: Lot-backed %d pairs dL* %5.1f +- %.1f (%s) | sky-backed %d pairs dL* %5.1f out %5.1f (reported) | all %d pairs dL* %5.1f" % [
+				tag, r.lot_n, r.lot_edge, r.lot_se, ("pole: not gated" if part == "pole" else "gated") + (", SKY ONLY: under %d" % EDGE_MIN_LOT if ev == "SKY ONLY" and part == "cover" else ""), r.sky_n, r.sky_edge,
+				r.sky_outer, r.pairs, r.edge])
 			# the ceiling and the no-flattening rule, against the same view with the read off
 			if has_cover and part == "cover":
 				look.set_cover_read(false)
@@ -680,11 +779,27 @@ func _measure(tree: SceneTree, world: Node, look: Node, cam: Camera3D, has_cover
 				dbg.save_png(shots.path_join(stem + "_edges.png"))
 				if OS.get_environment("COVER_DEBUG") != "":
 					m1.save_png(shots.path_join(stem + "_mask.png"))
+					skf.save_png(shots.path_join(stem + "_sky.png"))
 					s1.save_png(shots.path_join(stem + "_alone.png"))
 					if dbg.has_meta("masks"):
 						(dbg.get_meta("masks") as Image).save_png(shots.path_join(stem + "_masks.png"))
-			if part == "cover" and r.edge < BAR_EDGE:
-				errs.append("cover read: %s edge dL* %.1f < %.1f" % [tag, r.edge, BAR_EDGE])
+			var lim_key := "%s|%s|%s[%d]" % [RenderingServer.get_current_rendering_method(), place, piece.trim_prefix("Kit_Lot_").trim_suffix("_01"), idx]
+			if part == "cover" and d > EDGE_GATED_MAX and (ev == "REPORTED" or ev == "SKY ONLY") and (ev == "REPORTED" or EDGE_LIMITS_60.has(lim_key)):
+				var lim: Array = EDGE_LIMITS_60.get(lim_key, [])
+				if lim.is_empty():
+					errs.append("cover read: %s edge dL* %.1f < %.1f at %d m and not a named known limit (COVER.md 4b)" % [tag, r.lot_edge, BAR_EDGE, int(d)])
+				elif ev == "SKY ONLY" or r.lot_edge < float(lim[0]) - 2.0 * float(lim[1]):
+					errs.append("cover read: %s known limit regressed: Lot-backed %d pairs dL* %.1f, the limit %.1f +- %.1f (more than 2 SE lower, or no Lot-backed ring)" % [
+						tag, r.lot_n, r.lot_edge, lim[0], lim[1]])
+			if part == "cover" and ev == "FAIL":
+				errs.append("cover read: %s edge dL* %.1f < %.1f (Lot-backed, %d pairs)" % [tag, r.lot_edge, BAR_EDGE, r.lot_n])
+			elif part == "cover" and ev == "REPORTED":
+				print("  COVER %-44s edge REPORTED: Lot-backed %d pairs dL* %.1f +- %.1f < %.1f (gated at <= %d m only; a known limit for the AIR pass)" % [
+					tag, r.lot_n, r.lot_edge, r.lot_se, BAR_EDGE, int(EDGE_GATED_MAX)])
+			elif part == "cover" and ev == "SKY ONLY":
+				print("  COVER %-44s sky-backed only (%d Lot-backed pairs < %d): the edge is not gated; judged on its body and the value gap" % [
+					tag, r.lot_n, EDGE_MIN_LOT])
+				results[key].sky_only.append(tag)
 	if measured == 0 and no_view == 0:
 		errs.append("no cover view was measured (COVER_ONLY=%s)" % only)
 	# cover vs the non-cover mast pole at the same place and distance: the cover pieces are the lighter value class
@@ -704,6 +819,22 @@ func _measure(tree: SceneTree, world: Node, look: Node, cam: Camera3D, has_cover
 			"  REPORTED (gated at <= %d m only)" % int(GAP_GATED_MAX) if verdict == "REPORTED" else ""])
 		if verdict == "FAIL":
 			errs.append("cover vs non-cover at %s: darkest cover L* %.1f, mast pole L* %.1f (gap < %.1f)" % [key, worst, pole, BAR_GAP])
+		elif verdict == "ok":
+			for t in results[key].sky_only:
+				print("  COVER %-44s sky-backed only: judged by the value gap at %s (gap %.1f >= %.1f)" % [t, key, worst - pole, BAR_GAP])
+	# a sky-backed-only view with no gated value gap at its place and distance: at the fight distances (<= GAP_GATED_MAX)
+	# it cannot be judged, so it fails (never a silent pass); farther, where the gap itself is only reported, it is
+	# REPORTED too (lead's ruling 2026-10-23)
+	for key in results:
+		var dk := float(key.get_slice("|", 1))
+		var gated: bool = not results[key].cover.is_empty() and not results[key].pole.is_empty() and dk <= GAP_GATED_MAX
+		if not gated:
+			for t in results[key].sky_only:
+				if dk <= GAP_GATED_MAX:
+					errs.append("cover read: %s is sky-backed only and has no gated value gap at %s to judge it by" % [t, key])
+				else:
+					print("  COVER %-44s sky-backed only at %d m: REPORTED (the gap is gated at <= %d m only)" % [t, int(dk), int(GAP_GATED_MAX)])
+	sky_q.queue_free()
 	# draw calls with and without the cover read, at one view per place (30 m: in the runs that measure 30 m)
 	if has_cover and dists.has(30.0):
 		var on := 0
@@ -857,7 +988,8 @@ func _mask(m1: Image, m2: Image, r: Rect2i, part_b: bool) -> PackedByteArray:
 ## it compares L* 2 px inside with L* 2 px outside (MSAA blends the edge pixel itself). Returns the mean (the read) and
 ## median |dL*| and the mean inner / outer L*. `dbg` (optional): paints
 ## each measured edge pixel from red (no contrast) to green (>= BAR_EDGE).
-func _edge_read(img: Image, vis: PackedByteArray, full: PackedByteArray, r: Rect2i, dbg: Image = null) -> Dictionary:
+func _edge_read(img: Image, vis: PackedByteArray, full: PackedByteArray, r: Rect2i, dbg: Image = null,
+		sky: PackedByteArray = PackedByteArray()) -> Dictionary:
 	var w := img.get_width()
 	var nd := img.get_data()
 	var px := 0
@@ -889,8 +1021,14 @@ func _edge_read(img: Image, vis: PackedByteArray, full: PackedByteArray, r: Rect
 		stack.append(k + w)
 		stack.append(k - w)
 	var vals := PackedFloat32Array()
+	var lot := PackedFloat32Array()
 	var si := 0.0
 	var so := 0.0
+	var lsi := 0.0
+	var lso := 0.0
+	var ssum := 0.0
+	var sso := 0.0
+	var sn := 0
 	var steps := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 	for y in range(r.position.y + 3, r.end.y - 3):
 		for x in range(r.position.x + 3, r.end.x - 3):
@@ -909,9 +1047,18 @@ func _edge_read(img: Image, vis: PackedByteArray, full: PackedByteArray, r: Rect
 				var li := _lstar(nd, (pin.y * w + pin.x) * 3)
 				var lo := _lstar(nd, (pout.y * w + pout.x) * 3)
 				vals.append(absf(li - lo))
+				var on_sky: bool = not sky.is_empty() and sky[pout.y * w + pout.x] == 1
+				if on_sky:
+					ssum += absf(li - lo)
+					sso += lo
+					sn += 1
+				else:
+					lot.append(absf(li - lo))
+					lsi += li
+					lso += lo
 				if dbg != null:
 					var k := clampf(absf(li - lo) / BAR_EDGE, 0.0, 1.0)
-					dbg.set_pixel(x, y, Color(1.0 - k, k, 0.0))
+					dbg.set_pixel(x, y, Color(0.0, 0.3 + 0.7 * k, 1.0) if on_sky else Color(1.0 - k, k, 0.0))
 				si += li
 				so += lo
 	if dbg != null and OS.get_environment("COVER_DEBUG") != "":
@@ -922,10 +1069,30 @@ func _edge_read(img: Image, vis: PackedByteArray, full: PackedByteArray, r: Rect
 				mi.set_pixel(x, y, Color(vis[k], full[k] * 0.6, ext[k]))
 		dbg.set_meta("masks", mi)
 	var n := vals.size()
+	var ln := lot.size()
+	var out := {"edge": 0.0, "median": 0.0, "inner": 0.0, "outer": 0.0, "px": px, "pairs": n,
+		"lot_edge": 0.0, "lot_median": 0.0, "lot_inner": 0.0, "lot_outer": 0.0, "lot_n": ln, "lot_se": 0.0,
+		"sky_edge": ssum / maxf(1.0, sn), "sky_outer": sso / maxf(1.0, sn), "sky_n": sn}
 	if n == 0:
-		return {"edge": 0.0, "median": 0.0, "inner": 0.0, "outer": 0.0, "px": px, "pairs": 0}
+		return out
 	var sum := 0.0
 	for v in vals:
 		sum += v
 	vals.sort()
-	return {"edge": sum / n, "median": vals[n / 2], "inner": si / n, "outer": so / n, "px": px, "pairs": n}
+	out.edge = sum / n
+	out.median = vals[n / 2]
+	out.inner = si / n
+	out.outer = so / n
+	if ln > 0:
+		var lsum := 0.0
+		var lsq := 0.0
+		for v in lot:
+			lsum += v
+			lsq += v * v
+		out.lot_se = sqrt(maxf(0.0, lsq / ln - (lsum / ln) * (lsum / ln)) / ln)
+		lot.sort()
+		out.lot_edge = lsum / ln
+		out.lot_median = lot[ln / 2]
+		out.lot_inner = lsi / ln
+		out.lot_outer = lso / ln
+	return out

@@ -1,67 +1,46 @@
-// Moonlit overcast NIGHT sky (G-ATMOS, Wave 13; first cut G-LOOK, Wave 12). A blue-black zenith over a low cloud deck
-// lit from above by a moon hidden behind it: the deck's base is a cold slate, a little brighter around the moon and at
-// its thin edges; through the breaks a darker sky with a few faint stars, and the moon itself where a break passes in
-// front of it. The horizon is a cold haze: no warm sodium wash. Static (no TIME), so the radiance map is not rebuilt
-// every frame. look.gd's fog colour matches `horizon_color` (both sRGB; the shader works in linear).
+// The night sky (G-ATMOS; W17 AAA pass 1, G-SKY): the shared sky SOURCE, assets/sky/lot_night_sky.exr, which Godot
+// and the web twin both sample. It is a Blender Cycles equirect of the locked night: a low overcast deck lit from below
+// by the yard's sodium, darker slate toward the zenith, a cold haze at the horizon. look.gd reads it at runtime from
+// the repo (no copy under engines/godot), and its receipt (horizon and zenith colours) at startup.
+// - Axes: the EXR is in Godot's SKY_COORDS (u = 0 down -Z, 0.25 +X, 0.5 +Z, 0.75 -X; v = 0 the zenith), so it is
+//   sampled at SKY_COORDS as it is (proved with BL-DCC's markers EXR in both renderers: tests/test_look_sky.gd).
+// - Mip 0 only (textureLod 0): no mip seam where u wraps.
+// - Below the horizon the EXR is a constant dark ground; here the haze sinks from horizon_color (the fog colour, the
+//   receipt's horizon) to ground_dark x it, so far silhouettes and the ground's sky reflection sink into one haze.
+// - energy scales what the eye sees (the background); light_energy scales the radiance map (AT_CUBEMAP_PASS), which
+//   is the Lot's sky ambient and reflections: look.gd sets it so the Lot stays lit as W15 item 11 measured it.
+// - Compatibility (4.7.2) runs a sky shader in display space: source_color uniforms arrive unconverted (sRGB) and COLOR
+//   is written without encoding, so look.gd sets encode_srgb there only. The maths here is linear on both.
+// - use_source false (no EXR: look.gd reports the error) draws a plain gradient between the same horizon and zenith.
+// Static (no TIME), so the radiance map is built once.
 shader_type sky;
 
-uniform vec3 zenith_color : source_color = vec3(0.03, 0.042, 0.08);
-uniform vec3 horizon_color : source_color = vec3(0.11, 0.13, 0.17);
-uniform vec3 cloud_lit : source_color = vec3(0.17, 0.19, 0.24);
-uniform vec3 cloud_dark : source_color = vec3(0.045, 0.055, 0.08);
-uniform vec3 moon_color : source_color = vec3(0.82, 0.87, 1.0);
-uniform vec3 star_color : source_color = vec3(0.75, 0.8, 0.95);
-uniform vec3 moon_dir = vec3(-0.4, 0.55, -0.73);
-uniform float cloud_cover : hint_range(0.0, 1.0) = 0.74;
-uniform float moon_energy = 3.0;
-uniform float star_energy = 0.6;
+uniform sampler2D source_panorama : filter_linear, repeat_enable, hint_default_black;  // linear HDR: no source_color
+uniform bool use_source = true;
 uniform float energy = 1.0;
-uniform sampler2D cloud_noise : filter_linear_mipmap, repeat_enable;
+uniform float light_energy = 1.0;
+uniform bool encode_srgb = false;
+uniform vec3 horizon_color : source_color = vec3(0.29, 0.322, 0.341);
+uniform vec3 zenith_color : source_color = vec3(0.234, 0.279, 0.327);
+uniform float ground_dark = 0.35;
 
-float hash13(vec3 p) {
-	p = fract(p * 0.1031);
-	p += dot(p, p.zyx + 31.32);
-	return fract((p.x + p.y) * p.z);
+vec3 srgb_to_linear(vec3 c) {
+	return mix(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, lessThanEqual(c, vec3(0.04045)));
 }
 
-// Sparse faint stars on a lattice of the view direction (static; about 1 px each at 1280 x 720).
-float stars(vec3 d) {
-	vec3 p = d * 260.0;
-	vec3 c = floor(p);
-	float h = hash13(c);
-	if (h < 0.97) {
-		return 0.0;
-	}
-	vec3 o = vec3(hash13(c + 7.1), hash13(c + 13.7), hash13(c + 29.3)) * 0.6 + 0.2;
-	return smoothstep(0.35, 0.0, length(p - c - o)) * (h - 0.97) / 0.03;
+vec3 linear_to_srgb(vec3 c) {
+	return mix(1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, 12.92 * c, lessThan(c, vec3(0.0031308)));
 }
 
 void sky() {
 	vec3 d = normalize(EYEDIR);
-	float up = clamp(d.y, 0.0, 1.0);
-	vec3 md = normalize(moon_dir);
-	float m = max(dot(d, md), 0.0);
-	// the sky above the deck (seen through the breaks): blue-black overhead, a cold haze low down
-	vec3 base = mix(horizon_color, zenith_color, pow(up, 0.4));
-	// the deck: a flat layer, projected; two octaves of the same noise
-	vec2 uv = d.xz / (up + 0.12);
-	float n = texture(cloud_noise, uv * 0.07 + vec2(0.13, 0.71)).r * 0.65 + texture(cloud_noise, uv * 0.23).r * 0.35;
-	float lo = 0.85 - cloud_cover;
-	float cover = smoothstep(lo, lo + 0.3, n);
-	// a break drifts across the moon; the deck closes towards the horizon (no breaks low down, no stars on the skyline)
-	cover *= mix(1.0, smoothstep(0.35, 0.75, n), smoothstep(0.985, 0.998, m));
-	cover = mix(1.0, cover, smoothstep(0.03, 0.3, up));
-	float thin = 1.0 - clamp((n - lo) * 2.2, 0.0, 1.0);  // thin edges let more moonlight through
-	float glow = pow(m, 6.0) * 0.6 + pow(m, 40.0) * 1.4;   // the moon's patch on the deck
-	vec3 deck = mix(cloud_dark, cloud_lit, clamp(thin * 0.6 + glow * 0.5, 0.0, 1.0)) * (1.0 + glow);
-	deck = mix(deck, horizon_color, 1.0 - smoothstep(0.0, 0.18, up));  // the deck's far edge sinks into the haze
-	// the break: night sky, faint stars, the moon (a small soft disc and its corona)
-	vec3 clear = base * (1.0 + pow(m, 10.0) * 2.0);
-	clear += moon_color * (smoothstep(0.99982, 0.99992, m) * moon_energy + pow(m, 300.0) * 0.08 * moon_energy);
-	clear += star_color * stars(d) * star_energy * smoothstep(0.1, 0.35, up);
-	vec3 col = mix(clear, deck, cover);
-	if (d.y < 0.0) {
-		col = mix(horizon_color, horizon_color * 0.35, clamp(-d.y * 4.0, 0.0, 1.0));
+	vec3 hz = encode_srgb ? srgb_to_linear(horizon_color) : horizon_color;
+	vec3 zn = encode_srgb ? srgb_to_linear(zenith_color) : zenith_color;
+	vec3 col = use_source ? textureLod(source_panorama, SKY_COORDS, 0.0).rgb : mix(hz, zn, pow(clamp(d.y, 0.0, 1.0), 0.4));
+	vec3 ground = mix(hz, hz * ground_dark, clamp(-d.y * 4.0, 0.0, 1.0));
+	col = mix(col, ground, 1.0 - smoothstep(-0.03, 0.0, d.y)) * (AT_CUBEMAP_PASS ? light_energy : energy);
+	if (encode_srgb) {
+		col = linear_to_srgb(max(col, vec3(0.0)));
 	}
-	COLOR = col * energy;
+	COLOR = col;
 }

@@ -3,8 +3,9 @@ extends RefCounted
 ## floodlight per World.floodlights() entry with shadows on a few, wets `kit` / `prims` materials without replacing
 ## their maps or touching the originals, and the quality knob turns the costly features off.
 ## W13 (G-ATMOS): SSR and volumetric fog are requested only on Forward+ (Compatibility warns about them and ignores them);
-## the night keys stay night (a dark blue-black zenith, a cold horizon, fog the colour of the horizon); the ditch water
-## gets the look's dark water.
+## the night keys stay night (W17 G-SKY ruling: a lit overcast deck, not the W13 blue-black, so night_errs below holds
+## a cold horizon, a night ceiling that rejects dusk, a zenith no brighter than the horizon, fog the horizon's colour);
+## the ditch water gets the look's dark water.
 const WORLD_SRC := """extends Node3D
 signal built
 var is_built := false
@@ -13,6 +14,37 @@ func floodlights() -> Array:
 		{"pos": Vector3(0, 22, 40), "target": Vector3(10, 0, 20)}, {"pos": Vector3(40, 22, 40), "target": Vector3(30, 0, 20)},
 		{"pos": Vector3(-40, 22, 0), "target": Vector3(-20, 0, 0)}]
 """
+
+## W17 G-SKY ruling: the night ceiling on the horizon's linear luminance (the SOURCE receipt's is 0.082, the hero
+## reference's about 0.06-0.08; the W12 dusk horizon was 0.22).
+const NIGHT_HORIZON_MAX := 0.10
+## Skies night_errs must reject, linear RGB: [name, zenith, horizon, fog (null: the horizon), the failure it must report].
+const RECEIPT_ZENITH := Color(0.044577, 0.063056, 0.087282)  # v1 receipt zenith, linear (the fog case)
+const DUSK := [
+	["a bright dusk horizon (linear 0.3)", Color(0.2, 0.22, 0.26), Color(0.29, 0.3, 0.33), null, "ceiling"],
+	["a warm dusk horizon (r > b, under the ceiling)", Color(0.04, 0.05, 0.07), Color(0.09, 0.075, 0.06), null, "warm"],
+	["a zenith brighter than the horizon", Color(0.08, 0.09, 0.1), Color(0.05, 0.06, 0.07), null, "zenith"],
+	["fog the zenith's colour, not the horizon's", RECEIPT_ZENITH, Color(0.068, 0.085, 0.095), RECEIPT_ZENITH, "fog"],
+]
+
+## The night keys as the look holds them (sRGB Colors), checked in linear: the horizon is cold (r <= b; v2's warm
+## lamp patches may warm parts of it, not its azimuth average) and under the night ceiling, the zenith is no brighter
+## than the horizon, and the fog is the horizon's colour. Each failure starts with its kind: warm, ceiling, zenith, fog.
+static func night_errs(zen: Color, hor: Color, fog: Color) -> Array:
+	var out: Array = []
+	var hl := hor.srgb_to_linear()
+	var zl := zen.srgb_to_linear()
+	if hl.r > hl.b:
+		out.append("warm: the sky horizon %s is warm (r > b): it reads dusk, not night" % hl)
+	if hl.get_luminance() > NIGHT_HORIZON_MAX:
+		out.append("ceiling: the sky horizon's linear luminance %.3f is over the night ceiling %.2f (dusk)" \
+				% [hl.get_luminance(), NIGHT_HORIZON_MAX])
+	if zl.get_luminance() > hl.get_luminance():
+		out.append("zenith: the sky zenith (linear luminance %.3f) is brighter than the horizon (%.3f)" \
+				% [zl.get_luminance(), hl.get_luminance()])
+	if fog != hor:
+		out.append("fog: the fog colour %s is not the horizon colour %s" % [fog, hor])
+	return out
 
 func run(tree: SceneTree) -> Array:
 	var errs: Array = []
@@ -82,15 +114,15 @@ func run(tree: SceneTree) -> Array:
 	var wm = water.material_override
 	if not (wm is BaseMaterial3D) or wm.resource_name != "look_water" or wm.albedo_color.v > 0.1 or wm.roughness > 0.1:
 		errs.append("the ditch water did not get the look's dark still water")
-	# the night: a dark blue-black zenith, a cold (not warm, dusk) horizon, fog the horizon's colour
-	var zen: Color = look.SKY_ZENITH
-	var hor: Color = look.SKY_HORIZON
-	if zen.get_luminance() > 0.05 or zen.b <= zen.r:
-		errs.append("sky zenith %s is not a dark blue-black" % zen)
-	if hor.get_luminance() > 0.15 or hor.r > hor.b:  # W12 dusk horizon: 0.22, warm-washed
-		errs.append("sky horizon %s is bright or warm (reads dusk, not night)" % hor)
-	if look.environment.fog_light_color != hor:
-		errs.append("the fog colour is not the horizon colour")
+	# the night keys (the SOURCE's receipt: its horizon is the mean of every column of the horizon rows, so the
+	# azimuth average, which test_look_sky pins to the EXR) pass night_errs, and night_errs itself rejects dusk
+	errs.append_array(night_errs(look.SKY_ZENITH, look.SKY_HORIZON, look.environment.fog_light_color))
+	for d in DUSK:
+		var dh: Color = d[2].linear_to_srgb()
+		var df: Color = dh if d[3] == null else d[3].linear_to_srgb()
+		var de: Array = night_errs(d[1].linear_to_srgb(), dh, df)
+		if not de.any(func(m: String) -> bool: return m.begins_with(str(d[4]))):
+			errs.append("night_errs passes %s (want a '%s' failure; got %s)" % [d[0], d[4], de])
 	# Forward+ keeps its SSR and volumetric fog (the headless server reports the project's Forward+)
 	if look.rendering_method == "forward_plus" and not (look.environment.ssr_enabled and look.environment.volumetric_fog_enabled):
 		errs.append("Forward+ %s lost SSR or volumetric fog" % ["LOW", "MEDIUM", "HIGH"][look.quality])

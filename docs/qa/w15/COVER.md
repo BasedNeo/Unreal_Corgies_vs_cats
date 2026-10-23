@@ -107,7 +107,7 @@ The band [0.22, 0.28], the guard [0.08, 0.5] and the power 3 are the same on bot
 |---|---|---|---|
 | Forward+ | Footing | fill × 1.47 | Every footing is in a cone. 1.47 × 0.8 = the 0.45 its 60 m edge needs |
 | Forward+ | BagWall | fill × 0.97, sheen × 0.6 | The corgi-rim bags (in a cone) at 10 m |
-| Forward+ | FloodMast | fill × 0.84 | The cat-base ballast at 10 m |
+| Forward+ | FloodMast | fill × 0.82 (× 0.84 until W17 G-SKY, § 4b) | The cat-base ballast at 10 m |
 | Forward+ | Container20 | fill × 1.32, sat × 1.3 | The near-black frame is its silhouette at 30 m; the paint is greyed by AgX |
 | Compatibility | Container20 | fill × 2.2, sheen × 0.5 | Compatibility crushes the dark frame to black; half the sheen keeps the glow bound |
 
@@ -133,14 +133,21 @@ The band [0.22, 0.28], the guard [0.08, 0.5] and the power 3 are the same on bot
 - two mask pairs: visible pixels, and the whole outline drawn alone.
 
 **Measures:**
-- **Edge** = the mean |ΔL\*| across the exterior silhouette, 2 px in against 2 px out.
+- **Edge** = the mean |ΔL\*| across the exterior silhouette, 2 px in against 2 px out. Since W17 G-SKY (§ 4b), each
+  pair is classed by its outside sample: **Lot-backed** (Lot geometry) or **sky-backed** (the depth buffer at or past
+  0.98 × the camera's far plane, from a sky-mask frame per view).
 - **Body** = the visible pixels' mean L\*, L\* std and C\*.
 
 **Bars** (asserted by `test_look_cover.gd`, shared with the web):
 - **Ceiling:** a dark view (body < 35 L\* with the read off) may be lifted to 40 L\* at most at 10 and 30 m. A
   flood-lit view (≥ 35 off) may be lifted by 5 L\* at most there.
 - **No flattening:** at every view and distance, body L\* std with the read on ≥ 0.85 × with it off.
-- **Edge** ≥ 15 L\* at every cover view.
+- **Edge** ≥ 15 L\* at every cover view **at 10 and 30 m** (the fight distances, like the gap), over its **Lot-backed**
+  pairs, when there are at least 30 of them (`EDGE_MIN_LOT`). At 60 m a Lot-backed edge under 15 is REPORTED with its
+  pairs and mean ± SE (`EDGE_GATED_MAX` = 30; the known limits are in § 4b). The sky-backed pairs are printed beside it,
+  not gated: a silhouette against the sky is the AIR / backdrop passes' read. A view with fewer than 30 Lot-backed
+  pairs is "sky-backed only". At 10 / 30 m it is judged by the gated value gap at its place and fails if there is
+  none. At 60 m it is reported. These are the lead's rulings of 2026-10-23 (§ 4b).
 - **Value gap** ≥ 10 L\* at 10 and 30 m, the fight distances: at each base, the darkest cover body against the mast
   pole's body. At 60 m the gap is reported, not gated; the edge bar holds there. This is the lead's ruling of
   2026-10-12.
@@ -150,6 +157,8 @@ The band [0.22, 0.28], the guard [0.08, 0.5] and the power 3 are the same on bot
 **Reported, not asserted:**
 - Forward+ std and C\* against Compatibility's. One run sees one renderer.
 - The gap at 60 m.
+- The sky-backed edge, and the all-pairs edge (the pre-W17 metric), on each view's `ring:` line.
+- The Lot-backed edge at 60 m, when it is under 15: REPORTED, with n and mean ± SE.
 
 ### 4. Results
 
@@ -236,6 +245,95 @@ Not measured:
 - The cat-base ballast at 60 m: no clear line of sight from the Cat approach in ±80°.
 - The FloodLamp heads: overhead and not cover.
 
+### 4b. W17 G-SKY: the SOURCE sky, the FloodMast fill, the split edge ring and the 60 m fog limit
+
+Godot draws the shared sky SOURCE `assets/sky/lot_night_sky.exr` (BL-DCC's v3, sha 1f6e85de…, accepted as the art).
+The fog is the receipt's horizon at `SKY_ENERGY` (0.60, ruled), and the Lot's sky ambient is held at item 11's level
+(`SKY_LIGHT_ENERGY` 0.12). G-ATMOS.md § G-SKY has the full record. Logs are in the session scratchpad under `g-sky/`.
+
+**1. Forward+ FloodMast fill × 0.84 → × 0.82** (ruling (b), on v2). The brighter sky moved the cat-base ballast's MSAA
+mask edge, and the ceiling read 40.2 at 10 m. At × 0.82 it is 39.8, and it stays at 39.7–39.8 on v3. The ballast
+edges hold at 10, 30 and 60 m. The FloodMast's glow peak is 0.805.
+
+**2. The split edge ring** (lead's ruling, 2026-10-23; § 3). Under a lit overcast deck, the old ring tested the sky by
+accident: Forward+ west lane 30 m read 11.9 because the container's dark top rail sits at the deck's value.
+
+Proof on HEAD's W13 sky (all 15 runs × both renderers):
+- The all-pairs edge reproduces § 4's numbers in every view.
+- In rings with no sky pairs, the Lot-backed edge equals it exactly.
+- Numbers move only where sky pairs were in the ring.
+- The one verdict change is the corgi-rim bags at 10 / 30 m on both renderers. They sit above eye height, so they
+  have 3–26 Lot pairs. They become "sky-backed only" and pass on the corgi-base gap: 30.8 / 13.2 on Forward+,
+  19.9 / 20.4 on Compatibility.
+
+Mutants:
+- **A:** the container darkened to its ground's value is killed by the gated Lot-backed edge on both renderers (0.6 to
+  3.0 L\*).
+- **B:** every ring classed as sky never passes silently. Views are judged by the gated gap at 10 / 30 m, REPORTED at
+  60 m, and FAIL where there is no gap.
+
+`EDGE_MIN_LOT` = 30 (three times the 10-pair skip rule; about 3.6 m of silhouette at 60 m; SE 0.6–1.9 L\* on the
+smallest sky-free rings).
+
+**3. The bar on v3 at 0.60 with the split.** Forward+ passes 12 runs: every place at 10 and 30 m, and corgi base and
+cat base at 60 m. West lane 30 m is now Container20 Lot-backed 17.4. It **stops at west lane 60 m: Container20
+Lot-backed 13.2 ± 0.6** (248 pairs). Compatibility west lane 60 m is 12.2 ± 0.5. Compatibility east lane 60 m is
+**Pipe 8.4 ± 1.3** (31 pairs).
+
+On W13 these were 16.8, 15.7 and 17.4. **The cause is the fog, not the ring:** these pairs are Lot-backed. The fog is
+the receipt horizon × 0.60, about 3.3× brighter than W13's, and at 60 m it lifts the far Lot behind the piece:
+Forward+ container out L\* goes from 6.3 to 11.7.
+
+**4. The per-renderer knob, measured** (lead's ruling: sweep the Container20 fill before any bar is loosened; private
+copy only). Each cell is the Lot-backed edge ± SE / body L\* / std against its 0.85 × read-off floor. The verdict is the
+test's own.
+
+| Forward+ fill | west 10 m: edge ± SE / body / std | west 30 m | west 60 m | east lane 60 m Pipe | |
+|---|---|---|---|---|---|
+| ×1.32 (shipped) | 37.2 ± 0.4 / 35.4 / std 12.6 vs ≥4.0 ok | 17.4 ± 0.2 / 37.5 / std 10.9 vs ≥7.1 ok | 13.2 ± 0.6 / 37.5 / std 12.7 vs ≥6.1 ok | 18.1 ± 0.9 (59) | fails |
+| ×1.40 | 37.8 ± 0.4 / 36.3 / std 12.5 vs ≥4.0 ok | 18.2 ± 0.2 / 38.1 / std 10.7 vs ≥7.1 ok | 13.8 ± 0.6 / 38.0 / std 12.6 vs ≥6.1 ok | 18.1 ± 0.9 (59) | fails |
+| ×1.48 | 38.4 ± 0.4 / 37.2 / std 12.4 vs ≥4.0 ok | 18.9 ± 0.2 / 38.7 / std 10.5 vs ≥7.1 ok | 14.4 ± 0.6 / 38.4 / std 12.4 vs ≥6.1 ok | 18.1 ± 0.9 (59) | fails |
+| ×1.56 | 38.9 ± 0.4 / 38.0 / std 12.3 vs ≥4.0 ok | 19.6 ± 0.2 / 39.3 / std 10.3 vs ≥7.1 ok | 15.0 ± 0.6 / 38.9 / std 12.2 vs ≥6.1 ok | 18.1 ± 0.9 (59) | fails |
+
+| Compatibility fill | west 10 m | west 30 m | west 60 m | east lane 60 m Pipe | |
+|---|---|---|---|---|---|
+| ×2.2 (shipped) | 21.5 ± 0.4 / 37.2 / std 17.7 vs ≥2.4 ok | 17.0 ± 0.3 / 33.7 / std 10.4 vs ≥7.5 ok | 12.2 ± 0.5 / 35.0 / std 11.0 vs ≥6.6 ok | 8.4 ± 1.3 (31) | fails |
+| ×2.33 | 23.2 ± 0.4 / 39.3 / std 17.9 vs ≥2.4 ok | 18.7 ± 0.3 / 35.6 / std 10.5 vs ≥7.5 ok | 13.3 ± 0.5 / 36.6 / std 11.1 vs ≥6.6 ok | 8.4 ± 1.3 (31) | fails |
+| ×2.46 | 24.9 ± 0.4 / 41.4 / std 18.0 vs ≥2.4 ok | 20.3 ± 0.3 / 37.5 / std 10.6 vs ≥7.5 ok | 14.6 ± 0.5 / 38.3 / std 11.3 vs ≥6.6 ok | 8.4 ± 1.3 (31) | fails |
+| ×2.6 | 26.7 ± 0.4 / 43.5 / std 18.1 vs ≥2.4 ok | 22.0 ± 0.3 / 39.4 / std 10.7 vs ≥7.5 ok | 16.0 ± 0.5 / 40.0 / std 11.4 vs ≥6.6 ok | 8.4 ± 1.3 (31) | fails |
+
+- **Forward+:** no value in the ruled range clears 60 m. × 1.56 reads 15.0 ± 0.6 and is still a FAIL by the test (just
+  under 15). Its 30 m body is 39.3 against the 40 ceiling, so the knob runs out of ceiling before the edge clears its
+  SE.
+- **Compatibility:** × 2.6 clears 60 m (16.0) but breaks the 10 m ceiling (43.5). × 2.46 fails both (14.6; 41.4).
+- **East lane Pipe at 60 m:** it does not move with the container fill. On Compatibility it fails as shipped (8.4
+  ± 1.3).
+- **The glow bound holds at the top values:** Container20 peak 1.080 on Forward+ at × 1.56, and 1.152 on
+  Compatibility at × 2.6, against 1.3.
+
+**Status: no value meets both bars, so the shipped rows are unchanged** (Forward+ × 1.32, Compatibility × 2.2).
+
+**5. Option 3** (lead's ruling, 2026-10-23). The edge is gated at 10 and 30 m and REPORTED at 60 m, like the gap. The
+fight distances are bot ai_range 7–24 m and rifle falloff 24–48 m. At 60 m the read belongs to the haze that the
+fog = horizon contract sets. Headless mutants E1 (60 m gated), E2 (30 m reported) and E3 (REPORTED → ok) are killed.
+
+**Known limits** (a PARITY-style DIFF; the AIR pass's targets; Lot-backed edge at 60 m, at `SKY_ENERGY` 0.60):
+
+| Known limit | Lot-backed edge (pairs) | W13 |
+|---|---|---|
+| Forward+ west lane 60 m Container20 | 13.2 ± 0.6 (248) | 16.8 |
+| Compatibility west lane 60 m Container20 | 12.2 ± 0.5 (205) | 15.7 |
+| Compatibility east lane 60 m Pipe | 8.4 ± 1.3 (31) | 17.4 |
+| Compatibility corgi base 60 m BagWall[3] | 14.7 ± 1.2 (60) | 21.5 |
+| Compatibility slab approach 60 m BagWall[13] | 10.5 ± 0.6 (71) | 17.9 |
+
+All five are measured in this bar (v3 at 0.60, 30 of 30 runs PASS); each prints REPORTED, and the lead accepted all five as named known limits.
+
+**Rule:** the AIR pass must raise each toward ≥ 15, or bring a measured ruling. Any later pass that lowers one by more
+than 2 SE (its printed SE) is a regression: `test_look_cover.gd` `EDGE_LIMITS_60` fails it, and any other 60 m
+edge under 15 (not a named limit) fails too, as does a named limit that turns "sky-backed only". `SKY_FAR_FRAC` is
+pinned to [0.95, 1) headless (the fresh verifier's mutant c).
+
 ### 5. Draw budget (P-GLB4)
 
 | Check | Result |
@@ -285,7 +383,7 @@ The last five are 2 × 2 grids, 1200 px: rows before (HEAD) / after, columns Com
 | `LOOK` | still `"stylised-realistic"` |
 | Outlines | none (`test_look_scene` `outline_scan` PASS) |
 | Glow | each piece's brightest texel, max(r, g, b) exposed, is under the threshold of 1.3 (asserted per piece and renderer; table below) |
-| Night, sky, ground, floods | unchanged |
+| Night, sky, ground, floods | unchanged in item 11; W17 G-SKY swaps the sky for the shared SOURCE (§ 4b), with the Lot's sky ambient held at item 11's level |
 | `test_look_contract` | PASS |
 
 **The glow bound (item 11b): max(r, g, b), texel by texel.** Godot 4.7.2's glow keys on a pixel's brightest
